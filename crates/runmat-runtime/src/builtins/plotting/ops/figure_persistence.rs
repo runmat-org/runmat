@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, StructValue, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, StructValue,
+    Tensor, Type, Value,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
@@ -30,6 +31,17 @@ const SAVEFIG: &str = "savefig";
 const OPENFIG: &str = "openfig";
 const HGSAVE: &str = "hgsave";
 const HGLOAD: &str = "hgload";
+
+pub const HGSAVE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "hgsave accepts host graphics handles, a textual filename, and textual version tokens; numeric array contents are not an integer computation surface and resident tensors are rejected without gather.",
+};
+pub const HGLOAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "hgload accepts a textual filename and an optional property structure and returns opaque graphics handles plus property metadata; it has no direct integer data or control argument.",
+};
 
 const DEFAULT_WIDTH: u32 = 800;
 const DEFAULT_HEIGHT: u32 = 600;
@@ -367,10 +379,10 @@ pub async fn openfig_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::plotting::figure_persistence::HGSAVE_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::HGSAVE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn hgsave_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
-    let args = gather_values(&args, HGSAVE).await?;
     let request = parse_savefig_args(&args, HGSAVE)?;
     save_figures(&request.output_path, &request.figures, HGSAVE).await?;
     Ok(true)
@@ -383,10 +395,10 @@ pub async fn hgsave_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     keywords = "hgload,figure load,graphics,fig",
     type_resolver(handle_type),
     descriptor(crate::builtins::plotting::figure_persistence::HGLOAD_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::HGLOAD_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn hgload_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_values(&args, HGLOAD).await?;
     let (request, overrides) = parse_hgload_args(&args)?;
     let handles = open_figures(&request, HGLOAD).await?;
     let old_values = apply_hgload_overrides(&handles, overrides.as_ref())?;
@@ -507,6 +519,14 @@ fn parse_savefig_args(args: &[Value], builtin: &'static str) -> BuiltinResult<Sa
         ));
     }
 
+    if builtin == HGSAVE && args.iter().any(typed_integer_handle_value) {
+        return Err(persistence_error(
+            &ERROR_INVALID_ARGUMENT,
+            builtin,
+            "hgsave: typed integer values are not graphics handles",
+        ));
+    }
+
     let mut idx = 0usize;
     let figures =
         if args.len() >= 2 && !is_version_token(&args[0]) && !is_probable_filename(&args[0]) {
@@ -537,6 +557,13 @@ fn parse_savefig_args(args: &[Value], builtin: &'static str) -> BuiltinResult<Sa
         figures,
         output_path,
     })
+}
+
+fn typed_integer_handle_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 fn parse_openfig_args(args: &[Value], builtin: &'static str) -> BuiltinResult<OpenFigRequest> {
@@ -1298,6 +1325,50 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(labels.contains(&"ok = saveas(fig, filename)"));
         assert!(labels.contains(&"ok = saveas(fig, filename, formattype)"));
+    }
+
+    #[test]
+    fn hgload_and_hgsave_are_explicitly_integer_inapplicable() {
+        for audit in [HGSAVE_INTEGER_AUDIT, HGLOAD_INTEGER_AUDIT] {
+            assert_eq!(audit.kind, BuiltinIntegerAuditKind::NotApplicable);
+            assert!(audit.canonical_builtin.is_none());
+        }
+        for name in [HGSAVE, HGLOAD] {
+            let builtin = runmat_builtins::builtin_function_by_name(name)
+                .expect("registered graphics persistence builtin");
+            assert_eq!(
+                builtin.integer_audit.map(|audit| audit.kind),
+                Some(BuiltinIntegerAuditKind::NotApplicable),
+                "{name}"
+            );
+            assert!(builtin.integer_capabilities.is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn hgload_and_hgsave_reject_resident_numeric_arguments_without_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        assert!(block_on(hgload_builtin(vec![resident.clone()])).is_err());
+        assert!(block_on(hgsave_builtin(vec![resident, Value::from("unused.fig")])).is_err());
+    }
+
+    #[test]
+    fn hgsave_rejects_typed_integer_handle_spellings() {
+        for value in [
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Tensor(
+                Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1]), vec![1, 1])
+                    .unwrap(),
+            ),
+        ] {
+            let error = block_on(hgsave_builtin(vec![value, Value::from("unused.fig")]))
+                .expect_err("typed integer handles are outside hgsave's contract");
+            assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+        }
     }
 
     #[test]

@@ -3,13 +3,13 @@
   "category": "table",
   "keywords": ["head", "table", "timetable", "preview", "rows"],
   "summary": "Return the first rows of a table, timetable, or array.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Inputs are gathered before row selection."},
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU-resident array input is supported. It is downloaded non-destructively and the selected value is restored to the owning provider with its class preserved. A GPU-resident row-count control is a separately gated RunMat extension."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
   "requires_feature": null,
-  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`head(A, n)` selects the first `n` rows. The default row count is 8.",
-  "behaviors": ["Table/timetable variable metadata is preserved.", "Array inputs use the same row-selection helper as table variables."],
+  "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/integer_multidimensional_fft_and_table_selection.rs"},
+  "description": "`head(A, n)` selects the first `n` rows. The default row count is 8. All eight integer array classes preserve exact storage and trailing dimensions.",
+  "behaviors": ["Table/timetable variable metadata is preserved.", "Real, complex, logical, and integer arrays preserve every trailing dimension while selecting along dimension one.", "Typed integer row counts are decoded exactly and must be positive.", "GPU-resident data is supported in MATLAB-compatible modes; a GPU-resident row-count control remains gated before provider access."],
   "examples": [{"description": "First row", "input": "H = head(T, 1)", "output": "H = first row of T"}],
   "links": [{"label": "table", "url": "./table"}, {"label": "timetable", "url": "./timetable"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/selectors.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/selectors.rs"}
 }

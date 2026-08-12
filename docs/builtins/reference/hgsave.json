@@ -29,7 +29,8 @@
   "description": "`hgsave` saves the current figure, a figure handle, or the parent figures of graphics handles to RunMat FIG files. RunMat FIG persistence is figure-scene based; arbitrary graphics-subtree FIG files are not emitted yet.",
   "behaviors": [
     "`hgsave(filename)` saves the current figure and appends `.fig` when needed.",
-    "`hgsave(h, filename)` accepts scalar handles and handle arrays, deduplicating handles that resolve to the same parent figure.",
+    "`hgsave(h, filename)` accepts scalar double graphics handles and handle arrays, deduplicating handles that resolve to the same parent figure.",
+    "Typed integer handle spellings and GPU-resident numeric arguments are rejected without conversion or gather; this persistence surface has no integer computation contract.",
     "Version options `-v6`, `-v7`, and `-v7.3` are accepted for MATLAB compatibility and map to RunMat's FIG scene format."
   ],
   "examples": [

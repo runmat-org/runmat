@@ -32,6 +32,36 @@ const TABLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Table input.",
 }];
+const HEIGHT_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Table, timetable, or array input.",
+}];
+const HEAD_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Table, timetable, or array input.",
+}];
+const HEAD_INPUTS_COUNT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Table, timetable, or array input.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive number of leading rows to select.",
+    },
+];
 const READTABLE_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filename",
     ty: BuiltinParamType::StringScalar,
@@ -603,10 +633,22 @@ const GRPSTATS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     },
 ];
 const HEIGHT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "n = height(T)",
-    inputs: &TABLE_INPUT,
+    label: "n = height(A)",
+    inputs: &HEIGHT_INPUT,
     outputs: &NUM_OUTPUT,
 }];
+const HEAD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = head(A)",
+        inputs: &HEAD_INPUT,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = head(A, n)",
+        inputs: &HEAD_INPUTS_COUNT,
+        outputs: &ANY_OUTPUT,
+    },
+];
 const WIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "n = width(T)",
     inputs: &TABLE_INPUT,
@@ -755,6 +797,12 @@ pub const GRPSTATS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const HEIGHT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &HEIGHT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const HEAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HEAD_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,

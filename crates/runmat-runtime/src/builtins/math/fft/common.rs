@@ -409,8 +409,9 @@ pub fn free_rejected_provider_fft_output(
         return;
     }
     if let Some(owner) = runmat_accelerate_api::provider_for_handle(output) {
-        let _ = owner.free(output);
-        runmat_accelerate_api::clear_residency(output);
+        if owner.free(output).is_ok() {
+            runmat_accelerate_api::clear_residency(output);
+        }
     }
 }
 
@@ -962,6 +963,7 @@ pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<u
         }
         Value::Num(n) => parse_nd_sizes_data(&[*n], builtin),
         Value::Int(i) => parse_nd_sizes_integers(std::slice::from_ref(i), builtin),
+        Value::Bool(value) => parse_nd_sizes_data(&[f64::from(u8::from(*value))], builtin),
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
                 return Err(builtin_error(

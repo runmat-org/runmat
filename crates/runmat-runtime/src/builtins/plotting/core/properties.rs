@@ -1,4 +1,6 @@
-use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Tensor, Value};
+use runmat_builtins::{
+    CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value,
+};
 use runmat_plot::plots::{
     ColorMap, LegendStyle, PatchData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
@@ -257,9 +259,42 @@ pub fn validate_heatmap_property_pairs(
             "xlabel" => validate_axes_text_alias(PlotObjectKind::XLabel, &pair[1], builtin)?,
             "ylabel" => validate_axes_text_alias(PlotObjectKind::YLabel, &pair[1], builtin)?,
             "colorbar" | "colorbarvisible" => {
-                value_as_bool(&pair[1]).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: Colorbar must be logical"))
+                heatmap_on_off_value(&pair[1]).ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: ColorbarVisible must be 'on', 'off', 0, or 1"),
+                    )
                 })?;
+            }
+            "gridvisible" => {
+                heatmap_on_off_value(&pair[1]).ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: GridVisible must be 'on', 'off', 0, or 1"),
+                    )
+                })?;
+            }
+            "fontsize" => {
+                let font_size = heatmap_numeric_scalar_f64(&pair[1]).ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: FontSize must be a numeric scalar"),
+                    )
+                })?;
+                if !font_size.is_finite()
+                    || font_size <= 0.0
+                    || font_size > MAX_AXES_FONT_SIZE_POINTS
+                {
+                    return Err(plotting_error(
+                        builtin,
+                        format!(
+                            "{builtin}: FontSize must be a positive finite value no larger than {MAX_AXES_FONT_SIZE_POINTS}"
+                        ),
+                    ));
+                }
+            }
+            "colorlimits" => {
+                crate::builtins::plotting::op_common::limits::limits_from_value(&pair[1], builtin)?;
             }
             "colormap" => {
                 let name = value_as_string(&pair[1]).ok_or_else(|| {
@@ -761,6 +796,10 @@ fn get_axes_property(
                 "Colormap",
                 Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
             );
+            st.insert(
+                "ColorLimits",
+                crate::builtins::plotting::op_common::limits::limit_value(meta.color_limits),
+            );
             st.insert("XLim", limit_value(meta.x_limits));
             st.insert("YLim", limit_value(meta.y_limits));
             st.insert("ZLim", limit_value(meta.z_limits));
@@ -896,6 +935,9 @@ fn get_axes_property(
         Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
         Some("colormap") => Ok(Value::String(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
+        )),
+        Some("colorlimits") => Ok(crate::builtins::plotting::op_common::limits::limit_value(
+            meta.color_limits,
         )),
         Some("xlim") => Ok(limit_value(meta.x_limits)),
         Some("ylim") => Ok(limit_value(meta.y_limits)),
@@ -1228,6 +1270,27 @@ fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> 
     property_name_text(value, builtin).map(|s| canonical_property_name(s.trim()).into_owned())
 }
 
+pub(crate) fn is_heatmap_property_name(value: &Value) -> bool {
+    let Some(name) = value_as_string(value) else {
+        return false;
+    };
+    matches!(
+        canonical_property_name(name.trim()).as_ref(),
+        "title"
+            | "subtitle"
+            | "xlabel"
+            | "ylabel"
+            | "colorbar"
+            | "colorbarvisible"
+            | "gridvisible"
+            | "fontsize"
+            | "colorlimits"
+            | "colormap"
+            | "xdisplaylabels"
+            | "ydisplaylabels"
+    )
+}
+
 fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     value_as_string(value)
         .map(|s| s.trim().to_string())
@@ -1303,10 +1366,12 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "axisequal" => Cow::Borrowed("axisequal"),
         "colorbar" => Cow::Borrowed("colorbar"),
         "colorbarvisible" => Cow::Borrowed("colorbarvisible"),
+        "gridvisible" => Cow::Borrowed("gridvisible"),
         "colormap" => Cow::Borrowed("colormap"),
         "xdisplaylabels" => Cow::Borrowed("xdisplaylabels"),
         "ydisplaylabels" => Cow::Borrowed("ydisplaylabels"),
         "colordata" | "cdata" => Cow::Borrowed("colordata"),
+        "colorlimits" => Cow::Borrowed("colorlimits"),
         "xlim" => Cow::Borrowed("xlim"),
         "ylim" => Cow::Borrowed("ylim"),
         "zlim" => Cow::Borrowed("zlim"),
@@ -2507,7 +2572,7 @@ fn apply_plot_child_property(
             apply_image_property(image, key, value, builtin)
         }
         super::state::PlotChildHandleState::Heatmap(heatmap) => {
-            apply_heatmap_property(heatmap, key, value, builtin)
+            apply_heatmap_property(handle, heatmap, key, value, builtin)
         }
         super::state::PlotChildHandleState::Binscatter(binscatter) => {
             apply_binscatter_property(binscatter, key, value, builtin)
@@ -4276,9 +4341,24 @@ fn get_heatmap_property(
                 Value::Tensor(heatmap_handle.color_data.clone()),
             );
             st.insert("ColorbarVisible", Value::Bool(meta.colorbar_enabled));
+            st.insert("GridVisible", Value::Bool(meta.grid_enabled));
+            st.insert(
+                "FontSize",
+                Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
+            );
             st.insert(
                 "Colormap",
                 Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
+            );
+            st.insert(
+                "ColorLimits",
+                heatmap_handle
+                    .color_limits
+                    .clone()
+                    .map(Value::Tensor)
+                    .unwrap_or_else(|| {
+                        crate::builtins::plotting::op_common::limits::limit_value(meta.color_limits)
+                    }),
             );
             Ok(Value::Struct(st))
         }
@@ -4295,9 +4375,18 @@ fn get_heatmap_property(
         Some("ydisplaylabels") => string_array_from_vec(heatmap_handle.y_labels.clone()),
         Some("colordata") => Ok(Value::Tensor(heatmap_handle.color_data.clone())),
         Some("colorbarvisible") | Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
+        Some("gridvisible") => Ok(Value::Bool(meta.grid_enabled)),
+        Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
         Some("colormap") => Ok(Value::String(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
         )),
+        Some("colorlimits") => Ok(heatmap_handle
+            .color_limits
+            .clone()
+            .map(Value::Tensor)
+            .unwrap_or_else(|| {
+                crate::builtins::plotting::op_common::limits::limit_value(meta.color_limits)
+            })),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported heatmap property `{other}`"),
@@ -4907,6 +4996,7 @@ fn apply_image_property(
 }
 
 fn apply_heatmap_property(
+    handle: f64,
     heatmap_handle: &super::state::HeatmapHandleState,
     key: &str,
     value: &Value,
@@ -4934,10 +5024,38 @@ fn apply_heatmap_property(
             value,
             builtin,
         ),
-        "colorbar" | "colorbarvisible" => apply_axes_property(
+        "colorbar" | "colorbarvisible" => {
+            let enabled = heatmap_on_off_value(value).ok_or_else(|| {
+                plotting_error(
+                    builtin,
+                    format!("{builtin}: ColorbarVisible must be 'on', 'off', 0, or 1"),
+                )
+            })?;
+            crate::builtins::plotting::state::set_colorbar_enabled_for_axes(
+                heatmap_handle.figure,
+                heatmap_handle.axes_index,
+                enabled,
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
+        "gridvisible" => {
+            let enabled = heatmap_on_off_value(value).ok_or_else(|| {
+                plotting_error(
+                    builtin,
+                    format!("{builtin}: GridVisible must be 'on', 'off', 0, or 1"),
+                )
+            })?;
+            crate::builtins::plotting::state::set_grid_enabled_for_axes(
+                heatmap_handle.figure,
+                heatmap_handle.axes_index,
+                enabled,
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
+        "fontsize" => apply_axes_property(
             heatmap_handle.figure,
             heatmap_handle.axes_index,
-            "colorbar",
+            "fontsize",
             value,
             builtin,
         ),
@@ -4948,6 +5066,36 @@ fn apply_heatmap_property(
             value,
             builtin,
         ),
+        "colorlimits" => {
+            let public_value = Tensor::try_from(value)
+                .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")))?;
+            let public_limits =
+                crate::builtins::plotting::heatmap::public_color_limits_for_value(value, builtin)?;
+            let renderer_limits =
+                crate::builtins::plotting::heatmap::renderer_color_limits_for_value(
+                    &heatmap_handle.color_data,
+                    value,
+                    builtin,
+                )?;
+            crate::builtins::plotting::state::set_color_limits_for_axes(
+                heatmap_handle.figure,
+                heatmap_handle.axes_index,
+                Some(public_limits),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_heatmap_color_limits(handle, public_value)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::update_plot_element(
+                heatmap_handle.figure,
+                heatmap_handle.plot_index,
+                |plot| {
+                    if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
+                        surface.set_color_limits(Some(renderer_limits));
+                    }
+                },
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
         "xdisplaylabels" => {
             let labels = label_strings_from_value(value, builtin, "labels")?;
             if labels.len() != heatmap_handle.x_labels.len() {
@@ -6873,9 +7021,14 @@ pub(crate) fn label_strings_from_value(
             .collect(),
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)
-            .iter()
-            .map(|v| v.to_string())
+        Value::Tensor(tensor) => Ok((0..tensor.len())
+            .map(|index| {
+                format_numeric_label(
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("label index is within numeric storage"),
+                )
+            })
             .collect()),
         Value::Int(i) => Ok(vec![i.decimal_string()]),
         Value::Num(v) => Ok(vec![v.to_string()]),
@@ -6883,6 +7036,67 @@ pub(crate) fn label_strings_from_value(
             builtin,
             format!("{builtin}: unsupported {label_context} value {other:?}"),
         )),
+    }
+}
+
+fn format_numeric_label(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => value.to_string(),
+        NumericScalar::F32(value) => value.to_string(),
+        NumericScalar::I8(value) => value.to_string(),
+        NumericScalar::I16(value) => value.to_string(),
+        NumericScalar::I32(value) => value.to_string(),
+        NumericScalar::I64(value) => value.to_string(),
+        NumericScalar::U8(value) => value.to_string(),
+        NumericScalar::U16(value) => value.to_string(),
+        NumericScalar::U32(value) => value.to_string(),
+        NumericScalar::U64(value) => value.to_string(),
+    }
+}
+
+fn heatmap_on_off_value(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(value) => Some(*value),
+        Value::CharArray(chars) => {
+            let text: String = chars.data.iter().collect();
+            heatmap_on_off_text(&text)
+        }
+        Value::String(text) => heatmap_on_off_text(text),
+        Value::Num(value) => numeric_on_off(*value),
+        Value::Int(value) => numeric_on_off(value.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
+            .numeric_value_at(0)
+            .and_then(|value| numeric_on_off(value.materialize_f64())),
+        _ => None,
+    }
+}
+
+fn heatmap_numeric_scalar_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(value) => Some(*value),
+        Value::Int(value) => Some(value.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
+            .numeric_value_at(0)
+            .map(NumericScalar::materialize_f64),
+        _ => None,
+    }
+}
+
+fn heatmap_on_off_text(text: &str) -> Option<bool> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn numeric_on_off(value: f64) -> Option<bool> {
+    if value == 0.0 {
+        Some(false)
+    } else if value == 1.0 {
+        Some(true)
+    } else {
+        None
     }
 }
 

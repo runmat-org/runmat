@@ -1,5 +1,20 @@
 use super::*;
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
+
+const HEIGHT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Only array shape metadata is observed; numeric elements are not materialized.",
+}];
+pub const HEIGHT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "n = height(integer_A)", inputs: &HEIGHT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All integer classes share the array row-count contract; resident inputs are answered from handle shape without gather." }];
 
 #[runtime_builtin(
     name = "height",
@@ -7,9 +22,16 @@ use runmat_macros::runtime_builtin;
     summary = "Return the number of rows in a table.",
     keywords = "height,table,rows",
     descriptor(crate::builtins::table::HEIGHT_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::table::builtins::predicates::HEIGHT_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn height_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Value::GpuTensor(handle) = &value {
+        let rows = handle.shape.first().copied().unwrap_or(1);
+        return Ok(Value::Num(rows as f64));
+    }
     let host = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;

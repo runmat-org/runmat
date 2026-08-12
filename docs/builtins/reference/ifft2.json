@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Runs two provider-backed ifft_dim passes when available; otherwise RunMat gathers to the host and performs the transform with rustfft."
+    "notes": "Uses the input handle's owning provider for two validated `ifft_dim` passes. Only an explicit unsupported-hook response selects exact host fallback; malformed, aliased, or wrong-owner results are terminal and safely released."
   },
   "fusion": {
     "elementwise": false,
@@ -30,14 +30,15 @@
     "unit": "builtins::math::fft::ifft2::tests",
     "integration": "builtins::math::fft::ifft2::tests::ifft2_gpu_roundtrip_matches_cpu"
   },
-  "description": "`ifft2(X)` computes the two-dimensional inverse discrete Fourier transform of `X`. Size-argument behavior and transform ordering follow MATLAB semantics.",
+  "description": "`ifft2(X)` computes the two-dimensional inverse discrete Fourier transform of `X`. Documented integer data through 32 bits enters the double transform domain; host `int64` and `uint64` data and shorthand size forms are exactness-checked RunMat extensions.",
   "behaviors": [
     "`ifft2(X)` transforms along the first two dimensions whose sizes exceed one.",
     "`ifft2(X, M, N)` zero-pads or truncates the spectrum to `M` rows and `N` columns before the inverse.",
     "`ifft2(X, SIZE)` accepts a scalar or two-element vector describing the transform lengths.",
     "`ifft2(..., 'symmetric')` discards tiny imaginary parts and returns a real matrix when the spectrum is conjugate-symmetric. `'nonsymmetric'` keeps the complex result.",
     "Higher-dimensional inputs are processed slice-by-slice across trailing dimensions.",
-    "Empty sizes and zero padding mirror MATLAB behaviour, producing empty outputs when any requested length is zero."
+    "Empty or zero size controls and scalar/two-element SIZE shorthand are independently gated RunMat extensions.",
+    "Provider results must be fresh, correctly shaped, complex, physically precise, and owned by the input provider; only an unsupported hook falls back through exact host storage."
   ],
   "examples": [
     {
@@ -89,7 +90,7 @@
     },
     {
       "question": "Will `ifft2` run on the GPU automatically?",
-      "answer": "Yes when the active provider exposes `ifft_dim`. Otherwise the runtime gathers to the host and evaluates the inverse using `rustfft`."
+      "answer": "Yes when the input handle's owning provider exposes `ifft_dim` and returns valid fresh results. An explicit unsupported-hook response falls back through an exact owner download; provider failures or malformed results are not silently gathered away."
     },
     {
       "question": "Does `ifft2` normalise the result?",
@@ -142,5 +143,5 @@
     "label": "Open a ticket",
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat’s native acceleration layer keeps intermediate tensors on the GPU whenever the provider implements `ifft_dim`. If the provider lacks that hook (or detects an unsupported length), RunMat gathers the input once, executes the inverse transform on the CPU with `rustfft`, and returns a MATLAB-compatible result automatically."
+  "gpu_residency": "RunMat resolves execution through the provider that owns the input handle. Valid nonsymmetric floating results remain resident. Symmetric output and explicit unsupported-hook fallback may download internally; RunMat restores the result only when the owner can physically preserve its class, otherwise it returns the correctly typed host value."
 }

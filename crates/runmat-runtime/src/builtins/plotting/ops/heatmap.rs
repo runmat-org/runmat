@@ -2,14 +2,18 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
-use super::common::{gather_tensor_from_gpu_async, SurfaceDataInput};
+use super::common::SurfaceDataInput;
 use super::op_common::surface_inputs::AxisSource;
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
 use crate::builtins::common::spec::{
@@ -21,6 +25,130 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "heatmap";
+
+const GPU_CDATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "heatmap-gpu-cdata",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "heatmap with GPU-resident CData is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HeatmapGpuCDataExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_CDATA_EXTENSION];
+
+const fn documented_integer_input(
+    name: &'static str,
+    notes: &'static str,
+) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes,
+    }
+}
+
+const INTEGER_CDATA: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
+    "CData",
+    "Matrix ColorData accepts every built-in integer class and remains authoritative on the chart object.",
+)];
+const INTEGER_XVALUES: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
+    "XValues",
+    "Numeric constructor labels accept every built-in integer class and are formatted from authoritative storage.",
+)];
+const INTEGER_YVALUES: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
+    "YValues",
+    "Numeric constructor labels accept every built-in integer class and are formatted from authoritative storage.",
+)];
+const INTEGER_FONT_SIZE: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
+    "FontSize",
+    "The documented positive numeric font size is bounded before the client graphics conversion.",
+)];
+const INTEGER_COLORBAR_VISIBLE: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
+    "ColorbarVisible",
+    "The documented numeric on/off value is validated exactly as zero or one.",
+)];
+const INTEGER_GRID_VISIBLE: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
+    "GridVisible",
+    "The documented numeric on/off value is validated exactly as zero or one.",
+)];
+const INTEGER_COLOR_LIMITS: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
+    "ColorLimits",
+    "The documented two-element increasing limit vector is compared in authoritative storage before the renderer conversion.",
+)];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = heatmap(integer_CData)",
+        inputs: &INTEGER_CDATA,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact ColorData is retained on the HeatmapChart; integer-aware normalization precedes the explicit floating client-renderer boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = heatmap(integer_XValues, YValues, CData)",
+        inputs: &INTEGER_XVALUES,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer labels are converted directly to exact decimal strings; the output is an opaque chart handle.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = heatmap(XValues, integer_YValues, CData)",
+        inputs: &INTEGER_YVALUES,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer labels are converted directly to exact decimal strings; the output is an opaque chart handle.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = heatmap(..., 'FontSize', integer_size)",
+        inputs: &INTEGER_FONT_SIZE,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact positive scalar is range checked before conversion to the client font-size representation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = heatmap(..., 'ColorbarVisible', integer_on_off)",
+        inputs: &INTEGER_COLORBAR_VISIBLE,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only exact integer zero and one are accepted.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = heatmap(..., 'GridVisible', integer_on_off)",
+        inputs: &INTEGER_GRID_VISIBLE,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only exact integer zero and one are accepted.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = heatmap(..., 'ColorLimits', integer_limits)",
+        inputs: &INTEGER_COLOR_LIMITS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The two authoritative endpoints are ordered before their explicit client-renderer conversion.",
+    },
+];
 
 const HEATMAP_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -61,6 +189,22 @@ const HEATMAP_INPUTS_XYCDATA: [BuiltinParamDescriptor; 3] = [
         description: "M-by-N numeric matrix of color values.",
     },
 ];
+const HEATMAP_INPUTS_CDATA_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "CData",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "M-by-N numeric matrix of color values.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Heatmap property name/value pairs.",
+    },
+];
 
 const HEATMAP_INPUTS_XYCDATA_PROPS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
@@ -93,10 +237,15 @@ const HEATMAP_INPUTS_XYCDATA_PROPS: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
-const HEATMAP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const HEATMAP_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "h = heatmap(CData)",
         inputs: &HEATMAP_INPUTS_CDATA,
+        outputs: &HEATMAP_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = heatmap(CData, Name, Value, ...)",
+        inputs: &HEATMAP_INPUTS_CDATA_PROPS,
         outputs: &HEATMAP_OUTPUT_HANDLE,
     },
     BuiltinSignatureDescriptor {
@@ -201,9 +350,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::heatmap::HEATMAP_DESCRIPTOR),
+    extensions(crate::builtins::plotting::heatmap::EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::heatmap::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::heatmap"
 )]
 pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    gate_gpu_cdata_extension(&args)?;
     let ParsedHeatmap {
         x_labels,
         y_labels,
@@ -223,10 +375,17 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 
     let rows = color_data.rows;
     let cols = color_data.cols;
-    let render_data = transpose_for_surface(&color_data);
+    let integer_color_data = color_data.integer_storage().is_some();
+    let public_color_limit_value = integer_public_color_limit_value(&color_data);
+    let public_color_limits = integer_public_color_limits(&color_data);
+    let render_data = normalize_integer_color_data(&transpose_for_surface(&color_data));
     let x_axis = AxisSource::Host(default_axis(cols));
     let y_axis = AxisSource::Host(default_axis(rows));
-    let color_limits = color_limits_snapshot();
+    let color_limits = if integer_color_data {
+        Some((0.0, 1.0))
+    } else {
+        color_limits_snapshot()
+    };
     let mut surface = super::image::build_indexed_image_surface(
         &SurfaceDataInput::Host(render_data),
         &x_axis,
@@ -285,7 +444,22 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         x_labels,
         y_labels,
         color_data,
+        public_color_limit_value,
     );
+    if let Some(public_limits) = public_color_limits {
+        crate::builtins::plotting::state::set_color_limits_for_axes(
+            figure_handle,
+            axes,
+            Some(public_limits),
+        )
+        .map_err(|err| heatmap_invalid(err.to_string()))?;
+        crate::builtins::plotting::state::update_plot_element(figure_handle, plot_index, |plot| {
+            if let runmat_plot::plots::PlotElement::Surface(surface) = plot {
+                surface.set_color_limits(Some((0.0, 1.0)));
+            }
+        })
+        .map_err(|err| heatmap_invalid(err.to_string()))?;
+    }
     if !rest.is_empty() {
         let plot_handle = crate::builtins::plotting::properties::resolve_plot_handle(
             &Value::Num(handle),
@@ -312,6 +486,21 @@ struct ParsedHeatmap {
 }
 
 async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeatmap> {
+    let cdata_with_properties = args.len() >= 3
+        && args.len() % 2 == 1
+        && crate::builtins::plotting::properties::is_heatmap_property_name(&args[1]);
+    if cdata_with_properties {
+        let mut it = args.into_iter();
+        let color_data = cdata_tensor(it.next().expect("CData")).await?;
+        let x_labels = default_labels(color_data.cols);
+        let y_labels = default_labels(color_data.rows);
+        return Ok(ParsedHeatmap {
+            x_labels,
+            y_labels,
+            color_data,
+            rest: it.collect(),
+        });
+    }
     match args.len() {
         0 => Err(heatmap_invalid(
             "expected CData or XValues,YValues,CData input",
@@ -351,13 +540,250 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
 
 async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let tensor = match value {
-        Value::GpuTensor(handle) => gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?,
+        Value::GpuTensor(handle) => {
+            if handle.shape.first().copied().unwrap_or(0) == 0
+                || handle.shape.get(1).copied().unwrap_or(0) == 0
+                || handle.shape.iter().skip(2).any(|&dimension| dimension != 1)
+            {
+                return Err(heatmap_invalid(
+                    "CData must be a nonempty 2-D numeric matrix",
+                ));
+            }
+            let provider =
+                runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+                    heatmap_invalid("no acceleration provider owns the GPU CData handle")
+                })?;
+            let downloaded =
+                crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                    provider, &handle,
+                )
+                .await
+                .map_err(map_heatmap_invalid)?;
+            Tensor::try_from(&downloaded).map_err(|e| heatmap_invalid(&e))?
+        }
         other => Tensor::try_from(&other).map_err(|e| heatmap_invalid(&e))?,
     };
     if tensor.rows == 0 || tensor.cols == 0 {
         return Err(heatmap_invalid("CData must contain at least a 2-D grid"));
     }
+    if tensor.shape.iter().skip(2).any(|&dimension| dimension != 1) {
+        return Err(heatmap_invalid("CData must be a 2-D numeric matrix"));
+    }
     Ok(tensor)
+}
+
+fn gate_gpu_cdata_extension(args: &[Value]) -> crate::BuiltinResult<()> {
+    let cdata_with_properties = args.len() >= 3
+        && args.len() % 2 == 1
+        && crate::builtins::plotting::properties::is_heatmap_property_name(&args[1]);
+    let cdata = match args.len() {
+        1 => args.first(),
+        _ if cdata_with_properties => args.first(),
+        3.. => args.get(2),
+        _ => None,
+    };
+    if matches!(cdata, Some(Value::GpuTensor(_))) {
+        crate::compatibility::ensure_builtin_extension_enabled(&GPU_CDATA_EXTENSION, BUILTIN_NAME)?;
+    }
+    Ok(())
+}
+
+fn integer_public_color_limits(tensor: &Tensor) -> Option<(f64, f64)> {
+    let limits = integer_public_color_limit_value(tensor)?;
+    let values = limits.materialize_f64();
+    let (minimum, maximum) = (values[0], values[1]);
+    if minimum < maximum {
+        Some((minimum, maximum))
+    } else if minimum.is_finite() {
+        Some((minimum, next_f64_up(minimum)))
+    } else {
+        None
+    }
+}
+
+fn integer_public_color_limit_value(tensor: &Tensor) -> Option<Tensor> {
+    let storage = tensor.integer_storage()?;
+    macro_rules! limits {
+        ($variant:ident, $values:expr) => {{
+            let minimum = *$values.iter().min()?;
+            let maximum = *$values.iter().max()?;
+            if minimum == maximum {
+                let (lower, upper) = match maximum.checked_add(1) {
+                    Some(upper) => (minimum, upper),
+                    None => (minimum.checked_sub(1)?, maximum),
+                };
+                IntegerStorage::$variant(vec![lower, upper])
+            } else {
+                IntegerStorage::$variant(vec![minimum, maximum])
+            }
+        }};
+    }
+    let limits = match storage {
+        IntegerStorage::I8(values) => limits!(I8, values),
+        IntegerStorage::I16(values) => limits!(I16, values),
+        IntegerStorage::I32(values) => limits!(I32, values),
+        IntegerStorage::I64(values) => limits!(I64, values),
+        IntegerStorage::U8(values) => limits!(U8, values),
+        IntegerStorage::U16(values) => limits!(U16, values),
+        IntegerStorage::U32(values) => limits!(U32, values),
+        IntegerStorage::U64(values) => limits!(U64, values),
+    };
+    Tensor::new_integer(limits, vec![1, 2]).ok()
+}
+
+pub(crate) fn public_color_limits_for_value(
+    value: &Value,
+    builtin: &'static str,
+) -> crate::BuiltinResult<(f64, f64)> {
+    let (lo, hi) = crate::builtins::plotting::op_common::limits::limits_from_value(value, builtin)?;
+    if lo < hi {
+        return Ok((lo, hi));
+    }
+    Ok((lo, next_f64_up(lo)))
+}
+
+fn next_f64_up(value: f64) -> f64 {
+    if value == 0.0 {
+        f64::from_bits(1)
+    } else if value > 0.0 {
+        f64::from_bits(value.to_bits() + 1)
+    } else {
+        f64::from_bits(value.to_bits() - 1)
+    }
+}
+
+pub(crate) fn renderer_color_limits_for_value(
+    color_data: &Tensor,
+    value: &Value,
+    builtin: &'static str,
+) -> crate::BuiltinResult<(f64, f64)> {
+    let public = crate::builtins::plotting::op_common::limits::limits_from_value(value, builtin)?;
+    let limits =
+        Tensor::try_from(value).map_err(|error| heatmap_invalid(format!("{builtin}: {error}")))?;
+    if let Some(exact) = exact_integer_renderer_limits(color_data, &limits) {
+        return Ok(exact);
+    }
+    let Some((source_lo, source_hi)) = integer_public_color_limits(color_data) else {
+        return Ok(public);
+    };
+    let span = source_hi - source_lo;
+    if !span.is_finite() || span <= 0.0 {
+        return Ok((0.0, 1.0));
+    }
+    Ok(((public.0 - source_lo) / span, (public.1 - source_lo) / span))
+}
+
+fn exact_integer_renderer_limits(color_data: &Tensor, limits: &Tensor) -> Option<(f64, f64)> {
+    let source = color_data.integer_storage()?;
+    let limit_storage = limits.integer_storage()?;
+    macro_rules! signed_limits {
+        ($source:expr, $limits:expr) => {{
+            let minimum = $source.iter().copied().min()? as i128;
+            let maximum = $source.iter().copied().max()? as i128;
+            let lo = *$limits.first()? as i128;
+            let hi = *$limits.get(1)? as i128;
+            let span = maximum.checked_sub(minimum)?;
+            if span == 0 {
+                Some((0.0, 1.0))
+            } else {
+                Some((
+                    (lo - minimum) as f64 / span as f64,
+                    (hi - minimum) as f64 / span as f64,
+                ))
+            }
+        }};
+    }
+    macro_rules! unsigned_limits {
+        ($source:expr, $limits:expr) => {{
+            let minimum = $source.iter().copied().min()? as u128;
+            let maximum = $source.iter().copied().max()? as u128;
+            let lo = *$limits.first()? as u128;
+            let hi = *$limits.get(1)? as u128;
+            let span = maximum.checked_sub(minimum)?;
+            if span == 0 {
+                Some((0.0, 1.0))
+            } else {
+                let normalized = |value: u128| {
+                    if value >= minimum {
+                        (value - minimum) as f64 / span as f64
+                    } else {
+                        -((minimum - value) as f64 / span as f64)
+                    }
+                };
+                Some((normalized(lo), normalized(hi)))
+            }
+        }};
+    }
+    match (source, limit_storage) {
+        (IntegerStorage::I8(source), IntegerStorage::I8(limits)) => signed_limits!(source, limits),
+        (IntegerStorage::I16(source), IntegerStorage::I16(limits)) => {
+            signed_limits!(source, limits)
+        }
+        (IntegerStorage::I32(source), IntegerStorage::I32(limits)) => {
+            signed_limits!(source, limits)
+        }
+        (IntegerStorage::I64(source), IntegerStorage::I64(limits)) => {
+            signed_limits!(source, limits)
+        }
+        (IntegerStorage::U8(source), IntegerStorage::U8(limits)) => {
+            unsigned_limits!(source, limits)
+        }
+        (IntegerStorage::U16(source), IntegerStorage::U16(limits)) => {
+            unsigned_limits!(source, limits)
+        }
+        (IntegerStorage::U32(source), IntegerStorage::U32(limits)) => {
+            unsigned_limits!(source, limits)
+        }
+        (IntegerStorage::U64(source), IntegerStorage::U64(limits)) => {
+            unsigned_limits!(source, limits)
+        }
+        _ => None,
+    }
+}
+
+fn normalize_integer_color_data(tensor: &Tensor) -> Tensor {
+    let Some(storage) = tensor.integer_storage() else {
+        return tensor.clone();
+    };
+    let normalized = match storage {
+        IntegerStorage::I8(values) => normalize_signed(values.iter().map(|&v| i128::from(v))),
+        IntegerStorage::I16(values) => normalize_signed(values.iter().map(|&v| i128::from(v))),
+        IntegerStorage::I32(values) => normalize_signed(values.iter().map(|&v| i128::from(v))),
+        IntegerStorage::I64(values) => normalize_signed(values.iter().map(|&v| i128::from(v))),
+        IntegerStorage::U8(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
+        IntegerStorage::U16(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
+        IntegerStorage::U32(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
+        IntegerStorage::U64(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
+    };
+    Tensor::new(normalized, tensor.shape.clone()).expect("normalized heatmap shape")
+}
+
+fn normalize_signed(values: impl Iterator<Item = i128> + Clone) -> Vec<f64> {
+    let Some(minimum) = values.clone().min() else {
+        return Vec::new();
+    };
+    let maximum = values.clone().max().expect("nonempty integer color data");
+    if minimum == maximum {
+        return values.map(|_| 0.5).collect();
+    }
+    let span = (maximum - minimum) as f64;
+    values
+        .map(|value| (value - minimum) as f64 / span)
+        .collect()
+}
+
+fn normalize_unsigned(values: impl Iterator<Item = u128> + Clone) -> Vec<f64> {
+    let Some(minimum) = values.clone().min() else {
+        return Vec::new();
+    };
+    let maximum = values.clone().max().expect("nonempty integer color data");
+    if minimum == maximum {
+        return values.map(|_| 0.5).collect();
+    }
+    let span = (maximum - minimum) as f64;
+    values
+        .map(|value| (value - minimum) as f64 / span)
+        .collect()
 }
 
 fn labels_from_value(
@@ -660,6 +1086,274 @@ mod tests {
             .collect();
         assert!(labels.contains(&"h = heatmap(CData)"));
         assert!(labels.contains(&"h = heatmap(XValues, YValues, CData)"));
+        assert!(labels.contains(&"h = heatmap(CData, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn heatmap_integer_capabilities_cover_documented_matrix_roles() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 7);
+        for capability in INTEGER_CAPABILITIES {
+            for input in capability.inputs {
+                assert_eq!(
+                    input.classes,
+                    crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+                );
+                assert_eq!(
+                    input.availability,
+                    BuiltinIntegerInputAvailability::Documented
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn heatmap_wide_integer_labels_are_formatted_exactly() {
+        let wide = u64::MAX;
+        let labels = crate::builtins::plotting::properties::label_strings_from_value(
+            &Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![wide - 1, wide]), vec![1, 2])
+                    .expect("wide labels"),
+            ),
+            BUILTIN_NAME,
+            "XValues",
+        )
+        .expect("integer labels");
+        assert_eq!(labels, vec![(wide - 1).to_string(), wide.to_string()]);
+    }
+
+    #[test]
+    fn heatmap_wide_integer_color_normalization_keeps_adjacent_values_distinct() {
+        let wide = u64::MAX;
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![wide - 2, wide - 1, wide]),
+            vec![1, 3],
+        )
+        .expect("wide ColorData");
+        let normalized = normalize_integer_color_data(&input).materialize_f64();
+        assert_eq!(normalized, vec![0.0, 0.5, 1.0]);
+        assert!(normalized.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn heatmap_gpu_cdata_extension_is_gated_before_provider_access() {
+        let gpu = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 2],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = futures::executor::block_on(heatmap_builtin(vec![gpu]))
+            .expect_err("strict mode must reject GPU CData");
+        assert_eq!(err.identifier(), GPU_CDATA_EXTENSION.error_identifier);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn heatmap_wgpu_integer_cdata_download_is_exact_and_non_destructive() {
+        let _guard = crate::builtins::common::test_support::accel_test_lock();
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+        let source = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("wide CData");
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+            .expect("upload exact CData");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let downloaded =
+            futures::executor::block_on(cdata_tensor(Value::GpuTensor(handle.clone())))
+                .expect("download CData");
+        assert_eq!(downloaded.integer_storage(), source.integer_storage());
+        assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&handle),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        provider.free(&handle).ok();
+        runmat_accelerate_api::clear_residency(&handle);
+    }
+
+    #[test]
+    fn heatmap_validates_documented_integer_on_off_and_font_size_properties() {
+        let one = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer scalar"),
+        );
+        crate::builtins::plotting::properties::validate_heatmap_property_pairs(
+            &[
+                Value::String("ColorbarVisible".into()),
+                one.clone(),
+                Value::String("GridVisible".into()),
+                one,
+                Value::String("FontSize".into()),
+                Value::Int(runmat_builtins::IntValue::U64(12)),
+            ],
+            2,
+            2,
+            BUILTIN_NAME,
+        )
+        .expect("documented integer properties");
+
+        let err = crate::builtins::plotting::properties::validate_heatmap_property_pairs(
+            &[
+                Value::String("ColorbarVisible".into()),
+                Value::Int(runmat_builtins::IntValue::U64(2)),
+            ],
+            2,
+            2,
+            BUILTIN_NAME,
+        )
+        .expect_err("numeric on/off values must be exact zero or one");
+        assert!(err.message.contains("0, or 1"));
+    }
+
+    #[test]
+    fn heatmap_cdata_property_form_preserves_grammar_and_public_limits() {
+        let _guard = setup();
+        let source = Tensor::new_integer(IntegerStorage::U64(vec![10, 20, 30, 40]), vec![2, 2])
+            .expect("integer CData");
+        let handle = futures::executor::block_on(heatmap_builtin(vec![
+            Value::Tensor(source.clone()),
+            Value::String("FontSize".into()),
+            Value::Int(runmat_builtins::IntValue::U8(12)),
+            Value::String("ColorLimits".into()),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![15, 35]), vec![1, 2]).unwrap(),
+            ),
+        ]))
+        .expect("CData plus properties");
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("ColorData".into())]).unwrap(),
+            Value::Tensor(source)
+        );
+        let Value::Tensor(limits) = get_builtin(vec![
+            Value::Num(handle),
+            Value::String("ColorLimits".into()),
+        ])
+        .unwrap() else {
+            panic!("expected public ColorLimits");
+        };
+        assert_eq!(limits.materialize_f64(), vec![15.0, 35.0]);
+        let figure = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = figure.plots().next().unwrap() else {
+            panic!("expected heatmap surface");
+        };
+        assert_eq!(surface.color_limits, Some((1.0 / 6.0, 5.0 / 6.0)));
+    }
+
+    #[test]
+    fn heatmap_rejects_nd_cdata_before_plot_mutation() {
+        let _guard = setup();
+        let before = clone_figure(current_figure_handle())
+            .unwrap()
+            .plots()
+            .count();
+        let cdata = Tensor::new_integer(IntegerStorage::U8(vec![1; 8]), vec![2, 2, 2]).unwrap();
+        let error = futures::executor::block_on(heatmap_builtin(vec![Value::Tensor(cdata)]))
+            .expect_err("N-D CData must reject");
+        assert_eq!(
+            error.identifier(),
+            HEATMAP_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(
+            clone_figure(current_figure_handle())
+                .unwrap()
+                .plots()
+                .count(),
+            before
+        );
+    }
+
+    #[test]
+    fn heatmap_rejects_resident_nd_cdata_before_provider_lookup() {
+        let _guard = setup();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 2, 2],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = futures::executor::block_on(heatmap_builtin(vec![resident]))
+            .expect_err("N-D resident CData must reject from handle metadata");
+        assert_eq!(
+            error.identifier(),
+            HEATMAP_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(!error.message.contains("provider"));
+    }
+
+    #[test]
+    fn heatmap_wide_integer_color_limits_compare_before_f64_conversion() {
+        let lower = 9_007_199_254_740_992_u64;
+        let limits = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![lower, lower + 1]), vec![1, 2]).unwrap(),
+        );
+        crate::builtins::plotting::properties::validate_heatmap_property_pairs(
+            &[Value::String("ColorLimits".into()), limits],
+            2,
+            2,
+            BUILTIN_NAME,
+        )
+        .expect("adjacent wide integer limits remain ordered exactly");
+        let source = Tensor::new_integer(
+            IntegerStorage::U64(vec![lower - 1, lower, lower + 1]),
+            vec![1, 3],
+        )
+        .unwrap();
+        let limits = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![lower, lower + 1]), vec![1, 2]).unwrap(),
+        );
+        assert_eq!(
+            renderer_color_limits_for_value(&source, &limits, BUILTIN_NAME).unwrap(),
+            (0.5, 1.0)
+        );
+        let _guard = setup();
+        let handle = futures::executor::block_on(heatmap_builtin(vec![
+            Value::Tensor(source),
+            Value::String("ColorLimits".into()),
+            limits.clone(),
+        ]))
+        .expect("wide heatmap limits");
+        let returned = get_builtin(vec![
+            Value::Num(handle),
+            Value::String("ColorLimits".into()),
+        ])
+        .unwrap();
+        assert_eq!(returned, limits);
+    }
+
+    #[test]
+    fn heatmap_auto_limits_cover_negative_adjacent_and_constant_wide_integers() {
+        for storage in [
+            IntegerStorage::I64(vec![-9_007_199_254_740_993, -9_007_199_254_740_992]),
+            IntegerStorage::U64(vec![u64::MAX, u64::MAX]),
+        ] {
+            let _guard = setup();
+            let handle = futures::executor::block_on(heatmap_builtin(vec![Value::Tensor(
+                Tensor::new_integer(storage, vec![1, 2]).unwrap(),
+            )]))
+            .expect("wide integer heatmap");
+            let Value::Tensor(returned) = get_builtin(vec![
+                Value::Num(handle),
+                Value::String("ColorLimits".into()),
+            ])
+            .unwrap() else {
+                panic!("expected exact public ColorLimits")
+            };
+            let values = returned.materialize_f64();
+            let figure = clone_figure(current_figure_handle()).unwrap();
+            let axes = figure.axes_metadata(0).unwrap();
+            let (lo, hi) = axes.color_limits.expect("client auto limits");
+            assert!(lo < hi, "client limits must increase: {lo:?}, {hi:?}");
+            assert_eq!(values.len(), 2);
+            assert!(returned.integer_storage().is_some());
+        }
     }
 
     #[test]

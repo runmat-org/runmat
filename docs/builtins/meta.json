@@ -66465,21 +66465,42 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "B = head(A)",
           "inputs": [
             {
               "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Table, timetable, or array input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "B = head(A, n)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table, timetable, or array input."
             },
             {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Name-value options or conversion arguments."
+              "description": "Positive number of leading rows to select."
             }
           ],
           "outputs": [
@@ -66524,6 +66545,70 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "head-gpu-row-count",
+          "mode": "RunMatOnly",
+          "description": "head with a GPU-resident row count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HeadGpuRowCountExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = head(integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer array rows are selected exactly and retain their input class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Row selection preserves exact integer storage and every trailing dimension; resident data is downloaded non-destructively and restored to its owner."
+        },
+        {
+          "form": "B = head(A, integer_N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positive row count is decoded exactly from authoritative scalar storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "N is a positive scalar structural control; a resident N is a separately gated RunMat extension."
+        }
       ]
     },
     {
@@ -66540,6 +66625,34 @@
               "arity": "Required",
               "default": null,
               "description": "M-by-N numeric matrix of color values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the heatmap chart."
+            }
+          ]
+        },
+        {
+          "label": "h = heatmap(CData, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "CData",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "M-by-N numeric matrix of color values."
+            },
+            {
+              "name": "props",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Heatmap property name/value pairs."
             }
           ],
           "outputs": [
@@ -66642,6 +66755,205 @@
           "identifier": "RunMat:heatmap:Internal",
           "when": "Internal render/surface construction fails.",
           "message": "heatmap: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "heatmap-gpu-cdata",
+          "mode": "RunMatOnly",
+          "description": "heatmap with GPU-resident CData is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HeatmapGpuCDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = heatmap(integer_CData)",
+          "inputs": [
+            {
+              "name": "CData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Matrix ColorData accepts every built-in integer class and remains authoritative on the chart object."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact ColorData is retained on the HeatmapChart; integer-aware normalization precedes the explicit floating client-renderer boundary."
+        },
+        {
+          "form": "h = heatmap(integer_XValues, YValues, CData)",
+          "inputs": [
+            {
+              "name": "XValues",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric constructor labels accept every built-in integer class and are formatted from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer labels are converted directly to exact decimal strings; the output is an opaque chart handle."
+        },
+        {
+          "form": "h = heatmap(XValues, integer_YValues, CData)",
+          "inputs": [
+            {
+              "name": "YValues",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric constructor labels accept every built-in integer class and are formatted from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer labels are converted directly to exact decimal strings; the output is an opaque chart handle."
+        },
+        {
+          "form": "h = heatmap(..., 'FontSize', integer_size)",
+          "inputs": [
+            {
+              "name": "FontSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive numeric font size is bounded before the client graphics conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact positive scalar is range checked before conversion to the client font-size representation."
+        },
+        {
+          "form": "h = heatmap(..., 'ColorbarVisible', integer_on_off)",
+          "inputs": [
+            {
+              "name": "ColorbarVisible",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric on/off value is validated exactly as zero or one."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Only exact integer zero and one are accepted."
+        },
+        {
+          "form": "h = heatmap(..., 'GridVisible', integer_on_off)",
+          "inputs": [
+            {
+              "name": "GridVisible",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric on/off value is validated exactly as zero or one."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Only exact integer zero and one are accepted."
+        },
+        {
+          "form": "h = heatmap(..., 'ColorLimits', integer_limits)",
+          "inputs": [
+            {
+              "name": "ColorLimits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented two-element increasing limit vector is compared in authoritative storage before the renderer conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The two authoritative endpoints are ordered before their explicit client-renderer conversion."
         }
       ]
     },
@@ -66754,14 +67066,14 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "n = height(T)",
+          "label": "n = height(A)",
           "inputs": [
             {
-              "name": "T",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Table input."
+              "description": "Table, timetable, or array input."
             }
           ],
           "outputs": [
@@ -66805,6 +67117,35 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "n = height(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Only array shape metadata is observed; numeric elements are not materialized."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "All integer classes share the array row-count contract; resident inputs are answered from handle shape without gather."
         }
       ]
     },
@@ -66900,7 +67241,11 @@
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "figure persistence: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "hgload accepts a textual filename and an optional property structure and returns opaque graphics handles plus property metadata; it has no direct integer data or control argument."
+      }
     },
     {
       "name": "hgsave",
@@ -67008,7 +67353,11 @@
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "figure persistence: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "hgsave accepts host graphics handles, a textual filename, and textual version tokens; numeric array contents are not an integer computation surface and resident tensors are rejected without gather."
+      }
     },
     {
       "name": "hidden",
@@ -70708,6 +71057,153 @@
           "when": "IFFT2 execution or tensor shaping fails.",
           "message": "ifft2: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ifft2-wide-integer-data",
+          "mode": "RunMatOnly",
+          "description": "ifft2 with host int64 or uint64 data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ifft2WideIntegerDataExtension"
+        },
+        {
+          "id": "ifft2-wide-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "ifft2 with int64 or uint64 transform-size controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ifft2WideIntegerControlExtension"
+        },
+        {
+          "id": "ifft2-size-form",
+          "mode": "RunMatOnly",
+          "description": "ifft2(X, SIZE) scalar/vector shorthand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ifft2SizeFormExtension"
+        },
+        {
+          "id": "ifft2-empty-zero-size",
+          "mode": "RunMatOnly",
+          "description": "ifft2 empty or zero transform sizes are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ifft2EmptyZeroSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = ifft2(integer_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer arrays enter the double two-dimensional inverse-FFT domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented integer data produces double output; symmetric changes complexity only."
+        },
+        {
+          "form": "Y = ifft2(X, integer_M, integer_N, ...)",
+          "inputs": [
+            {
+              "name": "M and N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "M and N are exact positive scalar structural controls; logical scalars are also documented."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Documented controls are parsed exactly before provider execution."
+        },
+        {
+          "form": "Y = ifft2(int64_or_uint64_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Host wide data is gated and must cross the double boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "RunMat-only wide host data may not silently round; resident wide data rejects before gather."
+        },
+        {
+          "form": "Y = ifft2(X, int64_or_uint64_M_or_N_or_SIZE, ...)",
+          "inputs": [
+            {
+              "name": "M, N, or SIZE",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Wide structural controls are independently gated and parsed from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only wide controls are independently gated and decoded exactly."
+        },
+        {
+          "form": "Y = ifft2(X, integer_SIZE, ...)",
+          "inputs": [
+            {
+              "name": "SIZE",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "The scalar or two-element SIZE shorthand is independently gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only scalar/two-vector shorthand; empty and zero sizes have a further gate."
+        }
       ]
     },
     {
@@ -70859,6 +71355,126 @@
           "when": "IFFTN execution or tensor shaping fails.",
           "message": "ifftn: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ifftn-wide-integer-data",
+          "mode": "RunMatOnly",
+          "description": "ifftn with host int64 or uint64 data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IfftnWideIntegerDataExtension"
+        },
+        {
+          "id": "ifftn-wide-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "ifftn with int64 or uint64 SIZE controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IfftnWideIntegerControlExtension"
+        },
+        {
+          "id": "ifftn-short-size-vector",
+          "mode": "RunMatOnly",
+          "description": "ifftn SIZE vectors shorter than ndims(X) are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IfftnShortSizeExtension"
+        },
+        {
+          "id": "ifftn-zero-size-vector",
+          "mode": "RunMatOnly",
+          "description": "ifftn SIZE vectors containing zero are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IfftnZeroSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = ifftn(integer_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer arrays enter the double N-dimensional inverse-FFT domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented integer data produces double output; symmetric changes complexity only."
+        },
+        {
+          "form": "Y = ifftn(X, integer_SIZE, ...)",
+          "inputs": [
+            {
+              "name": "SIZE",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "SIZE is a positive integer vector with length at least ndims(X); logical vectors are documented."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Documented SIZE is decoded exactly and validated before execution."
+        },
+        {
+          "form": "Y = ifftn(int64_or_uint64_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Host wide data is gated and must be exactly representable as double."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "RunMat-only wide host data may not silently round; resident wide data rejects before gather."
+        },
+        {
+          "form": "Y = ifftn(X, int64_or_uint64_SIZE, ...)",
+          "inputs": [
+            {
+              "name": "SIZE",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Wide SIZE controls are independently gated and decoded exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only wide SIZE controls are independently gated; short and zero vectors have separate gates."
+        }
       ]
     },
     {
@@ -70946,6 +71562,97 @@
           "identifier": "RunMat:ifftshift:Internal",
           "when": "Shifting, tensor reconstruction, or GPU transfer operations fail.",
           "message": "ifftshift: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ifftshift-multi-dimension-selector",
+          "mode": "RunMatOnly",
+          "description": "ifftshift numeric dimension vectors and logical masks are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IfftshiftMultiDimensionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = ifftshift(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All integer classes are reordered exactly with class, shape, and complexity preserved."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Real and typed-complex integer storage is reordered without an f64 mirror; resident fallback restores to the owner."
+        },
+        {
+          "form": "Y = ifftshift(X, integer_DIM)",
+          "inputs": [
+            {
+              "name": "DIM",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented DIM form is one positive scalar parsed from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "All eight documented integer scalar classes select one dimension exactly."
+        },
+        {
+          "form": "Y = ifftshift(X, integer_DIMS)",
+          "inputs": [
+            {
+              "name": "DIMS",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "RunMat-only numeric vectors are decoded exactly; logical masks share the same gate."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only multi-axis vector/mask selection is independently gated."
         }
       ]
     },

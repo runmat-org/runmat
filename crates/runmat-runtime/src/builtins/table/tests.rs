@@ -2598,6 +2598,297 @@ fn timetable_conversion_predicates_and_head_work() {
 }
 
 #[test]
+fn head_preserves_exact_integer_rows_and_requires_positive_count() {
+    assert_eq!(HEAD_INTEGER_CAPABILITIES.len(), 2);
+    let source = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 5, 7, 9]),
+            vec![2, 2],
+        )
+        .unwrap(),
+    );
+    let selected = block_on(head_builtin(
+        source,
+        vec![Value::Int(runmat_builtins::IntValue::U8(1))],
+    ))
+    .unwrap();
+    let Value::Tensor(selected) = selected else {
+        panic!("expected exact integer tensor")
+    };
+    assert_eq!(selected.shape, vec![1, 2]);
+    assert_eq!(
+        selected.into_numeric_storage().unwrap(),
+        runmat_builtins::NumericStorage::U64(vec![9_007_199_254_740_993, 7])
+    );
+
+    for controls in [
+        vec![Value::Num(0.0)],
+        vec![Value::Num(1.0), Value::Num(2.0)],
+    ] {
+        assert!(block_on(head_builtin(Value::Num(1.0), controls)).is_err());
+    }
+}
+
+#[test]
+fn head_host_preserves_every_integer_class() {
+    for storage in [
+        IntegerStorage::I8(vec![-8, 8, 1, 2]),
+        IntegerStorage::I16(vec![-16, 16, 1, 2]),
+        IntegerStorage::I32(vec![-32, 32, 1, 2]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX, 1, 2]),
+        IntegerStorage::U8(vec![0, u8::MAX, 1, 2]),
+        IntegerStorage::U16(vec![0, u16::MAX, 1, 2]),
+        IntegerStorage::U32(vec![0, u32::MAX, 1, 2]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX, 1, 2]),
+    ] {
+        let source = Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap();
+        let Value::Tensor(selected) =
+            block_on(head_builtin(Value::Tensor(source), vec![Value::Num(1.0)])).unwrap()
+        else {
+            panic!("expected exact integer tensor")
+        };
+        assert_eq!(selected.shape, vec![1, 2]);
+        let expected = storage
+            .from_exact_values_like(vec![
+                storage.value_at(0).unwrap(),
+                storage.value_at(2).unwrap(),
+            ])
+            .unwrap();
+        assert_eq!(selected.integer_storage(), Some(&expected));
+    }
+}
+
+#[test]
+fn head_preserves_nd_real_complex_and_logical_pages() {
+    let real_f64 = Tensor::new((1..=12).map(f64::from).collect(), vec![2, 2, 3]).unwrap();
+    let Value::Tensor(real_f64) =
+        block_on(head_builtin(Value::Tensor(real_f64), vec![Value::Num(1.0)])).unwrap()
+    else {
+        panic!("expected double tensor")
+    };
+    assert_eq!(real_f64.shape, vec![1, 2, 3]);
+    assert_eq!(
+        real_f64.materialize_f64(),
+        vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]
+    );
+
+    let real = Tensor::from_f32((1..=12).map(|value| value as f32).collect(), vec![2, 2, 3])
+        .expect("single pages");
+    let Value::Tensor(real) =
+        block_on(head_builtin(Value::Tensor(real), vec![Value::Num(1.0)])).unwrap()
+    else {
+        panic!("expected single tensor");
+    };
+    assert_eq!(real.shape, vec![1, 2, 3]);
+    assert_eq!(real.numeric_dtype(), runmat_builtins::NumericDType::F32);
+    assert_eq!(real.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]);
+
+    let complex = ComplexTensor::from_f32(
+        (1..=12)
+            .map(|value| (value as f32, -(value as f32)))
+            .collect(),
+        vec![2, 2, 3],
+    )
+    .expect("complex pages");
+    let Value::ComplexTensor(complex) = block_on(head_builtin(
+        Value::ComplexTensor(complex),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected complex tensor");
+    };
+    assert_eq!(complex.shape, vec![1, 2, 3]);
+    assert_eq!(complex.numeric_dtype(), runmat_builtins::NumericDType::F32);
+    assert_eq!(
+        complex.materialize_f64(),
+        vec![
+            (1.0, -1.0),
+            (3.0, -3.0),
+            (5.0, -5.0),
+            (7.0, -7.0),
+            (9.0, -9.0),
+            (11.0, -11.0)
+        ]
+    );
+
+    let complex_f64 = ComplexTensor::new(
+        (1..=12)
+            .map(|value| (f64::from(value), -f64::from(value)))
+            .collect(),
+        vec![2, 2, 3],
+    )
+    .unwrap();
+    let Value::ComplexTensor(complex_f64) = block_on(head_builtin(
+        Value::ComplexTensor(complex_f64),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected double complex tensor")
+    };
+    assert_eq!(complex_f64.shape, vec![1, 2, 3]);
+
+    let integer_complex = ComplexTensor::new_integer(
+        runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I64((1..=12).collect()),
+            IntegerStorage::I64((-12..=-1).collect()),
+        )
+        .unwrap(),
+        vec![2, 2, 3],
+    )
+    .unwrap();
+    let Value::ComplexTensor(integer_complex) = block_on(head_builtin(
+        Value::ComplexTensor(integer_complex),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected integer complex tensor")
+    };
+    assert_eq!(integer_complex.shape, vec![1, 2, 3]);
+    assert!(integer_complex.integer_storage().is_some());
+
+    let logical = LogicalArray::new(
+        (0..12).map(|index| u8::from(index % 2 == 0)).collect(),
+        vec![2, 2, 3],
+    )
+    .expect("logical pages");
+    let Value::LogicalArray(logical) = block_on(head_builtin(
+        Value::LogicalArray(logical),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected logical array");
+    };
+    assert_eq!(logical.shape, vec![1, 2, 3]);
+    assert_eq!(logical.data, vec![1, 1, 1, 1, 1, 1]);
+}
+
+#[test]
+fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![2, 2],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    });
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let count_error = block_on(head_builtin(Value::Num(1.0), vec![resident]))
+        .expect_err("resident row count must be gated");
+    assert_eq!(
+        count_error.identifier(),
+        HEAD_EXTENSIONS[0].error_identifier
+    );
+}
+
+#[test]
+fn head_preserves_resident_integer_class_owner_and_source() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let source = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 5, 7, 9]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+            .expect("upload exact integer source");
+        let result = block_on(head_builtin(
+            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone()),
+            vec![Value::Num(1.0)],
+        ))
+        .expect("resident head");
+        let Value::GpuTensor(result) = result else {
+            panic!("expected resident result")
+        };
+        assert_ne!(result.buffer_id, handle.buffer_id);
+        assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+        assert!(runmat_accelerate_api::provider_for_handle(&result)
+            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&result),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        let downloaded = block_on(provider.download_integer(&result)).expect("download result");
+        assert_eq!(downloaded.shape, vec![1, 2]);
+        assert_eq!(
+            downloaded.data,
+            runmat_accelerate_api::HostIntegerDataOwned::U64(vec![9_007_199_254_740_993, 7])
+        );
+        for output in [&result, &handle] {
+            provider.free(output).ok();
+            runmat_accelerate_api::clear_residency(output);
+        }
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn head_wgpu_preserves_every_integer_class_exactly() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let _guard = crate::builtins::common::test_support::accel_test_lock();
+    if !register_wgpu_provider_available() {
+        return;
+    }
+    let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, i8::MAX, 1, 2]),
+        IntegerStorage::I16(vec![i16::MIN, i16::MAX, 1, 2]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX, 1, 2]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX, 1, 2]),
+        IntegerStorage::U8(vec![0, u8::MAX, 1, 2]),
+        IntegerStorage::U16(vec![0, u16::MAX, 1, 2]),
+        IntegerStorage::U32(vec![0, u32::MAX, 1, 2]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX, 1, 2]),
+    ] {
+        let source = Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap();
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &source).unwrap();
+        let output = block_on(head_builtin(
+            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone()),
+            vec![Value::Num(1.0)],
+        ))
+        .expect("resident integer head");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident integer output")
+        };
+        let downloaded = block_on(provider.download_integer(&output)).expect("download head");
+        let expected = storage
+            .from_exact_values_like(vec![
+                storage.value_at(0).unwrap(),
+                storage.value_at(2).unwrap(),
+            ])
+            .unwrap();
+        let actual = match downloaded.data {
+            runmat_accelerate_api::HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),
+            runmat_accelerate_api::HostIntegerDataOwned::I16(values) => IntegerStorage::I16(values),
+            runmat_accelerate_api::HostIntegerDataOwned::I32(values) => IntegerStorage::I32(values),
+            runmat_accelerate_api::HostIntegerDataOwned::I64(values) => IntegerStorage::I64(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U8(values) => IntegerStorage::U8(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U16(values) => IntegerStorage::U16(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U32(values) => IntegerStorage::U32(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U64(values) => IntegerStorage::U64(values),
+        };
+        assert_eq!(actual, expected);
+        assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+        for resident in [&output, &handle] {
+            provider.free(resident).ok();
+            runmat_accelerate_api::clear_residency(resident);
+        }
+    }
+}
+
+#[test]
+fn height_reads_resident_shape_without_provider_or_data_access() {
+    assert_eq!(HEIGHT_INTEGER_CAPABILITIES.len(), 1);
+    let handle = runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![13, 4],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    };
+    assert!(matches!(
+        block_on(height_builtin(Value::GpuTensor(handle))).unwrap(),
+        Value::Num(13.0)
+    ));
+}
+
+#[test]
 fn categorical_dictionary_and_selector_objects_materialize() {
     let categorical = block_on(categorical_builtin(vec![Value::StringArray(
         StringArray::new(vec!["red".into(), "blue".into(), "red".into()], vec![3, 1]).unwrap(),

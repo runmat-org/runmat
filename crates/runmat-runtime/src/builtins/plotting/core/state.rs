@@ -612,6 +612,7 @@ pub struct HeatmapHandleState {
     pub x_labels: Vec<String>,
     pub y_labels: Vec<String>,
     pub color_data: Tensor,
+    pub color_limits: Option<Tensor>,
 }
 
 #[derive(Clone, Debug)]
@@ -1004,6 +1005,7 @@ impl PlotChildHandleState {
                 x_labels: state.x_labels.clone(),
                 y_labels: state.y_labels.clone(),
                 color_data: state.color_data.clone(),
+                color_limits: state.color_limits.clone(),
             }),
             Self::Binscatter(state) => Self::Binscatter(BinscatterHandleState {
                 figure,
@@ -3837,6 +3839,7 @@ pub fn register_heatmap_handle(
     x_labels: Vec<String>,
     y_labels: Vec<String>,
     color_data: Tensor,
+    color_limits: Option<Tensor>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3850,9 +3853,24 @@ pub fn register_heatmap_handle(
             x_labels,
             y_labels,
             color_data,
+            color_limits,
         }),
     );
     id as f64
+}
+
+pub fn set_heatmap_color_limits(handle: f64, limits: Tensor) -> Result<(), FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let mut reg = registry();
+    match reg.plot_children.get_mut(&(handle.round() as u64)) {
+        Some(PlotChildHandleState::Heatmap(state)) => {
+            state.color_limits = Some(limits);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
 }
 
 pub fn register_binscatter_handle(
