@@ -23,20 +23,29 @@ static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
 
-static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
-static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<u64, u64>>> =
+pub type GpuHandleIdentity = (u32, u64);
+
+static LOGICAL_HANDLES: Lazy<RwLock<HashSet<GpuHandleIdentity>>> =
+    Lazy::new(|| RwLock::new(HashSet::new()));
+static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<GpuHandleIdentity, u64>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
+static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<GpuHandleIdentity, TransposeInfo>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
+static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<GpuHandleIdentity, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<u64, String>>> =
+static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<GpuHandleIdentity, String>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
+static HANDLE_STORAGES: Lazy<RwLock<HashMap<GpuHandleIdentity, GpuTensorStorage>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_INTEGER_TYPES: Lazy<RwLock<HashMap<u64, IntegerElementType>>> =
+static HANDLE_INTEGER_TYPES: Lazy<RwLock<HashMap<GpuHandleIdentity, IntegerElementType>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_PROVENANCE: Lazy<RwLock<HashMap<GpuHandleIdentity, GpuHandleProvenance>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+pub const fn handle_identity(handle: &GpuTensorHandle) -> GpuHandleIdentity {
+    (handle.device_id, handle.buffer_id)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeInfo {
@@ -119,7 +128,7 @@ pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
 /// reconstruct the original dtype when gathering back to the CPU.
 pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecision) {
     if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.insert(handle.buffer_id, precision);
+        guard.insert(handle_identity(handle), precision);
     }
 }
 
@@ -128,13 +137,13 @@ pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
     HANDLE_PRECISIONS
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
 }
 
 /// Clear any recorded precision metadata for a GPU tensor handle.
 pub fn clear_handle_precision(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_identity(handle));
     }
 }
 
@@ -145,7 +154,7 @@ pub fn clear_handle_precision(handle: &GpuTensorHandle) {
 /// the exact requested or inferred class.
 pub fn set_handle_class_name(handle: &GpuTensorHandle, class_name: impl Into<String>) {
     if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
-        guard.insert(handle.buffer_id, class_name.into());
+        guard.insert(handle_identity(handle), class_name.into());
     }
 }
 
@@ -154,29 +163,30 @@ pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
     HANDLE_CLASS_NAMES
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
 }
 
 /// Clear any recorded MATLAB underlying class metadata for a GPU tensor handle.
 pub fn clear_handle_class_name(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_identity(handle));
     }
 }
 
 /// Annotate a GPU tensor handle as logically-typed (`logical` in MATLAB terms)
 /// or clear the logical flag when `logical` is `false`.
 pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
+    let identity = handle_identity(handle);
     if let Ok(mut guard) = LOGICAL_HANDLES.write() {
         if logical {
-            guard.insert(handle.buffer_id);
+            guard.insert(identity);
             if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
-                *hits.entry(handle.buffer_id).or_insert(0) += 1;
+                *hits.entry(identity).or_insert(0) += 1;
             }
         } else {
-            guard.remove(&handle.buffer_id);
+            guard.remove(&identity);
             if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
-                hits.remove(&handle.buffer_id);
+                hits.remove(&identity);
             }
         }
     }
@@ -191,21 +201,31 @@ pub fn clear_handle_logical(handle: &GpuTensorHandle) {
 pub fn handle_is_logical(handle: &GpuTensorHandle) -> bool {
     LOGICAL_HANDLES
         .read()
-        .map(|guard| guard.contains(&handle.buffer_id))
+        .map(|guard| guard.contains(&handle_identity(handle)))
         .unwrap_or(false)
 }
 
 pub fn handle_logical_hits(buffer_id: u64) -> Option<u64> {
+    LOGICAL_HANDLE_HITS.read().ok().and_then(|guard| {
+        let mut matches = guard
+            .iter()
+            .filter_map(|((_, candidate), hits)| (*candidate == buffer_id).then_some(*hits));
+        let first = matches.next()?;
+        Some(matches.fold(first, u64::saturating_add))
+    })
+}
+
+pub fn handle_logical_hits_for_handle(handle: &GpuTensorHandle) -> Option<u64> {
     LOGICAL_HANDLE_HITS
         .read()
         .ok()
-        .and_then(|guard| guard.get(&buffer_id).copied())
+        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
 }
 
 pub fn record_handle_transpose(handle: &GpuTensorHandle, base_rows: usize, base_cols: usize) {
     if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
         guard.insert(
-            handle.buffer_id,
+            handle_identity(handle),
             TransposeInfo {
                 base_rows,
                 base_cols,
@@ -216,7 +236,7 @@ pub fn record_handle_transpose(handle: &GpuTensorHandle, base_rows: usize, base_
 
 pub fn clear_handle_transpose(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_identity(handle));
     }
 }
 
@@ -224,7 +244,7 @@ pub fn handle_transpose_info(handle: &GpuTensorHandle) -> Option<TransposeInfo> 
     TRANSPOSED_HANDLES
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
 }
 
 pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
@@ -268,7 +288,7 @@ impl IntegerElementType {
 /// Record the exact native integer class stored by a GPU tensor handle.
 pub fn set_handle_integer_type(handle: &GpuTensorHandle, element_type: IntegerElementType) {
     if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
-        guard.insert(handle.buffer_id, element_type);
+        guard.insert(handle_identity(handle), element_type);
     }
 }
 
@@ -277,13 +297,13 @@ pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementTyp
     HANDLE_INTEGER_TYPES
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
 }
 
 /// Clear the native integer class annotation for a released handle.
 pub fn clear_handle_integer_type(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_identity(handle));
     }
 }
 
@@ -301,6 +321,61 @@ pub struct GpuTensorHandle {
     /// provider routing is keyed by this value.
     pub device_id: u32,
     pub buffer_id: u64,
+}
+
+/// Semantic origin of a resident handle.
+///
+/// Automatic residency is an implementation detail and may transparently return
+/// to the host. Explicit residency represents user-visible `gpuArray` intent and
+/// must be retained by operations that preserve gpuArray semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GpuHandleProvenance {
+    Automatic,
+    Explicit,
+}
+
+pub fn set_handle_provenance(handle: &GpuTensorHandle, provenance: GpuHandleProvenance) {
+    if let Ok(mut guard) = HANDLE_PROVENANCE.write() {
+        guard.insert(handle_identity(handle), provenance);
+    }
+}
+
+pub fn handle_provenance(handle: &GpuTensorHandle) -> Option<GpuHandleProvenance> {
+    HANDLE_PROVENANCE
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
+}
+
+pub fn clear_handle_provenance(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_PROVENANCE.write() {
+        guard.remove(&handle_identity(handle));
+    }
+}
+
+pub fn mark_handle_explicit(handle: &GpuTensorHandle) {
+    set_handle_provenance(handle, GpuHandleProvenance::Explicit);
+}
+
+pub fn mark_handle_automatic(handle: &GpuTensorHandle) {
+    set_handle_provenance(handle, GpuHandleProvenance::Automatic);
+}
+
+pub fn handle_is_explicit(handle: &GpuTensorHandle) -> bool {
+    handle_provenance(handle) == Some(GpuHandleProvenance::Explicit)
+}
+
+/// Clear every API-owned annotation for a released handle, including backend
+/// residency tracking registered through [`register_residency_clear`].
+pub fn clear_handle_metadata(handle: &GpuTensorHandle) {
+    clear_residency(handle);
+    clear_handle_precision(handle);
+    clear_handle_class_name(handle);
+    clear_handle_logical(handle);
+    clear_handle_transpose(handle);
+    clear_handle_storage(handle);
+    clear_handle_integer_type(handle);
+    clear_handle_provenance(handle);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -620,7 +695,7 @@ pub struct WgpuBufferRef {
 
 pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
     if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.insert(handle.buffer_id, storage);
+        guard.insert(handle_identity(handle), storage);
     }
 }
 
@@ -628,13 +703,13 @@ pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
     HANDLE_STORAGES
         .read()
         .ok()
-        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
         .unwrap_or(GpuTensorStorage::Real)
 }
 
 pub fn clear_handle_storage(handle: &GpuTensorHandle) {
     if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.remove(&handle.buffer_id);
+        guard.remove(&handle_identity(handle));
     }
 }
 
@@ -3950,6 +4025,60 @@ mod tests {
             device_id,
             buffer_id: 42,
         }
+    }
+
+    #[test]
+    fn handle_metadata_is_namespaced_by_device_and_buffer() {
+        let first = test_handle(PROVIDER_A.device_id());
+        let second = test_handle(PROVIDER_B.device_id());
+        clear_handle_metadata(&first);
+        clear_handle_metadata(&second);
+
+        set_handle_precision(&first, ProviderPrecision::F32);
+        set_handle_precision(&second, ProviderPrecision::F64);
+        set_handle_class_name(&first, "single");
+        set_handle_class_name(&second, "uint64");
+        set_handle_integer_type(&second, IntegerElementType::U64);
+        set_handle_logical(&first, true);
+        record_handle_transpose(&first, 2, 3);
+        set_handle_storage(&second, GpuTensorStorage::ComplexInterleaved);
+        mark_handle_automatic(&first);
+        mark_handle_explicit(&second);
+
+        assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
+        assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
+        assert_eq!(handle_class_name(&first).as_deref(), Some("single"));
+        assert_eq!(handle_class_name(&second).as_deref(), Some("uint64"));
+        assert_eq!(handle_integer_type(&first), None);
+        assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
+        assert!(handle_is_logical(&first));
+        assert!(!handle_is_logical(&second));
+        assert_eq!(
+            handle_transpose_info(&first).map(|info| (info.base_rows, info.base_cols)),
+            Some((2, 3))
+        );
+        assert_eq!(handle_transpose_info(&second), None);
+        assert_eq!(handle_storage(&first), GpuTensorStorage::Real);
+        assert_eq!(
+            handle_storage(&second),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            handle_provenance(&first),
+            Some(GpuHandleProvenance::Automatic)
+        );
+        assert!(handle_is_explicit(&second));
+
+        clear_handle_metadata(&first);
+        assert_eq!(handle_precision(&first), None);
+        assert_eq!(handle_class_name(&first), None);
+        assert!(!handle_is_logical(&first));
+        assert_eq!(handle_transpose_info(&first), None);
+        assert_eq!(handle_provenance(&first), None);
+        assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
+        assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
+        assert!(handle_is_explicit(&second));
+        clear_handle_metadata(&second);
     }
 
     fn spectral_request<'a>(

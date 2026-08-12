@@ -18,7 +18,10 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, shape::normalize_scalar_shape, tensor};
+use crate::builtins::common::{
+    gpu_helpers, random_args::validate_constructor_gpu_output, shape::normalize_scalar_shape,
+    tensor,
+};
 use runmat_builtins::NumericDType;
 use runmat_builtins::Type;
 
@@ -547,32 +550,67 @@ fn zeros_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
     Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec())))
 }
 
-/// Create a GPU-resident zeros array. Falls back to host tensor if no GPU provider.
+/// Create an explicitly GPU-resident zeros array.
 async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
-    // Try to allocate on GPU with default precision (usually F32)
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let precision = provider.precision();
-        let dtype = dtype_from_precision(precision);
-        match provider.zeros(shape) {
-            Ok(handle) => {
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
-                return Ok(Value::GpuTensor(handle));
-            }
-            Err(err) => {
-                log::debug!(
-                    "zeros_gpu: provider.zeros failed ({err}); falling back to host upload"
-                );
-            }
-        }
-        // Fallback: build a host tensor and upload
-        let host = tensor::zeros_with_dtype(shape, dtype)?;
-        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| builtin_error("zeros: no acceleration provider is available"))?;
+    let precision = provider.precision();
+    let dtype = dtype_from_precision(precision);
+    if let Ok(handle) = provider.zeros(shape) {
+        if let Ok(handle) = validate_constructor_gpu_output(
+            "zeros",
+            provider,
+            handle,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            false,
+        ) {
+            return Ok(Value::GpuTensor(handle));
         }
     }
-    // No GPU provider: fall back to host double tensor
-    zeros_double(shape)
+    let host = tensor::zeros_with_dtype(shape, dtype)?;
+    if let Ok(handle) = gpu_helpers::upload_tensor(provider, &host) {
+        if let Ok(handle) = validate_constructor_gpu_output(
+            "zeros",
+            provider,
+            handle,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            false,
+        ) {
+            return Ok(Value::GpuTensor(handle));
+        }
+    }
+    Err(builtin_error(
+        "zeros: provider cannot preserve explicit gpuArray output",
+    ))
+}
+
+fn validate_zeros_gpu_output(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: GpuTensorHandle,
+    shape: &[usize],
+    storage: runmat_accelerate_api::GpuTensorStorage,
+    precision: Option<ProviderPrecision>,
+    integer_type: Option<IntegerElementType>,
+    logical: bool,
+) -> crate::BuiltinResult<Value> {
+    validate_constructor_gpu_output(
+        "zeros",
+        provider,
+        output,
+        shape,
+        storage,
+        precision,
+        integer_type,
+        logical,
+    )
+    .map(Value::GpuTensor)
+    .map_err(builtin_error)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -653,50 +691,88 @@ fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinRes
 
 #[async_recursion::async_recursion(?Send)]
 async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(handle)
+        .ok_or_else(|| builtin_error("zeros: no provider owns the explicit gpuArray prototype"))?;
     if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
         let prototype = integer_storage_prototype_from_element_type(integer_type);
         let storage = prototype.zeros_like(tensor::element_count(shape));
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-            let view = integer_tensor_view(&storage, shape);
-            if let Ok(gpu) = provider.upload_integer(&view) {
-                return Ok(Value::GpuTensor(gpu));
-            }
+        let view = integer_tensor_view(&storage, shape);
+        if let Ok(gpu) = provider.upload_integer(&view) {
+            return validate_zeros_gpu_output(
+                provider,
+                gpu,
+                shape,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                None,
+                Some(integer_type),
+                false,
+            );
         }
-        return zeros_integer_like(&prototype, shape);
+        return Err(builtin_error(
+            "zeros: provider cannot preserve explicit integer gpuArray output",
+        ));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-        let precision =
-            runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
-        let dtype = dtype_from_precision(precision);
-        let attempt = if handle.shape == shape {
-            provider.zeros_like(handle)
-        } else {
-            provider.zeros(shape)
-        };
-        if let Ok(gpu) = attempt {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
-        } else {
-            log_zeros_fallback(shape, dtype, "provider-like-error");
+    let precision =
+        runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
+    let dtype = dtype_from_precision(precision);
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
+        let complex = ComplexTensor::from_f64_values_with_dtype(
+            vec![(0.0, 0.0); tensor::element_count(shape)],
+            shape.to_vec(),
+            dtype,
+        )
+        .map_err(|error| builtin_error(format!("zeros: {error}")))?;
+        if let Ok(gpu) = gpu_helpers::upload_complex_tensor(provider, &complex) {
+            return validate_zeros_gpu_output(
+                provider,
+                gpu,
+                shape,
+                storage,
+                Some(precision),
+                None,
+                false,
+            );
         }
-        // Fallback: build a host tensor with dtype matching provider precision and upload
-        let host = tensor::zeros_with_dtype(shape, dtype)?;
-        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
-        } else {
-            log_zeros_fallback(shape, dtype, "upload-error");
-        }
+        return Err(builtin_error(
+            "zeros: provider cannot preserve explicit complex gpuArray output",
+        ));
+    }
+    let attempt = if handle.shape == shape {
+        provider.zeros_like(handle)
     } else {
-        log_zeros_fallback(shape, NumericDType::F32, "no-provider-like");
+        provider.zeros(shape)
+    };
+    if let Ok(gpu) = attempt {
+        if let Ok(value) = validate_zeros_gpu_output(
+            provider,
+            gpu,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            logical,
+        ) {
+            return Ok(value);
+        }
     }
-
-    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
-        .await
-        .map_err(|e| format!("zeros: {e}"))?;
-    log_zeros_fallback(shape, NumericDType::F32, "gather-fallback");
-    zeros_like(&gathered, shape).await
+    let host = tensor::zeros_with_dtype(shape, dtype)?;
+    if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
+        return validate_zeros_gpu_output(
+            provider,
+            gpu,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            logical,
+        );
+    }
+    Err(builtin_error(
+        "zeros: provider cannot preserve explicit gpuArray output",
+    ))
 }
 
 fn integer_storage_prototype_from_element_type(element_type: IntegerElementType) -> IntegerStorage {
@@ -755,7 +831,18 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     }
     match provider.zeros(shape) {
         Ok(handle) => {
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
+            let handle = validate_constructor_gpu_output(
+                "zeros",
+                provider,
+                handle,
+                shape,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                Some(precision),
+                None,
+                false,
+            )
+            .map_err(builtin_error)?;
+            runmat_accelerate_api::mark_handle_automatic(&handle);
             Ok(Some(Value::GpuTensor(handle)))
         }
         Err(err) => {
@@ -854,6 +941,45 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct InvalidAutomaticZerosProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        frees: AtomicUsize,
+    }
+
+    impl runmat_accelerate_api::AccelProvider for InvalidAutomaticZerosProvider {
+        fn upload(
+            &self,
+            host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+
+        fn download<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+
+        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            self.frees.fetch_add(1, Ordering::SeqCst);
+            self.inner.free(handle)
+        }
+
+        fn device_info(&self) -> String {
+            self.inner.device_info()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+
+        fn zeros(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.zeros(&[1, 1])
+        }
+    }
 
     fn clear_accel_provider_state() -> test_support::AccelTestGuard {
         test_support::accel_test_lock()
@@ -865,6 +991,20 @@ pub(crate) mod tests {
         let _guard = clear_accel_provider_state();
         let result = block_on(zeros_builtin(Vec::new())).expect("zeros");
         assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn automatic_zeros_rejects_and_frees_invalid_provider_output() {
+        let _guard = clear_accel_provider_state();
+        let provider = Box::leak(Box::new(InvalidAutomaticZerosProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            frees: AtomicUsize::new(0),
+        }));
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+
+        let error = zeros_double(&[2, 2]).expect_err("invalid provider output must be terminal");
+        assert!(error.message().contains("invalid constructor result"));
+        assert_eq!(provider.frees.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -1264,8 +1404,14 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn zeros_wgpu_single_allocates_gpu_without_like() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        assert_eq!(
+            runmat_accelerate_api::AccelProvider::precision(provider),
+            ProviderPrecision::F32
         );
         let value = zeros_single(&[2, 2]).expect("zeros single");
         match value {

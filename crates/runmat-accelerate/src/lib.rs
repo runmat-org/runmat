@@ -116,7 +116,7 @@ static API_HOOKS: Lazy<()> = Lazy::new(|| {
     runmat_accelerate_api::register_workgroup_size_hint_provider(workgroup_size_hint_bridge);
 });
 
-pub(crate) fn ensure_residency_hooks() {
+pub fn ensure_residency_hooks() {
     Lazy::force(&API_HOOKS);
 }
 

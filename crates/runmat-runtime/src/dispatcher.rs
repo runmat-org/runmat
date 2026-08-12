@@ -3,7 +3,8 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
 };
 use runmat_builtins::{
-    builtin_functions, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
+    builtin_functions, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType,
+    Tensor, Value,
 };
 use std::cell::RefCell;
 
@@ -101,13 +102,28 @@ fn gather_if_needed_async_impl<'a>(
                             .build()
                     })?;
                 let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-                if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                if let Some(expected_integer_type) =
+                    runmat_accelerate_api::handle_integer_type(handle)
+                {
                     let integer = provider.download_integer(handle).await.map_err(|err| {
                         build_runtime_error(format!("gather: {err}"))
                             .with_identifier("RunMat:gather:DownloadFailed")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
-                    runmat_accelerate_api::clear_residency(handle);
+                    if integer.shape != handle.shape
+                        || integer.data.element_type() != expected_integer_type
+                    {
+                        return Err(provider_payload_mismatch(
+                            handle,
+                            &integer.shape,
+                            format!(
+                                "integer class {:?}, expected {:?}",
+                                integer.data.element_type(),
+                                expected_integer_type
+                            ),
+                        ));
+                    }
                     let storage = match integer.data {
                         HostIntegerDataOwned::I8(data) => IntegerStorage::I8(data),
                         HostIntegerDataOwned::I16(data) => IntegerStorage::I16(data),
@@ -130,9 +146,20 @@ fn gather_if_needed_async_impl<'a>(
                     .map_err(|err| {
                         build_runtime_error(format!("gather: {err}"))
                             .with_identifier("RunMat:gather:DownloadFailed")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
-                runmat_accelerate_api::clear_residency(handle);
+                let expected_storage = runmat_accelerate_api::handle_storage(handle);
+                if host.shape != handle.shape || host.storage != expected_storage {
+                    return Err(provider_payload_mismatch(
+                        handle,
+                        &host.shape,
+                        format!(
+                            "storage {:?}, expected {:?}",
+                            host.storage, expected_storage
+                        ),
+                    ));
+                }
                 let runmat_accelerate_api::HostTensorOwned {
                     data,
                     shape,
@@ -148,23 +175,32 @@ fn gather_if_needed_async_impl<'a>(
                     })?;
                     Ok(Value::LogicalArray(logical))
                 } else if storage == GpuTensorStorage::ComplexInterleaved {
-                    let mut data = data;
                     let precision = runmat_accelerate_api::handle_precision(handle)
                         .unwrap_or_else(|| provider.precision());
-                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-                        for value in &mut data {
-                            *value = (*value as f32) as f64;
+                    if data.len() % 2 != 0 {
+                        return Err(provider_payload_mismatch(
+                            handle,
+                            &shape,
+                            "complex-interleaved scalar count is odd".to_string(),
+                        ));
+                    }
+                    let pairs = data.chunks_exact(2).map(|chunk| (chunk[0], chunk[1]));
+                    let storage = match precision {
+                        runmat_accelerate_api::ProviderPrecision::F32 => ComplexStorage::F32(
+                            pairs
+                                .map(|(real, imag)| (real as f32, imag as f32))
+                                .collect(),
+                        ),
+                        runmat_accelerate_api::ProviderPrecision::F64 => {
+                            ComplexStorage::F64(pairs.collect())
                         }
-                    }
-                    let mut complex = Vec::with_capacity(data.len() / 2);
-                    for chunk in data.chunks_exact(2) {
-                        complex.push((chunk[0], chunk[1]));
-                    }
-                    let tensor = ComplexTensor::new(complex, shape).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:TensorShapeError")
-                            .build()
-                    })?;
+                    };
+                    let tensor =
+                        ComplexTensor::from_complex_storage(storage, shape).map_err(|e| {
+                            build_runtime_error(format!("gather: {e}"))
+                                .with_identifier("RunMat:gather:TensorShapeError")
+                                .build()
+                        })?;
                     Ok(Value::ComplexTensor(tensor))
                 } else {
                     let mut data = data;
@@ -232,6 +268,20 @@ fn gather_if_needed_async_impl<'a>(
     })
 }
 
+fn provider_payload_mismatch(
+    handle: &GpuTensorHandle,
+    actual_shape: &[usize],
+    detail: String,
+) -> RuntimeError {
+    build_runtime_error(format!(
+        "gather: provider payload mismatch ({detail}; shape {actual_shape:?}, expected {:?})",
+        handle.shape
+    ))
+    .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
     futures::executor::block_on(gather_if_needed_async(value))
@@ -273,15 +323,15 @@ async fn call_builtin_async_impl(
 
     if matching_builtins.is_empty() {
         if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-            return compatibility_checked_builtin_result(name, result);
+            return compatibility_checked_builtin_result(name, args, result);
         }
         if let Some(result) = try_call_registered_static_method(name, args, output_count).await? {
-            return compatibility_checked_builtin_result(name, result);
+            return compatibility_checked_builtin_result(name, args, result);
         }
         // Fallback: treat as class constructor if class is registered.
         if runmat_builtins::get_class(name).is_some() {
             let result = call_registered_class_constructor(name, args, output_count).await?;
-            return compatibility_checked_builtin_result(name, result);
+            return compatibility_checked_builtin_result(name, args, result);
         }
         return Err(build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
@@ -289,7 +339,7 @@ async fn call_builtin_async_impl(
     }
 
     if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-        return compatibility_checked_builtin_result(name, result);
+        return compatibility_checked_builtin_result(name, args, result);
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -314,13 +364,13 @@ async fn call_builtin_async_impl(
     {
         let f = builtin.implementation;
         match (f)(args).await {
-            Ok(result) => return compatibility_checked_builtin_result(name, result),
+            Ok(result) => return compatibility_checked_builtin_result(name, args, result),
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry_async(args).await {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
                             Ok(result) => {
-                                return compatibility_checked_builtin_result(name, result);
+                                return compatibility_checked_builtin_result(name, args, result);
                             }
                             Err(retry_err) => last_error = retry_err,
                         },
@@ -357,9 +407,84 @@ async fn call_builtin_async_impl(
     Err(builder.build())
 }
 
-fn compatibility_checked_builtin_result(name: &str, result: Value) -> Result<Value, RuntimeError> {
+fn compatibility_checked_builtin_result(
+    name: &str,
+    args: &[Value],
+    result: Value,
+) -> Result<Value, RuntimeError> {
     crate::compatibility::ensure_value_compatible(&result, name)?;
+    propagate_gpu_provenance(name, args, &result);
     Ok(result)
+}
+
+fn propagate_gpu_provenance(name: &str, args: &[Value], result: &Value) {
+    let mut saw_gpu = false;
+    let mut explicit = false;
+    for arg in args {
+        visit_gpu_handles(arg, &mut |handle| {
+            saw_gpu = true;
+            explicit |= runmat_accelerate_api::handle_is_explicit(handle);
+        });
+    }
+    if !saw_gpu {
+        let explicit_constructor = matches!(
+            name,
+            "zeros"
+                | "ones"
+                | "inf"
+                | "nan"
+                | "rand"
+                | "randn"
+                | "randi"
+                | "eye"
+                | "true"
+                | "false"
+        ) && args.iter().any(|arg| {
+            crate::builtins::common::tensor::value_to_string(arg)
+                .is_some_and(|text| text.eq_ignore_ascii_case("gpuarray"))
+        });
+        visit_gpu_handles(result, &mut |handle| {
+            if explicit_constructor {
+                runmat_accelerate_api::mark_handle_explicit(handle);
+            } else if runmat_accelerate_api::handle_provenance(handle).is_none() {
+                runmat_accelerate_api::mark_handle_automatic(handle);
+            }
+        });
+        return;
+    }
+    visit_gpu_handles(result, &mut |handle| {
+        if explicit {
+            runmat_accelerate_api::mark_handle_explicit(handle);
+        } else {
+            runmat_accelerate_api::mark_handle_automatic(handle);
+        }
+    });
+}
+
+fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) {
+    match value {
+        Value::GpuTensor(handle) => visitor(handle),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::Object(value) => value
+            .properties
+            .values()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::Closure(value) => value
+            .captures
+            .iter()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::OutputList(values) => values
+            .iter()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        _ => {}
+    }
 }
 
 pub(crate) async fn try_call_registered_instance_method(
@@ -647,16 +772,31 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Never) {
         return false;
     }
-    if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested) {
-        return true;
+    if args.iter().any(value_contains_explicit_gpu) {
+        return false;
     }
     // Compatibility errors are policy decisions. Retain this source-chain
     // defense for wrappers that have not yet propagated an explicit policy.
     if error_chain_has_identifier_prefix(err, "RunMat:compatibility:") {
         return false;
     }
+    if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested) {
+        return true;
+    }
     let lowered = err.message().to_ascii_lowercase();
     lowered.contains("gpu")
+}
+
+fn value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
+        _ => false,
+    }
 }
 
 fn error_chain_has_gpu_gather_retry(err: &RuntimeError, policy: crate::GpuGatherRetry) -> bool {
@@ -745,11 +885,39 @@ mod tests {
             &wrapped_compatibility_error,
             &[gpu.clone()]
         ));
+        let requested_compatibility_error =
+            crate::build_runtime_error("host implementation requested")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Requested)
+                .with_source(
+                    crate::build_runtime_error("RunMat-only GPU form")
+                        .with_identifier("RunMat:compatibility:ExampleExtension")
+                        .build(),
+                )
+                .build();
+        assert!(!should_retry_with_gpu_gather(
+            &requested_compatibility_error,
+            &[gpu.clone()]
+        ));
 
+        let automatic_gpu = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 5,
+        };
+        runmat_accelerate_api::mark_handle_automatic(&automatic_gpu);
         let ordinary_gpu_error = crate::build_runtime_error("GPU input requires host fallback")
             .with_identifier("RunMat:example:UnsupportedGpuPath")
             .build();
-        assert!(should_retry_with_gpu_gather(&ordinary_gpu_error, &[gpu]));
+        assert!(should_retry_with_gpu_gather(
+            &ordinary_gpu_error,
+            &[Value::GpuTensor(automatic_gpu.clone())]
+        ));
+        runmat_accelerate_api::mark_handle_explicit(&automatic_gpu);
+        assert!(!should_retry_with_gpu_gather(
+            &ordinary_gpu_error,
+            &[Value::GpuTensor(automatic_gpu.clone())]
+        ));
+        runmat_accelerate_api::clear_handle_metadata(&automatic_gpu);
 
         let terminal_gpu_error = crate::build_runtime_error("GPU input is semantically invalid")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -784,14 +952,67 @@ mod tests {
         let wrapped_request = crate::build_runtime_error("provider path unavailable")
             .with_source(nested_request)
             .build();
+        let requested_handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 4,
+        };
         assert!(should_retry_with_gpu_gather(
             &wrapped_request,
-            &[Value::GpuTensor(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 4,
-            })]
+            &[Value::GpuTensor(requested_handle.clone())]
         ));
+        runmat_accelerate_api::mark_handle_explicit(&requested_handle);
+        assert!(!should_retry_with_gpu_gather(
+            &wrapped_request,
+            &[Value::GpuTensor(requested_handle.clone())]
+        ));
+        runmat_accelerate_api::clear_handle_metadata(&requested_handle);
+    }
+
+    #[test]
+    fn builtin_result_provenance_follows_gpu_input_intent() {
+        let explicit = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 91,
+        };
+        let automatic = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 92,
+        };
+        let explicit_result = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 93,
+        };
+        let automatic_result = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 94,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&explicit);
+        runmat_accelerate_api::mark_handle_automatic(&automatic);
+
+        super::propagate_gpu_provenance(
+            "plus",
+            &[Value::GpuTensor(explicit.clone())],
+            &Value::GpuTensor(explicit_result.clone()),
+        );
+        super::propagate_gpu_provenance(
+            "plus",
+            &[Value::GpuTensor(automatic.clone())],
+            &Value::GpuTensor(automatic_result.clone()),
+        );
+
+        assert!(runmat_accelerate_api::handle_is_explicit(&explicit_result));
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&automatic_result),
+            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        );
+        for handle in [&explicit, &automatic, &explicit_result, &automatic_result] {
+            runmat_accelerate_api::clear_handle_metadata(handle);
+        }
     }
 
     fn unique_class_name(prefix: &str) -> String {

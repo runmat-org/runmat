@@ -3996,11 +3996,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&h.buffer_id);
-        runmat_accelerate_api::clear_handle_precision(h);
-        runmat_accelerate_api::clear_handle_class_name(h);
-        runmat_accelerate_api::clear_handle_logical(h);
-        runmat_accelerate_api::clear_handle_integer_type(h);
-        runmat_accelerate_api::clear_handle_storage(h);
+        runmat_accelerate_api::clear_handle_metadata(h);
         Ok(())
     }
 

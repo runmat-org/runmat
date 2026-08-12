@@ -24,6 +24,18 @@ struct PreparedInput {
     owned: Option<GpuTensorHandle>,
 }
 
+fn mark_fusion_output(handle: &GpuTensorHandle, inputs: &[Value]) {
+    let explicit = inputs.iter().any(|value| {
+        matches!(value, Value::GpuTensor(input) if runmat_accelerate_api::handle_is_explicit(input))
+    });
+    if explicit {
+        runmat_accelerate_api::mark_handle_explicit(handle);
+    } else {
+        runmat_accelerate_api::mark_handle_automatic(handle);
+    }
+    fusion_residency::mark(handle);
+}
+
 pub struct FusionExecutionRequest<'a> {
     pub plan: &'a FusionGroupPlan,
     pub inputs: Vec<Value>,
@@ -122,6 +134,7 @@ fn ensure_gpu_tensor(
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view)?;
+            runmat_accelerate_api::mark_handle_automatic(&handle);
             Ok((handle.clone(), Some(handle)))
         }
         _ => Err(anyhow!("fusion: expected tensor input")),
@@ -390,7 +403,7 @@ fn execute_elementwise_outputs(
             .ok_or_else(|| anyhow!("fusion: WGSL generation failed for output {output_id}"))?;
         timer.mark("generate_wgsl");
         let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
-        fusion_residency::mark(&output);
+        mark_fusion_output(&output, &request.inputs);
         outputs.insert(output_id, Value::GpuTensor(output));
     } else {
         // Multi-output path: generate one shader that writes all outputs in a single dispatch,
@@ -409,7 +422,7 @@ fn execute_elementwise_outputs(
         ) {
             Ok(out_handles) => {
                 for (output_id, handle) in output_ids.iter().copied().zip(out_handles) {
-                    fusion_residency::mark(&handle);
+                    mark_fusion_output(&handle, &request.inputs);
                     outputs.insert(output_id, Value::GpuTensor(handle));
                 }
             }
@@ -424,7 +437,7 @@ fn execute_elementwise_outputs(
                         })?;
                     let output =
                         provider.fused_elementwise(&single_shader, &handles, &output_shape, len)?;
-                    fusion_residency::mark(&output);
+                    mark_fusion_output(&output, &request.inputs);
                     outputs.insert(output_id, Value::GpuTensor(output));
                 }
             }
@@ -616,7 +629,7 @@ pub fn execute_reduction(
         flavor,
     )?;
     timer.mark("dispatch");
-    fusion_residency::mark(&output);
+    mark_fusion_output(&output, &request.inputs);
 
     for input in prepared {
         if let Some(handle) = input.owned {
@@ -671,7 +684,7 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
         let _ = provider.free(&temp);
     }
 
-    fusion_residency::mark(&output);
+    mark_fusion_output(&output, &request.inputs);
     Ok(Value::GpuTensor(output))
 }
 
@@ -728,7 +741,7 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
         let _ = provider.free(&temp);
     }
 
-    fusion_residency::mark(&output);
+    mark_fusion_output(&output, &request.inputs);
     Ok(Value::GpuTensor(output))
 }
 
@@ -868,7 +881,7 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
         let _ = provider.free(&temp);
     }
 
-    fusion_residency::mark(&diag);
+    mark_fusion_output(&diag, &request.inputs);
     Ok(Value::GpuTensor(diag))
 }
 
@@ -953,7 +966,7 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
         provider.free(&temp).ok();
     }
 
-    fusion_residency::mark(&output);
+    mark_fusion_output(&output, &request.inputs);
     Ok(Value::GpuTensor(output))
 }
 
@@ -1190,7 +1203,7 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
     }
 
     if let Some((_, diag)) = &diag_handle {
-        fusion_residency::mark(diag);
+        mark_fusion_output(diag, &request.inputs);
     }
 
     let final_vid = request.plan.output.or(Some(cur));
@@ -1206,10 +1219,10 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
     if free_out {
         let _ = prov.free(&out);
     } else {
-        fusion_residency::mark(&out);
+        mark_fusion_output(&out, &request.inputs);
     }
 
-    fusion_residency::mark(&result);
+    mark_fusion_output(&result, &request.inputs);
     Ok(Value::GpuTensor(result))
 }
 
@@ -1217,6 +1230,41 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
 mod tests {
     use super::*;
     use runmat_builtins::IntValue;
+
+    #[test]
+    fn fusion_output_inherits_explicit_intent_or_remains_automatic() {
+        let explicit_input = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 901,
+            buffer_id: 1,
+        };
+        let automatic_output = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 901,
+            buffer_id: 2,
+        };
+        let explicit_output = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 901,
+            buffer_id: 3,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&explicit_input);
+
+        mark_fusion_output(&automatic_output, &[Value::Num(1.0)]);
+        mark_fusion_output(
+            &explicit_output,
+            &[Value::GpuTensor(explicit_input.clone())],
+        );
+
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&automatic_output),
+            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        );
+        assert!(runmat_accelerate_api::handle_is_explicit(&explicit_output));
+        for handle in [&explicit_input, &automatic_output, &explicit_output] {
+            runmat_accelerate_api::clear_handle_metadata(handle);
+        }
+    }
 
     #[test]
     fn wide_uint64_scalar_is_rejected_before_float_fusion_conversion() {
