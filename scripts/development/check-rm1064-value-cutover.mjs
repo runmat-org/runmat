@@ -40,7 +40,7 @@ function git(...args) {
 }
 
 if (manifest.schema_version !== 1) fail(`unsupported schema_version ${manifest.schema_version}`);
-if (!["structural-baseline", "extracted"].includes(manifest.stage)) fail(`unsupported stage ${manifest.stage}`);
+if (!["structural-baseline", "extracted", "catalog-separated"].includes(manifest.stage)) fail(`unsupported stage ${manifest.stage}`);
 
 for (const field of ["integer_commit", "qualified_merge", "current_owner", "target_owner"]) {
   if (typeof manifest.source?.[field] !== "string" || manifest.source[field].length === 0) {
@@ -122,14 +122,17 @@ if (manifest.stage === "structural-baseline" && fs.existsSync(path.join(repo, "c
   fail("runmat-value exists while the manifest still declares structural-baseline ownership; R03 must update the manifest atomically");
 }
 
-if (manifest.stage === "extracted") {
+if (["extracted", "catalog-separated"].includes(manifest.stage)) {
   const builtins = rustSources.filter(({ file }) => file.startsWith("crates/runmat-builtins/")).map(({ text }) => text).join("\n");
   for (const symbol of declaredSymbols) {
     const reexport = new RegExp(`\\bpub\\s+use\\b[^;]*\\b${escapeRegex(symbol)}\\b`);
     if (reexport.test(builtins)) fail(`runmat-builtins re-exports extracted live-value symbol ${symbol}`);
   }
+}
+
+if (manifest.stage === "catalog-separated") {
   const builtinsManifest = fs.readFileSync(path.join(repo, "crates/runmat-builtins/Cargo.toml"), "utf8");
-  if (/^runmat-value\s*=/m.test(builtinsManifest)) fail("runmat-builtins depends on runmat-value after extraction");
+  if (/^runmat-value\s*=/m.test(builtinsManifest)) fail("runmat-builtins depends on runmat-value after catalog separation");
 }
 
 if (process.exitCode) process.exit(process.exitCode);

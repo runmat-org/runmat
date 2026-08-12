@@ -52,7 +52,7 @@ The terminal merge may not restore an old path merely to make a textual merge ea
 
 `runmat-value` uses the modular layout specified by `RM_1064_REMAINING_SCOPE_PLAN.md`: focused `numeric`, `array`, `aggregate`, `symbolic`, `object`, and `callable` modules plus execution, exception, trace, and intrinsic inspection modules. `lib.rs` and `value.rs` remain small composition facades. The crate may depend on dependency-light handle/API crates such as `runmat-accelerate-api`, `runmat-execution`, and `runmat-gc-api`; it may not depend on runtime, HIR, MIR, VM, native codegen, filesystem/network/process facilities, provider implementations, session registries, or presentation policy.
 
-After R03, dependency guards must prove that `runmat-builtins` neither defines nor re-exports live value/storage symbols and does not depend on `runmat-value`. Static catalog declarations must remain usable by HIR/LSP/WASM without linking executable runtime behavior.
+After R03, dependency guards prove that `runmat-builtins` neither defines nor re-exports live value/storage symbols. A direct, explicitly temporary dependency on `runmat-value` remains only because the pre-R06 `BuiltinFunction`/constant registry, `Type::from_value`, and pre-R04 class defaults still embed live values. R04/R06 relocate those consumers, update the manifest to `catalog-separated`, and remove the dependency completely. Only at that gate are static catalog declarations required to be usable by HIR/LSP/WASM without linking live values or executable runtime behavior.
 
 ## Pre-I04 architecture envelope
 
