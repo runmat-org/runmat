@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Metadata-only builtin. RunMat reads the gpuArray handle class without gathering provider buffers."
+    "notes": "Metadata-only builtin. Explicit gpuArray values expose gpuArray metadata; internal automatic residency exposes underlying host-class metadata. Neither path gathers provider buffers."
   },
   "fusion": {
     "elementwise": false,
@@ -32,7 +32,7 @@
     "Object and handle-object inputs return a metadata reference for their registered runtime class.",
     "Text inputs describe the runtime text class. A row character vector returns metadata for `char`; a string scalar or string array returns metadata for `string`.",
     "Class references are ordinary metadata objects to `metaclass` and return metadata for `meta.class`.",
-    "gpuArray inputs return metadata for `gpuArray` without gathering provider buffers.",
+    "Explicit gpuArray inputs return metadata for `gpuArray`; internal automatic residency returns metadata for the underlying host class without gathering provider buffers.",
     "Numeric, logical, cell, struct, function-handle, listener, and MException values return metadata for their RunMat runtime class.",
     "RunMat does not yet materialize full MATLAB `matlab.metadata.Class` object properties such as `PropertyList`, `MethodList`, or `SuperclassList`; those remain part of the broader metadata-object work."
   ],

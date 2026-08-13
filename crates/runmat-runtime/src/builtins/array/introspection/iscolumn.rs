@@ -1,6 +1,6 @@
 //! MATLAB-compatible `iscolumn` builtin.
 
-use crate::builtins::common::shape::value_dimensions;
+use crate::builtins::common::shape::{effective_rank, value_dimensions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -23,12 +23,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Reads shape metadata and returns a host logical scalar.",
+    notes: "Reads shape metadata without provider access and returns a host logical scalar.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -93,12 +93,8 @@ fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
 )]
 async fn iscolumn_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let dims = value_dimensions(&value).await?;
-    let effective_rank = dims
-        .iter()
-        .rposition(|extent| *extent != 1)
-        .map_or(2, |index| (index + 1).max(2));
     Ok(Value::Bool(
-        effective_rank <= 2 && dims.get(1).copied().unwrap_or(1) == 1,
+        effective_rank(&dims) <= 2 && dims.get(1).copied().unwrap_or(1) == 1,
     ))
 }
 

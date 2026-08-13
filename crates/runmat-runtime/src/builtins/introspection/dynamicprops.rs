@@ -929,6 +929,7 @@ mod tests {
     #[test]
     fn dynamic_property_supports_value_access_and_metadata_mutation() {
         runmat_gc::gc_test_context(|| {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
             let target = dynamic_target_handle("DynTarget");
             let prop =
                 block_on(addprop_builtin(target.clone(), "gain".to_string())).expect("addprop");

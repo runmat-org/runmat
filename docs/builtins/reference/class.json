@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernels run. RunMat inspects metadata for gpuArray inputs and returns the class string without gathering data."
+    "notes": "No GPU kernels run. Explicit user-visible gpuArray values report the wrapper class; internal automatic residency reports the underlying host class. Both paths use metadata without gathering data."
   },
   "fusion": {
     "elementwise": false,
@@ -33,7 +33,7 @@
     "Logical scalars and arrays report `\"logical\"`. Character arrays return `\"char\"`, while string scalars or arrays return `\"string\"`.",
     "Cell arrays, structs, and user-defined `classdef` objects report `\"cell\"`, `\"struct\"`, or the class name that defined the object.",
     "Function handles and anonymous closures both report `\"function_handle\"`. Listeners return `\"event.listener\"`.",
-    "`gpuArray` values report `\"gpuArray\"` without gathering data. Use `underlyingType` if you need the element type of the device array.",
+    "Explicit user-visible `gpuArray` values report `\"gpuArray\"` without gathering data. Internal automatic residency remains transparent and reports the underlying host class from coherent metadata.",
     "Handle objects, including deleted handles, return the class name that introduced the handle. Metadata-only values such as `classref(\"Point\")` report `\"meta.class\"`."
   ],
   "examples": [
@@ -74,7 +74,7 @@
     },
     {
       "question": "Will `class` gather gpuArray inputs?",
-      "answer": "No. RunMat inspects metadata and returns `\"gpuArray\"` immediately; buffers stay on the device."
+      "answer": "No. RunMat inspects metadata without copying the buffer. Explicit gpuArray values return `\"gpuArray\"`; internally auto-resident values return their underlying host class."
     },
     {
       "question": "What does `class` return for handle objects?",

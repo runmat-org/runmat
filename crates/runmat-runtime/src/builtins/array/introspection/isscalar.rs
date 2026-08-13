@@ -6,9 +6,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -22,12 +23,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Inspects tensor metadata; downloads handles only when providers omit shapes.",
+    notes: "Inspects tensor metadata without provider access; an empty internal shape is normalized to scalar dimensions.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -51,6 +52,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::array::introspection::isscalar::ISSCALAR_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::isscalar::ISSCALAR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
 async fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -90,6 +92,11 @@ pub const ISSCALAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISSCALAR_ERRORS,
+};
+pub const ISSCALAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isscalar is a universal shape predicate; integer class and values are irrelevant and resident element-count/shape metadata is read without gathering payload data.",
 };
 
 async fn value_is_scalar(value: &Value) -> crate::BuiltinResult<bool> {

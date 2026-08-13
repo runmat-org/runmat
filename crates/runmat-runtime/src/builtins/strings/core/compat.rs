@@ -1,6 +1,8 @@
 //! MATLAB text compatibility helpers that do not warrant larger domain modules yet.
 
 use encoding_rs::{Encoding, UTF_8};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
@@ -20,6 +22,14 @@ use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_stri
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 const PATTERN_CLASS: &str = "pattern";
+
+static UNICODE_DECIMAL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\p{Nd}$").expect("valid Unicode decimal pattern"));
+static UNICODE_PUNCTUATION_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\p{P}$").expect("valid Unicode punctuation pattern"));
+static UNICODE_NON_GRAPHIC_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?:\p{Zl}|\p{Zp}|\p{Co}|\p{Cn})$").expect("valid Unicode non-graphic pattern")
+});
 
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -43,6 +53,14 @@ const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Logical result.",
+}];
+
+const OUT_BOOL_OR_CELL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical result, or a cell array of logical vectors for string/cell inputs or ForceCellOutput=true.",
 }];
 
 const IN_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -271,16 +289,47 @@ descriptor!(
 );
 descriptor!(
     ISSTRPROP_DESCRIPTOR,
-    "tf = isstrprop(text, category)",
+    "tf = isstrprop(text, category, 'ForceCellOutput', tf?)",
     &IN_TEXT_REST,
-    &OUT_BOOL
+    &OUT_BOOL_OR_CELL
 );
+const ISSTRPROP_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "isstrprop-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "isstrprop with a GPU-resident numeric input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsstrpropResidentInputExtension"),
+};
+const ISSTRPROP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISSTRPROP_RESIDENT_INPUT_EXTENSION];
+const ISSTRPROP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "str",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer values are interpreted exactly as Unicode character codes before the selected character property is evaluated.",
+    }];
+pub const ISSTRPROP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "TF = isstrprop(integer_str, category)",
+        inputs: &ISSTRPROP_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "All eight integer classes produce a same-shaped logical classification without an integer-to-floating mirror. Interactive resident numeric input is separately mode-gated before exact gather.",
+    }];
 descriptor!(
     ISLETTER_DESCRIPTOR,
     "tf = isletter(text)",
     &IN_TEXT,
     &OUT_BOOL
 );
+pub const ISSPACE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isspace accepts any datatype but classifies only character arrays and string scalars; integer host or resident values return scalar false without reading numeric payload data.",
+};
 pub const ISLETTER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
         kind: BuiltinIntegerAuditKind::NotApplicable,
@@ -497,6 +546,10 @@ fn tensor_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
+fn isstrprop_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Union(vec![Type::logical(), Type::cell_of(Type::logical())])
+}
+
 fn compat_error(name: &str, message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
@@ -689,19 +742,63 @@ async fn strncmpi_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> 
     summary = "Classify characters in text by character property.",
     keywords = "isstrprop,isletter,isspace,char classification,text",
     accel = "sink",
-    type_resolver(tensor_type),
+    type_resolver(isstrprop_type),
     descriptor(crate::builtins::strings::core::compat::ISSTRPROP_DESCRIPTOR),
+    extensions(crate::builtins::strings::core::compat::ISSTRPROP_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::compat::ISSTRPROP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn isstrprop_builtin(text: Value, prop: Value) -> BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text)
-        .await
-        .map_err(map_flow("isstrprop"))?;
+async fn isstrprop_builtin(text: Value, prop: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if !matches!(
+        prop,
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
+    ) {
+        return Err(compat_error(
+            "isstrprop",
+            "isstrprop: category must be a character vector or string scalar",
+        ));
+    }
+    if matches!(&text, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISSTRPROP_RESIDENT_INPUT_EXTENSION,
+            "isstrprop",
+        )?;
+    }
+    let text = match &text {
+        Value::GpuTensor(handle) => {
+            let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+                .ok_or_else(|| {
+                    compat_error(
+                        "isstrprop",
+                        "isstrprop: no provider owns the resident input",
+                    )
+                })?;
+            crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                owner, handle,
+            )
+            .await?
+        }
+        _ => text,
+    };
     let prop = gather_if_needed_async(&prop)
         .await
         .map_err(map_flow("isstrprop"))?;
     let prop = scalar_text(&prop, "isstrprop")?.to_ascii_lowercase();
-    classify_text_value(text, "isstrprop", |ch| char_matches_prop(ch, &prop))
+    if !is_valid_strprop_category(&prop) {
+        return Err(compat_error(
+            "isstrprop",
+            format!("isstrprop: unknown character category '{prop}'"),
+        ));
+    }
+    let force_cell_output = parse_isstrprop_force_cell_output(&rest)?;
+    let result =
+        classify_text_or_numeric_value(text, "isstrprop", |ch| char_matches_prop(ch, &prop))?;
+    if force_cell_output && !matches!(result, Value::Cell(_)) {
+        make_cell_with_shape(vec![result], vec![1, 1]).map_err(|e| compat_error("isstrprop", e))
+    } else {
+        Ok(result)
+    }
 }
 
 #[runtime_builtin(
@@ -733,9 +830,23 @@ async fn isletter_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(tensor_type),
     descriptor(crate::builtins::strings::core::compat::ISSPACE_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::compat::ISSPACE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn isspace_builtin(text: Value) -> BuiltinResult<Value> {
+    let text = match text {
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Value::String(array.data.into_iter().next().expect("string scalar"))
+        }
+        Value::StringArray(_) => {
+            return Err(compat_error(
+                "isspace",
+                "isspace: string input must be a string scalar",
+            ));
+        }
+        Value::String(_) | Value::CharArray(_) => text,
+        _ => return Ok(Value::Bool(false)),
+    };
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("isspace"))?;
@@ -1483,20 +1594,139 @@ fn classify_text_value(
     }
 }
 
+fn classify_text_or_numeric_value(
+    value: Value,
+    fn_name: &str,
+    pred: impl Fn(char) -> bool + Copy,
+) -> BuiltinResult<Value> {
+    match value {
+        Value::Num(value) => logical_value(
+            vec![u8::from(floating_character_code(value).is_some_and(pred))],
+            vec![1, 1],
+            fn_name,
+        ),
+        Value::Int(value) => logical_value(
+            vec![u8::from(integer_character_code(&value).is_some_and(pred))],
+            vec![1, 1],
+            fn_name,
+        ),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let mut data = Vec::with_capacity(tensor_utils::tensor_element_len(&tensor));
+            for index in 0..tensor_utils::tensor_element_len(&tensor) {
+                let value = tensor.numeric_value_at(index).ok_or_else(|| {
+                    compat_error(fn_name, format!("{fn_name}: inconsistent numeric storage"))
+                })?;
+                let character = match value {
+                    NumericScalar::F64(value) => floating_character_code(value),
+                    NumericScalar::F32(value) => floating_character_code(f64::from(value)),
+                    value => integer_character_code(
+                        &value
+                            .into_int_value()
+                            .expect("non-floating numeric scalar is integer"),
+                    ),
+                };
+                data.push(u8::from(character.is_some_and(pred)));
+            }
+            logical_value(data, shape, fn_name)
+        }
+        other => classify_text_value(other, fn_name, pred),
+    }
+}
+
+fn parse_isstrprop_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
+    if rest.is_empty() {
+        return Ok(false);
+    }
+    if rest.len() != 2 {
+        return Err(compat_error(
+            "isstrprop",
+            "isstrprop: expected the optional 'ForceCellOutput', tf name-value pair",
+        ));
+    }
+    let option = scalar_text(&rest[0], "isstrprop")?;
+    if !option.eq_ignore_ascii_case("forcecelloutput") {
+        return Err(compat_error(
+            "isstrprop",
+            format!("isstrprop: unsupported option '{option}'"),
+        ));
+    }
+    match &rest[1] {
+        Value::Bool(value) => Ok(*value),
+        Value::Num(value) if *value == 0.0 => Ok(false),
+        Value::Num(value) if *value == 1.0 => Ok(true),
+        Value::LogicalArray(value) if value.data.len() == 1 => Ok(value.data[0] != 0),
+        _ => Err(compat_error(
+            "isstrprop",
+            "isstrprop: ForceCellOutput must be a logical scalar or numeric 0 or 1",
+        )),
+    }
+}
+
+fn floating_character_code(value: f64) -> Option<char> {
+    let code = if value.is_finite() {
+        value.round().clamp(0.0, u16::MAX as f64) as u32
+    } else {
+        0
+    };
+    char::from_u32(code)
+}
+
+fn integer_character_code(value: &IntValue) -> Option<char> {
+    let code = match value {
+        IntValue::I8(value) => i128::from(*value).clamp(0, i128::from(u16::MAX)) as u32,
+        IntValue::I16(value) => i128::from(*value).clamp(0, i128::from(u16::MAX)) as u32,
+        IntValue::I32(value) => i128::from(*value).clamp(0, i128::from(u16::MAX)) as u32,
+        IntValue::I64(value) => i128::from(*value).clamp(0, i128::from(u16::MAX)) as u32,
+        IntValue::U8(value) => u128::from(*value).min(u128::from(u16::MAX)) as u32,
+        IntValue::U16(value) => u128::from(*value).min(u128::from(u16::MAX)) as u32,
+        IntValue::U32(value) => u128::from(*value).min(u128::from(u16::MAX)) as u32,
+        IntValue::U64(value) => u128::from(*value).min(u128::from(u16::MAX)) as u32,
+    };
+    char::from_u32(code)
+}
+
 fn char_matches_prop(ch: char, prop: &str) -> bool {
     match prop {
-        "alpha" | "letter" | "walpha" => ch.is_alphabetic(),
-        "alphanum" | "alphanumeric" | "walphanum" => ch.is_alphanumeric(),
-        "digit" | "wdigit" => ch.is_ascii_digit(),
+        "alpha" => ch.is_alphabetic(),
+        "alphanum" => ch.is_alphanumeric(),
+        "digit" => UNICODE_DECIMAL_RE.is_match(ch.encode_utf8(&mut [0; 4])),
         "xdigit" => ch.is_ascii_hexdigit(),
-        "space" | "wspace" => ch.is_whitespace(),
-        "upper" | "wupper" => ch.is_uppercase(),
-        "lower" | "wlower" => ch.is_lowercase(),
-        "punct" | "wpunct" => ch.is_ascii_punctuation(),
-        "cntrl" | "control" => ch.is_control(),
-        "graphic" | "wgraphic" | "print" | "wprint" => !ch.is_control(),
+        "wspace" => ch.is_whitespace(),
+        "upper" => ch.is_uppercase(),
+        "lower" => ch.is_lowercase(),
+        "punct" => UNICODE_PUNCTUATION_RE.is_match(ch.encode_utf8(&mut [0; 4])),
+        "cntrl" => ch.is_control(),
+        "graphic" => {
+            !ch.is_control()
+                && !ch.is_whitespace()
+                && !UNICODE_NON_GRAPHIC_RE.is_match(ch.encode_utf8(&mut [0; 4]))
+        }
+        "print" => {
+            ch == ' '
+                || (!ch.is_control()
+                    && !ch.is_whitespace()
+                    && !UNICODE_NON_GRAPHIC_RE.is_match(ch.encode_utf8(&mut [0; 4])))
+        }
         _ => false,
     }
+}
+
+fn is_valid_strprop_category(prop: &str) -> bool {
+    matches!(
+        prop,
+        "alpha"
+            | "alphanum"
+            | "digit"
+            | "xdigit"
+            | "wspace"
+            | "upper"
+            | "lower"
+            | "punct"
+            | "cntrl"
+            | "graphic"
+            | "print"
+    )
 }
 
 fn map_text_pair_preserve(
@@ -2333,6 +2563,134 @@ mod tests {
             .unwrap(),
             Value::Bool(false)
         );
+        let integer = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::from(b'A'), u64::from(b'1'), u64::MAX]),
+            vec![1, 3],
+        )
+        .unwrap();
+        assert_eq!(
+            block(isstrprop_builtin(
+                Value::Tensor(integer),
+                Value::String("alpha".into()),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap())
+        );
+        assert_eq!(
+            block(isspace_builtin(Value::Int(IntValue::U16(32)))).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn isstrprop_only_gates_explicit_resident_integer_input() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U16(&[u16::from(b'A'), u16::from(b'1')]),
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                assert_eq!(
+                    block(isstrprop_builtin(
+                        Value::GpuTensor(handle.clone()),
+                        Value::String("alpha".into()),
+                        Vec::new(),
+                    ))
+                    .unwrap(),
+                    Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
+                );
+            }
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block(isstrprop_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Value::String("alpha".into()),
+                    Vec::new(),
+                ))
+                .unwrap_err();
+                assert_eq!(
+                    error.identifier(),
+                    ISSTRPROP_RESIDENT_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert_eq!(
+                block(isstrprop_builtin(
+                    Value::GpuTensor(handle),
+                    Value::String("alpha".into()),
+                    Vec::new(),
+                ))
+                .unwrap(),
+                Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
+            );
+        });
+    }
+
+    #[test]
+    fn isstrprop_force_cell_output_wraps_numeric_result() {
+        let result = block(isstrprop_builtin(
+            Value::Int(IntValue::U16(u16::from(b'A'))),
+            Value::String("alpha".into()),
+            vec![Value::String("ForceCellOutput".into()), Value::Bool(true)],
+        ))
+        .expect("documented ForceCellOutput form");
+        assert!(matches!(
+            result,
+            Value::Cell(cell)
+                if cell.shape == vec![1, 1]
+                    && cell.data == vec![Value::Bool(true)]
+        ));
+    }
+
+    #[test]
+    fn isstrprop_numeric_codes_use_unicode_categories_and_reject_surrogates() {
+        let codes = Tensor::new_integer(
+            IntegerStorage::U16(vec![0x0661, 0x2014, 0xd800]),
+            vec![1, 3],
+        )
+        .expect("Unicode code units");
+        let digit = block(isstrprop_builtin(
+            Value::Tensor(codes.clone()),
+            Value::String("digit".into()),
+            Vec::new(),
+        ))
+        .expect("Unicode decimal classification");
+        assert_eq!(
+            digit,
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap())
+        );
+        let punctuation = block(isstrprop_builtin(
+            Value::Tensor(codes),
+            Value::String("punct".into()),
+            Vec::new(),
+        ))
+        .expect("Unicode punctuation classification");
+        assert_eq!(
+            punctuation,
+            Value::LogicalArray(LogicalArray::new(vec![0, 1, 0], vec![1, 3]).unwrap())
+        );
+    }
+
+    #[test]
+    fn isspace_accepts_string_scalars_and_rejects_string_arrays() {
+        let scalar = StringArray::new(vec!["a b".into()], vec![1, 1]).expect("string scalar");
+        assert_eq!(
+            block(isspace_builtin(Value::StringArray(scalar))).expect("string scalar"),
+            Value::LogicalArray(LogicalArray::new(vec![0, 1, 0], vec![1, 3]).unwrap())
+        );
+
+        let array = StringArray::new(vec![" ".into(), "x".into()], vec![1, 2])
+            .expect("nonscalar string array");
+        let error = block(isspace_builtin(Value::StringArray(array)))
+            .expect_err("nonscalar string arrays reject");
+        assert!(error.message().contains("string scalar"));
     }
 
     #[test]

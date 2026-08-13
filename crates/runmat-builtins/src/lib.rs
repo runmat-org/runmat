@@ -6489,6 +6489,45 @@ fn primitive_class_registry() -> HashMap<String, ClassDef> {
             methods: HashMap::new(),
         },
     );
+    // Keep this wrapper registry aligned with the public gpuArray object-function
+    // surface. Most entries dispatch through ordinary top-level builtins, but
+    // they remain methods of gpuArray for metadata predicates such as ismethod.
+    let gpu_array_methods = [
+        "arrayfun",
+        "existsOnGPU",
+        "gather",
+        "isgpuarray",
+        "isUnderlyingType",
+        "ndims",
+        "pagefun",
+        "size",
+        "underlyingType",
+    ]
+    .into_iter()
+    .map(|name| {
+        (
+            name.to_string(),
+            MethodDef {
+                name: name.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: name.to_string(),
+                implicit_class_argument: None,
+            },
+        )
+    })
+    .collect();
+    registry.insert(
+        "gpuArray".to_string(),
+        ClassDef {
+            name: "gpuArray".to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: gpu_array_methods,
+        },
+    );
     registry.insert(
         "dynamicprops".to_string(),
         ClassDef {

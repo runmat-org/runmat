@@ -29,3 +29,29 @@ fn compiled_structure_extensions_are_gated_in_matlab_mode() {
         Some("RunMat:compatibility:IsdiagIntegerInputExtension")
     );
 }
+
+#[test]
+fn compiled_integer_shape_missing_and_text_predicates_are_exact() {
+    execute_source(
+        "a=uint64([65 49 intmax('uint64')]); p=isstrprop(a,'alpha'); if ~isequal(p,logical([1 0 0])); error('isstrprop failed'); end; if ~ismatrix(a) || ~isrow(a) || isscalar(a) || ~isvector(a); error('shape predicates failed'); end; if any(isnan(a),'all') || any(ismissing(a),'all') || ~isnumeric(a) || ~isreal(a) || islogical(a) || issparse(a); error('numeric predicates failed'); end; if isstring(a) || istable(a) || istimetable(a) || isordinal(a) || isvarname(a); error('universal predicates failed'); end;",
+    )
+    .expect("compiled integer shape, missing, and text predicates");
+}
+
+#[test]
+fn compiled_integer_structure_extensions_are_gated() {
+    let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    for source in [
+        "tf=issymmetric(int32([1 0;0 1]));",
+        "y=istril(int32([1 0;2 3]));",
+        "y=istriu(int32([1 2;0 3]));",
+    ] {
+        let error = execute_source(source).expect_err("integer structure form must be gated");
+        assert!(
+            error
+                .identifier()
+                .is_some_and(|identifier| identifier.starts_with("RunMat:compatibility:")),
+            "{source}: {error}"
+        );
+    }
+}

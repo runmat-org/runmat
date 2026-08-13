@@ -366,6 +366,11 @@ pub const GETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
         notes: "A host integer scalar or array stored in the current RunMat preference session is returned with its exact class, shape, and value; multiple names wrap values in a shape-preserving cell array. Durable cross-session storage remains a general preference-system gap.",
     },
 ];
+pub const ISPREF_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "ispref accepts text group and preference names; integer host or resident controls are invalid and reject before provider access.",
+};
 simple_descriptor!(
     SETPREF_SIGNATURES,
     SETPREF_DESCRIPTOR,
@@ -1216,10 +1221,10 @@ async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISPREF_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISPREF_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn ispref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("ispref", &args).await?;
     if args.is_empty() || args.len() > 2 {
         return Err(compat_error(
             "ispref",
@@ -1789,6 +1794,23 @@ mod tests {
             FILEATTRIB_INTEGER_AUDIT.kind,
             BuiltinIntegerAuditKind::NotApplicable
         );
+    }
+
+    #[test]
+    fn ispref_rejects_integer_and_resident_controls_without_gather() {
+        for integer in [
+            runmat_builtins::IntValue::I8(-1),
+            runmat_builtins::IntValue::I16(-2),
+            runmat_builtins::IntValue::I32(-3),
+            runmat_builtins::IntValue::I64(i64::MIN),
+            runmat_builtins::IntValue::U8(1),
+            runmat_builtins::IntValue::U16(2),
+            runmat_builtins::IntValue::U32(3),
+            runmat_builtins::IntValue::U64(u64::MAX),
+        ] {
+            assert!(run(ispref_builtin(vec![Value::Int(integer)])).is_err());
+        }
+        assert!(run(ispref_builtin(vec![unowned_resident_value()])).is_err());
     }
 
     #[test]

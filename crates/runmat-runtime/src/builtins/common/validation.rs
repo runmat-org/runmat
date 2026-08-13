@@ -3,12 +3,14 @@
 use std::cmp::Ordering;
 use std::path::Path;
 
-use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
+use runmat_accelerate_api::{
+    handle_integer_type, handle_is_logical, handle_storage, GpuTensorStorage,
+};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, SparseTensor,
-    Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
+    ComplexTensor, IntValue, IntegerStorage, NumericDType, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -24,6 +26,9 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 /// execution paths so exact integer components are never coerced to `f64`.
 pub fn is_typed_complex_integer(value: &Value) -> bool {
     matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle)
+            if handle_integer_type(handle).is_some()
+                && handle_storage(handle) == GpuTensorStorage::ComplexInterleaved)
 }
 
 /// Reject a value that would otherwise enter a floating complex operation.
@@ -169,6 +174,12 @@ pub const ISVARNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[],
 };
+pub const ISVARNAME_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "isvarname is a text predicate; integer host or resident values return scalar false without numeric conversion or provider access.",
+    };
 
 pub const NAMEDARGS2CELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &NAMEDARGS_SIGNATURES,
@@ -1295,6 +1306,7 @@ fn any_type(
     summary = "Return true when text is a valid MATLAB variable name.",
     type_resolver(bool_type),
     descriptor(self::ISVARNAME_DESCRIPTOR),
+    integer_audit(self::ISVARNAME_INTEGER_AUDIT),
     builtin_path = "crate::builtins::common::validation"
 )]
 fn isvarname_builtin(value: Value) -> BuiltinResult<Value> {
@@ -1381,6 +1393,7 @@ validator_builtin!(
 mod tests {
     use super::*;
     use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
+    use crate::builtins::common::test_support;
     use runmat_builtins::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
         StructValue, Tensor,
@@ -1772,6 +1785,33 @@ mod tests {
         .is_ok());
         assert!(isvarname_value(&Value::String("alpha_1".into())));
         assert!(!isvarname_value(&Value::String("1alpha".into())));
+    }
+
+    #[test]
+    fn isvarname_returns_false_for_all_integer_classes() {
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert!(!isvarname_value(&Value::Int(value)));
+        }
+    }
+
+    #[test]
+    fn isvarname_returns_false_for_resident_integer_without_gather() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            assert!(!isvarname_value(&Value::GpuTensor(handle)));
+        });
     }
 
     #[test]

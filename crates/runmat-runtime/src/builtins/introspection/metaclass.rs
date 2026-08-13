@@ -25,7 +25,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Metadata-only predicate. RunMat reads runtime class metadata and returns a host meta-class reference without gathering gpuArray buffers.",
+    notes: "Metadata-only predicate. RunMat reports explicit gpuArray wrapper metadata and the underlying class for internal automatic residency without gathering buffers.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::metaclass")]
@@ -158,7 +158,7 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn metaclass_reports_listener_and_gpuarray_without_gather() {
+    fn metaclass_reports_listener_and_residency_provenance_without_gather() {
         assert_eq!(
             call(Value::Listener(Listener {
                 id: 7,
@@ -179,6 +179,8 @@ mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
+            assert_eq!(call(Value::GpuTensor(handle.clone())), "double");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
             assert_eq!(call(Value::GpuTensor(handle)), "gpuArray");
         });
     }

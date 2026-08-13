@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Metadata-only class hierarchy query. gpuArray inputs stay resident while RunMat checks host class metadata."
+    "notes": "Metadata-only class hierarchy query. Explicit gpuArray values query wrapper metadata; internal automatic residency queries underlying host-class metadata. Inputs stay resident."
   },
   "fusion": {
     "elementwise": false,
@@ -32,7 +32,7 @@
     "Class-name character vectors, string scalars, and 1x1 string arrays are interpreted as class names.",
     "Object and handle-object inputs are resolved through their runtime class names.",
     "ClassRef inputs query the referenced class.",
-    "gpuArray inputs query the `gpuArray` class metadata without gathering provider buffers.",
+    "Explicit gpuArray inputs query the `gpuArray` class metadata, while internal automatic residency queries the underlying host class without gathering provider buffers.",
     "Superclass names are returned nearest-parent first, then continuing toward the root.",
     "Classes with no registered visible superclasses return a 1x0 cell array.",
     "RunMat currently models a single parent link per class. Multiple inheritance and hidden-superclass filtering are not represented until the broader metadata object model lands.",

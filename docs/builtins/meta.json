@@ -17687,7 +17687,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "Integer scalars and arrays report their exact signedness and width; gpuArray reports its container class without inspecting or gathering payload data."
+              "notes": "Integer scalars and arrays report their exact signedness and width. Explicit gpuArray values report the wrapper class, while internal automatic residency reports the underlying numeric class without inspecting or gathering payload data."
             }
           ],
           "computation_domain": "Structural",
@@ -17695,7 +17695,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "FunctionSpecific",
-          "notes": "The result is a host character class name. Dense, sparse, and paired complex integer host storage is read from exact dtype metadata; resident values return gpuArray without provider access."
+          "notes": "The result is a host character class name. Dense, sparse, paired complex, and internally auto-resident integer storage is read from exact dtype metadata; only explicit resident values return gpuArray, without provider access."
         }
       ]
     },
@@ -79530,7 +79530,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "Host integer values expose their exact class and integer/numeric abstract categories; gpuArray remains the resident object's class."
+              "notes": "Host and internally auto-resident integer values expose their exact class and integer/numeric abstract categories; an explicit gpuArray remains the resident wrapper object's class."
             }
           ],
           "computation_domain": "Structural",
@@ -79538,7 +79538,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "Host integer class/category checks use dtype metadata exactly. Resident values match gpuArray only; isUnderlyingType owns resident underlying-class inspection."
+          "notes": "Host and internally auto-resident integer class/category checks use dtype metadata exactly. Only explicit resident values match gpuArray; isUnderlyingType owns explicit resident underlying-class inspection."
         }
       ]
     },
@@ -80801,7 +80801,11 @@
           "when": "Internal gather/dispatch path fails.",
           "message": "islogical: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "islogical is a universal type predicate; all eight integer classes return scalar false, including resident integer arrays, without reading payload data."
+      }
     },
     {
       "name": "ismatrix",
@@ -80830,7 +80834,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "ismatrix is a universal shape predicate; integer class and values are irrelevant, trailing singleton dimensions are ignored, and resident shape metadata is read without gathering payload data."
+      }
     },
     {
       "name": "ismember",
@@ -81453,7 +81461,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Object, class name, class reference, or gpuArray value to inspect."
+              "description": "Object instance or gpuArray object to inspect."
             },
             {
               "name": "method_name",
@@ -81481,7 +81489,11 @@
           "when": "The method-name argument is not a string scalar or row character vector.",
           "message": "ismethod: method name must be a string scalar or character vector"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "ismethod is an object-method predicate rather than an integer computation: host and internally auto-resident integers return false, while explicit integer gpuArrays use the production gpuArray wrapper method registry without payload access."
+      }
     },
     {
       "name": "ismissing",
@@ -81529,6 +81541,43 @@
           "when": "Internal shape or table materialization fails.",
           "message": "missing-value builtin: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ismissing-resident-input",
+          "mode": "RunMatOnly",
+          "description": "ismissing with an interactive GPU-resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsmissingResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "TF = ismissing(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight fixed-width integer classes have no standard missing value."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Returns a same-shaped all-false logical mask. Interactive resident input is a separately gated RunMat extension; admitted resident integers are validated from owner and class metadata without reading the payload and preserve this CPU builtin's host logical output policy."
+        }
       ]
     },
     {
@@ -81571,6 +81620,35 @@
           "when": "Internal mask-construction or gather path fails.",
           "message": "isnan: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isnan(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Fixed-width integer elements cannot represent NaN."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Returns a same-shaped all-false logical mask directly from integer class and shape. Resident integer masks are created on the exact owning provider without downloading the payload."
+        }
       ]
     },
     {
@@ -81607,6 +81685,35 @@
           "when": "Internal gather/dispatch path fails.",
           "message": "isnumeric: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isnumeric(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB explicitly defines every signed and unsigned fixed-width integer class as numeric."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Returns a host logical scalar from authoritative host dtype or coherent resident class metadata without reading payload values."
+        }
       ]
     },
     {
@@ -81636,7 +81743,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isobject is a universal object-type predicate; host integers and internally auto-resident integers return scalar false, while an explicitly constructed integer gpuArray returns true without payload access."
+      }
     },
     {
       "name": "isordinal",
@@ -81696,7 +81807,11 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isordinal accepts any data type and returns true only for ordinal categorical arrays; integer host or resident values return scalar false without payload access."
+      }
     },
     {
       "name": "isoutlier",
@@ -81891,7 +82006,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "ispref accepts text group and preference names; integer host or resident controls are invalid and reject before provider access."
+      }
     },
     {
       "name": "isprime",
@@ -81998,6 +82117,35 @@
           "when": "Internal gather/dispatch path fails.",
           "message": "isreal: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isreal(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes participate in the storage-complexity predicate, including complex integer storage introduced by current MATLAB conversion semantics."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Returns one logical scalar from storage kind, not element values: real integer storage is true and complex integer storage is false even when every imaginary component is zero. Resident metadata is validated against the exact owner without gathering."
+        }
       ]
     },
     {
@@ -82027,7 +82175,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isrow is a universal shape predicate; integer class and values are irrelevant and resident shape metadata is read without gathering payload data."
+      }
     },
     {
       "name": "isscalar",
@@ -82056,7 +82208,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isscalar is a universal shape predicate; integer class and values are irrelevant and resident element-count/shape metadata is read without gathering payload data."
+      }
     },
     {
       "name": "issorted",
@@ -82487,7 +82643,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isspace accepts any datatype but classifies only character arrays and string scalars; integer host or resident values return scalar false without reading numeric payload data."
+      }
     },
     {
       "name": "issparse",
@@ -82516,7 +82676,70 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.ISSPARSE.INTERNAL",
+          "identifier": "RunMat:issparse:InternalError",
+          "when": "Resident handle ownership or dtype metadata is contradictory.",
+          "message": "issparse: invalid resident metadata"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = issparse(dense_integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Dense arrays of every fixed-width integer class are not sparse."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Returns scalar logical false from storage metadata. Resident integer handles are validated against their exact owner without gathering."
+        },
+        {
+          "form": "tf = issparse(RunMat_sparse_integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed integer CSC storage is a RunMat-only value representation; MATLAB sparse numeric storage is limited to floating and logical classes."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Returns scalar logical true for an already-existing RunMat sparse integer value. Creation and propagation of that value are compatibility-gated at their owning operations; this universal storage predicate does not reinterpret or hide the value."
+        }
+      ]
     },
     {
       "name": "isstable",
@@ -82564,7 +82787,11 @@
           "when": "Pole calculation failed.",
           "message": "isstable: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isstable requires a dynamic-system model; fundamental integer host or resident values are invalid-domain inputs and reject before payload or provider access."
+      }
     },
     {
       "name": "isstring",
@@ -82593,7 +82820,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isstring is a universal type predicate; integer host or resident values return scalar false from value metadata without reading payload data."
+      }
     },
     {
       "name": "isstrprop",
@@ -82601,7 +82832,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = isstrprop(text, category)",
+          "label": "tf = isstrprop(text, category, 'ForceCellOutput', tf?)",
           "inputs": [
             {
               "name": "text",
@@ -82621,15 +82852,52 @@
           "outputs": [
             {
               "name": "tf",
-              "ty": "LogicalArray",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Logical result."
+              "description": "Logical result, or a cell array of logical vectors for string/cell inputs or ForceCellOutput=true."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "isstrprop-resident-input",
+          "mode": "RunMatOnly",
+          "description": "isstrprop with a GPU-resident numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsstrpropResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "TF = isstrprop(integer_str, category)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer values are interpreted exactly as Unicode character codes before the selected character property is evaluated."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Logical",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "All eight integer classes produce a same-shaped logical classification without an integer-to-floating mirror. Interactive resident numeric input is separately mode-gated before exact gather."
+        }
+      ]
     },
     {
       "name": "issymmetric",
@@ -82775,7 +83043,31 @@
           "when": "Runtime fails while creating internal tensors or coercing values.",
           "message": "issymmetric: internal runtime failure"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "issymmetric-integer-input",
+          "mode": "RunMatOnly",
+          "description": "issymmetric with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IssymmetricIntegerInputExtension"
+        },
+        {
+          "id": "issymmetric-tolerance-form",
+          "mode": "RunMatOnly",
+          "description": "issymmetric tolerance arguments are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IssymmetricToleranceExtension"
+        },
+        {
+          "id": "issymmetric-flag-aliases",
+          "mode": "RunMatOnly",
+          "description": "issymmetric flag aliases beyond 'nonskew' and 'skew' are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:IssymmetricFlagAliasExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "MATLAB documents single, double, and logical matrix inputs; RunMat integer matrices and tolerance arguments are separately declared and gated extensions."
+      }
     },
     {
       "name": "istable",
@@ -82835,7 +83127,11 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "istable is a universal object-type predicate; integer host or resident values return scalar false without gathering payload data."
+      }
     },
     {
       "name": "istimetable",
@@ -82895,7 +83191,11 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "istimetable is a universal object-type predicate; integer host or resident values return scalar false without gathering payload data."
+      }
     },
     {
       "name": "istril",
@@ -82937,7 +83237,19 @@
           "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
           "message": "istril: internal runtime failure"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "istril-integer-input",
+          "mode": "RunMatOnly",
+          "description": "istril with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IstrilIntegerInputExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension."
+      }
     },
     {
       "name": "istriu",
@@ -82979,7 +83291,19 @@
           "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
           "message": "istriu: internal runtime failure"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "istriu-integer-input",
+          "mode": "RunMatOnly",
+          "description": "istriu with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IstriuIntegerInputExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension."
+      }
     },
     {
       "name": "isvalid",
@@ -83008,7 +83332,18 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.ISVALID.INVALID_INPUT",
+          "identifier": "RunMat:isvalid:InvalidInput",
+          "when": "The input is not a handle object or listener.",
+          "message": "isvalid: input must be a handle object or listener"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isvalid is a handle-object method; fundamental integer host or resident values are invalid-domain inputs and reject before payload or provider access."
+      }
     },
     {
       "name": "isvarname",
@@ -83037,7 +83372,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isvarname is a text predicate; integer host or resident values return scalar false without numeric conversion or provider access."
+      }
     },
     {
       "name": "isvector",
@@ -83066,7 +83405,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isvector is a universal shape predicate; integer class and values are irrelevant, trailing singleton dimensions are ignored, and resident shape metadata is read without gathering payload data."
+      }
     },
     {
       "name": "join",

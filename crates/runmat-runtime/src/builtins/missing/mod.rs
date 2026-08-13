@@ -12,7 +12,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::builtins::math::reduction::{mean, median, min, std as std_reduction, sum, var};
 use crate::builtins::table::{
     is_tabular_object, select_rows, selected_row_names, table_from_columns_like, table_height,
@@ -171,6 +171,32 @@ descriptor!(
     ONE_VALUE_SIGNATURES,
     BuiltinOutputMode::Fixed
 );
+const ISMISSING_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ismissing-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ismissing with an interactive GPU-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsmissingResidentInputExtension"),
+};
+const ISMISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISMISSING_RESIDENT_INPUT_EXTENSION];
+const ISMISSING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight fixed-width integer classes have no standard missing value.",
+    }];
+pub const ISMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "TF = ismissing(integer_A)",
+        inputs: &ISMISSING_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Returns a same-shaped all-false logical mask. Interactive resident input is a separately gated RunMat extension; admitted resident integers are validated from owner and class metadata without reading the payload and preserve this CPU builtin's host logical output policy.",
+    }];
 descriptor!(
     ANYMISSING_DESCRIPTOR,
     ANYMISSING_SIGNATURES,
@@ -557,13 +583,47 @@ async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(logical_type),
     descriptor(crate::builtins::missing::ISMISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::ISMISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::ISMISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn ismissing_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Value::GpuTensor(handle) = &value {
+        if runmat_accelerate_api::handle_is_explicit(handle) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &ISMISSING_RESIDENT_INPUT_EXTENSION,
+                "ismissing",
+            )?;
+        }
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            return ismissing_resident_integer(handle);
+        }
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid_argument(format!("ismissing: failed to gather input: {err}")))?;
     ismissing_value(&value)
+}
+
+fn ismissing_resident_integer(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let integer = runmat_accelerate_api::handle_integer_type(handle)
+        .expect("resident integer predicate requires integer metadata");
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    if gpu_helpers::exact_provider_for_handle(handle).is_none()
+        || storage != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_precision(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
+    {
+        return Err(internal_error(
+            "ismissing: resident integer metadata is contradictory",
+        ));
+    }
+    Ok(Value::LogicalArray(LogicalArray::zeros(
+        handle.shape.clone(),
+    )))
 }
 
 #[runtime_builtin(
@@ -2721,7 +2781,6 @@ fn is_missing_text(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
@@ -2839,6 +2898,93 @@ mod tests {
             result,
             Value::LogicalArray(mask) if mask.data == vec![0, 0, 0] && mask.shape == vec![1, 3]
         ));
+    }
+
+    #[test]
+    fn ismissing_returns_same_shaped_false_for_all_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+            IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+            IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+            IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
+        ];
+        for storage in storages {
+            let input = Tensor::new_integer(storage, vec![2, 1]).expect("integer tensor");
+            let result = block_on(ismissing_builtin(Value::Tensor(input))).expect("ismissing");
+            assert!(matches!(
+                result,
+                Value::LogicalArray(mask)
+                    if mask.shape == vec![2, 1] && mask.data == vec![0, 0]
+            ));
+        }
+    }
+
+    #[test]
+    fn ismissing_resident_integer_uses_shape_metadata_and_returns_host_mask() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                .expect("resident ismissing extension");
+            assert!(matches!(
+                result,
+                Value::LogicalArray(mask)
+                    if mask.shape == vec![1, 2] && mask.data == vec![0, 0]
+            ));
+            assert!(gpu_helpers::exact_provider_for_handle(&handle).is_some());
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn ismissing_rejects_contradictory_resident_integer_metadata() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let error = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                .expect_err("integer/logical metadata contradiction must reject");
+            assert!(error.message().contains("metadata is contradictory"));
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn ismissing_matlab_mode_only_gates_explicit_resident_input() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let result = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                    .expect("automatic residency is transparent");
+                assert!(matches!(
+                    result,
+                    Value::LogicalArray(mask)
+                        if mask.shape == vec![1, 1] && mask.data == vec![0]
+                ));
+            }
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+                    .expect_err("explicit resident input is a compatibility-gated extension");
+                assert_eq!(
+                    error.identifier(),
+                    ISMISSING_RESIDENT_INPUT_EXTENSION.error_identifier
+                );
+            }
+            provider.free(&handle).ok();
+        });
     }
 
     #[test]

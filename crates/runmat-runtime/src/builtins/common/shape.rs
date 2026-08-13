@@ -1,7 +1,6 @@
 use runmat_builtins::{Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::dispatcher::gather_if_needed_async;
 use crate::RuntimeError;
 
 /// Return true if a shape should be treated as a scalar.
@@ -36,6 +35,15 @@ fn normalize_shape(shape: &[usize]) -> Vec<usize> {
     shape.to_vec()
 }
 
+/// Return MATLAB's effective rank after ignoring trailing singleton dimensions.
+/// MATLAB arrays retain a minimum visible rank of two.
+pub fn effective_rank(shape: &[usize]) -> usize {
+    shape
+        .iter()
+        .rposition(|extent| *extent != 1)
+        .map_or(2, |index| (index + 1).max(2))
+}
+
 /// Return the MATLAB-visible dimension vector for a runtime value.
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
@@ -47,13 +55,7 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::CharArray(ca) => ca.shape.clone(),
         Value::Cell(ca) => normalize_shape(&ca.shape),
-        Value::GpuTensor(handle) => {
-            if handle.shape.is_empty() {
-                let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone())).await?;
-                return value_dimensions(&gathered).await;
-            }
-            normalize_shape(&handle.shape)
-        }
+        Value::GpuTensor(handle) => normalize_shape(&handle.shape),
         _ => vec![1, 1],
     };
     Ok(dims)
@@ -70,17 +72,11 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
         Value::StringArray(sa) => sa.data.len(),
         Value::CharArray(ca) => ca.data.len(),
         Value::Cell(ca) => ca.data.len(),
-        Value::GpuTensor(handle) => {
-            if handle.shape.is_empty() {
-                let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone())).await?;
-                return value_numel(&gathered).await;
-            }
-            handle
-                .shape
-                .iter()
-                .copied()
-                .fold(1usize, |acc, dim| acc.saturating_mul(dim))
-        }
+        Value::GpuTensor(handle) => handle
+            .shape
+            .iter()
+            .copied()
+            .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
         _ => 1,
     };
     Ok(numel)
@@ -143,6 +139,18 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn empty_gpu_shape_is_scalar_metadata_without_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: Vec::new(),
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        };
+        let value = Value::GpuTensor(handle);
+        assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 1]);
+        assert_eq!(block_on(value_numel(&value)).unwrap(), 1);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_reads_typed_integer_storage_length_exactly() {
@@ -173,5 +181,13 @@ pub(crate) mod tests {
         let tensor = dims_to_row_tensor(&[2, 4, 6]).unwrap();
         assert_eq!(tensor.shape, vec![1, 3]);
         assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
+    }
+
+    #[test]
+    fn effective_rank_ignores_only_trailing_singletons() {
+        assert_eq!(effective_rank(&[2, 3]), 2);
+        assert_eq!(effective_rank(&[2, 3, 1, 1]), 2);
+        assert_eq!(effective_rank(&[1, 1, 4, 1]), 3);
+        assert_eq!(effective_rank(&[1, 1, 1]), 2);
     }
 }

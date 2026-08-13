@@ -130,11 +130,37 @@ pub const ISTRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISTRIL_ERRORS,
 };
 
+const ISTRIL_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "istril-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "istril with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IstrilIntegerInputExtension"),
+};
+const ISTRIL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIL_INTEGER_INPUT_EXTENSION];
+pub const ISTRIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
+};
+
 pub const ISTRIU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISTRIU_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISTRIU_ERRORS,
+};
+
+const ISTRIU_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "istriu-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "istriu with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IstriuIntegerInputExtension"),
+};
+const ISTRIU_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIU_INTEGER_INPUT_EXTENSION];
+pub const ISTRIU_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
 };
 
 #[runmat_macros::register_gpu_spec(
@@ -295,9 +321,19 @@ fn value_has_integer_storage(value: &Value) -> bool {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_DESCRIPTOR),
+    extensions(ISTRIL_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISTRIL_INTEGER_INPUT_EXTENSION,
+            "istril",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::LowerTriangular,
@@ -318,9 +354,19 @@ async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_DESCRIPTOR),
+    extensions(ISTRIU_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istriu_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISTRIU_INTEGER_INPUT_EXTENSION,
+            "istriu",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::UpperTriangular,
@@ -692,10 +738,12 @@ mod tests {
     }
 
     fn call_istril(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(istril_builtin(value))
     }
 
     fn call_istriu(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(istriu_builtin(value))
     }
 
@@ -714,13 +762,25 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_mode_rejects_integer_isdiag_before_execution() {
+    fn compatibility_mode_rejects_integer_structure_extensions_before_execution() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(isdiag_builtin(Value::Int(IntValue::I32(1))))
+        let isdiag_error = block_on(isdiag_builtin(Value::Int(IntValue::I32(1))))
             .expect_err("integer isdiag is a RunMat extension");
         assert_eq!(
-            error.identifier(),
+            isdiag_error.identifier(),
             ISDIAG_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let istril_error = block_on(istril_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer istril is a RunMat extension");
+        assert_eq!(
+            istril_error.identifier(),
+            ISTRIL_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let istriu_error = block_on(istriu_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer istriu is a RunMat extension");
+        assert_eq!(
+            istriu_error.identifier(),
+            ISTRIU_INTEGER_INPUT_EXTENSION.error_identifier
         );
     }
 

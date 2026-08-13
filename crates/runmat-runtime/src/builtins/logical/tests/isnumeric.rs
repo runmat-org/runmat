@@ -1,17 +1,20 @@
 //! MATLAB-compatible `isnumeric` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -19,17 +22,16 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "isnumeric",
     op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("logical_islogical")],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Uses provider metadata to distinguish logical gpuArrays from numeric ones; otherwise falls back to runtime residency tracking.",
+    notes: "Reads coherent owning-provider and handle class metadata and returns a host logical scalar without gathering payload data.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::isnumeric")]
@@ -83,6 +85,26 @@ pub const ISNUMERIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISNUMERIC_ERRORS,
 };
 
+const ISNUMERIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB explicitly defines every signed and unsigned fixed-width integer class as numeric.",
+    }];
+pub const ISNUMERIC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = isnumeric(integer_A)",
+        inputs: &ISNUMERIC_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Returns a host logical scalar from authoritative host dtype or coherent resident class metadata without reading payload values.",
+    }];
+
 fn isnumeric_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -102,6 +124,9 @@ fn isnumeric_error_with_message(
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::logical::tests::isnumeric::ISNUMERIC_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::logical::tests::isnumeric::ISNUMERIC_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::logical::tests::isnumeric"
 )]
 async fn isnumeric_builtin(value: Value) -> BuiltinResult<Value> {
@@ -116,33 +141,39 @@ fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
 }
 
 async fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(flag) = provider.logical_islogical(&handle) {
-            return Ok(Value::Bool(!flag));
-        }
-    }
-
-    if runmat_accelerate_api::handle_is_logical(&handle) {
-        return Ok(Value::Bool(false));
-    }
-
-    // Fall back to gathering only when metadata is unavailable.
-    let gpu_value = Value::GpuTensor(handle.clone());
-    let gathered = gpu_helpers::gather_value_async(&gpu_value)
-        .await
-        .map_err(|err| {
-            isnumeric_error_with_message(format!("isnumeric: {err}"), &ISNUMERIC_ERROR_INTERNAL)
-        })?;
-    isnumeric_host(gathered)
+    Ok(Value::Bool(checked_resident_is_numeric(&handle)?))
 }
 
-fn isnumeric_host(value: Value) -> BuiltinResult<Value> {
-    if matches!(value, Value::GpuTensor(_)) {
+fn checked_resident_is_numeric(handle: &GpuTensorHandle) -> BuiltinResult<bool> {
+    let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+        internal_error("isnumeric: no acceleration provider owns the input handle")
+    })?;
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    let integer = runmat_accelerate_api::handle_integer_type(handle);
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    let structurally_valid = if logical {
+        integer.is_none()
+            && precision == Some(owner.precision())
+            && storage == GpuTensorStorage::Real
+    } else if integer.is_some() {
+        precision.is_none() && storage == GpuTensorStorage::Real
+    } else {
+        precision == Some(owner.precision())
+            && matches!(
+                storage,
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
+            )
+    };
+    if !structurally_valid
+        || !gpu_helpers::gpu_class_metadata_matches(handle, precision, integer, logical)
+    {
         return Err(internal_error(
-            "isnumeric: internal error, GPU value reached host path",
-        ));
+            "isnumeric: resident class metadata contradicts physical storage metadata",
+        )
+        .into());
     }
-    Ok(Value::Bool(isnumeric_value(&value)))
+    Ok(!logical)
 }
 
 fn isnumeric_value(value: &Value) -> bool {
@@ -167,8 +198,9 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
-        MException, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor, Type,
+        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, IntegerStorage,
+        Listener, LogicalArray, MException, ObjectInstance, ResolveContext, StringArray,
+        StructValue, Tensor, Type,
     };
 
     fn run_isnumeric(value: Value) -> BuiltinResult<Value> {
@@ -199,6 +231,51 @@ pub(crate) mod tests {
             run_isnumeric(Value::Complex(1.0, -2.0)).unwrap(),
             Value::Bool(true)
         );
+    }
+
+    #[test]
+    fn all_integer_classes_report_true_without_conversion() {
+        let scalars = [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ];
+        for scalar in scalars {
+            assert_eq!(
+                run_isnumeric(Value::Int(scalar)).unwrap(),
+                Value::Bool(true)
+            );
+        }
+    }
+
+    #[test]
+    fn resident_integer_classes_report_true_without_gather() {
+        test_support::with_test_provider(|provider| {
+            let storages = [
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I16(vec![-2]),
+                IntegerStorage::I32(vec![-3]),
+                IntegerStorage::I64(vec![i64::MIN]),
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U16(vec![2]),
+                IntegerStorage::U32(vec![3]),
+                IntegerStorage::U64(vec![u64::MAX]),
+            ];
+            for storage in storages {
+                let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+                assert_eq!(
+                    run_isnumeric(Value::GpuTensor(handle.clone())).unwrap(),
+                    Value::Bool(true)
+                );
+                provider.free(&handle).ok();
+            }
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

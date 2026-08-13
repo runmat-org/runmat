@@ -32,6 +32,37 @@ const INAPPLICABLE_NAMES: [&str; 18] = [
     "isletter",
 ];
 
+const FOLLOWUP_CAPABILITY_NAMES: [&str; 6] = [
+    "ismissing",
+    "isnan",
+    "isnumeric",
+    "isreal",
+    "issparse",
+    "isstrprop",
+];
+
+const FOLLOWUP_INAPPLICABLE_NAMES: [&str; 19] = [
+    "islogical",
+    "ismatrix",
+    "ismethod",
+    "isobject",
+    "isordinal",
+    "ispref",
+    "isrow",
+    "isscalar",
+    "isspace",
+    "isstable",
+    "isstring",
+    "issymmetric",
+    "istable",
+    "istimetable",
+    "istril",
+    "istriu",
+    "isvalid",
+    "isvarname",
+    "isvector",
+];
+
 #[test]
 fn type_structure_and_finiteness_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
@@ -43,6 +74,40 @@ fn type_structure_and_finiteness_integer_metadata_is_explicit() {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert!(builtin.integer_audit.is_some(), "{name}");
+    }
+}
+
+#[test]
+fn followup_integer_predicate_metadata_is_explicit() {
+    for name in FOLLOWUP_CAPABILITY_NAMES {
+        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        assert!(!builtin.integer_capabilities.is_empty(), "{name}");
+        assert!(builtin.integer_audit.is_none(), "{name}");
+    }
+    for name in FOLLOWUP_INAPPLICABLE_NAMES {
+        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        assert!(builtin.integer_capabilities.is_empty(), "{name}");
+        assert!(builtin.integer_audit.is_some(), "{name}");
+    }
+}
+
+#[test]
+fn followup_integer_predicate_signatures_are_visible_to_lsp() {
+    for (name, source) in [
+        ("ismissing", "tf=ismissing(uint64(1));"),
+        ("isnan", "tf=isnan(uint64(1));"),
+        ("isnumeric", "tf=isnumeric(uint64(1));"),
+        ("isreal", "tf=isreal(uint64(1));"),
+        ("issparse", "tf=issparse(uint64(1));"),
+        ("isstrprop", "tf=isstrprop(uint16(65),'alpha');"),
+        ("isvector", "tf=isvector(uint64([1 2]));"),
+    ] {
+        let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
+        assert!(analysis.syntax_error.is_none(), "{source}");
+        assert!(analysis.lowering_error.is_none(), "{source}");
+        let position = Position::new(0, source.find(name).expect("builtin") as u32);
+        let help = signature_help_at(source, &analysis, &position).expect("signature help");
+        assert!(!help.signatures.is_empty(), "{name}");
     }
 }
 

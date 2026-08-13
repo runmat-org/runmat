@@ -27,7 +27,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Metadata-only class hierarchy query. gpuArray inputs stay resident while RunMat checks host class metadata.",
+    notes: "Metadata-only class hierarchy query. Explicit gpuArray inputs use wrapper metadata, while internally auto-resident values use their underlying host class; neither path downloads payload data.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -323,20 +323,7 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn superclasses_uses_gpuarray_metadata_without_gather() {
-        register_class(ClassDef {
-            name: "gpuArray".to_string(),
-            parent: Some("handle".to_string()),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
-        register_class(ClassDef {
-            name: "handle".to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
-
+    fn superclasses_distinguishes_automatic_and_explicit_residency_without_gather() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
             let view = HostTensorView {
@@ -344,7 +331,9 @@ mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            assert_eq!(call(Value::GpuTensor(handle)), vec!["handle".to_string()]);
+            assert!(call(Value::GpuTensor(handle.clone())).is_empty());
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            assert!(call(Value::GpuTensor(handle)).is_empty());
         });
     }
 

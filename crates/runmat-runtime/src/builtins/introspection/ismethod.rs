@@ -8,8 +8,9 @@ use crate::builtins::introspection::type_resolvers::ismethod_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     lookup_method, Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Listener, MException, Value,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Listener, MException,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -54,7 +55,7 @@ const ISMETHOD_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Object, class name, class reference, or gpuArray value to inspect.",
+        description: "Object instance or gpuArray object to inspect.",
     },
     BuiltinParamDescriptor {
         name: "method_name",
@@ -79,7 +80,6 @@ const ISMETHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "The method-name argument is not a string scalar or row character vector.",
     message: "ismethod: method name must be a string scalar or character vector",
 };
-
 const ISMETHOD_ERRORS: [BuiltinErrorDescriptor; 1] = [ISMETHOD_ERROR_NAME_INVALID];
 
 pub const ISMETHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -88,6 +88,12 @@ pub const ISMETHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISMETHOD_ERRORS,
 };
+pub const ISMETHOD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "ismethod is an object-method predicate rather than an integer computation: host and internally auto-resident integers return false, while explicit integer gpuArrays use the production gpuArray wrapper method registry without payload access.",
+    };
 
 #[runtime_builtin(
     name = "ismethod",
@@ -97,6 +103,7 @@ pub const ISMETHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(ismethod_type),
     descriptor(crate::builtins::introspection::ismethod::ISMETHOD_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::ismethod::ISMETHOD_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::ismethod"
 )]
 fn ismethod_builtin(receiver: Value, method_designator: Value) -> crate::BuiltinResult<Value> {
@@ -150,15 +157,14 @@ fn receiver_class_name(receiver: &Value) -> Option<String> {
                 Some(handle.class_name.clone())
             }
         }
-        Value::GpuTensor(_) => Some("gpuArray".to_string()),
-        Value::Listener(Listener { .. }) => Some("event.listener".to_string()),
-        Value::ClassRef(class_name) => Some(class_name.clone()),
-        Value::MException(MException { .. }) => Some("MException".to_string()),
-        Value::String(class_name) => Some(class_name.clone()),
-        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() => {
-            Some(sa.data[0].clone())
+        Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle) => {
+            Some("gpuArray".to_string())
         }
-        Value::CharArray(ca) if ca.rows <= 1 => Some(ca.data.iter().collect::<String>()),
+        Value::GpuTensor(_) => None,
+        Value::Listener(Listener { .. }) => Some("event.listener".to_string()),
+        Value::ClassRef(_) => None,
+        Value::MException(MException { .. }) => Some("MException".to_string()),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => None,
         _ => None,
     }
 }
@@ -169,8 +175,8 @@ mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        register_class, Access, CharArray, ClassDef, HandleRef, MethodDef, ObjectInstance,
-        StringArray, Tensor,
+        register_class, Access, CharArray, ClassDef, HandleRef, IntValue, IntegerStorage,
+        MethodDef, ObjectInstance, StringArray, Tensor,
     };
     use std::collections::HashMap;
 
@@ -296,24 +302,24 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ismethod_supports_class_name_text_and_class_refs() {
+    fn ismethod_rejects_class_name_text_and_class_refs_as_receivers() {
         let (_parent, child) = register_pair("ClassName");
 
-        assert!(call(
+        assert!(!call(
             Value::String(child.clone()),
             Value::String("run".to_string())
         ));
-        assert!(call(
+        assert!(!call(
             Value::CharArray(CharArray::new_row(&child)),
             Value::String("make".to_string())
         ));
-        assert!(call(
+        assert!(!call(
             Value::StringArray(
                 StringArray::new(vec![child.clone()], vec![1, 1]).expect("class scalar")
             ),
             Value::String("inherited".to_string())
         ));
-        assert!(call(
+        assert!(!call(
             Value::ClassRef(child),
             Value::String("run".to_string())
         ));
@@ -321,19 +327,7 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ismethod_uses_gpuarray_class_metadata_without_gather() {
-        let mut methods = HashMap::new();
-        methods.insert(
-            "__runmat_ismethod_marker".to_string(),
-            method("__runmat_ismethod_marker", Access::Public, false),
-        );
-        register_class(ClassDef {
-            name: "gpuArray".to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods,
-        });
-
+    fn ismethod_uses_production_gpuarray_metadata_without_gather() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
@@ -341,10 +335,27 @@ mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-
-            assert!(call(
+            assert!(!call(
+                Value::GpuTensor(handle.clone()),
+                Value::from("gather")
+            ));
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            for method in [
+                "arrayfun",
+                "existsOnGPU",
+                "gather",
+                "isgpuarray",
+                "isUnderlyingType",
+                "ndims",
+                "pagefun",
+                "size",
+                "underlyingType",
+            ] {
+                assert!(call(Value::GpuTensor(handle.clone()), Value::from(method)));
+            }
+            assert!(!call(
                 Value::GpuTensor(handle),
-                Value::String("__runmat_ismethod_marker".to_string())
+                Value::from("notARealGpuArrayMethod")
             ));
         });
     }
@@ -362,6 +373,58 @@ mod tests {
             Value::String("MissingClassForIsmethod".to_string()),
             Value::String("run".to_string())
         ));
+    }
+
+    #[test]
+    fn ismethod_reports_false_for_all_fundamental_integer_classes() {
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-2),
+            IntValue::I32(-3),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(2),
+            IntValue::U32(3),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert_eq!(
+                ismethod_builtin(Value::Int(value), Value::from("run"))
+                    .expect("fundamental integer has no public method"),
+                Value::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn ismethod_only_exposes_gpuarray_wrapper_for_explicit_residency() {
+        test_support::with_test_provider(|provider| {
+            for storage in [
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I16(vec![-2]),
+                IntegerStorage::I32(vec![-3]),
+                IntegerStorage::I64(vec![i64::MIN]),
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U16(vec![2]),
+                IntegerStorage::U32(vec![3]),
+                IntegerStorage::U64(vec![u64::MAX]),
+            ] {
+                let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+                let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                    .expect("upload integer");
+                assert_eq!(
+                    ismethod_builtin(Value::GpuTensor(handle.clone()), Value::from("gather"))
+                        .unwrap(),
+                    Value::Bool(false)
+                );
+                runmat_accelerate_api::mark_handle_explicit(&handle);
+                assert_eq!(
+                    ismethod_builtin(Value::GpuTensor(handle.clone()), Value::from("gather"))
+                        .unwrap(),
+                    Value::Bool(true)
+                );
+                provider.free(&handle).ok();
+            }
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -159,6 +159,6 @@ Fallback has two separate correctness obligations:
 - Automatically promoted ordinary values may return to the CPU whenever the planner or provider selects the CPU semantic baseline.
 - An exact integer handle must be downloaded with `download_integer`; fallback must preserve class and values and may re-upload only through `upload_integer`.
 
-`GpuTensorHandle` currently has no provenance bit distinguishing explicit `gpuArray` construction from automatic promotion. Consequently, the shared fallback policy cannot by itself reproduce every MATLAB unsupported-`gpuArray` error or residency rule. That is a compatibility-policy gap, not a reason to disable transparent fallback.
+RunMat records semantic provenance for each live `GpuTensorHandle`: explicit `gpuArray` construction and results that inherit explicit device intent remain user-visible gpuArray values, while automatic promotion remains an internal optimization. The dispatcher may transparently gather and retry only automatically resident values when the builtin requests host fallback; compatibility rejections, provider-integrity failures, and unsupported explicit gpuArray operations remain terminal. This provenance registry is cleared with the rest of the handle metadata when a buffer is released.
 
 For how the VM decides when to invoke provider execution, see [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion).

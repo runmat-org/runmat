@@ -1461,6 +1461,7 @@ mod tests {
     #[test]
     fn repeated_call_hits_cache_for_same_inputs_and_nargout() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1490,6 +1491,7 @@ mod tests {
     #[test]
     fn nan_inputs_match_existing_cache_entry() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1517,6 +1519,7 @@ mod tests {
     #[test]
     fn requested_output_count_is_part_of_cache_key() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1549,6 +1552,7 @@ mod tests {
     #[test]
     fn disabled_memoized_function_bypasses_cache_and_stats() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1584,6 +1588,7 @@ mod tests {
     #[test]
     fn cache_size_evicts_oldest_entries() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1623,6 +1628,7 @@ mod tests {
     #[test]
     fn clear_cache_and_clear_all_reset_counters() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1679,6 +1685,7 @@ mod tests {
     #[test]
     fn invalid_cache_size_errors_before_dispatch() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let f = memoized();
         let Value::HandleObject(handle) = &f else {
@@ -1770,6 +1777,7 @@ mod tests {
     #[test]
     fn handle_valued_outputs_are_reported_from_object_backed_cache() {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let _guard =
             crate::user_functions::install_semantic_function_invoker(Some(echo_first_invoker()));
