@@ -25,6 +25,10 @@ pub enum Token {
     ElseIf,
     #[token("for")]
     For,
+    #[token("parfor")]
+    ParFor,
+    #[token("spmd")]
+    Spmd,
     #[token("while")]
     While,
     #[token("break")]

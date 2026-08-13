@@ -27,6 +27,20 @@ pub enum MirTerminatorKind {
         body_block: BasicBlockId,
         exit_block: BasicBlockId,
     },
+    ParFor {
+        region: runmat_types::ParallelRegionId,
+        binding: MirLocalId,
+        iterable: MirRvalue,
+        maximum_workers: Option<Box<MirRvalue>>,
+        body_block: BasicBlockId,
+        exit_block: BasicBlockId,
+    },
+    Spmd {
+        region: runmat_types::ParallelRegionId,
+        header: Box<crate::parallel::MirSpmdHeader<MirRvalue>>,
+        body_block: BasicBlockId,
+        exit_block: BasicBlockId,
+    },
     TryCatch {
         try_block: BasicBlockId,
         catch_block: BasicBlockId,

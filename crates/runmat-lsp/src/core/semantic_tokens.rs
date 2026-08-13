@@ -80,6 +80,8 @@ pub fn full(text: &str, tokens: &[SpannedToken], hints: &[SemanticHint]) -> Opti
                     | Token::Else
                     | Token::ElseIf
                     | Token::For
+                    | Token::ParFor
+                    | Token::Spmd
                     | Token::While
                     | Token::Break
                     | Token::Continue

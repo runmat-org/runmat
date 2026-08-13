@@ -1,5 +1,6 @@
 use runmat_parser::{
-    Attr, BinOp, ClassMember, Expr, FunctionArgumentsBlockKind, LValue, Program, Span, Stmt, UnOp,
+    Attr, BinOp, ClassMember, Expr, FunctionArgumentsBlockKind, LValue, Program, Span, SpmdHeader,
+    Stmt, UnOp,
 };
 
 mod parse;
@@ -11,6 +12,58 @@ use support_extra::{assign, range, span_value, string, unary_boxed};
 
 fn assert_program_eq(actual: Program, expected: Program) {
     assert_eq!(strip_program(&actual), strip_program(&expected));
+}
+
+#[test]
+fn parses_parallel_region_controls_without_erasing_syntax() {
+    let program =
+        parse("parfor (i = 1:n, 4); y = i; end; spmd (2, 8); z = labindex; end; spmd (6); end; spmd (pool, 1, 4); end")
+            .unwrap();
+    assert_eq!(program.body.len(), 4);
+    assert!(matches!(
+        &program.body[0],
+        Stmt::ParFor {
+            var,
+            maximum_workers: Some(Expr::Number(value, _)),
+            body,
+            ..
+        } if var == "i" && value == "4" && body.len() == 1
+    ));
+    assert!(matches!(
+        &program.body[1],
+        Stmt::Spmd {
+            header: SpmdHeader::Two(Expr::Number(minimum, _), Expr::Number(maximum, _)),
+            body,
+            ..
+        } if minimum == "2" && maximum == "8" && body.len() == 1
+    ));
+    assert!(matches!(
+        &program.body[2],
+        Stmt::Spmd {
+            header: SpmdHeader::One(Expr::Number(exact, _)),
+            ..
+        } if exact == "6"
+    ));
+    assert!(matches!(
+        &program.body[3],
+        Stmt::Spmd {
+            header: SpmdHeader::Three(
+                Expr::Ident(pool, _),
+                Expr::Number(minimum, _),
+                Expr::Number(maximum, _),
+            ),
+            ..
+        } if pool == "pool" && minimum == "1" && maximum == "4"
+    ));
+}
+
+#[test]
+fn rejects_malformed_parallel_controls() {
+    assert!(parse("parfor (i = 1:4, 2; end").is_err());
+    assert!(parse("parfor i = 1:4, 2; end").is_err());
+    assert!(parse("spmd (); end").is_err());
+    assert!(parse("spmd (2, 4; end").is_err());
+    assert!(parse("spmd (pool, 1, 2, 3); end").is_err());
 }
 
 fn strip_program(program: &Program) -> Program {
@@ -68,6 +121,33 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
         } => Stmt::For {
             var: var.clone(),
             expr: strip_expr(expr),
+            body: body.iter().map(strip_stmt).collect(),
+            span: Span::default(),
+        },
+        Stmt::ParFor {
+            var,
+            expr,
+            maximum_workers,
+            body,
+            ..
+        } => Stmt::ParFor {
+            var: var.clone(),
+            expr: strip_expr(expr),
+            maximum_workers: maximum_workers.as_ref().map(strip_expr),
+            body: body.iter().map(strip_stmt).collect(),
+            span: Span::default(),
+        },
+        Stmt::Spmd { header, body, .. } => Stmt::Spmd {
+            header: match header {
+                SpmdHeader::Default => SpmdHeader::Default,
+                SpmdHeader::One(value) => SpmdHeader::One(strip_expr(value)),
+                SpmdHeader::Two(first, second) => {
+                    SpmdHeader::Two(strip_expr(first), strip_expr(second))
+                }
+                SpmdHeader::Three(first, second, third) => {
+                    SpmdHeader::Three(strip_expr(first), strip_expr(second), strip_expr(third))
+                }
+            },
             body: body.iter().map(strip_stmt).collect(),
             span: Span::default(),
         },

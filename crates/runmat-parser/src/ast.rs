@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::Span;
 
+mod parallel;
+pub use parallel::SpmdHeader;
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Number(String, Span),
@@ -197,6 +200,18 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    ParFor {
+        var: String,
+        expr: Expr,
+        maximum_workers: Option<Expr>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    Spmd {
+        header: SpmdHeader,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     Switch {
         expr: Expr,
         cases: Vec<(Expr, Vec<Stmt>)>,
@@ -260,6 +275,8 @@ impl Stmt {
             Stmt::If { span, .. }
             | Stmt::While { span, .. }
             | Stmt::For { span, .. }
+            | Stmt::ParFor { span, .. }
+            | Stmt::Spmd { span, .. }
             | Stmt::Switch { span, .. }
             | Stmt::TryCatch { span, .. }
             | Stmt::Function { span, .. }

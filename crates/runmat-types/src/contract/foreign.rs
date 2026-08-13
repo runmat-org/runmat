@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub const INTEROP_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ForeignTypeIdentity {
     pub family: String,
     pub name: String,
@@ -57,6 +58,7 @@ pub enum WasmInteropPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ForeignRequirement {
     pub type_identity: ForeignTypeIdentity,
     pub ownership: ForeignOwnership,
@@ -67,6 +69,7 @@ pub struct ForeignRequirement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ForeignAdapterRequirement {
     pub adapter: String,
     pub minimum_version: u32,
@@ -75,6 +78,7 @@ pub struct ForeignAdapterRequirement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InteropManifest {
     pub schema_version: u16,
     pub foreign_types: Vec<ForeignRequirement>,

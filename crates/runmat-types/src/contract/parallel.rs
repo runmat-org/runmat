@@ -5,10 +5,13 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+mod spmd;
+pub use spmd::SpmdLabRequirement;
+
 pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParallelVariableRole {
     Loop,
     Broadcast,
@@ -27,6 +30,7 @@ pub enum ParallelAccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParallelVariableContract {
     pub value: RegionValueId,
     pub role: ParallelVariableRole,
@@ -44,6 +48,7 @@ pub enum ParallelRandomnessPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParforContract {
     pub id: ParallelRegionId,
     pub loop_variable: RegionValueId,
@@ -55,16 +60,21 @@ pub struct ParforContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SpmdContract {
     pub id: ParallelRegionId,
-    pub minimum_labs: LabCount,
-    pub maximum_labs: Option<LabCount>,
+    pub labs: SpmdLabRequirement,
     pub captures: Vec<ParallelVariableContract>,
     pub capabilities: CapabilitySet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+#[serde(
+    rename_all = "snake_case",
+    tag = "kind",
+    content = "value",
+    deny_unknown_fields
+)]
 pub enum DistributionScheme {
     Replicated,
     Block { dimension: u32 },
@@ -73,6 +83,7 @@ pub enum DistributionScheme {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DistributedValueContract {
     pub id: DistributedValueId,
     pub value: ValueFact,
@@ -82,13 +93,14 @@ pub struct DistributedValueContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CollectiveContract {
     pub id: CollectiveId,
     pub operation: CollectiveOperation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum CollectiveOperation {
     Barrier,
     Broadcast {
@@ -132,6 +144,7 @@ pub enum CollectiveOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParallelManifest {
     pub schema_version: u16,
     pub parfor_regions: Vec<ParforContract>,
@@ -224,21 +237,7 @@ impl ParallelManifest {
             }
         }
         for region in &self.spmd_regions {
-            if region.minimum_labs.0 == 0 {
-                return Err(SchemaValidationError::new(
-                    "parallel.spmd_regions",
-                    "minimum lab count must be non-zero",
-                ));
-            }
-            if region
-                .maximum_labs
-                .is_some_and(|maximum| maximum.0 < region.minimum_labs.0)
-            {
-                return Err(SchemaValidationError::new(
-                    "parallel.spmd_regions.maximum_labs",
-                    "maximum lab count must not be below minimum",
-                ));
-            }
+            region.labs.validate()?;
             validate_variables(
                 "parallel.spmd_regions.captures",
                 region.id,

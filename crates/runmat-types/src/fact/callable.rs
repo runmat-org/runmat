@@ -3,6 +3,7 @@ use crate::CallableIdentity;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CallableFact {
     pub identity: Option<CallableIdentity>,
     pub parameters: Vec<ValueFact>,

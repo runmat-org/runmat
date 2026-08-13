@@ -330,6 +330,178 @@ impl ControlFlowBuilder {
                 }
                 return Ok(header_block);
             }
+            if let HirStmtKind::ParFor {
+                region,
+                binding,
+                range,
+                maximum_workers,
+                body: loop_body,
+            } = &stmt.kind
+            {
+                let iterable =
+                    lower_expr_with_replacements(ctx, range, &mut statements, await_replacements)?;
+                let maximum_workers = maximum_workers
+                    .as_ref()
+                    .map(|value| {
+                        lower_expr_with_replacements(
+                            ctx,
+                            value,
+                            &mut statements,
+                            await_replacements,
+                        )
+                    })
+                    .transpose()?
+                    .map(Box::new);
+                let header_id = if statements.is_empty() {
+                    id
+                } else {
+                    self.fresh_block()
+                };
+                let body_id = self.fresh_block();
+                let exit_id = self.lower_continuation_target(
+                    idx + 1,
+                    final_terminator,
+                    BlockLoweringEnv {
+                        ctx,
+                        body,
+                        return_terminator,
+                        loop_targets,
+                        await_replacements,
+                    },
+                )?;
+                let body_block = self.lower_block_from(
+                    body_id,
+                    0,
+                    MirTerminator {
+                        kind: MirTerminatorKind::Goto(header_id),
+                        span: stmt.span,
+                    },
+                    BlockLoweringEnv {
+                        ctx,
+                        body: loop_body,
+                        return_terminator,
+                        loop_targets: Some((header_id, exit_id)),
+                        await_replacements,
+                    },
+                )?;
+                self.blocks.push(body_block);
+                let header_block = BasicBlock {
+                    id: header_id,
+                    statements: Vec::new(),
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::ParFor {
+                            region: *region,
+                            binding: ctx.local_for_binding(*binding)?,
+                            iterable,
+                            maximum_workers,
+                            body_block: body_id,
+                            exit_block: exit_id,
+                        },
+                        span: stmt.span,
+                    },
+                };
+                if header_id != id {
+                    self.blocks.push(header_block);
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(header_id),
+                            span: stmt.span,
+                        },
+                    });
+                }
+                return Ok(header_block);
+            }
+            if let HirStmtKind::Spmd {
+                region,
+                header,
+                body: spmd_body,
+            } = &stmt.kind
+            {
+                let mut lower_header_value = |value| {
+                    lower_expr_with_replacements(ctx, value, &mut statements, await_replacements)
+                };
+                let header = match header {
+                    runmat_hir::parallel::SpmdHeader::Default => {
+                        crate::parallel::MirSpmdHeader::Default
+                    }
+                    runmat_hir::parallel::SpmdHeader::One(value) => {
+                        crate::parallel::MirSpmdHeader::One(lower_header_value(value)?)
+                    }
+                    runmat_hir::parallel::SpmdHeader::Two(first, second) => {
+                        crate::parallel::MirSpmdHeader::Two(
+                            lower_header_value(first)?,
+                            lower_header_value(second)?,
+                        )
+                    }
+                    runmat_hir::parallel::SpmdHeader::Three(first, second, third) => {
+                        crate::parallel::MirSpmdHeader::Three(
+                            lower_header_value(first)?,
+                            lower_header_value(second)?,
+                            lower_header_value(third)?,
+                        )
+                    }
+                };
+                let header_id = if statements.is_empty() {
+                    id
+                } else {
+                    self.fresh_block()
+                };
+                let body_id = self.fresh_block();
+                let exit_id = self.lower_continuation_target(
+                    idx + 1,
+                    final_terminator,
+                    BlockLoweringEnv {
+                        ctx,
+                        body,
+                        return_terminator,
+                        loop_targets,
+                        await_replacements,
+                    },
+                )?;
+                let body_block = self.lower_block_from(
+                    body_id,
+                    0,
+                    MirTerminator {
+                        kind: MirTerminatorKind::Goto(exit_id),
+                        span: stmt.span,
+                    },
+                    BlockLoweringEnv {
+                        ctx,
+                        body: spmd_body,
+                        return_terminator,
+                        loop_targets: None,
+                        await_replacements,
+                    },
+                )?;
+                self.blocks.push(body_block);
+                let header_block = BasicBlock {
+                    id: header_id,
+                    statements: Vec::new(),
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Spmd {
+                            region: *region,
+                            header: Box::new(header),
+                            body_block: body_id,
+                            exit_block: exit_id,
+                        },
+                        span: stmt.span,
+                    },
+                };
+                if header_id != id {
+                    self.blocks.push(header_block);
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(header_id),
+                            span: stmt.span,
+                        },
+                    });
+                }
+                return Ok(header_block);
+            }
             if let HirStmtKind::Switch {
                 expr,
                 cases,
@@ -644,6 +816,30 @@ fn first_unlowered_await_in_stmt<'a>(
         }),
         HirStmtKind::While { cond, .. } => first_unlowered_await(cond, await_replacements),
         HirStmtKind::For { range, .. } => first_unlowered_await(range, await_replacements),
+        HirStmtKind::ParFor {
+            range,
+            maximum_workers,
+            ..
+        } => first_unlowered_await(range, await_replacements).or_else(|| {
+            maximum_workers
+                .as_ref()
+                .and_then(|value| first_unlowered_await(value, await_replacements))
+        }),
+        HirStmtKind::Spmd { header, .. } => match header {
+            runmat_hir::parallel::SpmdHeader::Default => None,
+            runmat_hir::parallel::SpmdHeader::One(value) => {
+                first_unlowered_await(value, await_replacements)
+            }
+            runmat_hir::parallel::SpmdHeader::Two(first, second) => {
+                first_unlowered_await(first, await_replacements)
+                    .or_else(|| first_unlowered_await(second, await_replacements))
+            }
+            runmat_hir::parallel::SpmdHeader::Three(first, second, third) => {
+                first_unlowered_await(first, await_replacements)
+                    .or_else(|| first_unlowered_await(second, await_replacements))
+                    .or_else(|| first_unlowered_await(third, await_replacements))
+            }
+        },
         HirStmtKind::Switch { expr, cases, .. } => first_unlowered_await(expr, await_replacements)
             .or_else(|| {
                 cases

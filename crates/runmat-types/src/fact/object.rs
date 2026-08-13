@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectFact {
     pub class: Option<ClassId>,
     pub runtime_class: Option<QualifiedName>,
@@ -14,6 +15,7 @@ pub struct ObjectFact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClassReferenceFact {
     pub class: Option<ClassId>,
     pub runtime_class: Option<QualifiedName>,

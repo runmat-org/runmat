@@ -16,6 +16,32 @@ fn lower_semantic(src: &str) -> runmat_hir::HirAssembly {
 }
 
 #[test]
+fn parallel_regions_receive_stable_function_local_identities() {
+    let assembly = lower_semantic("parfor (i = 1:10, 4); y = i; end; spmd (2, 8); z = 1; end");
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| matches!(function.kind, FunctionKind::SyntheticEntrypoint))
+        .unwrap();
+    assert!(matches!(
+        &function.body.statements[0].kind,
+        HirStmtKind::ParFor {
+            region,
+            maximum_workers: Some(_),
+            ..
+        } if region.0.function == runmat_types::ProgramFunctionId(0) && region.0.ordinal == 0
+    ));
+    assert!(matches!(
+        &function.body.statements[1].kind,
+        HirStmtKind::Spmd {
+            region,
+            header: runmat_hir::parallel::SpmdHeader::Two(_, _),
+            ..
+        } if region.0.function == runmat_types::ProgramFunctionId(0) && region.0.ordinal == 1
+    ));
+}
+
+#[test]
 fn script_lowers_to_module_entrypoint_and_workspace_bindings() {
     let assembly = lower_semantic("x = 1; y = x + 2;");
 
@@ -1179,6 +1205,38 @@ fn lowering_emits_only_fixed_requested_output_counts() {
             }
             HirStmtKind::For { range, body, .. } => {
                 walk_expr(range);
+                for stmt in &body.statements {
+                    walk_stmt(stmt);
+                }
+            }
+            HirStmtKind::ParFor {
+                range,
+                maximum_workers,
+                body,
+                ..
+            } => {
+                walk_expr(range);
+                if let Some(workers) = maximum_workers {
+                    walk_expr(workers);
+                }
+                for stmt in &body.statements {
+                    walk_stmt(stmt);
+                }
+            }
+            HirStmtKind::Spmd { header, body, .. } => {
+                match header {
+                    runmat_hir::parallel::SpmdHeader::Default => {}
+                    runmat_hir::parallel::SpmdHeader::One(value) => walk_expr(value),
+                    runmat_hir::parallel::SpmdHeader::Two(first, second) => {
+                        walk_expr(first);
+                        walk_expr(second);
+                    }
+                    runmat_hir::parallel::SpmdHeader::Three(first, second, third) => {
+                        walk_expr(first);
+                        walk_expr(second);
+                        walk_expr(third);
+                    }
+                }
                 for stmt in &body.statements {
                     walk_stmt(stmt);
                 }

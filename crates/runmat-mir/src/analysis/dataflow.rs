@@ -336,6 +336,7 @@ fn simple_rvalue_fact(value: &MirRvalue, facts: &[Option<SimpleValueFact>]) -> S
                     dynamic_value()
                 }
             }),
+        MirRvalue::Distributed(_) | MirRvalue::Collective(_) => dynamic_value(),
     }
 }
 
@@ -794,6 +795,33 @@ fn diagnose_block(
             diagnose_rvalue_reads(iterable, state, block.terminator.span, diagnostics);
             state[binding.0] = InitFact::DefinitelyAssigned;
         }
+        MirTerminatorKind::ParFor {
+            binding,
+            iterable,
+            maximum_workers,
+            ..
+        } => {
+            diagnose_rvalue_reads(iterable, state, block.terminator.span, diagnostics);
+            if let Some(workers) = maximum_workers.as_deref() {
+                diagnose_rvalue_reads(workers, state, block.terminator.span, diagnostics);
+            }
+            state[binding.0] = InitFact::DefinitelyAssigned;
+        }
+        MirTerminatorKind::Spmd { header, .. } => match header.as_ref() {
+            crate::parallel::MirSpmdHeader::Default => {}
+            crate::parallel::MirSpmdHeader::One(value) => {
+                diagnose_rvalue_reads(value, state, block.terminator.span, diagnostics);
+            }
+            crate::parallel::MirSpmdHeader::Two(first, second) => {
+                diagnose_rvalue_reads(first, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(second, state, block.terminator.span, diagnostics);
+            }
+            crate::parallel::MirSpmdHeader::Three(first, second, third) => {
+                diagnose_rvalue_reads(first, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(second, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(third, state, block.terminator.span, diagnostics);
+            }
+        },
         MirTerminatorKind::Return(outputs) => {
             for output in outputs {
                 diagnose_operand_read(output, state, block.terminator.span, diagnostics);
@@ -899,6 +927,27 @@ fn diagnose_rvalue_reads(
             }
         }
         MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
+        MirRvalue::Distributed(operation) => match operation {
+            crate::parallel::MirDistributedOp::Create { input, .. } => {
+                diagnose_operand_read(input, state, span, diagnostics);
+            }
+            crate::parallel::MirDistributedOp::LocalPart { .. }
+            | crate::parallel::MirDistributedOp::Materialize { .. }
+            | crate::parallel::MirDistributedOp::Redistribute { .. } => {}
+        },
+        MirRvalue::Collective(operation) => match operation {
+            crate::parallel::MirCollectiveOp::Broadcast { input, .. }
+            | crate::parallel::MirCollectiveOp::Gather { input, .. }
+            | crate::parallel::MirCollectiveOp::Scatter { input, .. }
+            | crate::parallel::MirCollectiveOp::AllGather { input, .. }
+            | crate::parallel::MirCollectiveOp::Reduce { input, .. }
+            | crate::parallel::MirCollectiveOp::AllReduce { input, .. }
+            | crate::parallel::MirCollectiveOp::Send { input, .. } => {
+                diagnose_operand_read(input, state, span, diagnostics);
+            }
+            crate::parallel::MirCollectiveOp::Barrier { .. }
+            | crate::parallel::MirCollectiveOp::Receive { .. } => {}
+        },
     }
 }
 
@@ -1013,6 +1062,16 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
             .chain(std::iter::once(*otherwise))
             .collect(),
         MirTerminatorKind::For {
+            body_block,
+            exit_block,
+            ..
+        } => vec![*body_block, *exit_block],
+        MirTerminatorKind::ParFor {
+            body_block,
+            exit_block,
+            ..
+        }
+        | MirTerminatorKind::Spmd {
             body_block,
             exit_block,
             ..

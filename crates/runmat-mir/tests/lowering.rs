@@ -2098,6 +2098,94 @@ fn for_loop_exit_flows_to_following_statements() {
 }
 
 #[test]
+fn parallel_regions_lower_to_structured_terminators_with_stable_controls() {
+    let mir = lower_mir("parfor (i = 1:10, 4); y = i; end; spmd (2, 8); z = 1; end; w = 1;");
+    let body = mir.bodies.values().next().unwrap();
+
+    let parfor = body
+        .blocks
+        .iter()
+        .find_map(|block| match &block.terminator.kind {
+            MirTerminatorKind::ParFor {
+                region,
+                maximum_workers,
+                body_block,
+                exit_block,
+                ..
+            } => Some((*region, maximum_workers, *body_block, *exit_block)),
+            _ => None,
+        })
+        .expect("parfor terminator");
+    let spmd = body
+        .blocks
+        .iter()
+        .find_map(|block| match &block.terminator.kind {
+            MirTerminatorKind::Spmd {
+                region,
+                header,
+                body_block,
+                exit_block,
+            } => Some((*region, header.as_ref(), *body_block, *exit_block)),
+            _ => None,
+        })
+        .expect("spmd terminator");
+
+    assert_eq!(parfor.0 .0.function, runmat_types::ProgramFunctionId(0));
+    assert_eq!(parfor.0 .0.ordinal, 0);
+    assert!(parfor.1.is_some());
+    assert_ne!(parfor.2, parfor.3);
+    assert_eq!(spmd.0 .0.function, runmat_types::ProgramFunctionId(0));
+    assert_eq!(spmd.0 .0.ordinal, 1);
+    assert!(matches!(
+        spmd.1,
+        runmat_mir::parallel::MirSpmdHeader::Two(_, _)
+    ));
+    assert_ne!(spmd.2, spmd.3);
+    assert_eq!(body.blocks[spmd.3 .0].statements.len(), 1);
+}
+
+#[test]
+fn every_mir_construct_has_one_explicit_native_lowering_class() {
+    use runmat_mir::{MirConstructKind, NativeLoweringClass};
+    use std::collections::HashSet;
+
+    assert_eq!(MirConstructKind::ALL.len(), 47);
+    assert_eq!(
+        MirConstructKind::ALL
+            .into_iter()
+            .collect::<HashSet<_>>()
+            .len(),
+        MirConstructKind::ALL.len()
+    );
+    let classes = MirConstructKind::ALL
+        .into_iter()
+        .map(MirConstructKind::native_lowering_class)
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        classes,
+        HashSet::from([
+            NativeLoweringClass::NativeOperation,
+            NativeLoweringClass::RuntimeSlowPath,
+            NativeLoweringClass::StructuredSuspendResume,
+            NativeLoweringClass::CapabilityRejection,
+            NativeLoweringClass::ProvenUnreachable,
+        ])
+    );
+    assert_eq!(
+        MirConstructKind::ParFor.native_lowering_class(),
+        NativeLoweringClass::StructuredSuspendResume
+    );
+    assert_eq!(
+        MirConstructKind::Spmd.native_lowering_class(),
+        NativeLoweringClass::StructuredSuspendResume
+    );
+    assert_eq!(
+        MirConstructKind::CollectiveAllReduce.native_lowering_class(),
+        NativeLoweringClass::CapabilityRejection
+    );
+}
+
+#[test]
 fn try_catch_lowers_to_try_catch_blocks_and_merge() {
     let mir = lower_mir("function y = guarded(x); try; y = x; catch err; y = 0; end; end");
     let body = mir.bodies.values().next().unwrap();

@@ -4,11 +4,11 @@ use runmat_types::{
     ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership, ForeignRequirement,
     ForeignTypeIdentity, InteropManifest, LabCount, ParallelAccess, ParallelManifest,
     ParallelRandomnessPolicy, ParallelRegionId, ParallelVariableContract, ParallelVariableRole,
-    ParforContract, ProgramFunctionId, ProgramPointId, RegionContract, RegionGuardCondition,
-    RegionGuardContract, RegionGuardId, RegionId, RegionProvenance, RegionValueFact, RegionValueId,
-    SourceId, Span, SpmdContract, ValueFact, ValueKindFact, WasmInteropPolicy,
-    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
-    REGION_CONTRACT_SCHEMA_VERSION,
+    ParforContract, ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan,
+    RegionContract, RegionGuardCondition, RegionGuardContract, RegionGuardId, RegionId,
+    RegionProvenance, RegionValueFact, RegionValueId, SpmdContract, SpmdLabRequirement, ValueFact,
+    ValueKindFact, WasmInteropPolicy, INTEROP_MANIFEST_SCHEMA_VERSION,
+    PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 
 fn region_id(ordinal: u32) -> RegionId {
@@ -27,8 +27,8 @@ fn region() -> RegionContract {
     RegionContract {
         schema_version: REGION_CONTRACT_SCHEMA_VERSION,
         id,
-        source: SourceId(3),
-        span: Span { start: 10, end: 20 },
+        source: ProgramSourceId(3),
+        span: ProgramSpan { start: 10, end: 20 },
         entry: ProgramPointId {
             function: id.function,
             block: 0,
@@ -120,8 +120,10 @@ fn parallel() -> ParallelManifest {
         }],
         spmd_regions: vec![SpmdContract {
             id: ParallelRegionId(region_id(3)),
-            minimum_labs: LabCount(1),
-            maximum_labs: Some(LabCount(4)),
+            labs: SpmdLabRequirement::Range {
+                minimum: LabCount(1),
+                maximum: LabCount(4),
+            },
             captures: Vec::new(),
             capabilities: CapabilitySet::default(),
         }],
@@ -185,8 +187,8 @@ fn construct_schemas_reject_version_order_and_kind_drift() {
         "interop.foreign_types"
     );
 
-    let mut parallel = parallel();
-    parallel.collectives[0].operation = CollectiveOperation::Send {
+    let mut invalid_collective = parallel();
+    invalid_collective.collectives[0].operation = CollectiveOperation::Send {
         input: DistributedValueId {
             function: ProgramFunctionId(99),
             ordinal: 0,
@@ -194,9 +196,23 @@ fn construct_schemas_reject_version_order_and_kind_drift() {
         peer: runmat_types::LabRank(1),
     };
     assert_eq!(
-        parallel.validate().unwrap_err().path,
+        invalid_collective.validate().unwrap_err().path,
         "parallel.collectives.values"
     );
+
+    let mut invalid_range = parallel();
+    invalid_range.spmd_regions[0].labs = SpmdLabRequirement::Range {
+        minimum: LabCount(4),
+        maximum: LabCount(1),
+    };
+    assert_eq!(
+        invalid_range.validate().unwrap_err().path,
+        "parallel.spmd_regions.labs"
+    );
+
+    let mut local_exact = parallel();
+    local_exact.spmd_regions[0].labs = SpmdLabRequirement::Exact { labs: LabCount(0) };
+    local_exact.validate().unwrap();
 }
 
 #[cfg(target_arch = "wasm32")]

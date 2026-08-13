@@ -2,6 +2,7 @@ use super::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValueFact {
     pub kind: ValueKindFact,
     pub shape: ShapeFact,

@@ -1,18 +1,19 @@
 use crate::{
     AliasFact, CapabilityRequirement, CapabilitySet, DeoptimizationPointId, EffectSet,
-    ProgramPointId, RegionGuardId, RegionId, RegionValueId, ResidencyFact, SchemaValidationError,
-    ShapeFact, SourceId, Span, ValueFact, ValueKindFact,
+    ProgramPointId, ProgramSourceId, ProgramSpan, RegionGuardId, RegionId, RegionValueId,
+    ResidencyFact, SchemaValidationError, ShapeFact, ValueFact, ValueKindFact,
 };
 use serde::{Deserialize, Serialize};
 
 pub const REGION_CONTRACT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegionContract {
     pub schema_version: u16,
     pub id: RegionId,
-    pub source: SourceId,
-    pub span: Span,
+    pub source: ProgramSourceId,
+    pub span: ProgramSpan,
     pub entry: ProgramPointId,
     pub exits: Vec<ProgramPointId>,
     pub live_in: Vec<RegionValueId>,
@@ -25,12 +26,14 @@ pub struct RegionContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegionValueFact {
     pub value: RegionValueId,
     pub fact: ValueFact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegionGuardContract {
     pub id: RegionGuardId,
     pub condition: RegionGuardCondition,
@@ -38,7 +41,7 @@ pub struct RegionGuardContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum RegionGuardCondition {
     ValueFact {
         value: RegionValueId,

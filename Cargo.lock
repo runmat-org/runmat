@@ -6366,6 +6366,7 @@ version = "0.6.1"
 dependencies = [
  "ed25519-dalek",
  "minicbor",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",

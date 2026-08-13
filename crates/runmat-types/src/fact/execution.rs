@@ -40,6 +40,7 @@ pub enum SpawnSafetyReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExceptionFact {
     pub identifier: Option<String>,
 }

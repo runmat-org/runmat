@@ -64,6 +64,7 @@ struct LoweringCtx {
     next_stmt: usize,
     next_function: usize,
     next_class: usize,
+    next_parallel_region: HashMap<FunctionId, u32>,
     scopes: Vec<ScopeFrame>,
     function_modifiers: Vec<FunctionModifiers>,
     top_level_await: Vec<bool>,
@@ -249,6 +250,7 @@ impl LoweringCtx {
             next_stmt: 0,
             next_function: 0,
             next_class: 0,
+            next_parallel_region: HashMap::new(),
             scopes: Vec::new(),
             function_modifiers: Vec::new(),
             top_level_await: Vec::new(),
@@ -576,6 +578,19 @@ impl LoweringCtx {
     fn alloc_stmt_id(&mut self) -> StmtId {
         let id = StmtId(self.next_stmt);
         self.next_stmt += 1;
+        id
+    }
+
+    fn alloc_parallel_region_id(&mut self) -> runmat_types::ParallelRegionId {
+        let function = self.current_scope().owner;
+        let ordinal = self.next_parallel_region.entry(function).or_default();
+        let id = runmat_types::ParallelRegionId(runmat_types::RegionId {
+            function: runmat_types::ProgramFunctionId(
+                u32::try_from(function.0).expect("HIR function IDs must fit portable u32 identity"),
+            ),
+            ordinal: *ordinal,
+        });
+        *ordinal += 1;
         id
     }
 
@@ -2133,6 +2148,50 @@ impl LoweringCtx {
                     body: self.lower_stmts_semantic(body)?,
                 }
             }
+            AstStmt::ParFor {
+                var,
+                expr,
+                maximum_workers,
+                body,
+                ..
+            } => {
+                let region = self.alloc_parallel_region_id();
+                let binding =
+                    self.define_binding(var, BindingRole::Local, BindingStorage::Lexical, span);
+                HirStmtKind::ParFor {
+                    region,
+                    binding,
+                    range: self.lower_expr_semantic(expr)?,
+                    maximum_workers: maximum_workers
+                        .as_ref()
+                        .map(|value| self.lower_expr_semantic(value))
+                        .transpose()?,
+                    body: self.lower_stmts_semantic(body)?,
+                }
+            }
+            AstStmt::Spmd { header, body, .. } => HirStmtKind::Spmd {
+                region: self.alloc_parallel_region_id(),
+                header: match header {
+                    runmat_parser::SpmdHeader::Default => crate::parallel::SpmdHeader::Default,
+                    runmat_parser::SpmdHeader::One(value) => {
+                        crate::parallel::SpmdHeader::One(self.lower_expr_semantic(value)?)
+                    }
+                    runmat_parser::SpmdHeader::Two(first, second) => {
+                        crate::parallel::SpmdHeader::Two(
+                            self.lower_expr_semantic(first)?,
+                            self.lower_expr_semantic(second)?,
+                        )
+                    }
+                    runmat_parser::SpmdHeader::Three(first, second, third) => {
+                        crate::parallel::SpmdHeader::Three(
+                            self.lower_expr_semantic(first)?,
+                            self.lower_expr_semantic(second)?,
+                            self.lower_expr_semantic(third)?,
+                        )
+                    }
+                },
+                body: self.lower_stmts_semantic(body)?,
+            },
             AstStmt::Global(names, _) => {
                 let ids = names
                     .iter()

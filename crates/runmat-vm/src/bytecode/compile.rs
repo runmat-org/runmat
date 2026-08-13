@@ -752,7 +752,9 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         | MirRvalue::Colon
         | MirRvalue::End
         | MirRvalue::Future { .. }
-        | MirRvalue::Spawn(_) => false,
+        | MirRvalue::Spawn(_)
+        | MirRvalue::Distributed(_)
+        | MirRvalue::Collective(_) => false,
     }
 }
 
@@ -4889,6 +4891,78 @@ y = x^[1 2; 3 4];\n",
             err.identifier.as_deref(),
             Some("RunMat:MirOperatorUnsupported")
         );
+    }
+
+    #[test]
+    fn compile_rejects_parallel_region_until_scheduler_lowering_is_available() {
+        let source = "parfor (i = 1:10, 4); y = i; end";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirParallelCapabilityUnsupported")
+        );
+        let span = err.span.expect("parallel source span");
+        assert_eq!(&source[span.start..span.end], source);
+    }
+
+    #[test]
+    fn compile_rejects_spmd_until_scheduler_lowering_is_available() {
+        let source = "spmd (2, 8); y = 1; end";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirParallelCapabilityUnsupported")
+        );
+        let span = err.span.expect("SPMD source span");
+        assert_eq!(&source[span.start..span.end], source);
+    }
+
+    #[test]
+    fn compile_rejects_distributed_values_until_runtime_capability_is_available() {
+        let ast = runmat_parser::parse("x = 1;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+        let value = body
+            .blocks
+            .iter_mut()
+            .flat_map(|block| block.statements.iter_mut())
+            .find_map(|statement| match &mut statement.kind {
+                MirStmtKind::Assign { value, .. } => Some(value),
+                _ => None,
+            })
+            .expect("assignment rvalue");
+        *value = MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::Create {
+            id: runmat_types::DistributedValueId {
+                function: runmat_types::ProgramFunctionId(0),
+                ordinal: 0,
+            },
+            owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
+                function: runmat_types::ProgramFunctionId(0),
+                ordinal: 0,
+            }),
+            input: MirOperand::Constant(MirConstant::Number("1".into())),
+            scheme: runmat_types::DistributionScheme::Replicated,
+        });
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirDistributedCapabilityUnsupported")
+        );
+        assert!(err.span.is_some());
     }
 
     #[test]

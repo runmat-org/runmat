@@ -1,5 +1,8 @@
 pub mod analysis;
 pub mod lowering;
+pub mod parallel;
+
+mod construct;
 
 mod assembly;
 mod async_;
@@ -20,6 +23,7 @@ pub use async_::*;
 pub use block::*;
 pub use body::*;
 pub use call::*;
+pub use construct::*;
 pub use diagnostics::*;
 pub use ids::*;
 pub use indexing::*;

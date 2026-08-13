@@ -6,6 +6,7 @@ mod hir;
 mod ids;
 pub(crate) mod lowering;
 mod lowering_context;
+pub mod parallel;
 mod span;
 pub mod testing;
 

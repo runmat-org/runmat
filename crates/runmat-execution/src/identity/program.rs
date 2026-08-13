@@ -36,6 +36,7 @@ impl DomainContribution {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DomainContributionWire {
     name: String,
     digest: Digest,
@@ -60,6 +61,7 @@ pub struct ProgramEnvironment {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProgramEnvironmentWire {
     semantic_schema: u32,
     compiler_schema: u32,
@@ -423,6 +425,7 @@ fn decode_error(error: minicbor::decode::Error) -> ContractError {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProgramRevisionWire {
     schema_version: u16,
     graph_digest: Digest,

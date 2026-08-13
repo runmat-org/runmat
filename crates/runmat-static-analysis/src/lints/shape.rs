@@ -299,6 +299,30 @@ impl ShapeLintContext {
                 MirShapeValue::default()
             }
             runmat_mir::MirRvalue::Spawn(operand) => self.infer_mir_operand(body, operand),
+            runmat_mir::MirRvalue::Distributed(operation) => {
+                use runmat_mir::parallel::MirDistributedOp;
+                if let MirDistributedOp::Create { input, .. } = operation {
+                    self.infer_mir_operand(body, input);
+                }
+                MirShapeValue::default()
+            }
+            runmat_mir::MirRvalue::Collective(operation) => {
+                use runmat_mir::parallel::MirCollectiveOp;
+                let input = match operation {
+                    MirCollectiveOp::Broadcast { input, .. }
+                    | MirCollectiveOp::Gather { input, .. }
+                    | MirCollectiveOp::Scatter { input, .. }
+                    | MirCollectiveOp::AllGather { input, .. }
+                    | MirCollectiveOp::Reduce { input, .. }
+                    | MirCollectiveOp::AllReduce { input, .. }
+                    | MirCollectiveOp::Send { input, .. } => Some(input),
+                    MirCollectiveOp::Barrier { .. } | MirCollectiveOp::Receive { .. } => None,
+                };
+                if let Some(input) = input {
+                    self.infer_mir_operand(body, input);
+                }
+                MirShapeValue::default()
+            }
             runmat_mir::MirRvalue::WorkspaceFirstStaticProperty { .. } => MirShapeValue::default(),
             runmat_mir::MirRvalue::MetaClass(_)
             | runmat_mir::MirRvalue::Colon

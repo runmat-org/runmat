@@ -337,6 +337,18 @@ pub enum HirStmtKind {
         range: HirExpr,
         body: HirBlock,
     },
+    ParFor {
+        region: runmat_types::ParallelRegionId,
+        binding: BindingId,
+        range: HirExpr,
+        maximum_workers: Option<HirExpr>,
+        body: HirBlock,
+    },
+    Spmd {
+        region: runmat_types::ParallelRegionId,
+        header: crate::parallel::SpmdHeader<HirExpr>,
+        body: HirBlock,
+    },
     Switch {
         expr: HirExpr,
         cases: Vec<(HirExpr, HirBlock)>,

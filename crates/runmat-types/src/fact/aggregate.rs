@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CellFact {
     /// Conservative common fact for arbitrary element access.
     pub element: Box<ValueFact>,
@@ -12,12 +13,14 @@ pub struct CellFact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructFact {
     pub fields: BTreeMap<String, ValueFact>,
     pub fields_complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OutputListFact {
     pub outputs: Vec<ValueFact>,
     pub variadic: bool,

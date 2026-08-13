@@ -147,6 +147,9 @@ const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_CALL_CALLEE_INVALID: &str = "RunMat:MirMethodCallCalleeInvalid";
 const IDENT_MIR_METHOD_CALL_RECEIVER_MISSING: &str = "RunMat:MirMethodCallReceiverMissing";
+const IDENT_MIR_PARALLEL_CAPABILITY_UNSUPPORTED: &str = "RunMat:MirParallelCapabilityUnsupported";
+const IDENT_MIR_DISTRIBUTED_CAPABILITY_UNSUPPORTED: &str =
+    "RunMat:MirDistributedCapabilityUnsupported";
 
 fn encode_cell_end_offset(offset: isize) -> f64 {
     if offset <= 0 {
@@ -766,6 +769,13 @@ impl Compiler {
                         *exit_block,
                         &mut pending_jumps,
                     )?;
+                }
+                MirTerminatorKind::ParFor { .. } | MirTerminatorKind::Spmd { .. } => {
+                    return Err(CompileError::new(
+                        "parallel-region MIR requires the structured scheduler lowering capability",
+                    )
+                    .with_span(block.terminator.span)
+                    .with_identifier(IDENT_MIR_PARALLEL_CAPABILITY_UNSUPPORTED));
                 }
                 MirTerminatorKind::Return(values) => {
                     if exits_try_scope {
@@ -2319,6 +2329,11 @@ impl Compiler {
                 self.emit(Instr::Spawn);
                 Ok(())
             }
+            MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(self
+                .compile_error(
+                    "distributed-value and collective MIR requires the distributed runtime capability",
+                )
+                .with_identifier(IDENT_MIR_DISTRIBUTED_CAPABILITY_UNSUPPORTED)),
         }
     }
 
