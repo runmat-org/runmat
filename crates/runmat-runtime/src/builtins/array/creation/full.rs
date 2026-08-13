@@ -1,14 +1,9 @@
 //! MATLAB-compatible `full` conversion for sparse matrix values.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+use runmat_builtins::catalog::definitions::{
+    FULL_ERROR_INTERNAL, FULL_ERROR_INVALID_INPUT, FULL_INTEGER_SPARSE_EXTENSION,
 };
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{SparseTensor, Value};
 
@@ -19,15 +14,6 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "full";
-
-const INTEGER_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "full-integer-sparse",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sparse matrices with integer value storage are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FullIntegerSparseExtension"),
-};
-
-pub const FULL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_SPARSE_EXTENSION];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::full")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -57,92 +43,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Storage conversion executes outside numeric fusion.",
 };
 
-const FULL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Full matrix or already-full input.",
-}];
-
-const FULL_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sparse or full matrix.",
-}];
-
-const FULL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "A = full(S)",
-    inputs: &FULL_INPUT,
-    outputs: &FULL_OUTPUT,
-}];
-
-const FULL_DENSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "S",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "An already-full integer matrix is returned identically, preserving exact class, shape, values, storage, and residency.",
-    }];
-
-const FULL_SPARSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "S",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat sparse integer CSC storage densifies exactly to the same integer class; public sparse value storage is limited to double, single, and logical.",
-    }];
-
-pub const FULL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "A = full(S) with already-full integer S",
-        inputs: &FULL_DENSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host values pass through unchanged. Resident values retain the original handle and owning provider without dispatch through the ambient provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "A = full(S) with RunMat sparse integer S",
-        inputs: &FULL_SPARSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The host CSC payload is expanded into exact dense integer storage after the independent full-integer-sparse compatibility gate.",
-    },
-];
-
-const FULL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FULL.INVALID_INPUT",
-    identifier: Some("RunMat:full:InvalidInput"),
-    when: "Input is not a sparse matrix or already-full matrix value.",
-    message: "full: invalid input",
-};
-
-const FULL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FULL.INTERNAL",
-    identifier: Some("RunMat:full:Internal"),
-    when: "Sparse-to-full materialisation fails internally.",
-    message: "full: internal error",
-};
-
-const FULL_ERRORS: [BuiltinErrorDescriptor; 2] = [FULL_ERROR_INVALID_INPUT, FULL_ERROR_INTERNAL];
-
-pub const FULL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FULL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FULL_ERRORS,
-};
-
 fn full_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl std::fmt::Display,
@@ -170,19 +70,15 @@ fn invalid_input(type_name: &str) -> RuntimeError {
 
 #[runtime_builtin(
     name = "full",
-    category = "array/creation",
-    summary = "Convert sparse matrix storage to full storage.",
-    keywords = "full,sparse,dense,matrix,storage",
-    accel = "storage-conversion",
-    type_resolver(full_type),
-    descriptor(crate::builtins::array::creation::full::FULL_DESCRIPTOR),
-    extensions(crate::builtins::array::creation::full::FULL_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::creation::full::FULL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::full"
 )]
 async fn full_builtin(value: Value) -> BuiltinResult<Value> {
     if matches!(&value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()) {
-        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_SPARSE_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FULL_INTEGER_SPARSE_EXTENSION,
+            NAME,
+        )?;
     }
     match value {
         Value::SparseTensor(sparse) => full_from_sparse(sparse),
@@ -239,13 +135,6 @@ fn full_from_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
     Ok(Value::Tensor(tensor))
 }
 
-fn full_type(args: &[Type], _context: &ResolveContext) -> Type {
-    // RunMat does not currently have a sparse-specific `Type`; `Value::SparseTensor`
-    // is represented as `Type::Tensor`, so preserving the input type still models
-    // the dense tensor result of `full(S)`.
-    args.first().cloned().unwrap_or(Type::Unknown)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -255,6 +144,7 @@ pub(crate) mod tests {
         AccelProvider as _, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
         HostTensorView,
     };
+    use runmat_builtins::catalog::definitions::{FULL_EXTENSIONS, FULL_INTEGER_CAPABILITIES};
     use runmat_builtins::BuiltinIntegerInputAvailability;
     use runmat_value::{CellArray, IntegerStorage, SparseTensor, Tensor, Value};
 
@@ -410,18 +300,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_type_preserves_input_type() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        };
-        assert_eq!(
-            super::full_type(std::slice::from_ref(&ty), &ResolveContext::new(Vec::new())),
-            ty
-        );
-        assert_eq!(
-            super::full_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Unknown
-        );
+    fn full_uses_canonical_catalog_contract_without_legacy_registration() {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("full")
+            .expect("canonical full catalog entry");
+        assert_eq!(entry.contract.inference_rule.0, "array.full");
+        assert!(runmat_builtins::builtin_function_by_name("full").is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

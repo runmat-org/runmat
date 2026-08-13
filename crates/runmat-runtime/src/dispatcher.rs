@@ -312,6 +312,7 @@ async fn call_builtin_async_impl(
     ensure_wasm_builtins_registered();
 
     let _output_guard = crate::output_count::push_output_count(output_count);
+    let matching_bindings = crate::builtin::runtime_builtin_bindings_by_name(name);
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
@@ -321,7 +322,15 @@ async fn call_builtin_async_impl(
         }
     }
 
-    if matching_builtins.is_empty() {
+    if !matching_bindings.is_empty() && !matching_builtins.is_empty() {
+        return Err(build_runtime_error(format!(
+            "builtin `{name}` has both canonical and legacy runtime bindings"
+        ))
+        .with_identifier("RunMat:Catalog:DuplicateBindingAuthority")
+        .build());
+    }
+
+    if matching_bindings.is_empty() && matching_builtins.is_empty() {
         if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
             return compatibility_checked_builtin_result(name, args, result);
         }
@@ -352,17 +361,24 @@ async fn call_builtin_async_impl(
             categorized.push(b);
         }
     }
-    let matching_count = no_category.len() + categorized.len();
+    let matching_count = matching_bindings.len() + no_category.len() + categorized.len();
+    let implementations = matching_bindings
+        .into_iter()
+        .rev()
+        .map(|binding| binding.implementation)
+        .chain(
+            no_category
+                .into_iter()
+                .rev()
+                .chain(categorized.into_iter().rev())
+                .map(|builtin| builtin.implementation),
+        );
 
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
     let mut last_error = RuntimeError::new("unknown error");
-    for builtin in no_category
-        .into_iter()
-        .rev()
-        .chain(categorized.into_iter().rev())
-    {
-        let f = builtin.implementation;
+    for implementation in implementations {
+        let f = implementation;
         match (f)(args).await {
             Ok(result) => return compatibility_checked_builtin_result(name, args, result),
             Err(err) => {
@@ -532,7 +548,7 @@ pub(crate) async fn try_call_registered_instance_method(
     {
         return finalize_instance_method_result(method_name, receiver, result).map(Some);
     }
-    if runmat_builtins::builtin_function_by_name(&method.function_name).is_some()
+    if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != method_name
     {
         let result = call_builtin_async_impl(&method.function_name, args, output_count).await;
@@ -549,7 +565,7 @@ pub(crate) async fn try_call_registered_instance_method(
         {
             return finalize_instance_method_result(method_name, receiver, result).map(Some);
         }
-        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+        if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != method_name
         {
             let result = call_builtin_async_impl(&owner_qualified, args, output_count).await;
@@ -610,7 +626,7 @@ async fn try_call_registered_static_method(
     {
         return result.map(Some);
     }
-    if runmat_builtins::builtin_function_by_name(&method.function_name).is_some()
+    if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != qualified_name
     {
         return call_builtin_async_impl(&method.function_name, args, output_count)
@@ -628,7 +644,7 @@ async fn try_call_registered_static_method(
         {
             return result.map(Some);
         }
-        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+        if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != qualified_name
         {
             return call_builtin_async_impl(&owner_qualified, args, output_count)
@@ -680,7 +696,7 @@ async fn call_registered_class_constructor(
         {
             return Ok::<Option<Value>, RuntimeError>(Some(result?));
         }
-        if runmat_builtins::builtin_function_by_name(&ctor.function_name).is_some()
+        if runmat_builtins::builtin_name_is_known(&ctor.function_name)
             && ctor.function_name != class_name
         {
             let result = call_builtin_async_impl(&ctor.function_name, args, output_count).await?;
@@ -695,8 +711,7 @@ async fn call_registered_class_constructor(
         {
             return Ok::<Option<Value>, RuntimeError>(Some(result?));
         }
-        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
-            && owner_qualified != class_name
+        if runmat_builtins::builtin_name_is_known(&owner_qualified) && owner_qualified != class_name
         {
             let result = call_builtin_async_impl(&owner_qualified, args, output_count).await?;
             return Ok::<Option<Value>, RuntimeError>(Some(result));
@@ -880,6 +895,16 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn catalog_backed_builtin_dispatches_without_legacy_authority() {
+        assert!(runmat_builtins::builtin_function_by_name("full").is_none());
+        let input = Value::Num(7.0);
+        assert_eq!(
+            call_builtin("full", std::slice::from_ref(&input)).unwrap(),
+            input
+        );
+    }
 
     #[test]
     fn compatibility_errors_never_trigger_automatic_gpu_gather_retry() {

@@ -19,6 +19,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 pub mod analysis;
+pub mod builtin;
 pub mod dispatcher;
 pub mod geometry;
 pub mod operations;

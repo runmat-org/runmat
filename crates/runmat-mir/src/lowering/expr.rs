@@ -610,8 +610,12 @@ fn requested_output_count_for_arg_expansion(requested: &RequestedOutputCount) ->
 fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
     match callee {
         MirCallee::Static(CallableIdentity::Builtin(id)) => {
-            runmat_builtins::builtin_function_by_name(&id.0)
-                .map(|builtin| builtin.semantics())
+            runmat_builtins::builtin_catalog_entry_by_name(&id.0)
+                .map(|entry| entry.legacy_semantics())
+                .or_else(|| {
+                    runmat_builtins::builtin_function_by_name(&id.0)
+                        .map(|builtin| builtin.semantics())
+                })
                 .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0))
                 .unwrap_or_else(BuiltinSemantics::unknown)
         }

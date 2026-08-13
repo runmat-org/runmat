@@ -48,6 +48,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut extensions_path: Option<syn::Path> = None;
     let mut integer_capabilities_path: Option<syn::Path> = None;
     let mut integer_audit_path: Option<syn::Path> = None;
+    let mut binding_variant_lit: Option<LitStr> = None;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     for arg in args {
@@ -93,6 +94,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         builtin_path_lit = Some(ls);
                     } else {
                         panic!("builtin_path must be a string literal");
+                    }
+                } else if path.is_ident("binding_variant") {
+                    if let Lit::Str(ls) = lit {
+                        binding_variant_lit = Some(ls);
+                    } else {
+                        panic!("binding_variant must be a string literal");
                     }
                 } else if path.is_ident("type_resolver") {
                     if let Lit::Str(ls) = lit {
@@ -426,6 +433,30 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         .with_integer_audit(#integer_audit_expr)
     };
 
+    if binding_variant_lit.is_some()
+        && (category_lit.is_some()
+            || summary_lit.is_some()
+            || keywords_lit.is_some()
+            || errors_lit.is_some()
+            || related_lit.is_some()
+            || introduced_lit.is_some()
+            || status_lit.is_some()
+            || examples_lit.is_some()
+            || !accel_values.is_empty()
+            || type_resolver_path.is_some()
+            || type_resolver_ctx_path.is_some()
+            || descriptor_path.is_some()
+            || extensions_path.is_some()
+            || integer_capabilities_path.is_some()
+            || integer_audit_path.is_some()
+            || sink_flag
+            || suppress_auto_output_flag)
+    {
+        panic!(
+            "catalog-backed runtime bindings may declare only name, binding_variant, and builtin_path"
+        );
+    }
+
     let doc_expr = quote! {
         runmat_builtins::BuiltinDoc {
             name: #name_str,
@@ -447,19 +478,46 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let helper_ident = format_ident!("__runmat_wasm_register_builtin_{}", ident);
     let builtin_expr_helper = builtin_expr.clone();
     let doc_expr_helper = doc_expr.clone();
-    let wasm_helper = quote! {
-        #[cfg(target_arch = "wasm32")]
-        #[allow(non_snake_case)]
-        pub(crate) fn #helper_ident() {
-            runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
-            runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
-        }
-    };
-    let register_native = quote! {
-        #[cfg(not(target_arch = "wasm32"))]
-        runmat_builtins::inventory::submit! { #builtin_expr }
-        #[cfg(not(target_arch = "wasm32"))]
-        runmat_builtins::inventory::submit! { #doc_expr }
+    let (wasm_helper, register_native) = if let Some(variant) = binding_variant_lit {
+        let binding_expr = quote! {
+            crate::builtin::RuntimeBuiltinBinding::new(
+                runmat_builtins::BuiltinBindingIdentity {
+                    builtin: runmat_builtins::BuiltinCatalogIdentity { name: #name_str },
+                    variant: #variant,
+                },
+                #wrapper_ident,
+            )
+        };
+        (
+            quote! {
+                #[cfg(target_arch = "wasm32")]
+                #[allow(non_snake_case)]
+                pub(crate) fn #helper_ident() {
+                    crate::builtin::wasm_registry::submit(#binding_expr);
+                }
+            },
+            quote! {
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #binding_expr }
+            },
+        )
+    } else {
+        (
+            quote! {
+                #[cfg(target_arch = "wasm32")]
+                #[allow(non_snake_case)]
+                pub(crate) fn #helper_ident() {
+                    runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
+                    runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
+                }
+            },
+            quote! {
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #builtin_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #doc_expr }
+            },
+        )
     };
     append_wasm_block(quote! {
         #builtin_path::#helper_ident();

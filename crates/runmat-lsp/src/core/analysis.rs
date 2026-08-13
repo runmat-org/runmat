@@ -391,7 +391,25 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
         }
     }
 
-    // Built-in functions (rich docs)
+    // Canonical catalog entries are executor-neutral and remain available even
+    // when no runtime implementation is linked into the language server.
+    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&ident) {
+        return Some(Hover {
+            contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
+                kind: lsp_types::MarkupKind::Markdown,
+                value: docs::build_catalog_hover(entry),
+            }),
+            range: Some(
+                TextRange {
+                    start: token.start,
+                    end: token.end,
+                }
+                .to_lsp_range(text),
+            ),
+        });
+    }
+
+    // Legacy built-in functions (rich docs)
     if let Some(func) = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|f| f.name.eq_ignore_ascii_case(&ident))
@@ -652,6 +670,24 @@ pub fn signature_help_at(
 ) -> Option<SignatureHelp> {
     let offset = position_to_offset(_text, _position);
     let name = qualified_call_name_at_offset(&_analysis.tokens, offset)?;
+    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
+        if let Some(labels) = docs::catalog_signature_labels(entry) {
+            let signatures = labels
+                .into_iter()
+                .map(|label| lsp_types::SignatureInformation {
+                    label,
+                    documentation: None,
+                    parameters: None,
+                    active_parameter: None,
+                })
+                .collect();
+            return Some(SignatureHelp {
+                signatures,
+                active_signature: Some(0),
+                active_parameter: None,
+            });
+        }
+    }
     if let Some(func) = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|builtin| builtin.name.eq_ignore_ascii_case(&name))
@@ -1342,6 +1378,12 @@ fn completion_from_semantic(semantic: &AnalysisModel) -> Vec<CompletionItem> {
         }
         items.push(function_completion(func));
     }
+    for entry in runmat_builtins::builtin_catalog_entries() {
+        if entry.descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal {
+            continue;
+        }
+        items.push(catalog_completion(entry));
+    }
     for func in runmat_builtins::builtin_functions() {
         if func.descriptor.is_some_and(|descriptor| {
             descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal
@@ -1354,6 +1396,22 @@ fn completion_from_semantic(semantic: &AnalysisModel) -> Vec<CompletionItem> {
         items.push(constant_completion(constant));
     }
     items
+}
+
+fn catalog_completion(entry: &runmat_builtins::BuiltinCatalogEntry) -> CompletionItem {
+    CompletionItem {
+        label: entry.identity.name.to_string(),
+        kind: Some(lsp_types::CompletionItemKind::FUNCTION),
+        detail: docs::catalog_completion_signature_label(entry)
+            .or_else(|| Some(format!("builtin: {}", entry.identity.name))),
+        documentation: Some(lsp_types::Documentation::MarkupContent(
+            lsp_types::MarkupContent {
+                kind: lsp_types::MarkupKind::Markdown,
+                value: docs::build_catalog_hover(entry),
+            },
+        )),
+        ..Default::default()
+    }
 }
 
 fn variable_completion(var: &VariableSymbol) -> CompletionItem {
@@ -1924,6 +1982,29 @@ mod tests {
             value.contains("A = zeros(n)"),
             "expected descriptor signature in hover header, got:\n{value}"
         );
+    }
+
+    #[test]
+    fn catalog_backed_builtin_remains_visible_without_legacy_registration() {
+        assert!(runmat_builtins::builtin_catalog_entry_by_name("full").is_some());
+        assert!(runmat_builtins::builtin_function_by_name("full").is_none());
+
+        let text = "full(1);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let hover = hover_at(text, &analysis, &position).expect("catalog hover");
+        let lsp_types::HoverContents::Markup(markup) = hover.contents else {
+            panic!("catalog hover should use markdown")
+        };
+        assert!(markup.value.contains("A = full(S)"), "{}", markup.value);
+
+        let signatures = signature_help_at(text, &analysis, &position)
+            .expect("catalog signature help")
+            .signatures;
+        assert_eq!(signatures[0].label, "A = full(S)");
+
+        let completions = completion_at(text, &analysis, &position);
+        assert!(completions.iter().any(|item| item.label == "full"));
     }
 
     #[test]

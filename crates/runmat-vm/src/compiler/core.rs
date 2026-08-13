@@ -3074,8 +3074,8 @@ impl Compiler {
         if is_vm_intrinsic_builtin(&candidate) {
             return Ok(candidate);
         }
-        if let Some(builtin) = runmat_builtins::builtin_function_by_name(&candidate) {
-            return Ok(builtin.name.to_string());
+        if runmat_builtins::builtin_name_is_known(&candidate) {
+            return Ok(candidate);
         }
         Err(CompileError::new(format!("unknown builtin id {candidate}"))
             .with_identifier(IDENT_MIR_BUILTIN_UNKNOWN))

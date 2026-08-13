@@ -189,7 +189,7 @@ impl CallableDescriptor {
                 CallableFallbackPolicy::None,
             );
         }
-        if runmat_builtins::builtin_function_by_name(name).is_some() {
+        if runmat_builtins::builtin_name_is_known(name) {
             return (
                 CallableIdentity::Builtin(BuiltinId(name.to_string())),
                 CallableFallbackPolicy::None,

@@ -14,9 +14,7 @@ const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
 
 fn has_builtin_member_subsref_protocol(class_name: &str) -> bool {
     let qualified = format!("{class_name}.{}", ObjectIndexOp::Subsref.protocol_name());
-    runmat_builtins::builtin_functions()
-        .iter()
-        .any(|builtin| builtin.name == qualified)
+    runmat_builtins::builtin_name_is_known(&qualified)
 }
 
 fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_name: &str) -> bool {

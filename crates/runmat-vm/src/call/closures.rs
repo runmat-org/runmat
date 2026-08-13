@@ -8,7 +8,6 @@ use crate::call::shared::{
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
-use runmat_builtins::{builtin_function_by_name, builtin_functions};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 use runmat_types::MemberAccess;
@@ -143,7 +142,7 @@ fn method_function_identity(
             CallableFallbackPolicy::None,
         );
     }
-    if !trimmed.is_empty() && builtin_function_by_name(trimmed).is_some() {
+    if !trimmed.is_empty() && runmat_builtins::builtin_name_is_known(trimmed) {
         return runtime_named_identity(trimmed);
     }
     if trimmed.is_empty() {
@@ -505,7 +504,7 @@ pub fn load_method_closure(
                 }));
             }
             let qualified_name = external_qualified_display_name(&cls, &name);
-            if builtin_functions().iter().any(|b| b.name == qualified_name) {
+            if runmat_builtins::builtin_name_is_known(&qualified_name) {
                 Ok(Value::Closure(Closure {
                     bound_function:
                         runmat_runtime::user_functions::resolve_semantic_function_by_name(

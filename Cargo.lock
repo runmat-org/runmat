@@ -6299,6 +6299,7 @@ dependencies = [
  "runmat-types",
  "runmat-value",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
 ]
 

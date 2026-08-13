@@ -1,6 +1,8 @@
 pub use inventory;
 mod class_declarations;
 pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
+pub mod catalog;
+pub use catalog::*;
 mod catalog_fingerprint;
 pub use catalog_fingerprint::{builtin_catalog_fingerprint, BUILTIN_CATALOG_SCHEMA};
 pub use runmat_types::{LiteralContext as ResolveContext, LiteralValue};
@@ -523,198 +525,6 @@ pub fn type_resolver_kind_ctx(resolver: TypeResolverWithContext) -> TypeResolver
     TypeResolverKind::WithContext(resolver)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinOutputMode {
-    Fixed,
-    ByRequestedOutputCount,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinCompletionPolicy {
-    Public,
-    MethodOnly,
-    HiddenInternal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinParamArity {
-    Required,
-    Optional,
-    Variadic,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinParamType {
-    Any,
-    NumericScalar,
-    IntegerScalar,
-    StringScalar,
-    NumericArray,
-    LogicalArray,
-    SizeArg,
-    LikePrototype,
-    AxesHandle,
-    StyleSpec,
-    PropertyName,
-    PropertyValue,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BuiltinParamDescriptor {
-    pub name: &'static str,
-    pub ty: BuiltinParamType,
-    pub arity: BuiltinParamArity,
-    pub default: Option<&'static str>,
-    pub description: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BuiltinSignatureDescriptor {
-    pub label: &'static str,
-    pub inputs: &'static [BuiltinParamDescriptor],
-    pub outputs: &'static [BuiltinParamDescriptor],
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BuiltinErrorDescriptor {
-    pub code: &'static str,
-    pub identifier: Option<&'static str>,
-    pub when: &'static str,
-    pub message: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BuiltinDescriptor {
-    pub signatures: &'static [BuiltinSignatureDescriptor],
-    pub output_mode: BuiltinOutputMode,
-    pub completion_policy: BuiltinCompletionPolicy,
-    pub errors: &'static [BuiltinErrorDescriptor],
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerClass {
-    Int8,
-    Int16,
-    Int32,
-    Int64,
-    Uint8,
-    Uint16,
-    Uint32,
-    Uint64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerScalarDoubleRule {
-    NotApplicable,
-    Allowed,
-    AllowedExceptWith64BitInteger,
-    Rejected,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerInputAvailability {
-    Documented,
-    RunMatOnly,
-    Rejected,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BuiltinIntegerInputCapability {
-    pub name: &'static str,
-    pub classes: &'static [BuiltinIntegerClass],
-    pub availability: BuiltinIntegerInputAvailability,
-    pub scalar_double: BuiltinIntegerScalarDoubleRule,
-    pub notes: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerComputationDomain {
-    ExactInteger,
-    FloatingPoint,
-    Predicate,
-    Structural,
-    FunctionSpecific,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerOutputClassRule {
-    PreserveInput,
-    PreserveNondoubleInput,
-    Double,
-    Logical,
-    OptionDependent,
-    NotApplicable,
-    FunctionSpecific,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerOverflowRule {
-    Saturate,
-    Error,
-    NotApplicable,
-    EvidenceOpen,
-    FunctionSpecific,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerBackendRule {
-    HostOnly,
-    HostAndGpu,
-    GatherFallback,
-    GpuRestricted,
-    FunctionSpecific,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerOverloadKind {
-    ScalarOnly,
-    ElementwiseShapePreserving,
-    SameSizeOrScalar,
-    BroadcastCompatible,
-    StructuralParameter,
-    Multiple,
-    FunctionSpecific,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BuiltinIntegerCapabilityDescriptor {
-    pub form: &'static str,
-    pub inputs: &'static [BuiltinIntegerInputCapability],
-    pub computation_domain: BuiltinIntegerComputationDomain,
-    pub output_class: BuiltinIntegerOutputClassRule,
-    pub overflow: BuiltinIntegerOverflowRule,
-    pub backend: BuiltinIntegerBackendRule,
-    pub overload: BuiltinIntegerOverloadKind,
-    pub notes: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinIntegerAuditKind {
-    AliasOf,
-    NotApplicable,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct BuiltinIntegerAuditDescriptor {
-    pub kind: BuiltinIntegerAuditKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub canonical_builtin: Option<&'static str>,
-    pub notes: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinExtensionMode {
-    RunMatOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct BuiltinExtensionDescriptor {
-    pub id: &'static str,
-    pub mode: BuiltinExtensionMode,
-    pub description: &'static str,
-    pub error_identifier: Option<&'static str>,
-}
-
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -887,6 +697,10 @@ pub fn builtin_function_by_name(name: &str) -> Option<&'static BuiltinFunction> 
         .copied()
 }
 
+pub fn builtin_name_is_known(name: &str) -> bool {
+    builtin_catalog_entry_by_name(name).is_some() || builtin_function_by_name(name).is_some()
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn builtin_function_by_name(name: &str) -> Option<&'static BuiltinFunction> {
     wasm_registry::builtin_functions()
@@ -895,8 +709,9 @@ pub fn builtin_function_by_name(name: &str) -> Option<&'static BuiltinFunction> 
 }
 
 pub fn suppresses_auto_output(name: &str) -> bool {
-    builtin_function_by_name(name)
-        .map(|f| f.suppress_auto_output)
+    builtin_catalog_entry_by_name(name)
+        .map(|entry| entry.suppress_auto_output)
+        .or_else(|| builtin_function_by_name(name).map(|function| function.suppress_auto_output))
         .unwrap_or(false)
 }
 

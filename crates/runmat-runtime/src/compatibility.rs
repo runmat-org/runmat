@@ -2,6 +2,7 @@
 
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{BuiltinExtensionDescriptor, BuiltinExtensionMode};
+pub use runmat_builtins::{SPARSE_EXTENSIONS, SPARSE_INTEGER_EXTENSION};
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::cell::Cell;
@@ -21,15 +22,6 @@ pub fn runmat_extensions_enabled() -> bool {
 pub fn set_runmat_extensions_enabled(enabled: bool) {
     RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(enabled));
 }
-
-pub const SPARSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sparse-integer-storage",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sparse integer storage is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SparseIntegerExtension"),
-};
-
-pub const SPARSE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPARSE_INTEGER_EXTENSION];
 
 pub fn ensure_builtin_extension_enabled(
     extension: &BuiltinExtensionDescriptor,

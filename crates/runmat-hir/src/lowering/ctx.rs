@@ -717,8 +717,12 @@ impl LoweringCtx {
             _ => return Ok(false),
         };
 
-        let Some(semantics) = runmat_builtins::builtin_function_by_name(call_name)
-            .map(|builtin| builtin.semantics())
+        let Some(semantics) = runmat_builtins::builtin_catalog_entry_by_name(call_name)
+            .map(|entry| entry.legacy_semantics())
+            .or_else(|| {
+                runmat_builtins::builtin_function_by_name(call_name)
+                    .map(|builtin| builtin.semantics())
+            })
             .or_else(|| runmat_builtins::builtin_semantics_for_name(call_name))
         else {
             return Ok(false);
@@ -758,8 +762,11 @@ impl LoweringCtx {
         {
             return Ok(None);
         }
-        if let Some(semantics) = runmat_builtins::builtin_function_by_name(name)
-            .map(|builtin| builtin.semantics())
+        if let Some(semantics) = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .map(|entry| entry.legacy_semantics())
+            .or_else(|| {
+                runmat_builtins::builtin_function_by_name(name).map(|builtin| builtin.semantics())
+            })
             .or_else(|| runmat_builtins::builtin_semantics_for_name(name))
         {
             return Ok(semantics.workspace_effect);
@@ -3867,9 +3874,7 @@ fn is_builtin(name: &str) -> bool {
     if matches!(name, NARGIN_BUILTIN_NAME | NARGOUT_BUILTIN_NAME) {
         return true;
     }
-    runmat_builtins::builtin_functions()
-        .iter()
-        .any(|builtin| builtin.name == name)
+    runmat_builtins::builtin_name_is_known(name)
         || runmat_builtins::builtin_semantics_for_name(name).is_some()
 }
 

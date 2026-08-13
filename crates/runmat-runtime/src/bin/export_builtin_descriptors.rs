@@ -48,26 +48,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // are linked before we read runmat-builtins' global registry.
     let _ = runmat_runtime::object_property_getter_name("__descriptor_export_probe");
 
-    let mut builtins = runmat_builtins::builtin_functions()
-        .into_iter()
-        .filter_map(|builtin| {
-            let descriptor = builtin.descriptor?;
+    let mut builtins = runmat_builtins::builtin_catalog_entries()
+        .iter()
+        .filter_map(|entry| {
+            let descriptor = entry.descriptor;
             if !include_non_public
                 && descriptor.completion_policy != BuiltinCompletionPolicy::Public
             {
                 return None;
             }
             Some(BuiltinDescriptorExport {
-                name: builtin.name,
+                name: entry.identity.name,
                 output_mode: descriptor.output_mode,
                 completion_policy: descriptor.completion_policy,
                 signatures: descriptor.signatures,
                 errors: descriptor.errors,
-                extensions: builtin.extensions,
-                integer_capabilities: builtin.integer_capabilities,
-                integer_audit: builtin.integer_audit,
+                extensions: entry.extensions,
+                integer_capabilities: entry.integer_capabilities,
+                integer_audit: entry.integer_audit,
             })
         })
+        .chain(
+            runmat_builtins::builtin_functions()
+                .into_iter()
+                .filter_map(|builtin| {
+                    let descriptor = builtin.descriptor?;
+                    if !include_non_public
+                        && descriptor.completion_policy != BuiltinCompletionPolicy::Public
+                    {
+                        return None;
+                    }
+                    Some(BuiltinDescriptorExport {
+                        name: builtin.name,
+                        output_mode: descriptor.output_mode,
+                        completion_policy: descriptor.completion_policy,
+                        signatures: descriptor.signatures,
+                        errors: descriptor.errors,
+                        extensions: builtin.extensions,
+                        integer_capabilities: builtin.integer_capabilities,
+                        integer_audit: builtin.integer_audit,
+                    })
+                }),
+        )
         .collect::<Vec<_>>();
 
     builtins.sort_by(|a, b| a.name.cmp(b.name));
