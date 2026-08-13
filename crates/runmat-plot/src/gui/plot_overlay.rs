@@ -498,6 +498,7 @@ impl PlotOverlay {
     /// their text at font scale `ts`. Returns `(title_h, title_gap, x_h, x_gap)`.
     /// The bands follow the font size, so shrinking `ts` shrinks the bands with
     /// the text they must contain rather than clipping fixed-size text.
+    #[allow(clippy::too_many_arguments)]
     fn vertical_band_heights(
         &self,
         plot_renderer: &PlotRenderer,
