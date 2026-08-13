@@ -145,6 +145,98 @@ for (const pilot of manifest.representative_pilots ?? []) {
   if (!catalogNames.has(pilot.identity)) fail(`pilot ${pilot.identity} is absent from the generated builtin catalog`);
 }
 
+if ((manifest.completed_slices ?? []).includes("R06-pilots")) {
+  const expectedPilots = ["abs", "feval", "full", "gather", "struct", "zeros"];
+  if (JSON.stringify([...pilotIdentities].sort()) !== JSON.stringify(expectedPilots)) {
+    fail(`R06 pilot identities must be exactly ${expectedPilots.join(", ")}`);
+  }
+
+  const catalogRegistryPath = "crates/runmat-builtins/src/catalog/registry.rs";
+  const catalogRegistry = fs.readFileSync(path.join(repo, catalogRegistryPath), "utf8");
+  const inferenceRegistryPath = "crates/runmat-builtins/src/catalog/inference.rs";
+  const inferenceRegistry = fs.readFileSync(path.join(repo, inferenceRegistryPath), "utf8");
+  const staticDefinitionSources = new Set();
+
+  for (const pilot of manifest.representative_pilots) {
+    for (const field of ["catalog_definition", "runtime_binding", "inference_rule", "maturity", "status"]) {
+      if (typeof pilot[field] !== "string" || pilot[field].length === 0) {
+        fail(`completed R06 pilot ${pilot.identity} has invalid ${field}`);
+      }
+    }
+    if (pilot.status !== "complete") fail(`R06 pilot ${pilot.identity} is not complete`);
+    if (!["Complete", "DynamicByDesign"].includes(pilot.maturity)) {
+      fail(`R06 pilot ${pilot.identity} has unsupported maturity ${pilot.maturity}`);
+    }
+
+    const definitionPath = path.join(repo, pilot.catalog_definition);
+    const bindingPath = path.join(repo, pilot.runtime_binding);
+    if (!fs.existsSync(definitionPath)) fail(`R06 pilot definition does not exist: ${pilot.catalog_definition}`);
+    if (!fs.existsSync(bindingPath)) fail(`R06 pilot binding does not exist: ${pilot.runtime_binding}`);
+    if (!fs.existsSync(definitionPath) || !fs.existsSync(bindingPath)) continue;
+
+    staticDefinitionSources.add(pilot.catalog_definition);
+    const definition = fs.readFileSync(definitionPath, "utf8");
+    for (const declaration of [
+      `BuiltinCatalogIdentity { name: "${pilot.identity}" }`,
+      `BuiltinContractMaturity::${pilot.maturity}`,
+      `BuiltinInferenceRuleId("${pilot.inference_rule}")`,
+    ]) {
+      if (!definition.includes(declaration)) {
+        fail(`R06 pilot ${pilot.identity} definition is missing ${declaration}`);
+      }
+    }
+
+    const binding = fs.readFileSync(bindingPath, "utf8");
+    const attributes = [...binding.matchAll(/#\[(?:runmat_macros::)?runtime_builtin\(([\s\S]*?)\)\]/g)]
+      .map((match) => match[1])
+      .filter((attribute) => new RegExp(`\\bname\\s*=\\s*"${escapeRegex(pilot.identity)}"`).test(attribute));
+    if (attributes.length !== 1) {
+      fail(`R06 pilot ${pilot.identity} must have exactly one runtime binding annotation; found ${attributes.length}`);
+    } else {
+      const attribute = attributes[0];
+      if (!/\bbinding_variant\s*=\s*"default"/.test(attribute)) {
+        fail(`R06 pilot ${pilot.identity} runtime annotation has no default binding identity`);
+      }
+      for (const legacyField of [
+        "category", "summary", "keywords", "type_resolver", "descriptor", "extensions",
+        "integer_capabilities", "integer_audit", "semantics", "suppress_auto_output",
+      ]) {
+        if (new RegExp(`\\b${legacyField}\\s*(?:=|\\()`).test(attribute)) {
+          fail(`R06 pilot ${pilot.identity} runtime annotation retains static ${legacyField} authority`);
+        }
+      }
+    }
+
+    const catalogSymbol = `${pilot.identity.toUpperCase()}_CATALOG_ENTRY`;
+    if (!catalogRegistry.includes(`&${catalogSymbol}`)) {
+      fail(`${catalogRegistryPath} does not register R06 pilot ${pilot.identity}`);
+    }
+    if (!inferenceRegistry.includes(`"${pilot.inference_rule}"`)) {
+      fail(`${inferenceRegistryPath} does not register R06 pilot rule ${pilot.inference_rule}`);
+    }
+  }
+
+  for (const definitionPath of staticDefinitionSources) {
+    const definition = fs.readFileSync(path.join(repo, definitionPath), "utf8");
+    for (const forbidden of ["runmat_value", "BuiltinFunction", "BuiltinFuture", "fn(&[Value])"]) {
+      if (definition.includes(forbidden)) {
+        fail(`static catalog definition ${definitionPath} contains executable/value authority ${forbidden}`);
+      }
+    }
+  }
+
+  const orderedSymbols = [...catalogRegistry.matchAll(/&([A-Z_]+)_CATALOG_ENTRY/g)]
+    .map((match) => match[1].toLowerCase());
+  if (JSON.stringify(orderedSymbols) !== JSON.stringify(expectedPilots)) {
+    fail(`${catalogRegistryPath} is not the complete deterministic R06 pilot order`);
+  }
+
+  const fingerprint = fs.readFileSync(path.join(repo, "crates/runmat-builtins/src/catalog_fingerprint.rs"), "utf8");
+  if (!fingerprint.includes("canonical_catalog_fingerprint(builtin_catalog_entries())")) {
+    fail("execution catalog fingerprint does not compose the canonical R06 catalog");
+  }
+}
+
 if (manifest.stage === "structural-baseline" && fs.existsSync(path.join(repo, "crates/runmat-value"))) {
   fail("runmat-value exists while the manifest still declares structural-baseline ownership; R03 must update the manifest atomically");
 }
