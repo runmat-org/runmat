@@ -164,12 +164,28 @@ for (const [runtimeOwner, legacyOwner, label] of [
   ["crates/runmat-runtime/src/call/descriptor.rs", "crates/runmat-vm/src/call/descriptor.rs", "callable descriptor"],
   ["crates/runmat-runtime/src/call/identity.rs", null, "callable identity operations"],
   ["crates/runmat-runtime/src/object/indexing.rs", null, "object indexing protocol"],
+  ["crates/runmat-runtime/src/object/dispatch.rs", null, "object dispatch"],
+  ["crates/runmat-runtime/src/call/closures.rs", null, "closure semantics"],
 ]) {
   const owner = path.join(repo, runtimeOwner);
   if (!fs.existsSync(owner)) throw new Error(`missing R10 runtime ${label} owner ${relative(owner)}`);
   if (legacyOwner) {
     const legacy = path.join(repo, legacyOwner);
     if (fs.existsSync(legacy)) throw new Error(`legacy VM ${label} authority remains at ${relative(legacy)}`);
+  }
+}
+
+const vmClosureAdapter = path.join(repo, "crates/runmat-vm/src/call/closures.rs");
+const vmClosureAdapterText = fs.readFileSync(vmClosureAdapter, "utf8");
+for (const legacySemanticOwner of [
+  "call_method_or_member_index_with_outputs",
+  "call_rhs_operator_method_ordered_with_outputs",
+  "load_method_closure",
+  "method_access_permitted",
+]) {
+  const declaration = new RegExp(`(?:pub(?:\\(crate\\))?\\s+)?(?:async\\s+)?fn\\s+${legacySemanticOwner}\\b`);
+  if (declaration.test(vmClosureAdapterText)) {
+    throw new Error(`legacy VM closure/object semantic owner ${legacySemanticOwner} remains at ${relative(vmClosureAdapter)}`);
   }
 }
 

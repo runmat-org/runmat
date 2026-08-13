@@ -1,7 +1,4 @@
-use crate::call::shared::{
-    call_object_index_descriptor_method, call_object_index_descriptor_method_with_outputs,
-    class_defines_member_subsasgn, class_defines_member_subsref, expand_brace_values,
-};
+use crate::call::shared::expand_brace_values;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
 use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
 use runmat_runtime::call::descriptor::{
@@ -20,6 +17,10 @@ use runmat_runtime::indexing::selectors::{
 use runmat_runtime::indexing::write_linear as idx_write_linear;
 use runmat_runtime::indexing::write_slice as idx_write_slice;
 use runmat_runtime::indexing::EndExpr;
+use runmat_runtime::object::dispatch::{
+    call_object_index_descriptor_method, call_object_index_descriptor_method_with_outputs,
+    class_defines_member_subsasgn, class_defines_member_subsref,
+};
 use runmat_runtime::object::indexing::{
     ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector, ObjectParenExprSelectorSpec,
 };

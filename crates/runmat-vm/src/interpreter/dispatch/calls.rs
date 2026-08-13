@@ -769,7 +769,7 @@ async fn handle_method_or_member_index_call_inner(
     let current_class_context = current_class_context_from_function_name(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = call_closures::call_method_or_member_index_with_outputs(
+    let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
         base,
         identity,
         args,
@@ -802,7 +802,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let current_class_context = current_class_context_from_function_name(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = call_closures::call_method_or_member_index_with_outputs(
+    let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
         base,
         identity,
         args,
@@ -821,7 +821,7 @@ pub fn handle_load_method(
     current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {
     let base = crate::interpreter::stack::pop_value(stack)?;
-    let value = call_closures::load_method_closure(
+    let value = runmat_runtime::call::closures::load_method_closure(
         base,
         name,
         (!current_function_name.is_empty()).then_some(current_function_name),

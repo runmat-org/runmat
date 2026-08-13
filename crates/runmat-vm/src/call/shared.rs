@@ -1,9 +1,6 @@
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId};
 use runmat_runtime::call::arguments::ArgumentSpec;
-use runmat_runtime::object::indexing::{
-    build_matlab_substruct_arg, class_name_from_base, ObjectIndexDescriptor, ObjectIndexOp,
-    ObjectIndexSelector,
-};
+use runmat_runtime::object::dispatch::call_object_index_descriptor_method_with_outputs;
+use runmat_runtime::object::indexing::{ObjectIndexDescriptor, ObjectIndexSelector};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::Value;
 use std::future::Future;
@@ -17,14 +14,6 @@ pub fn expand_cell_indices(
 
 pub fn expand_all_cell(cell: &runmat_value::CellArray) -> Result<Vec<Value>, RuntimeError> {
     runmat_runtime::object::cell::expand_all_cell_values(cell)
-}
-
-pub(crate) fn object_property_getter_name(field: &str) -> String {
-    runmat_runtime::object_property_getter_name(field)
-}
-
-pub(crate) fn object_property_setter_name(field: &str) -> String {
-    runmat_runtime::object_property_setter_name(field)
 }
 
 pub(crate) async fn expand_brace_values(
@@ -87,204 +76,6 @@ pub(crate) async fn expand_brace_values(
         }
     }
     Ok(values)
-}
-
-pub(crate) async fn call_getfield_with_indices(
-    base: Value,
-    field: String,
-    indices: Vec<Value>,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    let mut getfield_args = Vec::with_capacity(3);
-    getfield_args.push(base);
-    getfield_args.push(Value::String(field));
-    if !indices.is_empty() {
-        let idx_count = indices.len();
-        let idx_cell = build_cell_array_with_shape(indices, 1, idx_count, "getfield idx build")?;
-        getfield_args.push(Value::Cell(idx_cell));
-    }
-    runmat_runtime::call_builtin_async_with_outputs("getfield", &getfield_args, requested_outputs)
-        .await
-}
-
-pub(crate) async fn call_object_operator_method(
-    base: Value,
-    method: &str,
-    arg: Value,
-) -> Result<Value, RuntimeError> {
-    crate::call::closures::call_method_or_member_index_with_outputs(
-        base,
-        CallableIdentity::Method(MethodId(method.to_string())),
-        vec![arg],
-        1,
-        None,
-        CallableFallbackPolicy::ObjectDispatch,
-    )
-    .await
-}
-
-pub(crate) async fn call_rhs_object_operator_method_ordered(
-    lhs: Value,
-    rhs: Value,
-    method: &str,
-) -> Result<Value, RuntimeError> {
-    crate::call::closures::call_rhs_operator_method_ordered_with_outputs(
-        lhs,
-        rhs,
-        method.to_string(),
-        1,
-        None,
-    )
-    .await
-}
-
-pub(crate) async fn call_object_named_method_with_outputs(
-    base: Value,
-    method: String,
-    args: Vec<Value>,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    crate::call::closures::call_method_or_member_index_with_outputs(
-        base,
-        CallableIdentity::Method(MethodId(method.clone())),
-        args,
-        requested_outputs,
-        None,
-        CallableFallbackPolicy::ObjectDispatch,
-    )
-    .await
-}
-
-pub(crate) async fn call_object_property_getter_with_outputs(
-    base: Value,
-    field: &str,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    call_object_named_method_with_outputs(
-        base,
-        object_property_getter_name(field),
-        vec![],
-        requested_outputs,
-    )
-    .await
-}
-
-pub(crate) async fn call_object_property_setter_with_outputs(
-    base: Value,
-    field: &str,
-    value: Value,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    call_object_named_method_with_outputs(
-        base,
-        object_property_setter_name(field),
-        vec![value],
-        requested_outputs,
-    )
-    .await
-}
-
-async fn call_object_member_method(
-    base: Value,
-    op: ObjectIndexOp,
-    field: String,
-    rhs: Option<Value>,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::member(base, op, field, rhs)).await
-}
-
-pub(crate) async fn call_object_member_subsref(
-    base: Value,
-    field: String,
-) -> Result<Value, RuntimeError> {
-    call_object_member_method(base, ObjectIndexOp::Subsref, field, None).await
-}
-
-pub(crate) async fn call_object_member_subsasgn(
-    base: Value,
-    field: String,
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    call_object_member_method(base, ObjectIndexOp::Subsasgn, field, Some(rhs)).await
-}
-
-pub(crate) fn class_defines_member_subsref(
-    class: &runmat_runtime::class_registry::RuntimeClass,
-) -> bool {
-    runmat_runtime::class_registry::lookup_method(
-        &class.name,
-        ObjectIndexOp::Subsref.protocol_name(),
-    )
-    .is_some()
-}
-
-pub(crate) fn class_defines_member_subsasgn(
-    class: &runmat_runtime::class_registry::RuntimeClass,
-) -> bool {
-    runmat_runtime::class_registry::lookup_method(
-        &class.name,
-        ObjectIndexOp::Subsasgn.protocol_name(),
-    )
-    .is_some()
-}
-
-pub(crate) async fn call_object_index_descriptor_method(
-    descriptor: ObjectIndexDescriptor,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method_with_outputs(descriptor, 1).await
-}
-
-pub(crate) async fn call_object_index_descriptor_method_with_outputs(
-    descriptor: ObjectIndexDescriptor,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    if let Some(class_name) = class_name_from_base(descriptor.base()) {
-        if let Some((method, owner)) = runmat_runtime::class_registry::lookup_method(
-            class_name,
-            descriptor.operation().protocol_name(),
-        ) {
-            let mut semantic_args = vec![
-                descriptor.base().clone(),
-                build_matlab_substruct_arg(&descriptor)?,
-            ];
-            if let Some(rhs) = descriptor.rhs() {
-                semantic_args.push(rhs.clone());
-            }
-            if let Some(result) =
-                runmat_runtime::user_functions::try_call_semantic_function_by_name(
-                    &method.function_name,
-                    &semantic_args,
-                    requested_outputs,
-                )
-                .await
-            {
-                return result;
-            }
-            let owner_qualified = format!("{}.{}", owner, descriptor.operation().protocol_name());
-            if owner_qualified != method.function_name {
-                if let Some(result) =
-                    runmat_runtime::user_functions::try_call_semantic_function_by_name(
-                        &owner_qualified,
-                        &semantic_args,
-                        requested_outputs,
-                    )
-                    .await
-                {
-                    return result;
-                }
-            }
-        }
-    }
-    let (base, method, args) = descriptor.into_method_invocation()?;
-    crate::call::closures::call_method_or_member_index_with_outputs(
-        base,
-        CallableIdentity::Method(MethodId(method.clone())),
-        args,
-        requested_outputs,
-        None,
-        CallableFallbackPolicy::ObjectDispatch,
-    )
-    .await
 }
 
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
@@ -377,9 +168,7 @@ fn build_cell_array_with_shape(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_expanded_args_from_specs, ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
-    };
+    use super::{build_expanded_args_from_specs, ObjectIndexDescriptor, ObjectIndexSelector};
     use futures::executor::block_on;
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
@@ -388,8 +177,11 @@ mod tests {
         external_qualified_display_name, external_qualified_identity,
     };
     use runmat_runtime::indexing::EndExpr;
+    use runmat_runtime::object::dispatch::{
+        class_defines_member_subsasgn, class_defines_member_subsref,
+    };
     use runmat_runtime::object::indexing::{
-        build_object_paren_expr_selector_values, build_object_paren_selector_values,
+        build_object_paren_expr_selector_values, build_object_paren_selector_values, ObjectIndexOp,
         ObjectParenExprSelectorSpec, OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE,
         OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF,
         OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
@@ -583,7 +375,7 @@ mod tests {
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
-        assert!(super::class_defines_member_subsref(&child));
+        assert!(class_defines_member_subsref(&child));
     }
 
     #[test]
@@ -626,7 +418,7 @@ mod tests {
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
-        assert!(super::class_defines_member_subsasgn(&child));
+        assert!(class_defines_member_subsasgn(&child));
     }
 
     #[test]

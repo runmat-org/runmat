@@ -52,20 +52,3 @@ pub fn reset_thread_state_for_tests() {
     runtime::globals::reset_thread_state_for_tests();
     runtime::workspace::reset_thread_state_for_tests();
 }
-
-pub async fn call_method_or_member_index_named_with_outputs(
-    base: runmat_value::Value,
-    name: String,
-    args: Vec<runmat_value::Value>,
-    requested_outputs: usize,
-    _fallback_policy: runmat_hir::CallableFallbackPolicy,
-) -> Result<runmat_value::Value, runmat_runtime::RuntimeError> {
-    call::closures::call_method_or_member_index_named_with_outputs(
-        base,
-        name,
-        args,
-        requested_outputs,
-        None,
-    )
-    .await
-}

@@ -1,11 +1,11 @@
-use crate::call::shared::{
+use crate::interpreter::errors::mex;
+use runmat_runtime::builtins::introspection::dynamicprops;
+use runmat_runtime::call::identity::external_qualified_display_name;
+use runmat_runtime::object::dispatch::{
     call_object_member_subsasgn, call_object_member_subsref,
     call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
     class_defines_member_subsasgn, class_defines_member_subsref,
 };
-use crate::interpreter::errors::mex;
-use runmat_runtime::builtins::introspection::dynamicprops;
-use runmat_runtime::call::identity::external_qualified_display_name;
 use runmat_runtime::object::indexing::ObjectIndexOp;
 use runmat_runtime::RuntimeError;
 use runmat_value::{Closure, StructValue, Tensor, Value};

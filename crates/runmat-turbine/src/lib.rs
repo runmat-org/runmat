@@ -1712,7 +1712,7 @@ pub extern "C" fn runmat_call_method_member_expanded_values(
             std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len as usize))
                 .map_err(|_| execution_error("invalid UTF-8 in callable name"))?
         };
-        let policy = decode_callable_fallback_policy(fallback_policy)?;
+        let _policy = decode_callable_fallback_policy(fallback_policy)?;
         let args = read_turbine_value_args(args_ptr, args_len)?;
         let specs = read_turbine_arg_specs(specs_ptr, specs_len)?;
         let mut expanded_args = expand_turbine_args(args, &specs)?;
@@ -1723,12 +1723,12 @@ pub extern "C" fn runmat_call_method_member_expanded_values(
         }
         let base = expanded_args.remove(0);
         let output = run_immediate(Box::pin(
-            runmat_vm::call_method_or_member_index_named_with_outputs(
+            runmat_runtime::object::dispatch::call_method_or_member_index_named_with_outputs(
                 base,
                 name.to_string(),
                 expanded_args,
                 out_count as usize,
-                policy,
+                None,
             ),
         ))?
         .map_err(TurbineError::ExecutionError)?;
