@@ -3,6 +3,7 @@ mod class_declarations;
 pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
 mod catalog_fingerprint;
 pub use catalog_fingerprint::{builtin_catalog_fingerprint, BUILTIN_CATALOG_SCHEMA};
+pub use runmat_types::{LiteralContext as ResolveContext, LiteralValue};
 use runmat_value::*;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
@@ -439,99 +440,6 @@ pub type BuiltinControlFlow = runmat_async::RuntimeError;
 
 /// Async result type for builtins.
 pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<Value, BuiltinControlFlow>> + 'static>>;
-
-#[derive(Clone, Debug, Default)]
-pub struct ResolveContext {
-    pub literal_args: Vec<LiteralValue>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum LiteralValue {
-    Number(f64),
-    Bool(bool),
-    String(String),
-    Vector(Vec<LiteralValue>),
-    Unknown,
-}
-
-impl ResolveContext {
-    pub fn new(literal_args: Vec<LiteralValue>) -> Self {
-        Self { literal_args }
-    }
-
-    pub fn numeric_dims(&self) -> Vec<Option<usize>> {
-        self.numeric_dims_from(0)
-    }
-
-    pub fn numeric_dims_from(&self, start: usize) -> Vec<Option<usize>> {
-        let slice = self.literal_args.get(start..).unwrap_or(&[]);
-        if let Some(LiteralValue::Vector(values)) = slice.first() {
-            return values
-                .iter()
-                .map(Self::numeric_dimension_from_literal)
-                .collect();
-        }
-        slice
-            .iter()
-            .map(Self::numeric_dimension_from_literal)
-            .collect()
-    }
-
-    pub fn literal_string_at(&self, index: usize) -> Option<String> {
-        match self.literal_args.get(index) {
-            Some(LiteralValue::String(value)) => Some(value.to_ascii_lowercase()),
-            _ => None,
-        }
-    }
-
-    pub fn literal_bool_at(&self, index: usize) -> Option<bool> {
-        match self.literal_args.get(index) {
-            Some(LiteralValue::Bool(value)) => Some(*value),
-            _ => None,
-        }
-    }
-
-    pub fn literal_vector_at(&self, index: usize) -> Option<Vec<LiteralValue>> {
-        match self.literal_args.get(index) {
-            Some(LiteralValue::Vector(values)) => Some(values.clone()),
-            _ => None,
-        }
-    }
-
-    pub fn numeric_vector_at(&self, index: usize) -> Option<Vec<Option<usize>>> {
-        let values = match self.literal_args.get(index) {
-            Some(LiteralValue::Vector(values)) => values,
-            _ => return None,
-        };
-        if values
-            .iter()
-            .any(|value| matches!(value, LiteralValue::Vector(_)))
-        {
-            return None;
-        }
-        Some(
-            values
-                .iter()
-                .map(Self::numeric_dimension_from_literal)
-                .collect(),
-        )
-    }
-
-    fn numeric_dimension_from_literal(value: &LiteralValue) -> Option<usize> {
-        match value {
-            LiteralValue::Number(num) => {
-                if num.is_finite() {
-                    let rounded = num.round();
-                    if (num - rounded).abs() <= 1e-9 && rounded >= 0.0 {
-                        return Some(rounded as usize);
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
-}
 
 #[cfg(test)]
 mod resolve_context_tests {

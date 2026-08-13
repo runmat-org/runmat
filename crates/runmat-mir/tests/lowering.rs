@@ -10,7 +10,7 @@ use runmat_mir::{
     MirTerminatorKind,
 };
 use runmat_types::{
-    DimensionFact, ExecutionFact, NumericClass, NumericDomain, NumericFact, ShapeFact,
+    DimensionFact, ExecutionFact, NumericClass, NumericDomain, NumericFact, ShapeFact, ValueFact,
     ValueKindFact,
 };
 
@@ -33,6 +33,15 @@ fn first_local_of_kind(body: &MirBody, kind: MirLocalKind) -> runmat_mir::MirLoc
         .find(|local| local.kind == kind)
         .unwrap()
         .id
+}
+
+fn output_fact<'a>(body: &MirBody, store: &'a AnalysisStore) -> &'a ValueFact {
+    let output = first_local_of_kind(body, MirLocalKind::Output);
+    &store.mir_locals[&MirLocalKey {
+        function: body.function,
+        local: output,
+    }]
+        .value
 }
 
 fn first_call(body: &MirBody) -> &runmat_mir::MirCall {
@@ -126,7 +135,7 @@ fn patch_entrypoint_call_requested_outputs(
             | runmat_hir::HirStmtKind::ExprStmt(expr, _)
             | runmat_hir::HirStmtKind::MultiAssign(_, expr, _) => {
                 if let runmat_hir::HirExprKind::Call(call) = &mut expr.kind {
-                    call.requested_outputs = requested_outputs.clone();
+                    call.requested_outputs = requested_outputs;
                     patched = true;
                     break;
                 }
@@ -157,9 +166,9 @@ fn patch_entrypoint_multi_assign_requested_outputs(
         let runmat_hir::HirStmtKind::MultiAssign(targets, expr, _) = &mut stmt.kind else {
             continue;
         };
-        targets.requested_outputs = target_requested_outputs.clone();
+        targets.requested_outputs = target_requested_outputs;
         if let runmat_hir::HirExprKind::Call(call) = &mut expr.kind {
-            call.requested_outputs = call_requested_outputs.clone();
+            call.requested_outputs = call_requested_outputs;
             patched = true;
             break;
         }
@@ -450,7 +459,12 @@ fn analyze_body_records_simple_string_value_flow_fact() {
         .unwrap();
 
     assert_eq!(fact.value.kind, ValueKindFact::Character);
-    assert_eq!(fact.value.shape, ShapeFact::Scalar);
+    assert_eq!(
+        fact.value.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(4)]
+        }
+    );
 }
 
 #[test]
@@ -506,6 +520,55 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
             dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)]
         }
     );
+}
+
+#[test]
+fn analyze_body_applies_canonical_broadcast_matrix_and_range_rules() {
+    let (body, store) =
+        analyze_single_body("function y = f(); a = [1; 2]; b = [1, 2, 3]; y = a .* b; end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(2), Some(3)])
+    );
+
+    let (body, store) = analyze_single_body("function y = f(); y = 1:2:7; end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(1), Some(4)])
+    );
+
+    let (body, store) = analyze_single_body("function y = f(s); y = 1:s:7; end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(1), None])
+    );
+}
+
+#[test]
+fn analyze_body_applies_canonical_index_member_and_mutation_rules() {
+    let (body, store) = analyze_single_body("function y = f(); a = [1, 2; 3, 4]; y = a(:, 1); end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(2), Some(1)])
+    );
+
+    let (body, store) =
+        analyze_single_body("function y = f(); c = {1, 2; 'x', 4}; y = c{2, 1}; end");
+    assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Character);
+
+    let (body, store) = analyze_single_body("function y = f(); y = [1, 2, 3]; y(4) = 4; end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(1), Some(4)])
+    );
+
+    let (body, store) = analyze_single_body(
+        "function y = f(); s = struct{count = 1}; s.label = 'ok'; y = s.label; end",
+    );
+    assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Character);
+
+    let (body, store) = analyze_single_body("function y = f(); c{2} = 'created'; y = c{2}; end");
+    assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Character);
 }
 
 #[test]

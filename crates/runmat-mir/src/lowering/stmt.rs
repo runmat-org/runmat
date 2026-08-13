@@ -40,7 +40,7 @@ pub(crate) fn lower_stmt_with_replacements(
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             let lowered_targets = lower_output_targets(ctx, &targets.targets, &mut stmts)?;
             let lowered_target_list = MirOutputTargetList {
-                requested_outputs: targets.requested_outputs.clone(),
+                requested_outputs: targets.requested_outputs,
                 targets: lowered_targets,
             };
             let requested_outputs = lowered_target_list

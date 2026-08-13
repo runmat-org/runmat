@@ -219,6 +219,74 @@ if ((manifest.completed_slices ?? []).includes("R04")) {
   }
 }
 
+if ((manifest.completed_slices ?? []).includes("R05")) {
+  const requiredModules = [
+    "crates/runmat-types/src/identity/operation.rs",
+    "crates/runmat-types/src/contract/call.rs",
+    "crates/runmat-types/src/contract/diagnostic.rs",
+    "crates/runmat-types/src/contract/effects.rs",
+    "crates/runmat-types/src/contract/indexing.rs",
+    "crates/runmat-types/src/contract/literal.rs",
+    "crates/runmat-types/src/contract/mutation.rs",
+    "crates/runmat-types/src/contract/output.rs",
+    "crates/runmat-types/src/rules/aggregate.rs",
+    "crates/runmat-types/src/rules/call.rs",
+    "crates/runmat-types/src/rules/indexing.rs",
+    "crates/runmat-types/src/rules/literal.rs",
+    "crates/runmat-types/src/rules/member.rs",
+    "crates/runmat-types/src/rules/mutation.rs",
+    "crates/runmat-types/src/rules/operator.rs",
+    "crates/runmat-types/src/rules/shape.rs",
+  ];
+  for (const module of requiredModules) {
+    if (!fs.existsSync(path.join(repo, module))) fail(`canonical R05 module is absent: ${module}`);
+  }
+
+  const canonicalDeclarations = new Map([
+    ["OperatorKind", "crates/runmat-types/src/identity/operation.rs"],
+    ["RequestedOutputCount", "crates/runmat-types/src/contract/output.rs"],
+    ["IndexKind", "crates/runmat-types/src/contract/indexing.rs"],
+    ["IndexResultContext", "crates/runmat-types/src/contract/indexing.rs"],
+    ["LiteralValue", "crates/runmat-types/src/contract/literal.rs"],
+    ["PlaceMutationKind", "crates/runmat-types/src/contract/mutation.rs"],
+    ["AssignmentCreationPolicy", "crates/runmat-types/src/contract/mutation.rs"],
+    ["AssignmentShapePolicy", "crates/runmat-types/src/contract/mutation.rs"],
+  ]);
+  for (const [symbol, owner] of canonicalDeclarations) {
+    const declaration = new RegExp(`(?:^|\\n)\\s*pub(?:\\([^)]*\\))?\\s+enum\\s+${escapeRegex(symbol)}(?:\\s*<|\\s|\\{)`);
+    const matches = rustSources.filter(({ text }) => declaration.test(text)).map(({ file }) => file);
+    if (matches.length !== 1 || matches[0] !== owner) {
+      fail(`R05 enum ${symbol} must be declared only by ${owner}; found ${matches.join(", ") || "none"}`);
+    }
+  }
+
+  const builtins = rustSources
+    .filter(({ file }) => file.startsWith("crates/runmat-builtins/"))
+    .map(({ text }) => text)
+    .join("\n");
+  if (/\bstruct\s+ResolveContext\b/.test(builtins)) {
+    fail("runmat-builtins retains the pre-R05 ResolveContext declaration");
+  }
+  if (/\benum\s+LiteralValue\b/.test(builtins)) {
+    fail("runmat-builtins retains the pre-R05 LiteralValue declaration");
+  }
+
+  const mirDataflowPath = "crates/runmat-mir/src/analysis/dataflow.rs";
+  const mirDataflow = fs.readFileSync(path.join(repo, mirDataflowPath), "utf8");
+  for (const authority of ["runmat_builtins::Type", "runmat_builtins::shape_rules"] ) {
+    if (mirDataflow.includes(authority)) fail(`${mirDataflowPath} uses legacy inference authority ${authority}`);
+  }
+  for (const inference of [
+    "infer_binary", "infer_call", "infer_cell_aggregate", "infer_index",
+    "infer_index_mutation", "infer_literal", "infer_member_read", "infer_member_write",
+    "infer_range", "infer_struct", "infer_tensor_aggregate", "infer_unary",
+  ]) {
+    if (!mirDataflow.includes(`${inference}(`)) {
+      fail(`${mirDataflowPath} does not consume canonical R05 rule ${inference}`);
+    }
+  }
+}
+
 if (manifest.stage === "catalog-separated") {
   const builtinsManifest = fs.readFileSync(path.join(repo, "crates/runmat-builtins/Cargo.toml"), "utf8");
   if (/^runmat-value\s*=/m.test(builtinsManifest)) fail("runmat-builtins depends on runmat-value after catalog separation");

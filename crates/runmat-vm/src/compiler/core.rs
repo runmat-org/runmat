@@ -1966,7 +1966,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let context_ok = if allow_deletion_context {
             mir_indexing_context_matches(
-                indexing.result_context.clone(),
+                indexing.result_context,
                 IndexResultContext::AssignmentTarget,
             )
         } else {
@@ -2005,7 +2005,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let context_ok = if allow_deletion_context {
             mir_indexing_context_matches(
-                indexing.result_context.clone(),
+                indexing.result_context,
                 IndexResultContext::AssignmentTarget,
             )
         } else {
@@ -3228,8 +3228,8 @@ impl Compiler {
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) = self
-                    .compile_mir_cell_index_components(indexing, indexing.result_context.clone())?;
+                let (end_offsets, end_exprs) =
+                    self.compile_mir_cell_index_components(indexing, indexing.result_context)?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),
                     end_offsets,
@@ -3245,7 +3245,7 @@ impl Compiler {
         indexing: &MirIndexing,
         expected_context: IndexResultContext,
     ) -> Result<MirCellIndexCompileResult, CompileError> {
-        if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
+        if !mir_indexing_context_matches(indexing.result_context, expected_context) {
             return Err(self
                 .compile_error("MIR cell index lowering received mismatched index result context")
                 .with_identifier(IDENT_MIR_CELL_INDEX_CONTEXT_INVALID));

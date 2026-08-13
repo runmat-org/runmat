@@ -5,10 +5,13 @@ use crate::{
 };
 use runmat_hir::Span;
 use runmat_types::{
-    AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
-    DimensionFact, DynamicReason, ExecutionFact, FactJoin, FutureStateFact, InvalidationVector,
-    LayoutFact, MutationFact, NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact,
-    SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
+    infer_binary, infer_call, infer_cell_aggregate, infer_index, infer_index_mutation,
+    infer_literal, infer_member_read, infer_member_write, infer_range, infer_struct,
+    infer_tensor_aggregate, infer_unary, AliasFact, CallContract, CallRequest, CallableFact,
+    CallableIdentity, CertaintyFact, ContiguityFact, DynamicReason, ExecutionFact, FactJoin,
+    FutureStateFact, IndexSelectorFact, InvalidationVector, LayoutFact, LiteralContext,
+    LiteralValue, MutationContract, MutationFact, OutputSelection, RangeStepFact, ResidencyFact,
+    ShapeFact, SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -95,22 +98,39 @@ fn transfer_fact_block(
     block: &BasicBlock,
     mut facts: Vec<Option<SimpleValueFact>>,
 ) -> Vec<Option<SimpleValueFact>> {
+    let mut pending_mutation = None;
     for stmt in &block.statements {
         match &stmt.kind {
             MirStmtKind::Assign { place, value } => {
-                if let MirPlace::Local(local) = place {
-                    facts[local.0] = Some(simple_rvalue_fact(value));
-                }
+                let assigned = simple_rvalue_fact(value, &facts);
+                assign_place_fact(
+                    place,
+                    assigned,
+                    pending_mutation.take().as_ref(),
+                    &mut facts,
+                );
             }
-            MirStmtKind::MultiAssign { targets, .. } => {
-                for target in &targets.targets {
+            MirStmtKind::MultiAssign { targets, value } => {
+                let outputs = if let MirRvalue::Call(call) = value {
+                    let mut selection = OutputSelection::new(call.requested_outputs);
+                    for (index, target) in targets.targets.iter().enumerate() {
+                        if matches!(target, crate::MirOutputTarget::Discard) {
+                            selection.discarded.insert(index);
+                        }
+                    }
+                    call_outputs(call, &facts, selection)
+                } else {
+                    rvalue_outputs(value, &facts)
+                };
+                for (index, target) in targets.targets.iter().enumerate() {
                     if let crate::MirOutputTarget::Place(MirPlace::Local(local)) = target {
-                        facts[local.0] = Some(dynamic_value());
+                        facts[local.0] =
+                            Some(outputs.get(index).cloned().unwrap_or_else(dynamic_value));
                     }
                 }
             }
+            MirStmtKind::PlaceMutation(mutation) => pending_mutation = Some(mutation.clone()),
             MirStmtKind::Expr(_)
-            | MirStmtKind::PlaceMutation(_)
             | MirStmtKind::WorkspaceEffect { .. }
             | MirStmtKind::EnvironmentEffect(_) => {}
         }
@@ -132,6 +152,85 @@ fn transfer_fact_block(
     facts
 }
 
+fn assign_place_fact(
+    place: &MirPlace,
+    assigned: ValueFact,
+    mutation: Option<&crate::MirPlaceMutation>,
+    facts: &mut [Option<SimpleValueFact>],
+) {
+    match place {
+        MirPlace::Local(local) => facts[local.0] = Some(assigned),
+        MirPlace::Member(base, member) => {
+            let current = place_fact(base, facts);
+            let allow_creation = mutation.is_some_and(|mutation| {
+                matches!(
+                    mutation.creation_policy,
+                    runmat_types::AssignmentCreationPolicy::CreateStructFieldPath
+                )
+            });
+            let updated = infer_member_write(&current, member, &assigned, allow_creation).fact;
+            assign_place_fact(base, updated, mutation, facts);
+        }
+        MirPlace::Index(base, indexing) => {
+            let current = place_fact(base, facts);
+            let mut contract = mutation.map_or(
+                MutationContract {
+                    kind: runmat_types::PlaceMutationKind::IndexedAssign,
+                    creation: runmat_types::AssignmentCreationPolicy::CreateArrayByIndex,
+                    shape: runmat_types::AssignmentShapePolicy::MatlabCompatible,
+                },
+                |mutation| MutationContract {
+                    kind: mutation.kind,
+                    creation: mutation.creation_policy,
+                    shape: mutation.shape_policy,
+                },
+            );
+            if matches!(indexing.kind, runmat_types::IndexKind::Brace)
+                && !matches!(contract.kind, runmat_types::PlaceMutationKind::Delete)
+            {
+                contract.kind = runmat_types::PlaceMutationKind::CellAssign;
+            }
+            let updated = infer_index_mutation(
+                &current,
+                &index_selectors(indexing, facts),
+                &assigned,
+                contract,
+            )
+            .fact;
+            assign_place_fact(base, updated, mutation, facts);
+        }
+        MirPlace::DynamicMember(base, _) => {
+            assign_place_fact(
+                base,
+                ValueFact::unknown(DynamicReason::DynamicDispatch),
+                mutation,
+                facts,
+            );
+        }
+        MirPlace::Binding(_) => {}
+    }
+}
+
+fn place_fact(place: &MirPlace, facts: &[Option<SimpleValueFact>]) -> ValueFact {
+    match place {
+        MirPlace::Local(local) => facts
+            .get(local.0)
+            .and_then(Clone::clone)
+            .unwrap_or_else(dynamic_value),
+        MirPlace::Member(base, member) => infer_member_read(&place_fact(base, facts), member).fact,
+        MirPlace::Index(base, indexing) => {
+            infer_index(
+                &place_fact(base, facts),
+                indexing.kind,
+                &index_selectors(indexing, facts),
+                indexing.result_context,
+            )
+            .fact
+        }
+        MirPlace::DynamicMember(_, _) | MirPlace::Binding(_) => dynamic_value(),
+    }
+}
+
 fn join_fact_state(
     existing: &mut [Option<SimpleValueFact>],
     incoming: &[Option<SimpleValueFact>],
@@ -150,9 +249,9 @@ fn join_fact_state(
     changed
 }
 
-fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
+fn simple_rvalue_fact(value: &MirRvalue, facts: &[Option<SimpleValueFact>]) -> SimpleValueFact {
     match value {
-        MirRvalue::Use(operand) => simple_operand_fact(operand),
+        MirRvalue::Use(operand) => simple_operand_fact(operand, facts),
         MirRvalue::Future { .. } => scalar_fact(ValueKindFact::Execution(ExecutionFact::Future {
             output: Box::new(dynamic_value()),
             state: FutureStateFact::Lazy,
@@ -166,25 +265,77 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
             rows,
             cols,
             elements,
-        } => aggregate_fact(kind, *rows, *cols, elements),
-        MirRvalue::StructLiteral { .. } => {
-            scalar_fact(ValueKindFact::Struct(runmat_types::StructFact {
-                fields: Default::default(),
-                fields_complete: false,
+        } => aggregate_fact(kind, *rows, *cols, elements, facts),
+        MirRvalue::StructLiteral { fields } => {
+            infer_struct(
+                fields
+                    .iter()
+                    .map(|(name, operand)| (name.0.clone(), simple_operand_fact(operand, facts)))
+                    .collect(),
+            )
+            .fact
+        }
+        MirRvalue::ObjectLiteral { class_name, fields } => {
+            let properties = fields
+                .iter()
+                .map(|(name, operand)| (name.0.clone(), simple_operand_fact(operand, facts)))
+                .collect();
+            scalar_fact(ValueKindFact::Object(runmat_types::ObjectFact {
+                class: None,
+                runtime_class: Some(class_name.clone()),
+                properties,
+                properties_complete: true,
+                handle_semantics: None,
             }))
         }
-        MirRvalue::ObjectLiteral { .. } => dynamic_value(),
-        MirRvalue::Binary(_, _, _) | MirRvalue::ShortCircuit { .. } | MirRvalue::Unary(_, _) => {
-            dynamic_value()
+        MirRvalue::Binary(left, operator, right) => {
+            infer_binary(
+                *operator,
+                &simple_operand_fact(left, facts),
+                &simple_operand_fact(right, facts),
+            )
+            .fact
         }
-        MirRvalue::Range { .. } | MirRvalue::Index { .. } => dynamic_value(),
-        MirRvalue::Member { .. }
-        | MirRvalue::DynamicMember { .. }
+        MirRvalue::ShortCircuit { .. } => scalar_fact(ValueKindFact::Logical),
+        MirRvalue::Unary(operator, operand) => {
+            infer_unary(*operator, &simple_operand_fact(operand, facts)).fact
+        }
+        MirRvalue::Range { start, step, end } => {
+            let step = match step {
+                None => RangeStepFact::Implicit,
+                Some(step) => numeric_operand(step)
+                    .map(RangeStepFact::Known)
+                    .unwrap_or(RangeStepFact::Unknown),
+            };
+            infer_range(numeric_operand(start), step, numeric_operand(end)).fact
+        }
+        MirRvalue::Index { base, indexing } => {
+            infer_index(
+                &simple_operand_fact(base, facts),
+                indexing.kind,
+                &index_selectors(indexing, facts),
+                indexing.result_context,
+            )
+            .fact
+        }
+        MirRvalue::Member { base, member } => {
+            infer_member_read(&simple_operand_fact(base, facts), member).fact
+        }
+        MirRvalue::DynamicMember { .. }
         | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
-        | MirRvalue::End
-        | MirRvalue::Call(_) => dynamic_value(),
+        | MirRvalue::End => dynamic_value(),
+        MirRvalue::Call(call) => rvalue_outputs(value, facts)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| {
+                if call.requested_outputs.fixed_count() == 0 {
+                    scalar_fact(ValueKindFact::Void)
+                } else {
+                    dynamic_value()
+                }
+            }),
     }
 }
 
@@ -193,53 +344,33 @@ fn aggregate_fact(
     rows: usize,
     cols: usize,
     elements: &[MirOperand],
+    facts: &[Option<SimpleValueFact>],
 ) -> SimpleValueFact {
-    let shape = ShapeFact::Shaped {
-        dims: vec![DimensionFact::Known(rows), DimensionFact::Known(cols)],
+    let rows = if rows == 0 {
+        Vec::new()
+    } else {
+        elements
+            .chunks(cols.max(1))
+            .map(|row| {
+                row.iter()
+                    .map(|operand| simple_operand_fact(operand, facts))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
     };
     match kind {
-        MirAggregateKind::Tensor => {
-            value_fact(tensor_element_kind(elements), shape, StorageFact::Dense)
-        }
-        MirAggregateKind::Cell => value_fact(
-            ValueKindFact::Cell(CellFact {
-                element: Box::new(dynamic_value()),
-                elements: vec![dynamic_value(); elements.len()],
-                elements_complete: true,
-            }),
-            shape,
-            StorageFact::Dense,
-        ),
+        MirAggregateKind::Tensor => infer_tensor_aggregate(&rows).fact,
+        MirAggregateKind::Cell => infer_cell_aggregate(&rows).fact,
     }
 }
 
-fn tensor_element_kind(elements: &[MirOperand]) -> ValueKindFact {
-    if !elements.is_empty()
-        && elements
-            .iter()
-            .all(|element| matches!(element, MirOperand::Constant(crate::MirConstant::Number(_))))
-    {
-        ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        })
-    } else {
-        ValueKindFact::Unknown
-    }
-}
-
-fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
+fn simple_operand_fact(operand: &MirOperand, facts: &[Option<SimpleValueFact>]) -> SimpleValueFact {
     match operand {
-        MirOperand::Constant(crate::MirConstant::Number(_)) => {
-            let kind = ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            });
-            scalar_fact(kind)
-        }
-        MirOperand::Constant(crate::MirConstant::String(_)) => {
-            scalar_fact(ValueKindFact::Character)
-        }
+        MirOperand::Local(local) => facts
+            .get(local.0)
+            .and_then(Clone::clone)
+            .unwrap_or_else(dynamic_value),
+        MirOperand::Constant(constant) => infer_literal(&literal_value(constant)).fact,
         MirOperand::FunctionHandle(
             CallableIdentity::BoundFunction(function)
             | CallableIdentity::ExternalFunction { function, .. },
@@ -270,8 +401,105 @@ fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
                 captures_complete: true,
             }))
         }
-        _ => dynamic_value(),
     }
+}
+
+fn rvalue_outputs(value: &MirRvalue, facts: &[Option<SimpleValueFact>]) -> Vec<SimpleValueFact> {
+    let MirRvalue::Call(call) = value else {
+        let fact = simple_rvalue_fact(value, facts);
+        return match fact.kind {
+            ValueKindFact::OutputList(list) => list.outputs,
+            _ => vec![fact],
+        };
+    };
+    call_outputs(call, facts, OutputSelection::new(call.requested_outputs))
+}
+
+fn call_outputs(
+    call: &crate::MirCall,
+    facts: &[Option<SimpleValueFact>],
+    output_selection: OutputSelection,
+) -> Vec<SimpleValueFact> {
+    let request = CallRequest {
+        arguments: call
+            .args
+            .iter()
+            .map(|argument| simple_operand_fact(argument.operand(), facts))
+            .collect(),
+        literals: LiteralContext::new(
+            call.args
+                .iter()
+                .map(|argument| literal_operand(argument.operand()))
+                .collect(),
+        ),
+        outputs: output_selection,
+    };
+    infer_call(
+        &CallContract::dynamic(DynamicReason::UnresolvedCallable),
+        &request,
+    )
+    .outputs
+}
+
+fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
+    match constant {
+        crate::MirConstant::Number(value) => LiteralValue::Real {
+            text: value.clone(),
+            class: runmat_types::NumericClass::Double,
+        },
+        crate::MirConstant::String(value) => {
+            if value.0.starts_with('\'') {
+                LiteralValue::Character(value.0.trim_matches('\'').to_owned())
+            } else {
+                LiteralValue::String(value.0.trim_matches('"').to_owned())
+            }
+        }
+        crate::MirConstant::Symbol(value) => LiteralValue::Symbolic(value.0.clone()),
+        crate::MirConstant::Bool(value) => LiteralValue::Bool(*value),
+        crate::MirConstant::EmptyArray => LiteralValue::Empty,
+    }
+}
+
+fn literal_operand(operand: &MirOperand) -> LiteralValue {
+    match operand {
+        MirOperand::Constant(constant) => literal_value(constant),
+        MirOperand::Local(_) | MirOperand::FunctionHandle(_) => LiteralValue::Unknown,
+    }
+}
+
+fn numeric_operand(operand: &MirOperand) -> Option<f64> {
+    match operand {
+        MirOperand::Constant(crate::MirConstant::Number(value)) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn index_selectors(
+    indexing: &MirIndexing,
+    facts: &[Option<SimpleValueFact>],
+) -> Vec<IndexSelectorFact> {
+    indexing
+        .components
+        .iter()
+        .map(|component| match component {
+            MirIndexComponent::Colon => IndexSelectorFact::Colon,
+            MirIndexComponent::End { offset, .. } => IndexSelectorFact::End { offset: *offset },
+            MirIndexComponent::Expr(operand) => {
+                if let Some(index) =
+                    numeric_operand(operand).filter(|index| *index >= 1.0 && index.fract() == 0.0)
+                {
+                    IndexSelectorFact::KnownOneBasedIndex(index as usize)
+                } else {
+                    let fact = simple_operand_fact(operand, facts);
+                    if matches!(fact.kind, ValueKindFact::Logical) {
+                        IndexSelectorFact::Logical(fact)
+                    } else {
+                        IndexSelectorFact::Numeric(fact)
+                    }
+                }
+            }
+        })
+        .collect()
 }
 
 fn scalar_fact(kind: ValueKindFact) -> SimpleValueFact {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "extracted",
-  "completed_slices": ["R03", "R04"],
+  "completed_slices": ["R03", "R04", "R05"],
   "source": {
     "integer_commit": "f24908ddc2296dc5640a0a15e3cbb8ff9f7dee53",
     "qualified_merge": "2e7bd5ed1543d57872c8be9426b4d09ab5feac0d",

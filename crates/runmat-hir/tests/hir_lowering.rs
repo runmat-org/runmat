@@ -1003,7 +1003,7 @@ r = max(pair(3));
             .hir_index
             .calls
             .iter()
-            .map(|call| (call.name.display_name(), call.requested_outputs.clone()))
+            .map(|call| (call.name.display_name(), call.requested_outputs))
             .collect::<Vec<_>>()
     );
 }
@@ -1028,7 +1028,7 @@ r = cat(g());
             .hir_index
             .calls
             .iter()
-            .map(|call| (call.name.display_name(), call.requested_outputs.clone()))
+            .map(|call| (call.name.display_name(), call.requested_outputs))
             .collect::<Vec<_>>()
     );
 }

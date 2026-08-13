@@ -2320,7 +2320,7 @@ impl LoweringCtx {
             AstExpr::Index(base, indices, _) => Ok(HirExpr {
                 id: self.alloc_expr_id(),
                 kind: HirExprKind::Index(
-                    Box::new(self.lower_assignment_base_expr(base, span, index_context.clone())?),
+                    Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
                     self.lower_indexing_with_context(indices, IndexKind::Paren, index_context)?,
                 ),
                 span: expr.span(),
@@ -2328,7 +2328,7 @@ impl LoweringCtx {
             AstExpr::IndexCell(base, indices, _) => Ok(HirExpr {
                 id: self.alloc_expr_id(),
                 kind: HirExprKind::Index(
-                    Box::new(self.lower_assignment_base_expr(base, span, index_context.clone())?),
+                    Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
                     self.lower_indexing_with_context(indices, IndexKind::Brace, index_context)?,
                 ),
                 span: expr.span(),
@@ -3103,7 +3103,7 @@ impl LoweringCtx {
             callee: callee.clone(),
             kind,
             syntax: syntax.clone(),
-            requested_outputs: requested_outputs.clone(),
+            requested_outputs,
             span,
         });
         Ok(HirCall {

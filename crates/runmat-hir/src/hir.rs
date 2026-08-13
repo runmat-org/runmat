@@ -2,9 +2,11 @@ use crate::{
     BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, Span, StmtId,
 };
 pub use runmat_types::{
-    BindingName, BuiltinId, CallableFallbackPolicy, CallableIdentity, ClassDeclaration, DefPath,
-    DefPathSegment, EntrypointName, FunctionName, MemberName, MethodId, MethodName, PackageName,
-    QualifiedName, SemanticAttribute, SymbolName, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME,
+    AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId,
+    CallableFallbackPolicy, CallableIdentity, ClassDeclaration, DefPath, DefPathSegment,
+    EntrypointName, FunctionName, IndexKind, IndexResultContext, MemberName, MethodId, MethodName,
+    OperatorKind, PackageName, PlaceMutationKind, QualifiedName, RequestedOutputCount,
+    SemanticAttribute, SymbolName, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME,
     DISCARD_OUTPUT_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME,
     FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME,
     NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
@@ -557,31 +559,6 @@ pub enum OutputTarget {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum RequestedOutputCount {
-    Zero,
-    One,
-    Exactly(usize),
-    CurrentFunctionNargout,
-}
-
-impl RequestedOutputCount {
-    pub fn fixed_count(&self) -> usize {
-        match self {
-            RequestedOutputCount::Zero => 0,
-            RequestedOutputCount::One => 1,
-            RequestedOutputCount::Exactly(count) => *count,
-            RequestedOutputCount::CurrentFunctionNargout => 1,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum IndexKind {
-    Paren,
-    Brace,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum IndexComponent {
     Colon,
     End { dim: Option<usize>, offset: isize },
@@ -594,15 +571,6 @@ pub struct IndexingSemantics {
     pub kind: IndexKind,
     pub components: Vec<IndexComponent>,
     pub result_context: IndexResultContext,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum IndexResultContext {
-    ReadSingle,
-    ReadCommaList,
-    AssignmentTarget,
-    DeletionTarget,
-    FunctionArgumentExpansion,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -675,66 +643,11 @@ pub enum ExpansionSemantics {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum OperatorKind {
-    UnaryPlus,
-    UnaryMinus,
-    Not,
-    Add,
-    Subtract,
-    MatrixMultiply,
-    ElementwiseMultiply,
-    MatrixPower,
-    ElementwisePower,
-    Mldivide,
-    Mrdivide,
-    ElementwiseDivide,
-    ElementwiseLeftDivide,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    ShortCircuitAnd,
-    ShortCircuitOr,
-    ElementwiseAnd,
-    ElementwiseOr,
-    Transpose,
-    ConjugateTranspose,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum PlaceMutationKind {
-    BindOrAssign,
-    IndexedAssign,
-    CellAssign,
-    MemberAssign,
-    Delete,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct PlaceMutation {
     pub place: HirPlace,
     pub kind: PlaceMutationKind,
     pub creation_policy: AssignmentCreationPolicy,
     pub shape_policy: AssignmentShapePolicy,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum AssignmentCreationPolicy {
-    ExistingOnly,
-    CreateBinding,
-    CreateArrayByIndex,
-    CreateStructFieldPath,
-    Overloaded,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum AssignmentShapePolicy {
-    Exact,
-    ScalarExpansion,
-    MatlabCompatible,
-    Overloaded,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

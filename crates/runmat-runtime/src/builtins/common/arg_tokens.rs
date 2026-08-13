@@ -1,4 +1,5 @@
 use runmat_builtins::{LiteralValue, ResolveContext};
+use runmat_types::NumericClass;
 use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::tensor;
@@ -24,13 +25,44 @@ pub fn tokens_from_context(ctx: &ResolveContext) -> Vec<ArgToken> {
 fn token_from_literal(value: &LiteralValue) -> ArgToken {
     match value {
         LiteralValue::Number(num) => ArgToken::Number(*num),
+        LiteralValue::Real { text, .. } => text
+            .parse()
+            .map(ArgToken::Number)
+            .unwrap_or(ArgToken::Unknown),
+        LiteralValue::Integer { text, class } => integer_literal(text, *class)
+            .map(ArgToken::Integer)
+            .unwrap_or(ArgToken::Unknown),
         LiteralValue::Bool(value) => ArgToken::Bool(*value),
-        LiteralValue::String(text) => ArgToken::String(text.to_ascii_lowercase()),
+        LiteralValue::Character(text)
+        | LiteralValue::String(text)
+        | LiteralValue::Keyword(text) => ArgToken::String(text.to_ascii_lowercase()),
         LiteralValue::Vector(values) => {
             ArgToken::Vector(values.iter().map(token_from_literal).collect())
         }
-        LiteralValue::Unknown => ArgToken::Unknown,
+        LiteralValue::Matrix(rows) => ArgToken::Vector(
+            rows.iter()
+                .map(|row| ArgToken::Vector(row.iter().map(token_from_literal).collect()))
+                .collect(),
+        ),
+        LiteralValue::Complex { .. }
+        | LiteralValue::Symbolic(_)
+        | LiteralValue::Empty
+        | LiteralValue::Unknown => ArgToken::Unknown,
     }
+}
+
+fn integer_literal(text: &str, class: NumericClass) -> Option<IntValue> {
+    Some(match class {
+        NumericClass::Int8 => IntValue::I8(text.parse().ok()?),
+        NumericClass::Int16 => IntValue::I16(text.parse().ok()?),
+        NumericClass::Int32 => IntValue::I32(text.parse().ok()?),
+        NumericClass::Int64 => IntValue::I64(text.parse().ok()?),
+        NumericClass::UInt8 => IntValue::U8(text.parse().ok()?),
+        NumericClass::UInt16 => IntValue::U16(text.parse().ok()?),
+        NumericClass::UInt32 => IntValue::U32(text.parse().ok()?),
+        NumericClass::UInt64 => IntValue::U64(text.parse().ok()?),
+        NumericClass::Double | NumericClass::Single => return None,
+    })
 }
 
 fn token_from_value(value: &Value) -> ArgToken {

@@ -1,6 +1,9 @@
 use runmat_types::codec::{decode_canonical, encode_canonical};
 use runmat_types::{
-    ClassKind, DynamicReason, ExternalClassDeclaration, QualifiedName, SymbolName, ValueFact,
+    infer_binary, infer_call, infer_index, CallContract, CallRequest, ClassKind, DynamicReason,
+    ExternalClassDeclaration, IndexKind, IndexResultContext, IndexSelectorFact, NumericClass,
+    NumericDomain, NumericFact, OperatorKind, OutputSelection, QualifiedName, RequestedOutputCount,
+    ShapeFact, SymbolName, ValueFact, ValueKindFact,
 };
 
 #[test]
@@ -35,9 +38,54 @@ fn immutable_declarations_round_trip_without_runtime_state() {
     assert_eq!(decoded, declaration);
 }
 
+fn semantic_rule_parity_vectors() {
+    let numeric = |shape| {
+        let mut fact = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }));
+        fact.shape = shape;
+        fact
+    };
+    let broadcast = infer_binary(
+        OperatorKind::ElementwiseMultiply,
+        &numeric(ShapeFact::from(vec![Some(2), Some(1)])),
+        &numeric(ShapeFact::from(vec![Some(1), Some(3)])),
+    );
+    assert_eq!(
+        broadcast.fact.shape,
+        ShapeFact::from(vec![Some(2), Some(3)])
+    );
+
+    let indexed = infer_index(
+        &numeric(ShapeFact::from(vec![Some(2), Some(3)])),
+        IndexKind::Paren,
+        &[IndexSelectorFact::Colon],
+        IndexResultContext::ReadSingle,
+    );
+    assert_eq!(indexed.fact.shape, ShapeFact::from(vec![Some(6), Some(1)]));
+
+    let call = infer_call(
+        &CallContract::fixed(vec![numeric(ShapeFact::Scalar)]),
+        &CallRequest {
+            arguments: Vec::new(),
+            literals: Default::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(call.outputs.len(), 1);
+    assert!(!call.dynamic_outputs);
+}
+
+#[test]
+fn semantic_rules_have_stable_native_vectors() {
+    semantic_rule_parity_vectors();
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen_test::wasm_bindgen_test]
 fn wasm_uses_the_same_canonical_vector() {
     canonical_encoding_is_deterministic_and_round_trips();
     immutable_declarations_round_trip_without_runtime_state();
+    semantic_rule_parity_vectors();
 }

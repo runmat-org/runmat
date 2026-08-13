@@ -1,4 +1,5 @@
 pub mod codec;
+pub mod contract;
 pub mod declaration;
 pub mod fact;
 pub mod identity;
@@ -7,6 +8,7 @@ pub mod source;
 pub mod symbolic;
 pub mod version;
 
+pub use contract::*;
 pub use declaration::{
     ClassDeclaration, ClassKind, EnumerationDeclaration, EventDeclaration,
     ExternalClassDeclaration, ExternalMethodDeclaration, ExternalPropertyDeclaration,
@@ -15,7 +17,7 @@ pub use declaration::{
 };
 pub use fact::*;
 pub use identity::*;
-pub use rules::{FactJoin, FactWiden};
+pub use rules::*;
 pub use source::{merge_span, Span};
 pub use symbolic::{
     parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration,

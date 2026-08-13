@@ -378,7 +378,7 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
-        let requested_outputs = request.requested_outputs.clone();
+        let requested_outputs = request.requested_outputs;
         let source_input = request.source.clone();
         let source_resolution = match source_input_text(request.source).await {
             Ok(resolved) => resolved,

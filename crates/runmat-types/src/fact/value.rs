@@ -17,6 +17,26 @@ pub struct ValueFact {
 }
 
 impl ValueFact {
+    pub fn proven(kind: ValueKindFact, shape: ShapeFact, storage: StorageFact) -> Self {
+        Self {
+            kind,
+            shape,
+            storage,
+            layout: LayoutFact::ColumnMajor,
+            contiguity: ContiguityFact::Contiguous,
+            view: ViewFact::Materialized,
+            residency: ResidencyFact::Host,
+            alias: AliasFact::Unique,
+            mutation: MutationFact::ValueSemantics,
+            certainty: CertaintyFact::Proven,
+            invalidation: InvalidationVector::default(),
+        }
+    }
+
+    pub fn scalar(kind: ValueKindFact) -> Self {
+        Self::proven(kind, ShapeFact::Scalar, StorageFact::Scalar)
+    }
+
     pub fn unknown(reason: DynamicReason) -> Self {
         Self {
             kind: ValueKindFact::Unknown,
@@ -37,6 +57,17 @@ impl ValueFact {
         let mut fact = Self::unknown(DynamicReason::Unspecified);
         fact.kind = ValueKindFact::Never;
         fact
+    }
+
+    pub fn numeric(&self) -> Option<NumericFact> {
+        match self.kind {
+            ValueKindFact::Numeric(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.shape.element_count() == Some(1)
     }
 }
 
