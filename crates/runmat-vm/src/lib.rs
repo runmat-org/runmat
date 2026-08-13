@@ -26,9 +26,6 @@ pub use bytecode::{
 };
 pub use call::builtins::{push_dynamic_eval_options, set_dynamic_eval_options};
 pub use compiler::CompileError;
-pub use interpreter::api::{
-    set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
-};
 pub use interpreter::runner::{
     interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
     interpret_with_vars_in_context, invoke_semantic_function_value,
@@ -46,7 +43,6 @@ pub use runtime::workspace::{
 
 #[doc(hidden)]
 pub fn reset_thread_state_for_tests() {
-    runtime::call_stack::reset_thread_state_for_tests();
     runmat_runtime::debug_context::reset_for_tests();
     runmat_runtime::builtins::introspection::debugging::reset_lock_registry_for_tests();
     runtime::globals::reset_thread_state_for_tests();

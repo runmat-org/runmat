@@ -105,9 +105,8 @@ const runtimeAmbientAuthorities = [
   ["crates/runmat-runtime/src/context/scope.rs", "ACTIVE_CONTEXTS", "R29"],
   ["crates/runmat-vm/src/runtime/workspace.rs", "WORKSPACE_STACK|PENDING_WORKSPACE|LAST_WORKSPACE_STATE|LAST_WORKSPACE_ASSIGNED_REPORT", "R10"],
   ["crates/runmat-runtime/src/workspace/session.rs", "LEGACY_SESSION_VARIABLES", "R29"],
-  ["crates/runmat-vm/src/runtime/call_stack.rs", "CALL_STACK|CALL_STACK_LIMIT|ERROR_NAMESPACE", "R10/R29"],
   ["crates/runmat-vm/src/interpreter/runner.rs", "CALL_COUNTS", "R10"],
-  ["crates/runmat-vm/src/interpreter/errors.rs", "CURRENT_PC", "R10"],
+  ["crates/runmat-vm/src/interpreter/errors.rs", "CURRENT_PC", "retained-vm-adapter"],
   ["crates/runmat-vm/src/call/builtins.rs", "DYNAMIC_EVAL_OPTIONS", "R10/R29"],
   ["crates/runmat-vm/src/coverage.rs", "ACTIVE", "R29"],
 ];
@@ -115,6 +114,7 @@ const allowedLegacyContextConsumers = new Set(
   runtimeAmbientAuthorities.map(([source]) => source),
 );
 allowedLegacyContextConsumers.add("crates/runmat-runtime/src/runtime_error.rs");
+allowedLegacyContextConsumers.add("crates/runmat-vm/src/runtime/call_stack.rs");
 
 const runtimeIndexingModules = [
   "end_expr.rs",
@@ -199,6 +199,21 @@ for (const legacyStore of ["GLOBALS", "PERSISTENTS", "PERSISTENTS_BY_NAME"]) {
 const runtimeSessionOwner = path.join(repo, "crates/runmat-runtime/src/workspace/session.rs");
 if (!fs.existsSync(runtimeSessionOwner)) {
   throw new Error(`missing R10 runtime session-variable owner ${relative(runtimeSessionOwner)}`);
+}
+
+const vmCallStackAdapter = path.join(repo, "crates/runmat-vm/src/runtime/call_stack.rs");
+const vmCallStackAdapterText = fs.readFileSync(vmCallStackAdapter, "utf8");
+for (const legacyAuthority of ["CALL_STACK", "CALL_STACK_LIMIT", "ERROR_NAMESPACE"]) {
+  if (new RegExp(`(?:static|thread_local!)\\s+${legacyAuthority}\\b`).test(vmCallStackAdapterText)) {
+    throw new Error(`legacy VM call/error authority ${legacyAuthority} remains at ${relative(vmCallStackAdapter)}`);
+  }
+}
+const runtimeContextOwner = path.join(repo, "crates/runmat-runtime/src/context/runtime.rs");
+const runtimeContextText = fs.readFileSync(runtimeContextOwner, "utf8");
+for (const runtimeAuthority of ["DEFAULT_CALLSTACK_LIMIT", "DEFAULT_ERROR_NAMESPACE"]) {
+  if (!new RegExp(`pub\\s+const\\s+${runtimeAuthority}\\b`).test(runtimeContextText)) {
+    throw new Error(`missing runtime context authority ${runtimeAuthority} at ${relative(runtimeContextOwner)}`);
+  }
 }
 
 for (const [source, identities, targetSlice] of runtimeAmbientAuthorities) {

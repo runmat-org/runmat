@@ -11,6 +11,9 @@ pub enum RuntimeLanguageMode {
     Strict,
 }
 
+pub const DEFAULT_CALLSTACK_LIMIT: usize = 200;
+pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
+
 /// Complete explicit runtime authority for one session/invocation tree.
 #[derive(Clone)]
 pub struct RuntimeContext {
@@ -155,7 +158,7 @@ impl RuntimeContext {
     pub fn set_error_namespace(&self, namespace: impl Into<String>) {
         let namespace = namespace.into();
         let namespace = if namespace.trim().is_empty() {
-            "RunMat".to_string()
+            DEFAULT_ERROR_NAMESPACE.to_string()
         } else {
             namespace
         };

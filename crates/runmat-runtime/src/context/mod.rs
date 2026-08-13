@@ -13,7 +13,9 @@ mod state;
 pub mod legacy;
 
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
-pub use runtime::{RuntimeContext, RuntimeLanguageMode};
+pub use runtime::{
+    RuntimeContext, RuntimeLanguageMode, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
+};
 pub use scope::ContextFuture;
 #[cfg(test)]
 pub(crate) use scope::RuntimeContextGuard;

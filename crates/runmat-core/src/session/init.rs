@@ -65,8 +65,8 @@ impl RunMatSession {
             .with_search_path(search_path),
             is_executing: false,
             async_input_handler: None,
-            callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,
-            error_namespace: runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string(),
+            callstack_limit: runmat_runtime::context::DEFAULT_CALLSTACK_LIMIT,
+            error_namespace: runmat_runtime::context::DEFAULT_ERROR_NAMESPACE.to_string(),
             active_source_name: "<repl>".to_string(),
             active_source_fullpath_name: None,
             telemetry_consent: true,
@@ -83,8 +83,6 @@ impl RunMatSession {
             diary_state: runmat_runtime::console::DiaryStateSnapshot::default(),
             pending_companion_source_discovery: None,
         };
-
-        runmat_vm::set_call_stack_limit(session.callstack_limit);
 
         // Cache the shared plotting context (if a GPU provider is active) so the
         // runtime can wire zero-copy render paths without instantiating another

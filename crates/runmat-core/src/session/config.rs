@@ -106,19 +106,17 @@ impl RunMatSession {
     pub fn set_callstack_limit(&mut self, limit: usize) {
         self.callstack_limit = limit;
         self.runtime_context.set_callstack_limit(limit);
-        runmat_vm::set_call_stack_limit(limit);
     }
 
     pub fn set_error_namespace(&mut self, namespace: impl Into<String>) {
         let namespace = namespace.into();
         let namespace = if namespace.trim().is_empty() {
-            runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string()
+            runmat_runtime::context::DEFAULT_ERROR_NAMESPACE.to_string()
         } else {
             namespace
         };
         self.error_namespace = namespace.clone();
         self.runtime_context.set_error_namespace(namespace.clone());
-        runmat_vm::set_error_namespace(&namespace);
         runmat_hir::set_error_namespace(&namespace);
     }
 

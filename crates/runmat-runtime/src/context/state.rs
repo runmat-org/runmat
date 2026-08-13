@@ -65,8 +65,8 @@ impl RuntimeContextState {
             language_mode: Cell::new(super::RuntimeLanguageMode::Matlab),
             top_level_await_enabled: Cell::new(true),
             dynamic_eval_enabled: Cell::new(true),
-            callstack_limit: Cell::new(200),
-            error_namespace: RefCell::new("RunMat".to_string()),
+            callstack_limit: Cell::new(super::DEFAULT_CALLSTACK_LIMIT),
+            error_namespace: RefCell::new(super::DEFAULT_ERROR_NAMESPACE.to_string()),
             cancellation: RefCell::new(cancellation),
         }
     }

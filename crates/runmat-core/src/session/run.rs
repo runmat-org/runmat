@@ -445,8 +445,6 @@ impl RunMatSession {
             )
         })?;
         let _diary_state = SessionDiaryStateGuard::new(self);
-        runmat_vm::set_call_stack_limit(self.callstack_limit);
-        runmat_vm::set_error_namespace(&self.error_namespace);
         runmat_vm::set_dynamic_eval_options(
             self.compat_mode,
             self.compat_mode.allows_runmat_extensions(),

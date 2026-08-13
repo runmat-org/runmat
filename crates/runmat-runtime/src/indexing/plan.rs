@@ -1155,6 +1155,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_pointer_width = "64")]
     fn index_plan_rejects_sparse_sized_indices_beyond_u32_storage() {
         let selectors = vec![SliceSelector::Scalar((u32::MAX as usize) + 2)];
         let err = build_index_plan(&selectors, 1, &[u32::MAX as usize + 2, 1])
