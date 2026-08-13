@@ -1,14 +1,11 @@
 //! MATLAB-compatible `abs` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::catalog::definitions::{
+    ABS_CHARACTER_INPUT_EXTENSION, ABS_ERROR_INTERNAL, ABS_ERROR_INVALID_INPUT,
+    ABS_ERROR_TOO_MANY_OUTPUTS, ABS_LOGICAL_INPUT_EXTENSION,
 };
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
@@ -22,7 +19,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::symbolic::symbolic_expr_to_value;
-use crate::builtins::math::type_resolvers::symbolic_numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::abs")]
@@ -60,112 +56,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "abs";
 
-const ABS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Absolute value or magnitude.",
-}];
-const ABS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Real numeric input or floating complex input; logical and character forms are RunMat-only extensions.",
-}];
-const ABS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = abs(X)",
-    inputs: &ABS_INPUTS,
-    outputs: &ABS_OUTPUT,
-}];
-const ABS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ABS.INVALID_INPUT",
-    identifier: Some("RunMat:abs:InvalidInput"),
-    when: "Input is not supported real numeric, floating complex, or declared extension data.",
-    message: "abs: invalid input",
-};
-const ABS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ABS.INTERNAL",
-    identifier: Some("RunMat:abs:Internal"),
-    when: "Internal tensor conversion/allocation/provider interaction failed.",
-    message: "abs: internal error",
-};
-const ABS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ABS.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:abs:TooManyOutputs"),
-    when: "More than one output is requested.",
-    message: "abs: too many output arguments",
-};
-const ABS_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ABS_ERROR_INVALID_INPUT,
-    ABS_ERROR_INTERNAL,
-    ABS_ERROR_TOO_MANY_OUTPUTS,
-];
-
-const ABS_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "abs-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "abs with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AbsLogicalInputExtension"),
-};
-const ABS_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "abs-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "abs with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AbsCharacterInputExtension"),
-};
-const ABS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    ABS_LOGICAL_INPUT_EXTENSION,
-    ABS_CHARACTER_INPUT_EXTENSION,
-    crate::compatibility::SPARSE_INTEGER_EXTENSION,
-];
-
-const ABS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Real full scalars and arrays accept every built-in integer class and preserve size and class.",
-}];
-const ABS_SPARSE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "MATLAB sparse numeric values are single or double; RunMat mode additionally preserves exact integer CSC values.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = abs(integer_X)",
-        inputs: &ABS_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Unsigned values are unchanged; signed values negate exactly and the unrepresentable magnitude of intmin saturates to intmax. Documented resident input returns to its owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "S = abs(sparse(integer_X))",
-        inputs: &ABS_SPARSE_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat-only typed sparse storage retains CSC structure and exact class while applying the same signed saturation rule to stored values.",
-    },
-];
-pub const ABS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ABS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ABS_ERRORS,
-};
-
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -180,14 +70,7 @@ fn builtin_error_with_detail(
 
 #[runtime_builtin(
     name = "abs",
-    category = "math/elementwise",
-    summary = "Absolute value and complex magnitude for scalars and arrays.",
-    keywords = "abs,absolute value,magnitude,complex,gpu",
-    accel = "unary",
-    type_resolver(symbolic_numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::abs::ABS_DESCRIPTOR),
-    extensions(ABS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::elementwise::abs::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::abs"
 )]
 async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
@@ -446,6 +329,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::catalog::definitions::{
+        ABS_DESCRIPTOR, ABS_EXTENSIONS, ABS_INTEGER_CAPABILITIES,
+    };
 
     #[cfg(feature = "wgpu")]
     fn register_wgpu_provider_available() -> bool {
@@ -455,7 +341,6 @@ pub(crate) mod tests {
         .is_ok()
             && runmat_accelerate_api::provider().is_some()
     }
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerComplexStorage, LogicalArray, Tensor};
 
     fn abs_builtin(value: Value) -> BuiltinResult<Value> {
@@ -470,35 +355,8 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = abs(X)"));
-        assert_eq!(INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(ABS_INTEGER_CAPABILITIES.len(), 2);
         assert_eq!(ABS_EXTENSIONS.len(), 3);
-    }
-
-    #[test]
-    fn abs_type_preserves_tensor_shape() {
-        let out = symbolic_numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn abs_type_scalar_tensor_returns_num() {
-        let out = symbolic_numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

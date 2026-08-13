@@ -1,9 +1,13 @@
 use super::{
-    definitions::{FULL_CATALOG_ENTRY, ZEROS_CATALOG_ENTRY},
+    definitions::{ABS_CATALOG_ENTRY, FULL_CATALOG_ENTRY, ZEROS_CATALOG_ENTRY},
     BuiltinCatalogEntry,
 };
 
-static CATALOG_ENTRIES: [&BuiltinCatalogEntry; 2] = [&FULL_CATALOG_ENTRY, &ZEROS_CATALOG_ENTRY];
+static CATALOG_ENTRIES: [&BuiltinCatalogEntry; 3] = [
+    &ABS_CATALOG_ENTRY,
+    &FULL_CATALOG_ENTRY,
+    &ZEROS_CATALOG_ENTRY,
+];
 
 pub fn builtin_catalog_entries() -> &'static [&'static BuiltinCatalogEntry] {
     &CATALOG_ENTRIES
