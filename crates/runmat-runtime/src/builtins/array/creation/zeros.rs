@@ -4,10 +4,11 @@ use runmat_accelerate_api::{
     GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
     ProviderPrecision,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::catalog::definitions::{
+    ZEROS_ERROR_CLASS_CONFLICT, ZEROS_ERROR_LIKE_DUPLICATE, ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE,
+    ZEROS_ERROR_UNRECOGNIZED_OPTION,
 };
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
@@ -24,11 +25,7 @@ use crate::builtins::common::{
     gpu_helpers, random_args::validate_constructor_gpu_output, shape::normalize_scalar_shape,
     tensor,
 };
-use runmat_builtins::Type;
 use runmat_value::NumericDType;
-
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
-use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -75,180 +72,6 @@ fn zeros_error_with_message(
     builder.build()
 }
 
-fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    tensor_type_from_rank(args, ctx)
-}
-
-const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Output array.",
-}];
-
-const ZEROS_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const ZEROS_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square size.",
-}];
-
-const ZEROS_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "size_vector",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Size vector defining output dimensions.",
-}];
-
-const ZEROS_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "prototype",
-    ty: BuiltinParamType::LikePrototype,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Prototype value when no numeric dimension arguments are provided.",
-}];
-
-const ZEROS_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "dims",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Dimension sizes.",
-}];
-
-const ZEROS_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "dims",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Dimension sizes.",
-    },
-    BuiltinParamDescriptor {
-        name: "typename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description:
-            "Class name override (double|single|logical|int8|int16|int32|int64|uint8|uint16|uint32|uint64|gpuArray).",
-    },
-];
-
-const ZEROS_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "dims",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Dimension sizes.",
-    },
-    BuiltinParamDescriptor {
-        name: "like_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Like keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype array used for class/device.",
-    },
-];
-
-const ZEROS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "A = zeros()",
-        inputs: &ZEROS_SIG_EMPTY_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(n)",
-        inputs: &ZEROS_SIG_N_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(size_vector)",
-        inputs: &ZEROS_SIG_SIZE_VECTOR_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(m, n, ...)",
-        inputs: &ZEROS_SIG_DIMS_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(prototype)",
-        inputs: &ZEROS_SIG_PROTOTYPE_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(..., typename)",
-        inputs: &ZEROS_SIG_CLASS_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(..., \"like\", prototype)",
-        inputs: &ZEROS_SIG_LIKE_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-];
-
-const ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.LIKE_EXPECTED_PROTOTYPE",
-    identifier: None,
-    when: "The 'like' keyword is provided without a prototype argument.",
-    message: "zeros: expected prototype after 'like'",
-};
-
-const ZEROS_ERROR_CLASS_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.CLASS_CONFLICT",
-    identifier: None,
-    when: "A class keyword and a 'like' prototype are both provided.",
-    message: "zeros: cannot combine 'like' with other class specifiers",
-};
-
-const ZEROS_ERROR_UNRECOGNIZED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.UNRECOGNIZED_OPTION",
-    identifier: None,
-    when: "A trailing option string is not a supported class keyword.",
-    message: "zeros: unrecognised option",
-};
-
-const ZEROS_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.LIKE_DUPLICATE",
-    identifier: None,
-    when: "The 'like' keyword is specified more than once.",
-    message: "zeros: multiple 'like' specifications are not supported",
-};
-
-const ZEROS_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE,
-    ZEROS_ERROR_CLASS_CONFLICT,
-    ZEROS_ERROR_UNRECOGNIZED_OPTION,
-    ZEROS_ERROR_LIKE_DUPLICATE,
-];
-
-pub const ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ZEROS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ZEROS_ERRORS,
-};
-
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "zeros",
@@ -273,12 +96,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "zeros",
-    category = "array/creation",
-    summary = "Create arrays filled with zero values.",
-    keywords = "zeros,array,logical,gpu,like",
-    accel = "array_construct",
-    type_resolver(zeros_type),
-    descriptor(crate::builtins::array::creation::zeros::ZEROS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1012,34 +830,6 @@ pub(crate) mod tests {
         let error = zeros_double(&[2, 2]).expect_err("invalid provider output must be terminal");
         assert!(error.message().contains("invalid constructor result"));
         assert_eq!(provider.frees.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn zeros_type_defaults_to_num() {
-        assert_eq!(zeros_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
-    }
-
-    #[test]
-    fn zeros_type_infers_rank_from_scalar_dim() {
-        assert_eq!(
-            zeros_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
-    #[test]
-    fn zeros_type_infers_rank_from_size_vector() {
-        let size_vec = Type::Tensor {
-            shape: Some(vec![Some(1), Some(3)]),
-        };
-        assert_eq!(
-            zeros_type(&[size_vec], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None, None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -124,6 +124,63 @@ fn migrated_registry_is_valid_and_case_insensitive() {
 }
 
 #[test]
+fn zeros_contract_uses_literal_dimensions_class_and_like_residency() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+
+    let dimension = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let request = CallRequest {
+        arguments: vec![dimension.clone(), dimension],
+        literals: LiteralContext::new(vec![LiteralValue::Number(2.0), LiteralValue::Number(3.0)]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let inference = infer_catalog_call(
+        builtin_catalog_entry_by_name("zeros").expect("zeros entry"),
+        &request,
+    );
+    assert!(inference.diagnostics.is_empty());
+    assert_eq!(
+        inference.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(3)])
+    );
+    assert_eq!(inference.outputs[0].storage, StorageFact::Dense);
+
+    let mut prototype = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(4), Some(5)]),
+        StorageFact::Dense,
+    );
+    prototype.residency = ResidencyFact::Device {
+        provider: Some("pilot".into()),
+    };
+    let like = ValueFact::scalar(ValueKindFact::String);
+    let request = CallRequest {
+        arguments: vec![like, prototype.clone()],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Keyword("like".into()),
+            LiteralValue::Unknown,
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let inference = infer_catalog_call(
+        builtin_catalog_entry_by_name("zeros").expect("zeros entry"),
+        &request,
+    );
+    assert_eq!(inference.outputs[0].kind, prototype.kind);
+    assert_eq!(inference.outputs[0].shape, prototype.shape);
+    assert_eq!(inference.outputs[0].residency, prototype.residency);
+}
+
+#[test]
 fn full_contract_densifies_sparse_facts_without_losing_class_shape_or_residency() {
     use runmat_types::{
         CallRequest, NumericClass, NumericDomain, NumericFact, OutputSelection,
