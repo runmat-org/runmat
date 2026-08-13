@@ -365,6 +365,10 @@ if ((manifest.completed_slices ?? []).includes("R05")) {
 
   const mirDataflowPath = "crates/runmat-mir/src/analysis/dataflow.rs";
   const mirDataflow = fs.readFileSync(path.join(repo, mirDataflowPath), "utf8");
+  const mirAnalysis = rustSources
+    .filter(({ file }) => file.startsWith("crates/runmat-mir/src/analysis/"))
+    .map(({ text }) => text)
+    .join("\n");
   for (const authority of ["runmat_builtins::Type", "runmat_builtins::shape_rules"] ) {
     if (mirDataflow.includes(authority)) fail(`${mirDataflowPath} uses legacy inference authority ${authority}`);
   }
@@ -373,8 +377,8 @@ if ((manifest.completed_slices ?? []).includes("R05")) {
     "infer_index_mutation", "infer_literal", "infer_member_read", "infer_member_write",
     "infer_range", "infer_struct", "infer_tensor_aggregate", "infer_unary",
   ]) {
-    if (!mirDataflow.includes(`${inference}(`)) {
-      fail(`${mirDataflowPath} does not consume canonical R05 rule ${inference}`);
+    if (!mirAnalysis.includes(`${inference}(`)) {
+      fail(`runmat-mir analysis does not consume canonical R05 rule ${inference}`);
     }
   }
 }
@@ -382,6 +386,67 @@ if ((manifest.completed_slices ?? []).includes("R05")) {
 if (manifest.stage === "catalog-separated") {
   const builtinsManifest = fs.readFileSync(path.join(repo, "crates/runmat-builtins/Cargo.toml"), "utf8");
   if (/^runmat-value\s*=/m.test(builtinsManifest)) fail("runmat-builtins depends on runmat-value after catalog separation");
+}
+
+if ((manifest.completed_slices ?? []).includes("R08")) {
+  for (const module of [
+    "crates/runmat-builtins/src/catalog/constant.rs",
+    "crates/runmat-static-analysis/src/semantic/model.rs",
+    "crates/runmat-static-analysis/src/semantic/projection.rs",
+    "crates/runmat-lsp/src/core/semantic/model.rs",
+    "crates/runmat-lsp/src/core/semantic/presentation.rs",
+  ]) {
+    if (!fs.existsSync(path.join(repo, module))) fail(`R08 semantic module is absent: ${module}`);
+  }
+  const prohibitedAuthorities = [
+    ["ShapeLintContext", "legacy sequential shape walker"],
+    ["infer_binding_shapes", "legacy LSP shape projection"],
+    ["mir_locals", "compatibility final-local map"],
+    ["MirLocalKey", "compatibility final-local identity"],
+    ["MirLocalFact", "compatibility final-local fact"],
+    ["SimpleValueFact", "compatibility shared-fact alias"],
+  ];
+  const semanticConsumers = rustSources.filter(({ file }) =>
+    /crates\/runmat-(?:mir|static-analysis|lsp|core)\//.test(file));
+  for (const [symbol, description] of prohibitedAuthorities) {
+    const matches = semanticConsumers.filter(({ text }) => text.includes(symbol)).map(({ file }) => file);
+    if (matches.length > 0) fail(`R08 retains ${description} ${symbol}: ${matches.join(", ")}`);
+  }
+  const frontend = fs.readFileSync(path.join(repo, "crates/runmat-static-analysis/src/frontend.rs"), "utf8");
+  if (!frontend.includes("project_document_facts")) {
+    fail("R08 frontend does not publish the shared semantic document projection");
+  }
+  const hirLowering = fs.readFileSync(path.join(repo, "crates/runmat-hir/src/lowering/ctx.rs"), "utf8");
+  const mirDataflow = fs.readFileSync(path.join(repo, "crates/runmat-mir/src/analysis/dataflow.rs"), "utf8");
+  for (const [consumer, source] of [["HIR", hirLowering], ["MIR", mirDataflow]]) {
+    if (!source.includes("builtin_constant_catalog_entry_by_name")) {
+      fail(`R08 ${consumer} constant resolution does not consume the static constant catalog`);
+    }
+  }
+  if (mirDataflow.includes("runmat_builtins::constants")) {
+    fail("R08 MIR fact inference inspects the live runtime constant registry");
+  }
+  const catalogFingerprint = fs.readFileSync(path.join(repo, "crates/runmat-builtins/src/catalog_fingerprint.rs"), "utf8");
+  if (!catalogFingerprint.includes("builtin_constant_catalog_entries")) {
+    fail("R08 analysis revision fingerprint omits static constant contracts");
+  }
+  const legacyTypeConsumers = semanticConsumers
+    .filter(({ text }) => text.includes("runmat_builtins::Type"))
+    .map(({ file }) => file);
+  const expectedLegacyBridge = ["crates/runmat-mir/src/analysis/inference/legacy_builtin.rs"];
+  if (JSON.stringify(legacyTypeConsumers) !== JSON.stringify(expectedLegacyBridge)) {
+    fail(`R08 legacy Type coverage is not isolated to the bounded bridge: ${legacyTypeConsumers.join(", ") || "none"}`);
+  }
+  const legacyBridge = fs.readFileSync(path.join(repo, expectedLegacyBridge[0]), "utf8");
+  for (const marker of ["builtin_functions()", "C00-C07", "R29 removes this module"]) {
+    if (!legacyBridge.includes(marker)) fail(`R08 bounded legacy bridge is missing inventory/removal marker ${marker}`);
+  }
+  const native = fs.readFileSync(path.join(repo, "crates/runmat-lsp/src/main.rs"), "utf8");
+  const wasm = fs.readFileSync(path.join(repo, "crates/runmat-lsp/src/wasm/exports.rs"), "utf8");
+  for (const method of ["quickInformation", "semanticFacts"]) {
+    if (!native.includes(`runmat/${method}`)) fail(`native LSP omits runmat/${method}`);
+    if (!wasm.includes(`js_name = "${method}"`)) fail(`WASM LSP omits ${method}`);
+  }
 }
 
 if (process.exitCode) process.exit(process.exitCode);

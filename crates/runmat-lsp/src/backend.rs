@@ -5,8 +5,9 @@ use std::sync::Arc;
 use crate::core::analysis::{
     analyze_document_with_compat_and_source, completion_at, definition_locations_at,
     diagnostics_for_document, document_symbols, formatting_edits, function_definitions_in_document,
-    function_references_in_document, hover_at, references_locations_at, semantic_tokens_full,
-    semantic_tokens_legend, signature_help_at, CompatMode, DocumentAnalysis,
+    function_references_in_document, hover_at, quick_information_at, references_locations_at,
+    semantic_document_facts, semantic_tokens_full, semantic_tokens_legend, signature_help_at,
+    CompatMode, DocumentAnalysis,
 };
 use crate::core::position::position_to_offset;
 use crate::core::project::ProjectContext;
@@ -26,8 +27,9 @@ use tower_lsp::lsp_types::{
     MessageType, OneOf, PositionEncodingKind, ReferenceParams, SemanticTokensOptions,
     SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
     ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentContentChangeEvent, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
-    Url, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
@@ -107,6 +109,37 @@ impl RunMatLanguageServer {
         Ok(runmat_static_analysis::testing::discover_frozen_tests(
             &snapshot, compat,
         ))
+    }
+
+    pub async fn quick_information(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> RpcResult<Option<runmat_static_analysis::semantic::SemanticQuickInformation>> {
+        let state = self.state.read().await;
+        let Some(document) = state.documents.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let Some(analysis) = document.analysis.as_ref() else {
+            return Ok(None);
+        };
+        Ok(quick_information_at(
+            &document.text,
+            analysis,
+            &params.position,
+        ))
+    }
+
+    pub async fn semantic_facts(
+        &self,
+        params: TextDocumentIdentifier,
+    ) -> RpcResult<Option<runmat_static_analysis::semantic::SemanticDocumentFacts>> {
+        let state = self.state.read().await;
+        Ok(state
+            .documents
+            .get(&params.uri)
+            .and_then(|document| document.analysis.as_ref())
+            .and_then(semantic_document_facts)
+            .cloned())
     }
 
     async fn update_document(&self, uri: Url, text: String, version: Option<i32>) {

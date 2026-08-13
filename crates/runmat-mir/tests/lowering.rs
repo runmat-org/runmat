@@ -3,7 +3,7 @@ use runmat_hir::{
     LoweringContext, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    analysis::{analyze_assembly, AnalysisStore, AssignmentFact, MirLocalKey},
+    analysis::{analyze_assembly, AnalysisStore, AssignmentFact},
     lowering::lower_assembly,
     AsyncBehaviorFact, MirAggregateKind, MirBody, MirCallArg, MirCallee, MirConstant, MirIndexPlan,
     MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind,
@@ -37,11 +37,38 @@ fn first_local_of_kind(body: &MirBody, kind: MirLocalKind) -> runmat_mir::MirLoc
 
 fn output_fact<'a>(body: &MirBody, store: &'a AnalysisStore) -> &'a ValueFact {
     let output = first_local_of_kind(body, MirLocalKind::Output);
-    &store.mir_locals[&MirLocalKey {
-        function: body.function,
-        local: output,
-    }]
-        .value
+    final_local_fact(body, store, output)
+}
+
+fn region_value(body: &MirBody, local: runmat_mir::MirLocalId) -> RegionValueId {
+    RegionValueId {
+        function: ProgramFunctionId(u32::try_from(body.function.0).expect("portable function id")),
+        local: u32::try_from(local.0).expect("portable local id"),
+    }
+}
+
+fn local_observations<'a>(
+    body: &MirBody,
+    store: &'a AnalysisStore,
+    local: runmat_mir::MirLocalId,
+) -> impl Iterator<Item = &'a runmat_mir::analysis::ProgramLocalFact> {
+    let value = region_value(body, local);
+    store
+        .program_points
+        .iter()
+        .filter(move |point| point.point.function == value.function)
+        .filter_map(move |point| point.local(value))
+}
+
+fn final_local_fact<'a>(
+    body: &MirBody,
+    store: &'a AnalysisStore,
+    local: runmat_mir::MirLocalId,
+) -> &'a ValueFact {
+    local_observations(body, store, local)
+        .filter_map(|observation| observation.fact.as_ref())
+        .last()
+        .expect("local has an analyzed value fact")
 }
 
 fn first_call(body: &MirBody) -> &runmat_mir::MirCall {
@@ -380,13 +407,11 @@ fn dataflow_marks_parameters_and_assigned_outputs_definitely_assigned() {
     let param = first_local_of_kind(body, MirLocalKind::Parameter);
     let output = first_local_of_kind(body, MirLocalKind::Output);
 
-    assert!(store.mir_locals.contains_key(&MirLocalKey {
-        function: body.function,
-        local: param,
+    assert!(local_observations(body, &store, param).any(|fact| {
+        fact.assignment == AssignmentFact::DefinitelyAssigned && fact.fact.is_some()
     }));
-    assert!(store.mir_locals.contains_key(&MirLocalKey {
-        function: body.function,
-        local: output,
+    assert!(local_observations(body, &store, output).any(|fact| {
+        fact.assignment == AssignmentFact::DefinitelyAssigned && fact.fact.is_some()
     }));
     assert!(!store
         .diagnostics
@@ -401,10 +426,8 @@ fn dataflow_joins_branch_assignment_as_maybe_assigned() {
     let store = analyze_assembly(&mir);
     let output = first_local_of_kind(body, MirLocalKind::Output);
 
-    assert!(store.mir_locals.contains_key(&MirLocalKey {
-        function: body.function,
-        local: output,
-    }));
+    assert!(local_observations(body, &store, output)
+        .any(|fact| fact.assignment == AssignmentFact::MaybeAssigned));
 }
 
 #[test]
@@ -419,10 +442,7 @@ fn analyze_assembly_populates_output_local_facts_by_semantic_id() {
         .unwrap()
         .id;
 
-    assert!(store.mir_locals.contains_key(&MirLocalKey {
-        function: body.function,
-        local: output_local,
-    }));
+    assert!(local_observations(body, &store, output_local).any(|fact| fact.fact.is_some()));
 }
 
 #[test]
@@ -430,15 +450,7 @@ fn analyze_body_records_simple_numeric_local_and_binding_facts() {
     let (body, store) = analyze_single_body("function y = f(); y = 1; end");
     let output = first_local_of_kind(&body, MirLocalKind::Output);
     assert_eq!(
-        store
-            .mir_locals
-            .get(&MirLocalKey {
-                function: body.function,
-                local: output,
-            })
-            .unwrap()
-            .value
-            .kind,
+        final_local_fact(&body, &store, output).kind,
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,
             domain: NumericDomain::Real,
@@ -450,17 +462,11 @@ fn analyze_body_records_simple_numeric_local_and_binding_facts() {
 fn analyze_body_records_simple_string_value_flow_fact() {
     let (body, store) = analyze_single_body("function y = f(); y = 'name'; end");
     let output = first_local_of_kind(&body, MirLocalKind::Output);
-    let fact = store
-        .mir_locals
-        .get(&MirLocalKey {
-            function: body.function,
-            local: output,
-        })
-        .unwrap();
+    let fact = final_local_fact(&body, &store, output);
 
-    assert_eq!(fact.value.kind, ValueKindFact::Character);
+    assert_eq!(fact.kind, ValueKindFact::Character);
     assert_eq!(
-        fact.value.shape,
+        fact.shape,
         ShapeFact::Shaped {
             dims: vec![DimensionFact::Known(1), DimensionFact::Known(4)]
         }
@@ -472,35 +478,31 @@ fn analyze_body_records_function_handle_value_flow_fact() {
     let mir = lower_mir("function h = f(); h = @target; end\nfunction y = target(x); y = x; end");
     let store = analyze_assembly(&mir);
     let function_fact = store
-        .mir_locals
-        .values()
-        .find(|fact| matches!(fact.value.kind, ValueKindFact::Callable(_)))
+        .program_points
+        .iter()
+        .flat_map(|point| &point.locals)
+        .filter_map(|local| local.fact.as_ref())
+        .find(|fact| matches!(fact.kind, ValueKindFact::Callable(_)))
         .unwrap();
 
-    assert!(matches!(
-        function_fact.value.kind,
-        ValueKindFact::Callable(_)
-    ));
+    assert!(matches!(function_fact.kind, ValueKindFact::Callable(_)));
 }
 
 #[test]
 fn analyze_body_records_tensor_and_cell_aggregate_facts() {
     let (tensor_body, tensor_store) = analyze_single_body("function y = f(); y = [1, 2]; end");
     let tensor_output = first_local_of_kind(&tensor_body, MirLocalKind::Output);
-    let tensor_fact = &tensor_store.mir_locals[&MirLocalKey {
-        function: tensor_body.function,
-        local: tensor_output,
-    }];
+    let tensor_fact = final_local_fact(&tensor_body, &tensor_store, tensor_output);
 
     assert!(matches!(
-        tensor_fact.value.kind,
+        tensor_fact.kind,
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,
             domain: NumericDomain::Real,
         })
     ));
     assert_eq!(
-        tensor_fact.value.shape,
+        tensor_fact.shape,
         ShapeFact::Shaped {
             dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)]
         }
@@ -508,14 +510,11 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
 
     let (cell_body, cell_store) = analyze_single_body("function y = f(); y = {1, 2}; end");
     let cell_output = first_local_of_kind(&cell_body, MirLocalKind::Output);
-    let cell_fact = &cell_store.mir_locals[&MirLocalKey {
-        function: cell_body.function,
-        local: cell_output,
-    }];
+    let cell_fact = final_local_fact(&cell_body, &cell_store, cell_output);
 
-    assert!(matches!(cell_fact.value.kind, ValueKindFact::Cell(_)));
+    assert!(matches!(cell_fact.kind, ValueKindFact::Cell(_)));
     assert_eq!(
-        cell_fact.value.shape,
+        cell_fact.shape,
         ShapeFact::Shaped {
             dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)]
         }
@@ -535,6 +534,12 @@ fn analyze_body_applies_canonical_broadcast_matrix_and_range_rules() {
     assert_eq!(
         output_fact(&body, &store).shape,
         ShapeFact::from(vec![Some(1), Some(4)])
+    );
+
+    let (body, store) = analyze_single_body("function y = f(); y = -2:0.02:2; end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(1), Some(201)])
     );
 
     let (body, store) = analyze_single_body("function y = f(s); y = 1:s:7; end");
@@ -575,26 +580,20 @@ fn analyze_body_applies_canonical_index_member_and_mutation_rules() {
 fn analyze_body_records_binary_op_as_unknown_scalar_fact() {
     let (body, store) = analyze_single_body("function y = f(x); y = x + 1; end");
     let output = first_local_of_kind(&body, MirLocalKind::Output);
-    let fact = &store.mir_locals[&MirLocalKey {
-        function: body.function,
-        local: output,
-    }];
+    let fact = final_local_fact(&body, &store, output);
 
-    assert_eq!(fact.value.kind, ValueKindFact::Unknown);
-    assert_eq!(fact.value.shape, ShapeFact::Unknown);
+    assert_eq!(fact.kind, ValueKindFact::Unknown);
+    assert_eq!(fact.shape, ShapeFact::Unknown);
 }
 
 #[test]
 fn analyze_body_joins_simple_facts_across_cfg_paths() {
     let (body, store) = analyze_single_body("function y = f(c); y = 1; if c; y = 's'; end; end");
     let output = first_local_of_kind(&body, MirLocalKind::Output);
-    let fact = &store.mir_locals[&MirLocalKey {
-        function: body.function,
-        local: output,
-    }];
+    let fact = final_local_fact(&body, &store, output);
 
-    assert_eq!(fact.value.kind, ValueKindFact::Unknown);
-    assert_eq!(fact.value.shape, ShapeFact::Scalar);
+    assert_eq!(fact.kind, ValueKindFact::Unknown);
+    assert_eq!(fact.shape, ShapeFact::Scalar);
 }
 
 #[test]
@@ -606,9 +605,11 @@ async function y = make(); y = 1; end",
     let store = analyze_assembly(&mir);
 
     let async_values: Vec<_> = store
-        .mir_locals
-        .values()
-        .filter_map(|fact| match &fact.value.kind {
+        .program_points
+        .iter()
+        .flat_map(|point| &point.locals)
+        .filter_map(|local| local.fact.as_ref())
+        .filter_map(|fact| match &fact.kind {
             ValueKindFact::Execution(execution) => Some(execution),
             _ => None,
         })
@@ -672,24 +673,14 @@ fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
             Some(local.id).filter(|_| {
                 local.kind == MirLocalKind::Temporary
                     && matches!(
-                        store.mir_locals[&MirLocalKey {
-                            function: body.function,
-                            local: local.id,
-                        }]
-                            .value
-                            .kind,
+                        final_local_fact(body, &store, local.id).kind,
                         ValueKindFact::Callable(_)
                     )
             })
         })
         .unwrap();
     assert!(matches!(
-        store.mir_locals[&MirLocalKey {
-            function: body.function,
-            local: handle_local,
-        }]
-            .value
-            .kind,
+        final_local_fact(body, &store, handle_local).kind,
         ValueKindFact::Callable(_)
     ));
     assert!(store.diagnostics.iter().any(|diagnostic| {
@@ -767,12 +758,7 @@ fn analyze_body_populates_local_facts_for_parameters() {
     let parameter = first_local_of_kind(&body, MirLocalKind::Parameter);
 
     assert_eq!(
-        store.mir_locals[&MirLocalKey {
-            function: body.function,
-            local: parameter,
-        }]
-            .value
-            .kind,
+        final_local_fact(&body, &store, parameter).kind,
         ValueKindFact::Unknown
     );
 }
@@ -784,10 +770,8 @@ fn dataflow_widens_loop_assignment_as_maybe_assigned() {
     let store = analyze_assembly(&mir);
     let output = first_local_of_kind(body, MirLocalKind::Output);
 
-    assert!(store.mir_locals.contains_key(&MirLocalKey {
-        function: body.function,
-        local: output,
-    }));
+    assert!(local_observations(body, &store, output)
+        .any(|fact| fact.assignment == AssignmentFact::MaybeAssigned));
 }
 
 #[test]
@@ -987,10 +971,15 @@ fn dataflow_marks_spawn_as_task_handle_even_when_safety_diagnostic_rejects_targe
     let mir = lower_mir("function y = f(); task = spawn(@(x) x); y = 1; end");
     let store = analyze_assembly(&mir);
 
-    assert!(store.mir_locals.values().any(|fact| matches!(
-        fact.value.kind,
-        ValueKindFact::Execution(ExecutionFact::Task { .. })
-    )));
+    assert!(store
+        .program_points
+        .iter()
+        .flat_map(|point| &point.locals)
+        .filter_map(|local| local.fact.as_ref())
+        .any(|fact| matches!(
+            fact.kind,
+            ValueKindFact::Execution(ExecutionFact::Task { .. })
+        )));
     assert!(store.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
     }));
@@ -1019,19 +1008,16 @@ fn analyze_assembly_populates_store_products_by_function() {
 }
 
 #[test]
-fn analyze_assembly_scopes_mir_local_facts_by_function() {
+fn analyze_assembly_scopes_program_point_facts_by_function() {
     let mir = lower_mir("function y = f(x); y = x; end\nfunction z = g(a); z = a; end");
 
     let store = analyze_assembly(&mir);
     let expected_locals: usize = mir.bodies.values().map(|body| body.locals.len()).sum();
 
-    assert_eq!(store.mir_locals.len(), expected_locals);
+    assert_eq!(store.local_value_count(None), expected_locals);
     for body in mir.bodies.values() {
         for local in &body.locals {
-            assert!(store.mir_locals.contains_key(&MirLocalKey {
-                function: body.function,
-                local: local.id,
-            }));
+            assert!(local_observations(body, &store, local.id).next().is_some());
         }
     }
 }
@@ -1099,7 +1085,7 @@ fn analysis_store_diagnostics_serialize_with_store() {
     assert!(json.contains("RM-MIR0002"));
     assert!(json.contains("definite-assignment"));
     assert_eq!(roundtrip, store);
-    assert!(!roundtrip.mir_locals.is_empty());
+    assert!(!roundtrip.program_points.is_empty());
 }
 
 #[test]
@@ -1160,9 +1146,8 @@ fn dataflow_marks_await_assignment_output_definitely_assigned() {
     let store = analyze_assembly(&mir);
     let output = first_local_of_kind(body, MirLocalKind::Output);
 
-    assert!(store.mir_locals.contains_key(&MirLocalKey {
-        function: body.function,
-        local: output,
+    assert!(local_observations(body, &store, output).any(|fact| {
+        fact.assignment == AssignmentFact::DefinitelyAssigned && fact.fact.is_some()
     }));
 }
 

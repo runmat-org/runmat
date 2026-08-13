@@ -8,8 +8,6 @@ use runmat_parser::{CompatMode, ParserOptions};
 use runmat_vm::CompileError;
 use serde::{Deserialize, Serialize};
 
-use crate::lints::shape::lint_shapes_from_mir;
-
 pub const DIAGNOSTIC_UNRESOLVED_FUNCTION: &str = "RM-RES0001";
 pub const DIAGNOSTIC_RUNTIME_DEPENDENT_RESOLUTION: &str = "RM-RES0002";
 pub const DIAGNOSTIC_RUNTIME_METHOD_DISPATCH: &str = "RM-RES0003";
@@ -107,6 +105,7 @@ pub struct FrontendAnalysis {
     pub lowering: Option<LoweringResult>,
     pub mir: Option<MirAssembly>,
     pub facts: Option<AnalysisStore>,
+    pub semantic_facts: Option<crate::semantic::SemanticDocumentFacts>,
     pub diagnostics: Vec<HirDiagnostic>,
     pub parse_failure: Option<ParseFailure>,
     pub lowering_failure: Option<HirError>,
@@ -164,6 +163,7 @@ pub fn analyze_source_with_catalog(
                 lowering: None,
                 mir: None,
                 facts: None,
+                semantic_facts: None,
                 diagnostics: vec![HirDiagnostic::new(
                     "RunMat:ParseError",
                     HirDiagnosticSeverity::Error,
@@ -208,6 +208,7 @@ pub fn analyze_program_with_catalog(
                 lowering: None,
                 mir: None,
                 facts: None,
+                semantic_facts: None,
                 diagnostics: vec![HirDiagnostic::new(
                     code,
                     HirDiagnosticSeverity::Error,
@@ -239,6 +240,7 @@ pub fn analyze_program_with_catalog(
                 lowering: Some(lowering),
                 mir: None,
                 facts: None,
+                semantic_facts: None,
                 diagnostics: vec![HirDiagnostic::new(
                     code,
                     HirDiagnosticSeverity::Error,
@@ -267,8 +269,6 @@ pub fn analyze_program_with_catalog(
         .filter(|diagnostic| diagnostic.code != "RM-MIR0009")
         .cloned()
         .collect::<Vec<_>>();
-    diagnostics.extend(lint_shapes_from_mir(&mir, &facts));
-
     let environment_effects = environment_effects(&mir);
     let resolution = call_resolution_diagnostics(&lowering, &environment_effects, source_catalog);
     let runtime_dependent = resolution.runtime_dependent;
@@ -309,10 +309,12 @@ pub fn analyze_program_with_catalog(
     if runtime_dependent {
         domains.name_resolution = AnalysisCompleteness::RuntimeDependent;
     }
+    let semantic_facts = crate::semantic::project_document_facts(&lowering, &mir, &facts);
     FrontendAnalysis {
         lowering: Some(lowering),
         mir: Some(mir),
         facts: Some(facts),
+        semantic_facts: Some(semantic_facts),
         diagnostics,
         parse_failure: None,
         lowering_failure: None,
@@ -696,12 +698,12 @@ mod tests {
     }
 
     #[test]
-    fn includes_mir_and_shape_diagnostics() {
+    fn includes_canonical_mir_fact_diagnostics() {
         let analysis = analyze("a = ones(2,3); b = ones(4,2); c = a * b;");
         assert!(analysis
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "lint.shape.matmul"));
+            .any(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL"));
     }
 
     #[test]
@@ -764,6 +766,83 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.category.as_deref() == Some("call-resolution")));
+    }
+
+    #[test]
+    fn semantic_projection_answers_reassignment_at_the_requested_source_position() {
+        let source = "x = 1; before = x; x = 'changed'; after = x;";
+        let analysis = analyze(source);
+        let facts = analysis.semantic_facts.as_ref().expect("semantic facts");
+
+        let before_offset = source.find("before = x").unwrap() + "before = ".len();
+        let after_offset = source.find("after = x").unwrap() + "after = ".len();
+        let before = facts
+            .quick_information("x", before_offset)
+            .and_then(|information| information.observation)
+            .and_then(|observation| observation.fact)
+            .expect("fact before reassignment");
+        let after = facts
+            .quick_information("x", after_offset)
+            .and_then(|information| information.observation)
+            .and_then(|observation| observation.fact)
+            .expect("fact after reassignment");
+
+        assert!(matches!(
+            before.kind,
+            runmat_types::ValueKindFact::Numeric(_)
+        ));
+        assert_eq!(after.kind, runmat_types::ValueKindFact::Character);
+    }
+
+    #[test]
+    fn semantic_projection_exposes_the_safe_control_flow_join() {
+        let source = "c = true; x = 1; if c; x = false; end; y = x;";
+        let analysis = analyze(source);
+        let facts = analysis.semantic_facts.as_ref().expect("semantic facts");
+        let offset = source.find("y = x").unwrap() + "y = ".len();
+        let joined = facts
+            .quick_information("x", offset)
+            .and_then(|information| information.observation)
+            .and_then(|observation| observation.fact)
+            .expect("joined fact");
+
+        assert_eq!(joined.kind, runmat_types::ValueKindFact::Unknown);
+        assert_eq!(joined.shape, runmat_types::ShapeFact::Scalar);
+        assert_eq!(
+            joined.certainty,
+            runmat_types::CertaintyFact::Dynamic(
+                runmat_types::DynamicReason::ConflictingControlFlow
+            )
+        );
+    }
+
+    #[test]
+    fn semantic_projection_is_deterministic_strict_and_round_trips() {
+        let analysis = analyze("x = linspace(-1, 1, 5); y = sin(x);");
+        let facts = analysis.semantic_facts.as_ref().expect("semantic facts");
+        let first = serde_json::to_string(facts).expect("serialize facts");
+        let second = serde_json::to_string(facts).expect("serialize facts again");
+        assert_eq!(first, second);
+        let round_trip: crate::semantic::SemanticDocumentFacts =
+            serde_json::from_str(&first).expect("round-trip facts");
+        assert_eq!(&round_trip, facts);
+        round_trip.validate_current().expect("current revision");
+
+        let mut incompatible_revision = round_trip.clone();
+        incompatible_revision.revision.fact_schema_minor += 1;
+        assert!(matches!(
+            incompatible_revision.validate_current(),
+            Err(runmat_mir::analysis::AnalysisRevisionMismatch::FactSchema { .. })
+        ));
+
+        let mut incompatible = serde_json::to_value(facts).expect("facts as JSON");
+        incompatible
+            .as_object_mut()
+            .expect("document object")
+            .insert("unknown_future_field".to_string(), serde_json::json!(true));
+        assert!(
+            serde_json::from_value::<crate::semantic::SemanticDocumentFacts>(incompatible).is_err()
+        );
     }
 
     #[test]

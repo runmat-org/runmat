@@ -17,9 +17,7 @@ use crate::analysis::inference::{
     apply_rvalue_contract, assign_place, infer_rvalue, infer_rvalue_outputs, operand_fact,
     rvalue_literal,
 };
-use crate::analysis::{
-    AssignmentFact, MirLocalFact, MirLocalKey, ProgramLocalFact, ProgramPointFacts,
-};
+use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
 
 const WIDEN_AFTER_UPDATE: usize = 4;
 const MAX_BLOCK_UPDATES: usize = 64;
@@ -212,24 +210,6 @@ fn collect_call_observation(
             argument_spans: Vec::new(),
         }),
         _ => {}
-    }
-}
-
-pub(crate) fn publish_legacy_projection(
-    function: FunctionId,
-    state: &FlowState,
-    target: &mut BTreeMap<MirLocalKey, MirLocalFact>,
-) {
-    for (local, fact) in state.final_facts() {
-        target.insert(
-            MirLocalKey {
-                function,
-                local: crate::MirLocalId(local),
-            },
-            MirLocalFact {
-                value: fact.fact.clone().unwrap_or_else(dynamic_value),
-            },
-        );
     }
 }
 

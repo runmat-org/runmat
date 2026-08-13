@@ -1,14 +1,14 @@
 use sha2::{Digest, Sha256};
 
 use crate::{
-    builtin_catalog_entries, builtin_functions, canonical_catalog_fingerprint, AccelTag,
-    BuiltinCompletionPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamType, Type,
-    TypeResolverKind,
+    builtin_catalog_entries, builtin_constant_catalog_entries, builtin_functions,
+    canonical_catalog_fingerprint, AccelTag, BuiltinCompletionPolicy, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamType, Type, TypeResolverKind,
 };
 
 /// Bump when execution-relevant builtin behavior changes in a way the
 /// declarative catalog cannot observe, such as type-resolver semantics.
-pub const BUILTIN_CATALOG_SCHEMA: u32 = 2;
+pub const BUILTIN_CATALOG_SCHEMA: u32 = 3;
 
 /// Return a target-independent fingerprint of the builtin execution contract.
 ///
@@ -20,13 +20,22 @@ pub fn builtin_catalog_fingerprint() -> [u8; 32] {
     functions.sort_unstable_by_key(|function| function.name);
 
     let mut hash = Sha256::new();
-    field(&mut hash, b"runmat-builtin-catalog-v2");
+    field(&mut hash, b"runmat-builtin-catalog-v3");
     number(&mut hash, BUILTIN_CATALOG_SCHEMA as u64);
     field(
         &mut hash,
         &canonical_catalog_fingerprint(builtin_catalog_entries())
             .expect("static builtin catalog must serialize"),
     );
+    let constants = builtin_constant_catalog_entries();
+    number(&mut hash, constants.len() as u64);
+    for constant in constants {
+        field(&mut hash, constant.name.as_bytes());
+        field(
+            &mut hash,
+            &serde_json::to_vec(&constant.kind).expect("static constant kind must serialize"),
+        );
+    }
     number(&mut hash, functions.len() as u64);
     for function in functions {
         field(&mut hash, function.name.as_bytes());

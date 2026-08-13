@@ -16,6 +16,32 @@ const BUILTINS: [&str; 10] = [
     "getfield",
 ];
 
+fn builtin_metadata(
+    name: &str,
+) -> (
+    &'static runmat_builtins::BuiltinDescriptor,
+    &'static [runmat_builtins::BuiltinExtensionDescriptor],
+    &'static [runmat_builtins::BuiltinIntegerCapabilityDescriptor],
+    Option<&'static runmat_builtins::BuiltinIntegerAuditDescriptor>,
+) {
+    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
+        return (
+            entry.descriptor,
+            entry.extensions,
+            entry.integer_capabilities,
+            entry.integer_audit,
+        );
+    }
+    let binding = runmat_builtins::builtin_function_by_name(name)
+        .unwrap_or_else(|| panic!("catalog entry or runtime binding for {name}"));
+    (
+        binding.descriptor.expect("public descriptor"),
+        binding.extensions,
+        binding.integer_capabilities,
+        binding.integer_audit,
+    )
+}
+
 #[test]
 fn file_io_and_field_access_descriptors_are_public_and_visible() {
     for (name, source, expected_signature) in [
@@ -66,13 +92,12 @@ fn file_io_and_field_access_integer_dispositions_are_public_completions() {
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
     for name in BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        let descriptor = builtin.descriptor.expect("public descriptor");
+        let (descriptor, _, integer_capabilities, integer_audit) = builtin_metadata(name);
         assert_eq!(
             descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public
         );
-        assert!(!builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some());
+        assert!(!integer_capabilities.is_empty() || integer_audit.is_some());
         assert!(completions
             .iter()
             .any(|item| item.label.eq_ignore_ascii_case(name)));
@@ -121,10 +146,10 @@ fn file_io_and_field_access_extensions_are_independently_registered() {
             &["getfield-textual-index", "getfield-indexed-resident-field"][..],
         ),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let (_, extensions, _, _) = builtin_metadata(name);
         for extension_id in extension_ids {
             assert!(
-                builtin.extensions.iter().any(|extension| {
+                extensions.iter().any(|extension| {
                     extension.id == *extension_id
                         && extension.mode == runmat_builtins::BuiltinExtensionMode::RunMatOnly
                 }),
@@ -133,9 +158,6 @@ fn file_io_and_field_access_extensions_are_independently_registered() {
         }
     }
     for name in ["func2str", "functions"] {
-        assert!(runmat_builtins::builtin_function_by_name(name)
-            .expect("registered builtin")
-            .extensions
-            .is_empty());
+        assert!(builtin_metadata(name).1.is_empty());
     }
 }

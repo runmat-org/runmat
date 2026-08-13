@@ -15,16 +15,22 @@ const COHORT: [&str; 8] = [
 #[test]
 fn gpu_transfer_and_constructor_integer_metadata_is_public() {
     for name in COHORT {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name);
+        let binding = runmat_builtins::builtin_function_by_name(name);
+        let descriptor = catalog
+            .map(|entry| entry.descriptor)
+            .or_else(|| binding.and_then(|binding| binding.descriptor))
+            .unwrap_or_else(|| panic!("catalog entry or runtime binding for {name}"));
+        let integer_capabilities = catalog.map_or_else(
+            || binding.expect("runtime binding").integer_capabilities,
+            |entry| entry.integer_capabilities,
+        );
         assert_eq!(
-            builtin
-                .descriptor
-                .expect("public descriptor")
-                .completion_policy,
+            descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
             "{name}"
         );
-        assert!(!builtin.integer_capabilities.is_empty(), "{name}");
+        assert!(!integer_capabilities.is_empty(), "{name}");
     }
 }
 

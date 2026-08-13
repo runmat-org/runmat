@@ -25,7 +25,6 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.program_points.clear();
     store.functions.clear();
     store.classes.clear();
-    store.mir_locals.clear();
 
     for (function, body) in &assembly.bodies {
         let Ok(function_ordinal) = u32::try_from(function.0) else {
@@ -54,7 +53,6 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             program.captures.get(function).map_or(&[], Vec::as_slice),
             &program.summaries,
         );
-        flow::publish_legacy_projection(*function, &flow.final_state, &mut store.mir_locals);
         store.diagnostics.extend(flow.diagnostics.clone());
         store.program_points.extend(flow.points);
         let summary = program

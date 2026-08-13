@@ -35,6 +35,7 @@ runmat-package = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-static-analysis = { workspace = true }
+runmat-types = { workspace = true }
 runmat-test = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true }
@@ -53,6 +54,9 @@ runmat-runtime = { workspace = true, features = ["plot-web"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 # Keep wasm-opt enabled while avoiding a Binaryen precompute crash seen on Windows.
 [package.metadata.wasm-pack.profile.release]

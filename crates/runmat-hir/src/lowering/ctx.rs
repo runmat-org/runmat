@@ -2442,15 +2442,10 @@ impl LoweringCtx {
                 if let Some(binding) = self.binding_for_read(name, span) {
                     HirExprKind::Binding(binding)
                 } else if self.current_scope().external_bindings_visible
-                    && runmat_builtins::constants()
-                        .iter()
-                        .any(|c| c.name == name.as_str())
+                    && runmat_builtins::builtin_constant_catalog_entry_by_name(name).is_some()
                 {
                     HirExprKind::Binding(self.define_external_binding_for_read(name, span))
-                } else if runmat_builtins::constants()
-                    .iter()
-                    .any(|c| c.name == name.as_str())
-                {
+                } else if runmat_builtins::builtin_constant_catalog_entry_by_name(name).is_some() {
                     HirExprKind::Constant(SymbolName(name.clone()))
                 } else if let Some(class_name) =
                     self.resolve_imported_static_property_target(name, span)?

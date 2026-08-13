@@ -1,3 +1,4 @@
+mod constant;
 mod contract;
 pub mod definitions;
 mod descriptor;
@@ -15,6 +16,7 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use constant::*;
 pub use contract::*;
 pub use descriptor::*;
 pub use documentation::*;

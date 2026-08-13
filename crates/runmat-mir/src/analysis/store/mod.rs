@@ -8,19 +8,13 @@ pub use function::*;
 pub use program_point::*;
 pub use version::*;
 
-use runmat_hir::FunctionId;
+use crate::MirDiagnostic;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-
-use crate::{MirDiagnostic, MirLocalId};
-
-use super::MirLocalFact;
 
 /// Complete, portable semantic result for one MIR assembly.
 ///
-/// `program_points` and `functions` are the authoritative products. `mir_locals`
-/// is a deterministic final-fact projection retained for consumers migrating in
-/// R08; it is not a second inference authority.
+/// Program-point facts and function summaries are the sole value-analysis
+/// authority. Consumers select facts by stable program identity and point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisStore {
@@ -29,7 +23,6 @@ pub struct AnalysisStore {
     pub program_points: Vec<ProgramPointFacts>,
     pub functions: Vec<FunctionAnalysis>,
     pub classes: Vec<ClassAnalysis>,
-    pub mir_locals: BTreeMap<MirLocalKey, MirLocalFact>,
     pub diagnostics: Vec<MirDiagnostic>,
 }
 
@@ -41,7 +34,6 @@ impl Default for AnalysisStore {
             program_points: Vec::new(),
             functions: Vec::new(),
             classes: Vec::new(),
-            mir_locals: BTreeMap::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -61,39 +53,14 @@ impl AnalysisStore {
             .ok()
             .map(|index| &self.functions[index])
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MirLocalKey {
-    pub function: FunctionId,
-    pub local: MirLocalId,
-}
-
-impl Serialize for MirLocalKey {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&format!("{}:{}", self.function.0, self.local.0))
-    }
-}
-
-impl<'de> Deserialize<'de> for MirLocalKey {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de;
-        let value = String::deserialize(deserializer)?;
-        let Some((function, local)) = value.split_once(':') else {
-            return Err(de::Error::custom(
-                "expected MIR local key as function:local",
-            ));
-        };
-        Ok(Self {
-            function: FunctionId(function.parse().map_err(de::Error::custom)?),
-            local: MirLocalId(local.parse().map_err(de::Error::custom)?),
-        })
+    pub fn local_value_count(&self, function: Option<runmat_types::ProgramFunctionId>) -> usize {
+        self.program_points
+            .iter()
+            .filter(|point| function.is_none_or(|function| point.point.function == function))
+            .flat_map(|point| point.locals.iter().map(|local| local.value))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
     }
 }
 

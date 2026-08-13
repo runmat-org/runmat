@@ -225,6 +225,41 @@ fn selector_bounds_diagnostic(
     selectors: &[IndexSelectorFact],
     context: IndexResultContext,
 ) -> Option<crate::InferenceDiagnostic> {
+    let logical_mismatch =
+        if selectors.len() == 1 {
+            match &selectors[0] {
+                IndexSelectorFact::Logical(selector) => base
+                    .element_count()
+                    .zip(selector.shape.element_count())
+                    .filter(|(base, selector)| base != selector)
+                    .map(|_| 0),
+                _ => None,
+            }
+        } else {
+            let dimensions = dimensions(base, selectors.len());
+            selectors.iter().zip(dimensions).enumerate().find_map(
+                |(dimension, (selector, bound))| match (selector, bound) {
+                    (IndexSelectorFact::Logical(selector), crate::DimensionFact::Known(bound))
+                        if selector
+                            .shape
+                            .element_count()
+                            .is_some_and(|count| count != bound) =>
+                    {
+                        Some(dimension)
+                    }
+                    _ => None,
+                },
+            )
+        };
+    if let Some(dimension) = logical_mismatch {
+        return Some(
+            crate::InferenceDiagnostic::error(
+                "RM-TYPE-LOGICAL-INDEX",
+                "logical index shape does not match the indexed extent",
+            )
+            .at_dimension(dimension),
+        );
+    }
     if let Some(dimension) = selectors
         .iter()
         .position(|selector| matches!(selector, IndexSelectorFact::KnownOneBasedIndex(0)))

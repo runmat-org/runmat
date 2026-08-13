@@ -58,6 +58,9 @@ pub(crate) fn infer_mir_call(
         if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
             return runmat_builtins::infer_catalog_call(entry, &request);
         }
+        if let Some(inference) = super::infer_legacy_builtin(&name, &request) {
+            return inference;
+        }
     }
 
     if let MirCallee::Dynamic(operand) = &call.callee {
@@ -116,9 +119,7 @@ fn operand_fact(
             .get(local.0)
             .and_then(Clone::clone)
             .unwrap_or_else(dynamic_value),
-        MirOperand::Constant(constant) => {
-            runmat_types::infer_literal(&dataflow::literal_value(constant)).fact
-        }
+        MirOperand::Constant(constant) => dataflow::constant_fact(constant),
         MirOperand::FunctionHandle(identity) => {
             let summary = match identity {
                 CallableIdentity::BoundFunction(function)

@@ -24,13 +24,11 @@ struct InitDataflowResult {
     in_states: Vec<Option<Vec<InitFact>>>,
 }
 
-type SimpleValueFact = ValueFact;
-
 pub(crate) fn assign_place_fact(
     place: &MirPlace,
     assigned: ValueFact,
     mutation: Option<&crate::MirPlaceMutation>,
-    facts: &mut [Option<SimpleValueFact>],
+    facts: &mut [Option<ValueFact>],
 ) {
     match place {
         MirPlace::Local(local) => facts[local.0] = Some(assigned),
@@ -85,7 +83,7 @@ pub(crate) fn assign_place_fact(
     }
 }
 
-fn place_fact(place: &MirPlace, facts: &[Option<SimpleValueFact>]) -> ValueFact {
+fn place_fact(place: &MirPlace, facts: &[Option<ValueFact>]) -> ValueFact {
     match place {
         MirPlace::Local(local) => facts
             .get(local.0)
@@ -105,59 +103,67 @@ fn place_fact(place: &MirPlace, facts: &[Option<SimpleValueFact>]) -> ValueFact 
     }
 }
 
-pub(crate) fn simple_rvalue_fact(
+pub(crate) fn simple_rvalue_fact(value: &MirRvalue, facts: &[Option<ValueFact>]) -> ValueFact {
+    simple_rvalue_inference(value, facts).fact
+}
+
+pub(crate) fn simple_rvalue_inference(
     value: &MirRvalue,
-    facts: &[Option<SimpleValueFact>],
-) -> SimpleValueFact {
+    facts: &[Option<ValueFact>],
+) -> runmat_types::FactInference {
     match value {
-        MirRvalue::Use(operand) => simple_operand_fact(operand, facts),
-        MirRvalue::Future { .. } => scalar_fact(ValueKindFact::Execution(ExecutionFact::Future {
-            output: Box::new(dynamic_value()),
-            state: FutureStateFact::Lazy,
-        })),
-        MirRvalue::Spawn(_) => scalar_fact(ValueKindFact::Execution(ExecutionFact::Task {
-            output: Box::new(dynamic_value()),
-            spawn_safety: SpawnSafetyFact::RequiresIsolation,
-        })),
+        MirRvalue::Use(operand) => {
+            runmat_types::FactInference::exact(simple_operand_fact(operand, facts))
+        }
+        MirRvalue::Future { .. } => runmat_types::FactInference::exact(scalar_fact(
+            ValueKindFact::Execution(ExecutionFact::Future {
+                output: Box::new(dynamic_value()),
+                state: FutureStateFact::Lazy,
+            }),
+        )),
+        MirRvalue::Spawn(_) => runmat_types::FactInference::exact(scalar_fact(
+            ValueKindFact::Execution(ExecutionFact::Task {
+                output: Box::new(dynamic_value()),
+                spawn_safety: SpawnSafetyFact::RequiresIsolation,
+            }),
+        )),
         MirRvalue::Aggregate {
             kind,
             rows,
             cols,
             elements,
-        } => aggregate_fact(kind, *rows, *cols, elements, facts),
-        MirRvalue::StructLiteral { fields } => {
-            infer_struct(
-                fields
-                    .iter()
-                    .map(|(name, operand)| (name.0.clone(), simple_operand_fact(operand, facts)))
-                    .collect(),
-            )
-            .fact
-        }
+        } => aggregate_inference(kind, *rows, *cols, elements, facts),
+        MirRvalue::StructLiteral { fields } => infer_struct(
+            fields
+                .iter()
+                .map(|(name, operand)| (name.0.clone(), simple_operand_fact(operand, facts)))
+                .collect(),
+        ),
         MirRvalue::ObjectLiteral { class_name, fields } => {
             let properties = fields
                 .iter()
                 .map(|(name, operand)| (name.0.clone(), simple_operand_fact(operand, facts)))
                 .collect();
-            scalar_fact(ValueKindFact::Object(runmat_types::ObjectFact {
-                class: None,
-                runtime_class: Some(class_name.clone()),
-                properties,
-                properties_complete: true,
-                handle_semantics: None,
-            }))
+            runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Object(
+                runmat_types::ObjectFact {
+                    class: None,
+                    runtime_class: Some(class_name.clone()),
+                    properties,
+                    properties_complete: true,
+                    handle_semantics: None,
+                },
+            )))
         }
-        MirRvalue::Binary(left, operator, right) => {
-            infer_binary(
-                *operator,
-                &simple_operand_fact(left, facts),
-                &simple_operand_fact(right, facts),
-            )
-            .fact
+        MirRvalue::Binary(left, operator, right) => infer_binary(
+            *operator,
+            &simple_operand_fact(left, facts),
+            &simple_operand_fact(right, facts),
+        ),
+        MirRvalue::ShortCircuit { .. } => {
+            runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Logical))
         }
-        MirRvalue::ShortCircuit { .. } => scalar_fact(ValueKindFact::Logical),
         MirRvalue::Unary(operator, operand) => {
-            infer_unary(*operator, &simple_operand_fact(operand, facts)).fact
+            infer_unary(*operator, &simple_operand_fact(operand, facts))
         }
         MirRvalue::Range { start, step, end } => {
             let step = match step {
@@ -166,40 +172,39 @@ pub(crate) fn simple_rvalue_fact(
                     .map(RangeStepFact::Known)
                     .unwrap_or(RangeStepFact::Unknown),
             };
-            infer_range(numeric_operand(start), step, numeric_operand(end)).fact
+            infer_range(numeric_operand(start), step, numeric_operand(end))
         }
-        MirRvalue::Index { base, indexing } => {
-            infer_index(
-                &simple_operand_fact(base, facts),
-                indexing.kind,
-                &index_selectors(indexing, facts),
-                indexing.result_context,
-            )
-            .fact
-        }
+        MirRvalue::Index { base, indexing } => infer_index(
+            &simple_operand_fact(base, facts),
+            indexing.kind,
+            &index_selectors(indexing, facts),
+            indexing.result_context,
+        ),
         MirRvalue::Member { base, member } => {
-            infer_member_read(&simple_operand_fact(base, facts), member).fact
+            infer_member_read(&simple_operand_fact(base, facts), member)
         }
         MirRvalue::DynamicMember { .. }
         | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
-        | MirRvalue::End => dynamic_value(),
+        | MirRvalue::End => runmat_types::FactInference::exact(dynamic_value()),
         MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0 => {
-            scalar_fact(ValueKindFact::Void)
+            runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Void))
         }
-        MirRvalue::Call(_) => dynamic_value(),
-        MirRvalue::Distributed(_) | MirRvalue::Collective(_) => dynamic_value(),
+        MirRvalue::Call(_) => runmat_types::FactInference::exact(dynamic_value()),
+        MirRvalue::Distributed(_) | MirRvalue::Collective(_) => {
+            runmat_types::FactInference::exact(dynamic_value())
+        }
     }
 }
 
-fn aggregate_fact(
+fn aggregate_inference(
     kind: &MirAggregateKind,
     rows: usize,
     cols: usize,
     elements: &[MirOperand],
-    facts: &[Option<SimpleValueFact>],
-) -> SimpleValueFact {
+    facts: &[Option<ValueFact>],
+) -> runmat_types::FactInference {
     let rows = if rows == 0 {
         Vec::new()
     } else {
@@ -213,18 +218,18 @@ fn aggregate_fact(
             .collect::<Vec<_>>()
     };
     match kind {
-        MirAggregateKind::Tensor => infer_tensor_aggregate(&rows).fact,
-        MirAggregateKind::Cell => infer_cell_aggregate(&rows).fact,
+        MirAggregateKind::Tensor => infer_tensor_aggregate(&rows),
+        MirAggregateKind::Cell => infer_cell_aggregate(&rows),
     }
 }
 
-fn simple_operand_fact(operand: &MirOperand, facts: &[Option<SimpleValueFact>]) -> SimpleValueFact {
+fn simple_operand_fact(operand: &MirOperand, facts: &[Option<ValueFact>]) -> ValueFact {
     match operand {
         MirOperand::Local(local) => facts
             .get(local.0)
             .and_then(Clone::clone)
             .unwrap_or_else(dynamic_value),
-        MirOperand::Constant(constant) => infer_literal(&literal_value(constant)).fact,
+        MirOperand::Constant(constant) => constant_fact(constant),
         MirOperand::FunctionHandle(
             CallableIdentity::BoundFunction(function)
             | CallableIdentity::ExternalFunction { function, .. },
@@ -258,6 +263,15 @@ fn simple_operand_fact(operand: &MirOperand, facts: &[Option<SimpleValueFact>]) 
     }
 }
 
+pub(crate) fn constant_fact(constant: &crate::MirConstant) -> ValueFact {
+    if let crate::MirConstant::Symbol(name) = constant {
+        if let Some(constant) = runmat_builtins::builtin_constant_catalog_entry_by_name(&name.0) {
+            return constant.fact();
+        }
+    }
+    infer_literal(&literal_value(constant)).fact
+}
+
 pub(crate) fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
     match constant {
         crate::MirConstant::Number(value) => LiteralValue::Real {
@@ -284,10 +298,7 @@ fn numeric_operand(operand: &MirOperand) -> Option<f64> {
     }
 }
 
-fn index_selectors(
-    indexing: &MirIndexing,
-    facts: &[Option<SimpleValueFact>],
-) -> Vec<IndexSelectorFact> {
+fn index_selectors(indexing: &MirIndexing, facts: &[Option<ValueFact>]) -> Vec<IndexSelectorFact> {
     indexing
         .components
         .iter()
@@ -312,11 +323,11 @@ fn index_selectors(
         .collect()
 }
 
-fn scalar_fact(kind: ValueKindFact) -> SimpleValueFact {
+fn scalar_fact(kind: ValueKindFact) -> ValueFact {
     value_fact(kind, ShapeFact::Scalar, StorageFact::Scalar)
 }
 
-fn value_fact(kind: ValueKindFact, shape: ShapeFact, storage: StorageFact) -> SimpleValueFact {
+fn value_fact(kind: ValueKindFact, shape: ShapeFact, storage: StorageFact) -> ValueFact {
     ValueFact {
         kind,
         shape,
@@ -332,7 +343,7 @@ fn value_fact(kind: ValueKindFact, shape: ShapeFact, storage: StorageFact) -> Si
     }
 }
 
-fn dynamic_value() -> SimpleValueFact {
+fn dynamic_value() -> ValueFact {
     ValueFact::unknown(DynamicReason::Unspecified)
 }
 

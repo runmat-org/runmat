@@ -118,7 +118,7 @@ MATLAB indexing is complex (supporting `end`, `:`, and logical masks). MIR lower
 
 ## MIR Dataflow Analysis
 
-Once lowered, the `AnalysisStore` tracks facts about `MirLocal` slots across the CFG using a fixed-point iteration engine in `compute_simple_local_facts`.
+Once lowered, `analyze_assembly` computes an `AnalysisStore` over every MIR body. Its fixed-point engine retains source-addressable program-point facts across each control-flow graph; a final-local compatibility map is not a second analysis product.
 
 ### Analysis Logic Flow
 
@@ -127,12 +127,12 @@ The diagram below illustrates how the analysis engine processes a `MirBody` to p
 ```mermaid
 flowchart TD
   A["MirBody"]
-  B["compute_simple_local_facts"]
-  C["transfer_fact_block"]
+  B["analyze_body"]
+  C["transfer_statement"]
   D["MirStmtKind::Assign"]
-  E["simple_rvalue_fact"]
-  F["SimpleValueFact (Type, Shape, Async)"]
-  G["join_fact_state (Merge Paths)"]
+  E["infer_rvalue"]
+  F["ValueFact"]
+  G["FlowState::join_from (Merge Paths)"]
   H["AnalysisStore"]
   A --> B
   B --> C
@@ -146,5 +146,5 @@ flowchart TD
 ### Key Analysis Facts
 
 - `InitFact`: Tracks if a local is `Unassigned`, `MaybeAssigned`, or `DefinitelyAssigned`. Used for definite assignment validation.
-- `SimpleValueFact`: Aggregates `TypeFact` (e.g., Double, Struct), `ShapeFact` (dimensions), and `ValueFlowFact`.
+- `ValueFact`: The canonical, dependency-light semantic fact from `runmat-types`; it combines kind, shape, storage, execution, and certainty information without depending on runtime values.
 - `SpawnSafetyFact`: Analyzes if a closure or function is safe to `spawn` on a background thread based on its captures and effects.

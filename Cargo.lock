@@ -6348,6 +6348,7 @@ dependencies = [
  "runmat-test",
  "runmat-time",
  "runmat-turbine",
+ "runmat-types",
  "runmat-value",
  "runmat-vm",
  "serde_json",
@@ -6618,6 +6619,7 @@ dependencies = [
  "runmat-static-analysis",
  "runmat-test",
  "runmat-thread-local",
+ "runmat-types",
  "runmat-vm",
  "serde",
  "serde-wasm-bindgen",
@@ -6627,6 +6629,7 @@ dependencies = [
  "tower-lsp",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -7043,6 +7046,7 @@ dependencies = [
  "runmat-types",
  "runmat-vm",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

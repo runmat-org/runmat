@@ -2719,8 +2719,8 @@ fn compile_input_records_mir_analysis_facts() {
         "valid semantic compile should not emit MIR diagnostics"
     );
     assert!(
-        !prepared.analysis().mir_locals.is_empty(),
-        "semantic compile should carry MIR local analysis facts for entrypoint execution"
+        prepared.analysis().local_value_count(None) > 0,
+        "semantic compile should carry program-point local analysis facts for entrypoint execution"
     );
 }
 
@@ -10404,7 +10404,7 @@ fn dynamic_workspace_evalin_base_and_assignin_update_base_workspace() {
 
 #[test]
 fn dynamic_workspace_assignin_session_delta_preserves_all_integer_classes() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         assignin('base', 'ai_i8', int8([-128 127]));
         assignin('base', 'ai_i16', int16([-32768 32767]));

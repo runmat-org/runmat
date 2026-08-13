@@ -16,14 +16,10 @@ fn mir_local_fact_count_for_entrypoint(
     analysis: &runmat_mir::analysis::AnalysisStore,
     assembly: &runmat_hir::HirAssembly,
 ) -> usize {
-    let Some(entrypoint_target) = entrypoint_target_function(assembly) else {
-        return analysis.mir_locals.len();
-    };
-    analysis
-        .mir_locals
-        .keys()
-        .filter(|key| key.function == entrypoint_target)
-        .count()
+    let function = entrypoint_target_function(assembly)
+        .and_then(|function| u32::try_from(function.0).ok())
+        .map(runmat_types::ProgramFunctionId);
+    analysis.local_value_count(function)
 }
 
 fn function_output_arities(
