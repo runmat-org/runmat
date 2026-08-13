@@ -1,6 +1,6 @@
 use crate::source_context;
-use runmat_hir::{SourceId, Span};
 use runmat_thread_local::runmat_thread_local;
+use runmat_types::{SourceId, Span};
 use std::cell::RefCell;
 
 #[derive(Debug, Clone)]

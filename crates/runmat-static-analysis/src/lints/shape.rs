@@ -89,7 +89,7 @@ impl ShapeLintContext {
                 }) else {
                     continue;
                 };
-                if let Some(shape) = shape_from_fact(&fact.shape) {
+                if let Some(shape) = shape_from_fact(&fact.value.shape) {
                     self.env.insert(binding, shape);
                 }
             }
@@ -764,20 +764,19 @@ fn sized_constructor_shape(args: &[MirShapeValue]) -> Option<Shape> {
     }
 }
 
-fn shape_from_fact(shape: &runmat_hir::ShapeFact) -> Option<Shape> {
+fn shape_from_fact(shape: &runmat_types::ShapeFact) -> Option<Shape> {
     match shape {
-        runmat_hir::ShapeFact::Scalar => Some(Shape(vec![Some(1), Some(1)])),
-        runmat_hir::ShapeFact::Shaped { dims } => Some(Shape(
+        runmat_types::ShapeFact::Scalar => Some(Shape(vec![Some(1), Some(1)])),
+        runmat_types::ShapeFact::Shaped { dims } => Some(Shape(
             dims.iter()
                 .map(|dim| match dim {
-                    runmat_hir::DimFact::Known(value) => Some(*value),
-                    runmat_hir::DimFact::Symbolic(_) | runmat_hir::DimFact::Unknown => None,
+                    runmat_types::DimensionFact::Known(value) => Some(*value),
+                    runmat_types::DimensionFact::Symbolic(_)
+                    | runmat_types::DimensionFact::Unknown => None,
                 })
                 .collect(),
         )),
-        runmat_hir::ShapeFact::Ranked { .. }
-        | runmat_hir::ShapeFact::Unknown
-        | runmat_hir::ShapeFact::Unreachable => None,
+        runmat_types::ShapeFact::Ranked { .. } | runmat_types::ShapeFact::Unknown => None,
     }
 }
 

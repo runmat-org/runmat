@@ -1,6 +1,6 @@
 use crate::RuntimeError;
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SourceId};
 use runmat_thread_local::runmat_thread_local;
+use runmat_types::{CallableFallbackPolicy, CallableIdentity, SourceId};
 use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
@@ -33,7 +33,7 @@ pub struct CallableRequest {
 impl CallableRequest {
     pub fn semantic(function: usize, args: Vec<Value>, requested_outputs: usize) -> Self {
         Self {
-            identity: CallableIdentity::BoundFunction(runmat_hir::FunctionId(function)),
+            identity: CallableIdentity::BoundFunction(runmat_types::FunctionId(function)),
             fallback_policy: CallableFallbackPolicy::None,
             args,
             requested_outputs,
@@ -270,7 +270,7 @@ pub async fn try_call_semantic_descriptor(
     }
     let name = fallback_policy.resolution_name_for(&identity)?;
     if matches!(identity, CallableIdentity::DynamicName(_))
-        && runmat_builtins::get_class(&name).is_some()
+        && crate::class_registry::get_class(&name).is_some()
     {
         // Constructor calls for class names must flow through runtime constructor dispatch,
         // not generic semantic name resolution.

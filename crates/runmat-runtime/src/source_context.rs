@@ -1,5 +1,5 @@
-use runmat_hir::SourceId;
 use runmat_thread_local::runmat_thread_local;
+use runmat_types::SourceId;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;

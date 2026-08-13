@@ -30,6 +30,7 @@ pub(super) fn class_records(sources: &[SemanticTestSource<'_>]) -> Vec<ClassReco
                     source_index,
                     class_index,
                     name: class
+                        .declaration
                         .name
                         .0
                         .iter()
@@ -71,17 +72,23 @@ pub(super) fn test_case_lineage(
         lineage.push(current);
         let record = &records[current];
         let class = &sources[record.source_index].assembly.classes[record.class_index];
-        let Some(parent) = class.declared_super_class.as_deref() else {
+        let Some(parent) = class
+            .declaration
+            .inheritance
+            .declared_super_class
+            .as_deref()
+        else {
             return Lineage::NotTestCase;
         };
         if parent.eq_ignore_ascii_case("matlab.unittest.TestCase")
-            || runmat_builtins::is_class_or_subclass(parent, "matlab.unittest.TestCase")
+            || runmat_builtins::standard_class_is_subclass(parent, "matlab.unittest.TestCase")
         {
             lineage.reverse();
             return Lineage::TestCase(lineage);
         }
         let Some(parent_index) = by_name.get(&parent.to_ascii_lowercase()) else {
             let declares_testing_metadata = class
+                .declaration
                 .methods
                 .iter()
                 .any(|method| attributes::has(&method.declared_attributes, "Test"));

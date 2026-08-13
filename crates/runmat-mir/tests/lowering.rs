@@ -9,6 +9,10 @@ use runmat_mir::{
     MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind,
     MirTerminatorKind,
 };
+use runmat_types::{
+    DimensionFact, ExecutionFact, NumericClass, NumericDomain, NumericFact, ShapeFact,
+    ValueKindFact,
+};
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
     let ast = runmat_parser::parse(src).unwrap();
@@ -424,11 +428,12 @@ fn analyze_body_records_simple_numeric_local_and_binding_facts() {
                 local: output,
             })
             .unwrap()
-            .ty,
-        runmat_hir::TypeFact::Numeric {
-            class: runmat_hir::NumericClass::Double,
-            domain: runmat_hir::NumericDomain::Real,
-        }
+            .value
+            .kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
     );
 }
 
@@ -444,12 +449,8 @@ fn analyze_body_records_simple_string_value_flow_fact() {
         })
         .unwrap();
 
-    assert_eq!(fact.ty, runmat_hir::TypeFact::CharArray);
-    assert_eq!(fact.shape, runmat_hir::ShapeFact::Scalar);
-    assert_eq!(
-        fact.value_flow,
-        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::CharArray)
-    );
+    assert_eq!(fact.value.kind, ValueKindFact::Character);
+    assert_eq!(fact.value.shape, ShapeFact::Scalar);
 }
 
 #[test]
@@ -459,12 +460,12 @@ fn analyze_body_records_function_handle_value_flow_fact() {
     let function_fact = store
         .mir_locals
         .values()
-        .find(|fact| matches!(fact.ty, runmat_hir::TypeFact::Function(_)))
+        .find(|fact| matches!(fact.value.kind, ValueKindFact::Callable(_)))
         .unwrap();
 
     assert!(matches!(
-        function_fact.value_flow,
-        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Function(_))
+        function_fact.value.kind,
+        ValueKindFact::Callable(_)
     ));
 }
 
@@ -478,25 +479,18 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
     }];
 
     assert!(matches!(
-        tensor_fact.ty,
-        runmat_hir::TypeFact::Tensor(runmat_hir::TensorTypeFact {
-            element: runmat_hir::TensorElementDomainFact::Numeric {
-                class: runmat_hir::NumericClass::Double,
-                domain: runmat_hir::NumericDomain::Real,
-            },
-            ..
+        tensor_fact.value.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
         })
     ));
     assert_eq!(
-        tensor_fact.shape,
-        runmat_hir::ShapeFact::Shaped {
-            dims: vec![runmat_hir::DimFact::Known(1), runmat_hir::DimFact::Known(2)]
+        tensor_fact.value.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)]
         }
     );
-    assert!(matches!(
-        tensor_fact.value_flow,
-        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Tensor(_))
-    ));
 
     let (cell_body, cell_store) = analyze_single_body("function y = f(); y = {1, 2}; end");
     let cell_output = first_local_of_kind(&cell_body, MirLocalKind::Output);
@@ -505,16 +499,12 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
         local: cell_output,
     }];
 
-    assert_eq!(cell_fact.ty, runmat_hir::TypeFact::Cell);
+    assert!(matches!(cell_fact.value.kind, ValueKindFact::Cell(_)));
     assert_eq!(
-        cell_fact.shape,
-        runmat_hir::ShapeFact::Shaped {
-            dims: vec![runmat_hir::DimFact::Known(1), runmat_hir::DimFact::Known(2)]
+        cell_fact.value.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)]
         }
-    );
-    assert_eq!(
-        cell_fact.value_flow,
-        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Cell)
     );
 }
 
@@ -527,9 +517,8 @@ fn analyze_body_records_binary_op_as_unknown_scalar_fact() {
         local: output,
     }];
 
-    assert_eq!(fact.ty, runmat_hir::TypeFact::Unknown);
-    assert_eq!(fact.shape, runmat_hir::ShapeFact::Unknown);
-    assert_eq!(fact.value_flow, runmat_hir::ValueFlowFact::UnknownList);
+    assert_eq!(fact.value.kind, ValueKindFact::Unknown);
+    assert_eq!(fact.value.shape, ShapeFact::Unknown);
 }
 
 #[test]
@@ -541,8 +530,8 @@ fn analyze_body_joins_simple_facts_across_cfg_paths() {
         local: output,
     }];
 
-    assert_eq!(fact.ty, runmat_hir::TypeFact::Unknown);
-    assert_eq!(fact.shape, runmat_hir::ShapeFact::Scalar);
+    assert_eq!(fact.value.kind, ValueKindFact::Unknown);
+    assert_eq!(fact.value.shape, ShapeFact::Scalar);
 }
 
 #[test]
@@ -556,15 +545,18 @@ async function y = make(); y = 1; end",
     let async_values: Vec<_> = store
         .mir_locals
         .values()
-        .filter_map(|fact| fact.async_value.as_ref())
+        .filter_map(|fact| match &fact.value.kind {
+            ValueKindFact::Execution(execution) => Some(execution),
+            _ => None,
+        })
         .collect();
 
     assert!(async_values
         .iter()
-        .any(|fact| matches!(fact, runmat_hir::AsyncValueFact::Future(_))));
+        .any(|fact| matches!(fact, ExecutionFact::Future { .. })));
     assert!(async_values
         .iter()
-        .any(|fact| matches!(fact, runmat_hir::AsyncValueFact::TaskHandle(_))));
+        .any(|fact| matches!(fact, ExecutionFact::Task { .. })));
 }
 
 #[test]
@@ -621,8 +613,9 @@ fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
                             function: body.function,
                             local: local.id,
                         }]
-                            .ty,
-                        runmat_hir::TypeFact::Function(_)
+                            .value
+                            .kind,
+                        ValueKindFact::Callable(_)
                     )
             })
         })
@@ -632,8 +625,9 @@ fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
             function: body.function,
             local: handle_local,
         }]
-            .ty,
-        runmat_hir::TypeFact::Function(_)
+            .value
+            .kind,
+        ValueKindFact::Callable(_)
     ));
     assert!(store.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0003"
@@ -714,8 +708,9 @@ fn analyze_body_populates_local_facts_for_parameters() {
             function: body.function,
             local: parameter,
         }]
-            .ty,
-        runmat_hir::TypeFact::Unknown
+            .value
+            .kind,
+        ValueKindFact::Unknown
     );
 }
 
@@ -930,8 +925,8 @@ fn dataflow_marks_spawn_as_task_handle_even_when_safety_diagnostic_rejects_targe
     let store = analyze_assembly(&mir);
 
     assert!(store.mir_locals.values().any(|fact| matches!(
-        fact.async_value,
-        Some(runmat_hir::AsyncValueFact::TaskHandle(_))
+        fact.value.kind,
+        ValueKindFact::Execution(ExecutionFact::Task { .. })
     )));
     assert!(store.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")

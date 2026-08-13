@@ -5,6 +5,7 @@ use runmat_builtins::{
     BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::MemberAccess;
 use runmat_value::Value;
 
 const GETMETHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -91,16 +92,17 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
     crate::compatibility::ensure_builtin_extension_enabled(&GETMETHOD_EXTENSION, "getmethod")?;
 
     fn ensure_method_accessible(class_name: &str, method_name: &str) -> crate::BuiltinResult<()> {
-        let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
+        let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+        else {
             return Ok(());
         };
         let caller_class = crate::class_access_context();
         let access_allowed = match method.access {
-            runmat_value::Access::Public => true,
-            runmat_value::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-            runmat_value::Access::Protected => caller_class
+            runmat_types::MemberAccess::Public => true,
+            runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+            runmat_types::MemberAccess::Protected => caller_class
                 .as_deref()
-                .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
+                .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
         };
         if access_allowed {
             return Ok(());
@@ -126,7 +128,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         Value::Object(o) => {
             ensure_method_accessible(&o.class_name, method_name)?;
             if let Some((resolved, _owner)) =
-                runmat_builtins::lookup_method(&o.class_name, method_name)
+                crate::class_registry::lookup_method(&o.class_name, method_name)
             {
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
@@ -149,7 +151,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         Value::HandleObject(h) => {
             ensure_method_accessible(&h.class_name, method_name)?;
             if let Some((resolved, _owner)) =
-                runmat_builtins::lookup_method(&h.class_name, method_name)
+                crate::class_registry::lookup_method(&h.class_name, method_name)
             {
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),

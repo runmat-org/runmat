@@ -9,8 +9,8 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_hir::RUN_BUILTIN_NAME;
 use runmat_macros::runtime_builtin;
+use runmat_types::RUN_BUILTIN_NAME;
 use runmat_value::Value;
 
 use crate::builtins::common::fs::path_to_string;

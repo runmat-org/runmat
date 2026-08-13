@@ -8,7 +8,7 @@ use runmat_test::discovery::{
 };
 use runmat_test::identity::{FixtureGroupId, FixtureId, ParameterId};
 
-use crate::{ClassMethod, HirClass, HirFunction};
+use crate::{HirClass, HirFunction, MethodDeclaration};
 
 use crate::testing::attributes;
 use crate::testing::source::source_descriptor;
@@ -19,7 +19,7 @@ pub(super) fn descriptor(
     suite_identity: &str,
     group_id: FixtureGroupId,
     class_name: &str,
-    method: &ClassMethod,
+    method: &MethodDeclaration,
     function: &HirFunction,
 ) -> Option<FixtureDescriptor> {
     let (scope, setup) = scope_and_direction(method)?;
@@ -45,7 +45,7 @@ pub(super) fn descriptor(
     })
 }
 
-pub(super) fn is_fixture(method: &ClassMethod) -> bool {
+pub(super) fn is_fixture(method: &MethodDeclaration) -> bool {
     scope_and_direction(method).is_some()
 }
 
@@ -61,6 +61,7 @@ pub(super) fn materialization(
     let mut fixtures = Vec::new();
     let mut pending = Vec::new();
     for attribute in class
+        .declaration
         .declared_attributes
         .iter()
         .filter(|attribute| attribute.name.eq_ignore_ascii_case("SharedTestFixtures"))
@@ -103,7 +104,7 @@ pub(super) fn materialization(
     (fixtures, pending)
 }
 
-fn scope_and_direction(method: &ClassMethod) -> Option<(FixtureScope, bool)> {
+fn scope_and_direction(method: &MethodDeclaration) -> Option<(FixtureScope, bool)> {
     for (attribute, scope, setup) in [
         ("TestMethodSetup", FixtureScope::Test, true),
         ("TestMethodTeardown", FixtureScope::Test, false),

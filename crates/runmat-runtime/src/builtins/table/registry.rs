@@ -1,8 +1,7 @@
+use runmat_types::MemberAccess;
+use runmat_value::Value;
 use std::cell::Cell;
 use std::collections::HashMap;
-
-use runmat_builtins::{ClassDef, MethodDef, PropertyDef};
-use runmat_value::{Access, Value};
 
 use crate::{OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD};
 
@@ -53,13 +52,13 @@ fn register_tabular_class(name: &str) {
     let mut properties = HashMap::new();
     properties.insert(
         PROPERTIES_MEMBER.to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: PROPERTIES_MEMBER.to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Struct(default_properties_for_class(
                 name,
                 Vec::new(),
@@ -72,19 +71,19 @@ fn register_tabular_class(name: &str) {
     for method_name in [OBJECT_SUBSREF_METHOD, OBJECT_SUBSASGN_METHOD] {
         methods.insert(
             method_name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: method_name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("{TABLE_CLASS}.{method_name}"),
                 implicit_class_argument: None,
             },
         );
     }
 
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: name.to_string(),
         parent: None,
         properties,
@@ -97,18 +96,18 @@ fn register_plain_object_class(name: &str, property_names: &[&str]) {
     for property_name in property_names {
         properties.insert(
             (*property_name).to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: (*property_name).to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
     }
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: name.to_string(),
         parent: None,
         properties,
@@ -121,13 +120,13 @@ fn register_dictionary_class() {
     for property_name in ["Keys", "Values"] {
         properties.insert(
             property_name.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: property_name.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
@@ -136,18 +135,18 @@ fn register_dictionary_class() {
     for method_name in [OBJECT_SUBSREF_METHOD, OBJECT_SUBSASGN_METHOD] {
         methods.insert(
             method_name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: method_name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("{DICTIONARY_CLASS}.{method_name}"),
                 implicit_class_argument: None,
             },
         );
     }
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: DICTIONARY_CLASS.to_string(),
         parent: None,
         properties,

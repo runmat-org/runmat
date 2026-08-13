@@ -765,15 +765,15 @@ fn class_method_lowers_to_function_referenced_by_class() {
 
     assert_eq!(assembly.classes.len(), 1);
     let class = &assembly.classes[0];
-    assert_eq!(class.name.0[0].0, "C");
-    assert_eq!(class.properties[0].name.0, "p");
-    assert_eq!(class.methods.len(), 1);
+    assert_eq!(class.declaration.name.0[0].0, "C");
+    assert_eq!(class.declaration.properties[0].name.0, "p");
+    assert_eq!(class.declaration.methods.len(), 1);
     let method_function = assembly
         .functions
         .iter()
-        .find(|function| function.id == class.methods[0].function)
+        .find(|function| function.id == class.declaration.methods[0].function)
         .unwrap();
-    assert_eq!(method_function.enclosing_class, Some(class.id));
+    assert_eq!(method_function.enclosing_class, Some(class.declaration.id));
     assert!(matches!(
         method_function.kind,
         FunctionKind::ClassMethod { is_static: false }
@@ -814,14 +814,17 @@ fn class_inheritance_links_super_class_id() {
     let class_a = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "A")
+        .find(|class| class.declaration.name.0[0].0 == "A")
         .expect("class A");
     let class_b = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "B")
+        .find(|class| class.declaration.name.0[0].0 == "B")
         .expect("class B");
-    assert_eq!(class_b.super_class, Some(class_a.id));
+    assert_eq!(
+        class_b.declaration.inheritance.resolved_super_class,
+        Some(class_a.declaration.id)
+    );
 }
 
 #[test]
@@ -832,15 +835,21 @@ fn transitive_handle_inheritance_marks_handle_kind() {
     let class_b = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "B")
+        .find(|class| class.declaration.name.0[0].0 == "B")
         .expect("class B");
     let class_c = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "C")
+        .find(|class| class.declaration.name.0[0].0 == "C")
         .expect("class C");
-    assert!(matches!(class_b.kind, runmat_hir::ClassKind::Handle));
-    assert!(matches!(class_c.kind, runmat_hir::ClassKind::Handle));
+    assert!(matches!(
+        class_b.declaration.kind,
+        runmat_hir::ClassKind::Handle
+    ));
+    assert!(matches!(
+        class_c.declaration.kind,
+        runmat_hir::ClassKind::Handle
+    ));
 }
 
 #[test]
@@ -849,11 +858,17 @@ fn dynamicprops_superclass_marks_handle_kind() {
     let class = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "DynPoint")
+        .find(|class| class.declaration.name.0[0].0 == "DynPoint")
         .expect("DynPoint class");
-    assert!(matches!(class.kind, runmat_hir::ClassKind::Handle));
-    assert_eq!(class.super_class, None);
-    assert_eq!(class.builtin_super_class.as_deref(), Some("dynamicprops"));
+    assert!(matches!(
+        class.declaration.kind,
+        runmat_hir::ClassKind::Handle
+    ));
+    assert_eq!(class.declaration.inheritance.resolved_super_class, None);
+    assert_eq!(
+        class.declaration.inheritance.builtin_super_class.as_deref(),
+        Some("dynamicprops")
+    );
 }
 
 #[test]
@@ -914,14 +929,14 @@ fn class_attributes_lower_to_semantic_metadata() {
     );
     let class = &assembly.classes[0];
 
-    let prop_attrs = &class.properties[0].attributes;
+    let prop_attrs = &class.declaration.properties[0].attributes;
     assert!(prop_attrs.is_constant);
     assert!(prop_attrs.is_hidden);
     assert!(matches!(prop_attrs.access, MemberAccess::Private));
     assert!(matches!(prop_attrs.get_access, MemberAccess::Private));
     assert!(matches!(prop_attrs.set_access, MemberAccess::Private));
 
-    let method = &class.methods[0];
+    let method = &class.declaration.methods[0];
     assert!(method.is_static);
     assert!(matches!(method.attributes.access, MemberAccess::Private));
     assert!(method.attributes.is_sealed);

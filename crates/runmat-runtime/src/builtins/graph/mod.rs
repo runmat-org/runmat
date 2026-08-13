@@ -1,4 +1,5 @@
 //! MATLAB-compatible graph and digraph data-type helpers.
+use runmat_types::MemberAccess;
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
@@ -7,10 +8,10 @@ use std::sync::OnceLock;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef, ResolveContext, Type,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, IntValue, ObjectInstance, StringArray, Tensor, Value};
+use runmat_value::{IntValue, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::table::{table_from_columns, table_variables};
@@ -1674,22 +1675,22 @@ fn register_graph_class(name: &str) {
     for property_name in ["Edges", "Nodes", NUM_NODES_PROPERTY] {
         properties.insert(
             property_name.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: property_name.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
     }
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: name.to_string(),
         parent: None,
         properties,
-        methods: HashMap::<String, MethodDef>::new(),
+        methods: HashMap::<String, crate::class_registry::RuntimeMethod>::new(),
     });
 }
 

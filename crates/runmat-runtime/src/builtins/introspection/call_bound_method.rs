@@ -115,7 +115,7 @@ pub async fn call_bound_method_builtin(
     args.push(base);
     args.extend(rest);
     let requested_outputs = crate::current_requested_outputs();
-    if let Some((_resolved, owner)) = runmat_builtins::lookup_method(&class_name, &method) {
+    if let Some((_resolved, owner)) = crate::class_registry::lookup_method(&class_name, &method) {
         return crate::dispatch_object_external_member(owner, &method, args, requested_outputs)
             .await;
     }

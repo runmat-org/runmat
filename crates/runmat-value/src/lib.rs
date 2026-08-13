@@ -21,6 +21,6 @@ pub use numeric::{
     IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage, NumericStorageView,
     NumericStorageViewMut,
 };
-pub use object::{Access, DynamicPropertyDef, HandleRef, Listener, ObjectArray, ObjectInstance};
+pub use object::{DynamicPropertyDef, HandleRef, Listener, ObjectArray, ObjectInstance};
 pub use symbolic::{SymbolicExpr, SymbolicFunction};
 pub use value::Value;

@@ -6,6 +6,7 @@
 //! path rather than a background event thread; this keeps callback execution
 //! deterministic across native and wasm hosts.
 
+use runmat_types::MemberAccess;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,10 +20,9 @@ use std::sync::Mutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, CellArray, HandleRef, IntValue, ObjectInstance, StructValue, Value};
+use runmat_value::{CellArray, HandleRef, IntValue, ObjectInstance, StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -469,7 +469,7 @@ timer_setter_builtin!(
 timer_setter_builtin!(timer_set_user_data_builtin, "set.UserData", "UserData");
 
 fn ensure_timer_class_registered() {
-    if runmat_builtins::get_class(TIMER_CLASS).is_some() {
+    if crate::class_registry::get_class(TIMER_CLASS).is_some() {
         return;
     }
 
@@ -483,12 +483,12 @@ fn ensure_timer_class_registered() {
     ] {
         methods.insert(
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: function_name.to_string(),
                 implicit_class_argument: None,
             },
@@ -505,23 +505,23 @@ fn ensure_timer_class_registered() {
     {
         properties.insert(
             name.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: name.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: is_timer_mutable_property(name),
-                get_access: Access::Public,
+                get_access: MemberAccess::Public,
                 set_access: if READONLY_PROPS.contains(&name) {
-                    Access::Private
+                    MemberAccess::Private
                 } else {
-                    Access::Public
+                    MemberAccess::Public
                 },
                 default_value: None,
             },
         );
     }
 
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: TIMER_CLASS.to_string(),
         parent: Some("handle".to_string()),
         properties,

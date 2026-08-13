@@ -1,12 +1,12 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
+use runmat_types::MemberAccess;
 
 use std::cell::Cell;
 use std::collections::HashMap;
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
-use runmat_builtins::{ClassDef, MethodDef, PropertyDef};
-use runmat_value::{Access, CharArray, ComplexTensor, ObjectInstance, Tensor, Value};
+use runmat_value::{CharArray, ComplexTensor, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
@@ -82,13 +82,13 @@ pub fn ensure_tf_class_registered() {
         ] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Public,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
                     default_value: None,
                 },
             );
@@ -101,19 +101,19 @@ pub fn ensure_tf_class_registered() {
         ] {
             methods.insert(
                 method_name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: method_name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: format!("{TF_CLASS}.{method_name}"),
                     implicit_class_argument: None,
                 },
             );
         }
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: TF_CLASS.to_string(),
             parent: None,
             properties,

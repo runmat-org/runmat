@@ -1,4 +1,5 @@
 use crate::FunctionId;
+use runmat_types::ExternalClassDeclaration;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -41,6 +42,7 @@ pub struct LoweringContext<'a> {
     pub private_function_aliases: &'a HashMap<String, HashMap<String, String>>,
     pub runmat_extensions_enabled: bool,
     pub top_level_await_enabled: bool,
+    pub external_class_declarations: &'a [ExternalClassDeclaration],
 }
 
 impl<'a> LoweringContext<'a> {
@@ -55,6 +57,7 @@ impl<'a> LoweringContext<'a> {
             private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
+            external_class_declarations: &[],
         }
     }
 
@@ -104,6 +107,14 @@ impl<'a> LoweringContext<'a> {
         self
     }
 
+    pub fn with_external_class_declarations(
+        mut self,
+        declarations: &'a [ExternalClassDeclaration],
+    ) -> Self {
+        self.external_class_declarations = declarations;
+        self
+    }
+
     pub fn empty() -> Self {
         static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
         Self {
@@ -116,6 +127,7 @@ impl<'a> LoweringContext<'a> {
             private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
+            external_class_declarations: &[],
         }
     }
 }

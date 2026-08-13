@@ -3,10 +3,12 @@ use crate::{
     MirDiagnosticSeverity, MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand,
     MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
-use runmat_hir::{
-    AsyncValueFact, CallableIdentity, DimFact, FutureFact, FutureStateFact, NumericClass,
-    NumericDomain, ShapeFact, Span, SpawnSafetyFact, TaskHandleFact, TensorElementDomainFact,
-    TensorTypeFact, TypeFact, ValueFlowFact,
+use runmat_hir::Span;
+use runmat_types::{
+    AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
+    DimensionFact, DynamicReason, ExecutionFact, FactJoin, FutureStateFact, InvalidationVector,
+    LayoutFact, MutationFact, NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact,
+    SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -20,24 +22,7 @@ struct InitDataflowResult {
     in_states: Vec<Option<Vec<InitFact>>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct SimpleValueFact {
-    ty: TypeFact,
-    shape: ShapeFact,
-    value_flow: ValueFlowFact,
-    async_value: Option<AsyncValueFact>,
-}
-
-impl Default for SimpleValueFact {
-    fn default() -> Self {
-        Self {
-            ty: TypeFact::Unknown,
-            shape: ShapeFact::Unknown,
-            value_flow: ValueFlowFact::UnknownList,
-            async_value: None,
-        }
-    }
-}
+type SimpleValueFact = ValueFact;
 
 fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
     let local_facts = compute_simple_local_facts(body);
@@ -49,16 +34,9 @@ fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
                 local: local.id,
             },
             MirLocalFact {
-                ty: local_facts[local.id.0].clone().unwrap_or_default().ty,
-                shape: local_facts[local.id.0].clone().unwrap_or_default().shape,
-                value_flow: local_facts[local.id.0]
+                value: local_facts[local.id.0]
                     .clone()
-                    .unwrap_or_default()
-                    .value_flow,
-                async_value: local_facts[local.id.0]
-                    .clone()
-                    .unwrap_or_default()
-                    .async_value,
+                    .unwrap_or_else(dynamic_value),
             },
         );
     }
@@ -127,7 +105,7 @@ fn transfer_fact_block(
             MirStmtKind::MultiAssign { targets, .. } => {
                 for target in &targets.targets {
                     if let crate::MirOutputTarget::Place(MirPlace::Local(local)) = target {
-                        facts[local.0] = Some(SimpleValueFact::default());
+                        facts[local.0] = Some(dynamic_value());
                     }
                 }
             }
@@ -143,11 +121,11 @@ fn transfer_fact_block(
             ..
         } => {
             if let Some(local) = place_root(place) {
-                facts[local.0] = Some(SimpleValueFact::default());
+                facts[local.0] = Some(dynamic_value());
             }
         }
         MirTerminatorKind::For { binding, .. } => {
-            facts[binding.0] = Some(SimpleValueFact::default());
+            facts[binding.0] = Some(dynamic_value());
         }
         _ => {}
     }
@@ -175,43 +153,38 @@ fn join_fact_state(
 fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
     match value {
         MirRvalue::Use(operand) => simple_operand_fact(operand),
-        MirRvalue::Future { .. } => SimpleValueFact {
-            async_value: Some(AsyncValueFact::Future(FutureFact {
-                output: Box::new(TypeFact::Unknown),
-                state: FutureStateFact::Lazy,
-            })),
-            ..SimpleValueFact::default()
-        },
-        MirRvalue::Spawn(_) => SimpleValueFact {
-            async_value: Some(AsyncValueFact::TaskHandle(TaskHandleFact {
-                output: Box::new(TypeFact::Unknown),
-                spawn_safety: SpawnSafetyFact::RequiresIsolation,
-            })),
-            ..SimpleValueFact::default()
-        },
+        MirRvalue::Future { .. } => scalar_fact(ValueKindFact::Execution(ExecutionFact::Future {
+            output: Box::new(dynamic_value()),
+            state: FutureStateFact::Lazy,
+        })),
+        MirRvalue::Spawn(_) => scalar_fact(ValueKindFact::Execution(ExecutionFact::Task {
+            output: Box::new(dynamic_value()),
+            spawn_safety: SpawnSafetyFact::RequiresIsolation,
+        })),
         MirRvalue::Aggregate {
             kind,
             rows,
             cols,
             elements,
         } => aggregate_fact(kind, *rows, *cols, elements),
-        MirRvalue::StructLiteral { .. } => scalar_single_fact(TypeFact::Struct),
-        MirRvalue::ObjectLiteral { .. } => scalar_single_fact(TypeFact::Unknown),
-        MirRvalue::Binary(_, _, _) | MirRvalue::ShortCircuit { .. } | MirRvalue::Unary(_, _) => {
-            SimpleValueFact::default()
+        MirRvalue::StructLiteral { .. } => {
+            scalar_fact(ValueKindFact::Struct(runmat_types::StructFact {
+                fields: Default::default(),
+                fields_complete: false,
+            }))
         }
-        MirRvalue::Range { .. } => SimpleValueFact::default(),
-        MirRvalue::Index { .. } => SimpleValueFact {
-            value_flow: ValueFlowFact::UnknownList,
-            ..SimpleValueFact::default()
-        },
+        MirRvalue::ObjectLiteral { .. } => dynamic_value(),
+        MirRvalue::Binary(_, _, _) | MirRvalue::ShortCircuit { .. } | MirRvalue::Unary(_, _) => {
+            dynamic_value()
+        }
+        MirRvalue::Range { .. } | MirRvalue::Index { .. } => dynamic_value(),
         MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
         | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End
-        | MirRvalue::Call(_) => SimpleValueFact::default(),
+        | MirRvalue::Call(_) => dynamic_value(),
     }
 }
 
@@ -222,117 +195,115 @@ fn aggregate_fact(
     elements: &[MirOperand],
 ) -> SimpleValueFact {
     let shape = ShapeFact::Shaped {
-        dims: vec![DimFact::Known(rows), DimFact::Known(cols)],
+        dims: vec![DimensionFact::Known(rows), DimensionFact::Known(cols)],
     };
     match kind {
-        MirAggregateKind::Tensor => single_fact(
-            TypeFact::Tensor(TensorTypeFact {
-                element: tensor_element_domain(elements),
-                shape: shape.clone(),
+        MirAggregateKind::Tensor => {
+            value_fact(tensor_element_kind(elements), shape, StorageFact::Dense)
+        }
+        MirAggregateKind::Cell => value_fact(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(dynamic_value()),
+                elements: vec![dynamic_value(); elements.len()],
+                elements_complete: true,
             }),
-            shape.clone(),
+            shape,
+            StorageFact::Dense,
         ),
-        MirAggregateKind::Cell => single_fact(TypeFact::Cell, shape),
     }
 }
 
-fn tensor_element_domain(elements: &[MirOperand]) -> TensorElementDomainFact {
+fn tensor_element_kind(elements: &[MirOperand]) -> ValueKindFact {
     if !elements.is_empty()
         && elements
             .iter()
             .all(|element| matches!(element, MirOperand::Constant(crate::MirConstant::Number(_))))
     {
-        TensorElementDomainFact::Numeric {
+        ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,
             domain: NumericDomain::Real,
-        }
+        })
     } else {
-        TensorElementDomainFact::Unknown
+        ValueKindFact::Unknown
     }
 }
 
 fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
     match operand {
         MirOperand::Constant(crate::MirConstant::Number(_)) => {
-            let ty = TypeFact::Numeric {
+            let kind = ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,
                 domain: NumericDomain::Real,
-            };
-            scalar_single_fact(ty)
+            });
+            scalar_fact(kind)
         }
         MirOperand::Constant(crate::MirConstant::String(_)) => {
-            scalar_single_fact(TypeFact::CharArray)
+            scalar_fact(ValueKindFact::Character)
         }
         MirOperand::FunctionHandle(
             CallableIdentity::BoundFunction(function)
             | CallableIdentity::ExternalFunction { function, .. },
         )
         | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
-            scalar_single_fact(TypeFact::Function(*function))
+            scalar_fact(ValueKindFact::Callable(CallableFact {
+                identity: Some(CallableIdentity::BoundFunction(*function)),
+                parameters: Vec::new(),
+                parameters_complete: false,
+                outputs: Vec::new(),
+                outputs_complete: false,
+                variadic_inputs: true,
+                variadic_outputs: true,
+                captures: Vec::new(),
+                captures_complete: true,
+            }))
         }
-        _ => SimpleValueFact::default(),
+        MirOperand::FunctionHandle(identity) => {
+            scalar_fact(ValueKindFact::Callable(CallableFact {
+                identity: Some(identity.clone()),
+                parameters: Vec::new(),
+                parameters_complete: false,
+                outputs: Vec::new(),
+                outputs_complete: false,
+                variadic_inputs: true,
+                variadic_outputs: true,
+                captures: Vec::new(),
+                captures_complete: true,
+            }))
+        }
+        _ => dynamic_value(),
     }
 }
 
-fn scalar_single_fact(ty: TypeFact) -> SimpleValueFact {
-    single_fact(ty, ShapeFact::Scalar)
+fn scalar_fact(kind: ValueKindFact) -> SimpleValueFact {
+    value_fact(kind, ShapeFact::Scalar, StorageFact::Scalar)
 }
 
-fn single_fact(ty: TypeFact, shape: ShapeFact) -> SimpleValueFact {
-    SimpleValueFact {
-        ty: ty.clone(),
+fn value_fact(kind: ValueKindFact, shape: ShapeFact, storage: StorageFact) -> SimpleValueFact {
+    ValueFact {
+        kind,
         shape,
-        value_flow: ValueFlowFact::Single(ty),
-        async_value: None,
+        storage,
+        layout: LayoutFact::ColumnMajor,
+        contiguity: ContiguityFact::Contiguous,
+        view: ViewFact::Materialized,
+        residency: ResidencyFact::Host,
+        alias: AliasFact::Unique,
+        mutation: MutationFact::ValueSemantics,
+        certainty: CertaintyFact::Proven,
+        invalidation: InvalidationVector::default(),
     }
+}
+
+fn dynamic_value() -> SimpleValueFact {
+    ValueFact::unknown(DynamicReason::Unspecified)
 }
 
 fn merge_simple_fact(slot: &mut Option<SimpleValueFact>, incoming: SimpleValueFact) {
     match slot {
         Some(existing) => {
-            *existing = SimpleValueFact {
-                ty: join_type(&existing.ty, &incoming.ty),
-                shape: join_shape(&existing.shape, &incoming.shape),
-                value_flow: join_value_flow(&existing.value_flow, &incoming.value_flow),
-                async_value: join_async_value(&existing.async_value, &incoming.async_value),
-            };
+            *existing = existing.join(&incoming);
         }
         None => *slot = Some(incoming),
-    }
-}
-
-fn join_type(left: &TypeFact, right: &TypeFact) -> TypeFact {
-    if left == right {
-        left.clone()
-    } else {
-        TypeFact::Unknown
-    }
-}
-
-fn join_shape(left: &ShapeFact, right: &ShapeFact) -> ShapeFact {
-    if left == right {
-        left.clone()
-    } else {
-        ShapeFact::Unknown
-    }
-}
-
-fn join_value_flow(left: &ValueFlowFact, right: &ValueFlowFact) -> ValueFlowFact {
-    if left == right {
-        left.clone()
-    } else {
-        ValueFlowFact::UnknownList
-    }
-}
-
-fn join_async_value(
-    left: &Option<AsyncValueFact>,
-    right: &Option<AsyncValueFact>,
-) -> Option<AsyncValueFact> {
-    if left == right {
-        left.clone()
-    } else {
-        None
     }
 }
 

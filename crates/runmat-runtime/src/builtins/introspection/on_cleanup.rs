@@ -1,4 +1,5 @@
 //! MATLAB-compatible `onCleanup` handle object.
+use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
 
@@ -10,11 +11,10 @@ use std::sync::Mutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ClassDef, MethodDef,
-    PropertyDef,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, CellArray, HandleRef, ObjectInstance, Value};
+use runmat_value::{CellArray, HandleRef, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -257,38 +257,38 @@ pub(crate) async fn run_cleanup_for_workspace_values(values: &[Value]) -> Builti
 }
 
 fn ensure_on_cleanup_class_registered() {
-    if runmat_builtins::get_class(ON_CLEANUP_CLASS).is_some() {
+    if crate::class_registry::get_class(ON_CLEANUP_CLASS).is_some() {
         return;
     }
     let mut methods = HashMap::new();
     methods.insert(
         "delete".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "delete".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "__runmat_oncleanup_delete".to_string(),
             implicit_class_argument: None,
         },
     );
     methods.insert(
         "cancel".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "cancel".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "cancel".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: ON_CLEANUP_CLASS.to_string(),
         parent: Some("handle".to_string()),
-        properties: HashMap::<String, PropertyDef>::new(),
+        properties: HashMap::<String, crate::class_registry::RuntimeProperty>::new(),
         methods,
     });
 }

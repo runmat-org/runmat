@@ -15,32 +15,33 @@ pub use diagnostic::{
 };
 pub use error::{set_error_namespace, HirError};
 pub use hir::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, AsyncValueFact, BindingName, BindingOwner,
-    BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
-    CallSyntax, CallableFallbackPolicy, CallableIdentity, CapturedBinding, ClassArgumentBlock,
-    ClassEnumeration, ClassEvent, ClassKind, ClassMethod, ClassProperty, ClassResolution,
-    CommandArgument, DefPath, DefPathSegment, DimFact, DimSymbol, EmptyArrayRole, EntrypointName,
-    EntrypointOrigin, EntrypointPolicy, EnvironmentEffect, ExpansionSemantics, FunctionAbi,
-    FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
-    FunctionArgValidationLiteral, FunctionArgValidator, FunctionArgumentValidation,
-    FunctionHandleResolution, FunctionHandleTarget, FunctionKind, FunctionModifiers, FunctionName,
-    FunctionResolution, FutureFact, FutureStateFact, HirAssembly, HirBinding, HirBlock, HirCall,
-    HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirExpr, HirExprKind, HirFunction,
-    HirImport, HirIndex, HirModule, HirPlace, HirScriptSection, HirStmt, HirStmtKind,
-    ImportResolution, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics,
-    LoweringResult, MemberAccess, MemberName, MethodAttributes, MethodId, MethodName, NumericClass,
-    NumericDomain, OperatorKind, OutputTarget, OutputTargetList, PackageName, PlaceMutation,
-    PlaceMutationKind, PropertyAttributes, QualifiedName, ReferenceKind, ReferenceResolution,
-    RequestedOutputCount, SemanticAttribute, ShapeFact, SourceUnitKind, SpawnSafetyFact,
-    SpawnSafetyReason, StringLiteral, SymbolName, TaskHandleFact, TensorElementDomainFact,
-    TensorTypeFact, TypeFact, ValueFlowFact, WorkspaceEffect, WorkspaceExportPolicy,
-    WorkspaceVisibility, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME,
-    EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME, FEVAL_BUILTIN_NAME,
-    NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
-    RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
-    TEST_CLASS_REGISTRATION_BUILTIN_NAME,
+    AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BindingOwner, BindingResolution,
+    BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution, CallSyntax,
+    CallableFallbackPolicy, CallableIdentity, CapturedBinding, ClassArgumentBlock,
+    ClassPropertyDefault, ClassResolution, CommandArgument, DefPath, DefPathSegment,
+    EmptyArrayRole, EntrypointName, EntrypointOrigin, EntrypointPolicy, EnvironmentEffect,
+    ExpansionSemantics, FunctionAbi, FunctionArgDefaultValue, FunctionArgDim,
+    FunctionArgRangeInclusivity, FunctionArgSizeSpec, FunctionArgValidationLiteral,
+    FunctionArgValidator, FunctionArgumentValidation, FunctionHandleResolution,
+    FunctionHandleTarget, FunctionKind, FunctionModifiers, FunctionName, FunctionResolution,
+    HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
+    HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule, HirPlace,
+    HirScriptSection, HirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
+    IndexResultContext, IndexingSemantics, LoweringResult, MemberName, MethodId, MethodName,
+    OperatorKind, OutputTarget, OutputTargetList, PackageName, PlaceMutation, PlaceMutationKind,
+    QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount, SourceUnitKind,
+    StringLiteral, SymbolName, WorkspaceEffect, WorkspaceExportPolicy, WorkspaceVisibility,
+    ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, EVALC_BUILTIN_NAME,
+    EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME, FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME,
+    NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME,
+    RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME, TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
 pub use ids::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, StmtId};
 pub use lowering::lower;
 pub use lowering_context::{FunctionOutputArity, LoweringContext};
+pub use runmat_types::{
+    ClassDeclaration, ClassKind, EnumerationDeclaration, EventDeclaration, InheritanceDeclaration,
+    MemberAccess, MethodAttributes, MethodDeclaration, PropertyAttributes, PropertyDeclaration,
+    SemanticAttribute, SpawnSafetyFact, SpawnSafetyReason,
+};
 pub use span::{merge_span, Span};

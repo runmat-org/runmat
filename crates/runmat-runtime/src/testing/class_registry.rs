@@ -1,8 +1,9 @@
+use runmat_types::MemberAccess;
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use runmat_builtins::{ClassDef, MethodDef, PropertyDef};
-use runmat_value::{Access, Value};
+use crate::class_registry::{RuntimeClass, RuntimeMethod, RuntimeProperty};
+use runmat_value::Value;
 
 use super::objects::{
     FUNCTION_TEST_CASE_CLASS, TEST_CASE_CLASS, TEST_RESULT_CLASS, TEST_SUITE_CLASS,
@@ -94,25 +95,25 @@ fn register_test_case() {
         .map(|name| {
             (
                 name.to_string(),
-                MethodDef {
+                RuntimeMethod {
                     name: name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: format!("{TEST_CASE_CLASS}.{name}"),
                     implicit_class_argument: None,
                 },
             )
         })
         .collect();
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(RuntimeClass {
         name: TEST_CASE_CLASS.into(),
         parent: Some("handle".into()),
         properties: properties(&["Name"]),
         methods,
     });
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(RuntimeClass {
         name: FUNCTION_TEST_CASE_CLASS.into(),
         parent: Some(TEST_CASE_CLASS.into()),
         properties: HashMap::new(),
@@ -151,7 +152,7 @@ fn register_class_with_methods(
     property_names: &[&str],
     method_names: &[&str],
 ) {
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(RuntimeClass {
         name: name.into(),
         parent: parent.map(str::to_owned),
         properties: properties(property_names),
@@ -160,12 +161,12 @@ fn register_class_with_methods(
             .map(|method_name| {
                 (
                     (*method_name).into(),
-                    MethodDef {
+                    RuntimeMethod {
                         name: (*method_name).into(),
                         is_static: false,
                         is_abstract: false,
                         is_sealed: false,
-                        access: Access::Public,
+                        access: MemberAccess::Public,
                         function_name: format!("{name}.{method_name}"),
                         implicit_class_argument: None,
                     },
@@ -175,19 +176,19 @@ fn register_class_with_methods(
     });
 }
 
-fn properties(names: &[&str]) -> HashMap<String, PropertyDef> {
+fn properties(names: &[&str]) -> HashMap<String, RuntimeProperty> {
     names
         .iter()
         .map(|name| {
             (
                 (*name).into(),
-                PropertyDef {
+                RuntimeProperty {
                     name: (*name).into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Private,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Private,
                     default_value: Some(Value::String(String::new())),
                 },
             )
@@ -202,14 +203,14 @@ mod tests {
     #[test]
     fn registers_testing_inheritance_and_qualification_methods() {
         ensure_testing_classes();
-        assert!(runmat_builtins::is_class_or_subclass(
+        assert!(crate::class_registry::is_class_or_subclass(
             FUNCTION_TEST_CASE_CLASS,
             TEST_CASE_CLASS
         ));
-        assert!(runmat_builtins::is_class_or_subclass(
+        assert!(crate::class_registry::is_class_or_subclass(
             TEST_CASE_CLASS,
             "handle"
         ));
-        assert!(runmat_builtins::lookup_method(TEST_CASE_CLASS, "verifyEqual").is_some());
+        assert!(crate::class_registry::lookup_method(TEST_CASE_CLASS, "verifyEqual").is_some());
     }
 }

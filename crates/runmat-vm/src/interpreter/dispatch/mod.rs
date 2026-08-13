@@ -269,15 +269,15 @@ fn enforce_spawn_value_concurrency_policy(value: &Value) -> Result<(), RuntimeEr
 
 fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
     let empty_default = || Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("empty tensor"));
-    if let Some(def) = runmat_builtins::get_class(class_name) {
-        let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+    if let Some(def) = runmat_runtime::class_registry::get_class(class_name) {
+        let mut chain: Vec<runmat_runtime::class_registry::RuntimeClass> = Vec::new();
         let mut visited = HashSet::new();
         let mut cursor: Option<String> = Some(def.name.clone());
         while let Some(name) = cursor {
             if !visited.insert(name.clone()) {
                 break;
             }
-            if let Some(class_def) = runmat_builtins::get_class(&name) {
+            if let Some(class_def) = runmat_runtime::class_registry::get_class(&name) {
                 chain.push(class_def.clone());
                 cursor = class_def.parent.clone();
             } else {

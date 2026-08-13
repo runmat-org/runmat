@@ -8,24 +8,37 @@ use runmat_test::discovery::{
 use runmat_test::identity::ParameterId;
 use serde_json::{Number, Value};
 
-use crate::{ClassProperty, HirExpr, HirExprKind, OperatorKind};
+use crate::{HirExpr, HirExprKind, OperatorKind, PropertyDeclaration};
+
+#[derive(Clone)]
+pub(super) struct ClassPropertyInput {
+    pub declaration: PropertyDeclaration,
+    pub default: Option<HirExpr>,
+}
 
 use super::{source::source_descriptor, SemanticTestSource};
 
 pub(super) fn class_parameter_sets(
     source: &SemanticTestSource<'_>,
     class_name: &str,
-    properties: &[ClassProperty],
+    properties: &[ClassPropertyInput],
     revision: &ProgramRevision,
     materialized: &BTreeMap<&str, &MaterializationResponse>,
 ) -> (Vec<Vec<ParameterDescriptor>>, Vec<MaterializationRequest>) {
     let mut sets = vec![Vec::new()];
     let mut pending = Vec::new();
     for property in properties.iter().filter(|property| {
-        super::attributes::has(&property.declared_attributes, "TestParameter")
-            || super::attributes::has(&property.declared_attributes, "MethodSetupParameter")
-            || super::attributes::has(&property.declared_attributes, "ClassSetupParameter")
+        super::attributes::has(&property.declaration.declared_attributes, "TestParameter")
+            || super::attributes::has(
+                &property.declaration.declared_attributes,
+                "MethodSetupParameter",
+            )
+            || super::attributes::has(
+                &property.declaration.declared_attributes,
+                "ClassSetupParameter",
+            )
     }) {
+        let property = &property.declaration;
         let is_test_parameter =
             super::attributes::has(&property.declared_attributes, "TestParameter");
         let path_kind = if is_test_parameter {
@@ -34,7 +47,11 @@ pub(super) fn class_parameter_sets(
             "fixture-parameter"
         };
         let semantic_path = format!("{class_name}/{path_kind}/{}", property.name.0);
-        let static_values = property.default.as_ref().and_then(static_parameter_values);
+        let static_values = properties
+            .iter()
+            .find(|input| input.declaration.name == property.name)
+            .and_then(|input| input.default.as_ref())
+            .and_then(static_parameter_values);
         let values = if let Some(values) = static_values {
             values
         } else {

@@ -1,4 +1,5 @@
 //! MATLAB-compatible dynamic property support for handle objects.
+use runmat_types::MemberAccess;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -11,9 +12,7 @@ use runmat_builtins::{
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    Access, DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value,
-};
+use runmat_value::{DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value};
 use std::collections::HashMap;
 
 pub const DYNAMICPROPS_CLASS: &str = "dynamicprops";
@@ -282,11 +281,11 @@ fn metadata_bool(value: &Value, field: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn metadata_access(value: &Value, field: &str) -> BuiltinResult<Access> {
+fn metadata_access(value: &Value, field: &str) -> BuiltinResult<MemberAccess> {
     match metadata_string(value, field)?.to_ascii_lowercase().as_str() {
-        "public" => Ok(Access::Public),
-        "private" => Ok(Access::Private),
-        "protected" => Ok(Access::Protected),
+        "public" => Ok(MemberAccess::Public),
+        "private" => Ok(MemberAccess::Private),
+        "protected" => Ok(MemberAccess::Protected),
         other => Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -295,11 +294,11 @@ fn metadata_access(value: &Value, field: &str) -> BuiltinResult<Access> {
     }
 }
 
-fn access_value(access: &Access) -> Value {
+fn access_value(access: &MemberAccess) -> Value {
     let text = match access {
-        Access::Public => "public",
-        Access::Private => "private",
-        Access::Protected => "protected",
+        MemberAccess::Public => "public",
+        MemberAccess::Private => "private",
+        MemberAccess::Protected => "protected",
     };
     Value::String(text.to_string())
 }
@@ -359,11 +358,11 @@ fn dynamic_def_to_metadata_object(
 
 fn dynamic_def_from_class_property(
     class_name: &str,
-    prop: &runmat_builtins::PropertyDef,
+    prop: &crate::class_registry::RuntimeProperty,
 ) -> DynamicPropertyDef {
     let mut def = DynamicPropertyDef::new(prop.name.clone(), class_name.to_string());
-    def.get_access = prop.get_access.clone();
-    def.set_access = prop.set_access.clone();
+    def.get_access = prop.get_access;
+    def.set_access = prop.set_access;
     def.dependent = prop.is_dependent;
     def
 }
@@ -391,7 +390,7 @@ fn dynamic_property_handle_from_gc(target: runmat_gc::GcHandle) -> Value {
 }
 
 fn require_dynamicprops_target(class_name: &str) -> BuiltinResult<()> {
-    if runmat_builtins::is_class_or_subclass(class_name, DYNAMICPROPS_CLASS) {
+    if crate::class_registry::is_class_or_subclass(class_name, DYNAMICPROPS_CLASS) {
         Ok(())
     } else {
         Err(dynamic_error(
@@ -465,7 +464,7 @@ pub fn dynamic_property_assign(
     let Some(def) = obj.dynamic_property(name) else {
         return Ok(false);
     };
-    if def.set_access == Access::Private {
+    if def.set_access == MemberAccess::Private {
         return Err(dynamic_error(
             "setfield",
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -480,7 +479,7 @@ pub fn dynamic_property_read(obj: &ObjectInstance, name: &str) -> BuiltinResult<
     let Some((def, value)) = dynamic_property_get(obj, name) else {
         return Ok(None);
     };
-    if def.get_access == Access::Private {
+    if def.get_access == MemberAccess::Private {
         return Err(dynamic_error(
             "getfield",
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -630,7 +629,7 @@ async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<
             ));
         };
         require_dynamicprops_target(&obj.class_name)?;
-        if runmat_builtins::lookup_property(&obj.class_name, &property_name).is_some()
+        if crate::class_registry::lookup_property(&obj.class_name, &property_name).is_some()
             || obj.has_dynamic_property(&property_name)
         {
             return Err(dynamic_error(
@@ -717,7 +716,7 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
                 )?));
             }
             if let Some((prop, owner)) =
-                runmat_builtins::lookup_property(&obj.class_name, &property_name)
+                crate::class_registry::lookup_property(&obj.class_name, &property_name)
             {
                 let def = dynamic_def_from_class_property(&owner, &prop);
                 return Ok(Value::Object(dynamic_def_to_metadata_object(
@@ -737,7 +736,7 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
                 )));
             }
             if let Some((prop, owner)) =
-                runmat_builtins::lookup_property(&obj.class_name, &property_name)
+                crate::class_registry::lookup_property(&obj.class_name, &property_name)
             {
                 let def = dynamic_def_from_class_property(&owner, &prop);
                 return Ok(Value::Object(dynamic_def_to_metadata_object(
@@ -874,7 +873,7 @@ mod tests {
     }
 
     fn dynamic_target_handle(class_name: &str) -> (Value, runmat_gc::ExplicitRoot) {
-        runmat_builtins::register_class(runmat_builtins::ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_name.to_string(),
             parent: Some(DYNAMICPROPS_CLASS.to_string()),
             properties: HashMap::new(),
@@ -975,7 +974,7 @@ mod tests {
     #[test]
     fn addprop_rejects_handle_classes_without_dynamicprops_parent() {
         {
-            runmat_builtins::register_class(runmat_builtins::ClassDef {
+            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: "PlainHandleForDynamicProps".to_string(),
                 parent: Some("handle".to_string()),
                 properties: HashMap::new(),

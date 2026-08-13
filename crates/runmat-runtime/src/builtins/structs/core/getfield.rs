@@ -1,4 +1,5 @@
 //! MATLAB-compatible `getfield` builtin with struct array and object support.
+use runmat_types::MemberAccess;
 
 use crate::builtins::common::indexing::perform_indexing;
 use crate::builtins::common::spec::{
@@ -23,7 +24,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    Access, CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
+    CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
     NumericScalar, ObjectInstance, StructValue, Tensor, Value,
 };
 
@@ -371,7 +372,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
 #[runtime_builtin(
     name = "getfield",
     category = "structs/core",
-    summary = "Access struct or object fields.",
+    summary = "MemberAccess struct or object fields.",
     keywords = "getfield,struct,object,field access",
     type_resolver(getfield_type),
     descriptor(crate::builtins::structs::core::getfield::GETFIELD_DESCRIPTOR),
@@ -1357,7 +1358,7 @@ fn get_struct_field(struct_value: &StructValue, name: &str) -> BuiltinResult<Val
 }
 
 async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
-    if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
         if prop.is_static {
             return Err(getfield_error_with_message(
                 format!(
@@ -1367,7 +1368,7 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
                 &GETFIELD_ERROR_OBJECT_PROPERTY,
             ));
         }
-        if prop.get_access == Access::Private {
+        if prop.get_access == MemberAccess::Private {
             return Err(getfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
@@ -1397,8 +1398,8 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
         return Ok(value.clone());
     }
 
-    if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
-        if prop.get_access == Access::Private {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
+        if prop.get_access == MemberAccess::Private {
             return Err(getfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
@@ -1513,9 +1514,8 @@ fn is_struct_array(cell: &CellArray) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ClassDef, PropertyDef};
     use runmat_value::{
-        Access, CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerStorage, Listener,
+        CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerStorage, Listener,
         MException, NumericStorage, ObjectInstance, StructValue,
     };
 
@@ -2248,7 +2248,7 @@ pub(crate) mod tests {
     fn getfield_dependent_property_invokes_getter() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let class_name = "runmat.unittest.GetfieldDependent";
-        let mut def = ClassDef {
+        let mut def = crate::class_registry::RuntimeClass {
             name: class_name.to_string(),
             parent: None,
             properties: std::collections::HashMap::new(),
@@ -2256,17 +2256,17 @@ pub(crate) mod tests {
         };
         def.properties.insert(
             "p".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "p".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: true,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(def);
+        crate::class_registry::register_class(def);
 
         let mut obj = ObjectInstance::new(class_name.to_string());
         obj.properties
@@ -2283,7 +2283,7 @@ pub(crate) mod tests {
         let parent_name = "runmat.unittest.GetfieldDependentParent";
         let child_name = "runmat.unittest.GetfieldDependentChild";
 
-        let mut parent = ClassDef {
+        let mut parent = crate::class_registry::RuntimeClass {
             name: parent_name.to_string(),
             parent: None,
             properties: std::collections::HashMap::new(),
@@ -2291,19 +2291,19 @@ pub(crate) mod tests {
         };
         parent.properties.insert(
             "p".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "p".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: true,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(parent);
+        crate::class_registry::register_class(parent);
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child_name.to_string(),
             parent: Some(parent_name.to_string()),
             properties: std::collections::HashMap::new(),

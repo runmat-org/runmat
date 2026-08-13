@@ -97,12 +97,39 @@ for (const relocation of manifest.non_value_relocations ?? []) {
     fail(`non-value relocation for ${relocation.target} has no symbols`);
     continue;
   }
+  for (const symbol of relocation.symbols) {
+    if (nonValueSymbols.has(symbol)) fail(`non-value symbol ${symbol} is classified more than once`);
+    nonValueSymbols.add(symbol);
+  }
+  if (relocation.status === "complete") {
+    if (!Array.isArray(relocation.resolved_symbols) || relocation.resolved_symbols.length !== relocation.symbols.length) {
+      fail(`completed relocation for ${relocation.target} must resolve every source symbol`);
+      continue;
+    }
+    const resolvedSources = new Set();
+    for (const resolution of relocation.resolved_symbols) {
+      for (const field of ["source", "target", "path"]) {
+        if (typeof resolution[field] !== "string" || resolution[field].length === 0) {
+          fail(`completed relocation ${JSON.stringify(resolution)} has invalid ${field}`);
+        }
+      }
+      resolvedSources.add(resolution.source);
+      const targetPath = path.join(repo, resolution.path);
+      if (!fs.existsSync(targetPath)) {
+        fail(`completed relocation target does not exist: ${resolution.path}`);
+      } else if (!fs.readFileSync(targetPath, "utf8").includes(resolution.target)) {
+        fail(`completed relocation target ${resolution.target} is absent from ${resolution.path}`);
+      }
+    }
+    for (const symbol of relocation.symbols) {
+      if (!resolvedSources.has(symbol)) fail(`completed relocation does not resolve ${symbol}`);
+    }
+    continue;
+  }
   const source = path.join(repo, relocation.source);
   if (!fs.existsSync(source)) fail(`non-value source does not exist: ${relocation.source}`);
   const sourceText = fs.existsSync(source) ? fs.readFileSync(source, "utf8") : "";
   for (const symbol of relocation.symbols) {
-    if (nonValueSymbols.has(symbol)) fail(`non-value symbol ${symbol} is classified more than once`);
-    nonValueSymbols.add(symbol);
     if (!sourceText.includes(symbol)) fail(`non-value symbol ${symbol} is not present in ${relocation.source}`);
   }
 }
@@ -148,6 +175,47 @@ if (["extracted", "catalog-separated"].includes(manifest.stage)) {
     if (new RegExp(`^${escapeRegex(dependency)}\\s*=`, "m").test(valueManifest)) {
       fail(`runmat-value has forbidden upward dependency ${dependency}`);
     }
+  }
+}
+
+if ((manifest.completed_slices ?? []).includes("R04")) {
+  const runtimeManifest = fs.readFileSync(path.join(repo, "crates/runmat-runtime/Cargo.toml"), "utf8");
+  const hirManifest = fs.readFileSync(path.join(repo, "crates/runmat-hir/Cargo.toml"), "utf8");
+  const typesManifest = fs.readFileSync(path.join(repo, "crates/runmat-types/Cargo.toml"), "utf8");
+  for (const [owner, manifestText, forbidden] of [
+    ["runmat-runtime", runtimeManifest, ["runmat-hir"]],
+    ["runmat-hir", hirManifest, ["runmat-runtime", "runmat-value"]],
+    ["runmat-types", typesManifest, ["runmat-value", "runmat-builtins", "runmat-runtime", "runmat-hir", "runmat-mir", "runmat-vm", "runmat-execution", "runmat-accelerate-api", "runmat-gc-api"]],
+  ]) {
+    for (const dependency of forbidden) {
+      if (new RegExp(`^${escapeRegex(dependency)}\\s*=`, "m").test(manifestText)) {
+        fail(`${owner} has forbidden R04 dependency ${dependency}`);
+      }
+    }
+  }
+  for (const { file, text } of rustSources) {
+    if (file.startsWith("crates/runmat-runtime/") && /\brunmat_hir\b/.test(text)) {
+      fail(`${file} imports frontend HIR vocabulary after R04`);
+    }
+    if (file.startsWith("crates/runmat-hir/") && /\brunmat_runtime\b/.test(text)) {
+      fail(`${file} imports runtime session state after R04`);
+    }
+  }
+  const builtins = rustSources
+    .filter(({ file }) => file.startsWith("crates/runmat-builtins/"))
+    .map(({ text }) => text)
+    .join("\n");
+  for (const symbol of ["ClassDef", "PropertyDef", "MethodDef", "CLASS_REGISTRY", "STATIC_VALUES", "ENUMERATION_REGISTRY"]) {
+    if (new RegExp(`\\b${escapeRegex(symbol)}\\b`).test(builtins)) {
+      fail(`runmat-builtins retains R04 class/session authority ${symbol}`);
+    }
+  }
+  const valueSources = rustSources
+    .filter(({ file }) => file.startsWith("crates/runmat-value/"))
+    .map(({ text }) => text)
+    .join("\n");
+  if (/\b(?:type|enum)\s+Access\b/.test(valueSources) || /\bpub\s+use\b[^;]*\bMemberAccess\b/.test(valueSources)) {
+    fail("runmat-value retains a member-access declaration alias or re-export after R04");
   }
 }
 

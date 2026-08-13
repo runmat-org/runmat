@@ -11,8 +11,8 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type,
 };
-use runmat_hir::RUNTESTS_BUILTIN_NAME;
 use runmat_macros::runtime_builtin;
+use runmat_types::RUNTESTS_BUILTIN_NAME;
 use runmat_value::Value;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};

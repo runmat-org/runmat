@@ -26,7 +26,7 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
         Value::HandleObject(handle) => handle.class_name.as_str(),
         _ => "",
     };
-    if runmat_builtins::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
         Ok(())
     } else {
         Err(

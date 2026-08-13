@@ -3,7 +3,8 @@ use crate::{
     MirIndexComponent, MirIndexing, MirLocal, MirLocalId, MirLocalKind, MirOperand, MirPlace,
     MirRvalue, MirStmtKind, MirTerminatorKind, SpawnBoundary,
 };
-use runmat_hir::{BindingId, FunctionId, Span, SpawnSafetyFact, SpawnSafetyReason};
+use runmat_hir::{BindingId, FunctionId, Span};
+use runmat_types::{SpawnSafetyFact, SpawnSafetyReason};
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -342,7 +343,7 @@ pub(super) fn diagnose_spawn_safety(boundaries: &[SpawnBoundary]) -> Vec<MirDiag
         .iter()
         .filter_map(|boundary| match &boundary.safety {
             SpawnSafetyFact::NotSpawnSafe { reason } => {
-                Some(spawn_safety_diagnostic(reason.clone(), boundary.span))
+                Some(spawn_safety_diagnostic(*reason, boundary.span))
             }
             SpawnSafetyFact::SpawnSafe | SpawnSafetyFact::RequiresIsolation => None,
         })

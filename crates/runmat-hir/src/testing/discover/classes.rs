@@ -8,14 +8,14 @@ use runmat_test::discovery::{
 use runmat_test::identity::{FixtureGroupId, SuiteId};
 
 use crate::{
-    ClassMethod, ClassProperty, DefPath, DefPathSegment, FunctionId, HirFunction, PackageName,
+    DefPath, DefPathSegment, FunctionId, HirFunction, MethodDeclaration, PackageName,
     QualifiedName, SymbolName,
 };
 
 use super::{cross_product_parameters, def_path_string, descriptor};
 use super::{fixtures, lineage};
 use crate::testing::attributes;
-use crate::testing::parameters::class_parameter_sets;
+use crate::testing::parameters::{class_parameter_sets, ClassPropertyInput};
 use crate::testing::source::source_descriptor;
 use crate::testing::{SemanticDiscoveryInput, SemanticTestSource};
 
@@ -40,7 +40,11 @@ pub(super) fn discover(
                         code: code.into(),
                         message,
                         severity: DiscoveryDiagnosticSeverity::Error,
-                        source: Some(source_descriptor(source, record.name.clone(), class.span)),
+                        source: Some(source_descriptor(
+                            source,
+                            record.name.clone(),
+                            class.declaration.span,
+                        )),
                     });
                     continue;
                 }
@@ -57,21 +61,28 @@ pub(super) fn discover(
         let group_id = FixtureGroupId::derive(suite_id.as_str(), &record.name);
         let mut class_tags = Vec::new();
         let mut methods =
-            BTreeMap::<String, (&SemanticTestSource<'_>, &ClassMethod, &HirFunction)>::new();
+            BTreeMap::<String, (&SemanticTestSource<'_>, &MethodDeclaration, &HirFunction)>::new();
         let mut fixture_methods =
-            BTreeMap::<String, (&SemanticTestSource<'_>, &ClassMethod, &HirFunction)>::new();
-        let mut properties = BTreeMap::<String, (&SemanticTestSource<'_>, &ClassProperty)>::new();
+            BTreeMap::<String, (&SemanticTestSource<'_>, &MethodDeclaration, &HirFunction)>::new();
+        let mut properties =
+            BTreeMap::<String, (&SemanticTestSource<'_>, ClassPropertyInput)>::new();
         let mut materialized_fixtures = Vec::new();
         let pending_before = discovery.pending_materialization.len();
         for ancestor_index in lineage {
             let ancestor_record = &records[ancestor_index];
             let ancestor_source = &input.sources[ancestor_record.source_index];
             let ancestor = &ancestor_source.assembly.classes[ancestor_record.class_index];
-            class_tags.extend(attributes::tags(&ancestor.declared_attributes));
-            for property in &ancestor.properties {
+            class_tags.extend(attributes::tags(&ancestor.declaration.declared_attributes));
+            for property in &ancestor.declaration.properties {
                 properties.insert(
                     property.name.0.to_ascii_lowercase(),
-                    (ancestor_source, property),
+                    (
+                        ancestor_source,
+                        ClassPropertyInput {
+                            declaration: property.clone(),
+                            default: ancestor.property_default(&property.name).cloned(),
+                        },
+                    ),
                 );
             }
             let (ancestor_fixtures, pending) = fixtures::materialization(
@@ -85,7 +96,7 @@ pub(super) fn discover(
             );
             materialized_fixtures.extend(ancestor_fixtures);
             discovery.pending_materialization.extend(pending);
-            for method in &ancestor.methods {
+            for method in &ancestor.declaration.methods {
                 let Some(function) = function_by_id(ancestor_source, method.function) else {
                     continue;
                 };
@@ -187,7 +198,7 @@ pub(super) fn discover(
             id: suite_id,
             fixture_group_id: group_id,
             display_name: record.name.clone(),
-            source: source_descriptor(source, record.name.clone(), class.span),
+            source: source_descriptor(source, record.name.clone(), class.declaration.span),
             fixtures,
             tests,
         });
@@ -195,17 +206,17 @@ pub(super) fn discover(
 }
 
 fn grouped_properties<'a>(
-    properties: impl Iterator<Item = (&'a SemanticTestSource<'a>, &'a ClassProperty)>,
-) -> Vec<(&'a SemanticTestSource<'a>, Vec<ClassProperty>)> {
-    let mut grouped: Vec<(&SemanticTestSource<'_>, Vec<ClassProperty>)> = Vec::new();
+    properties: impl Iterator<Item = (&'a SemanticTestSource<'a>, ClassPropertyInput)>,
+) -> Vec<(&'a SemanticTestSource<'a>, Vec<ClassPropertyInput>)> {
+    let mut grouped: Vec<(&SemanticTestSource<'_>, Vec<ClassPropertyInput>)> = Vec::new();
     for (source, property) in properties {
         if let Some((_, values)) = grouped
             .iter_mut()
             .find(|(candidate, _)| std::ptr::eq(*candidate, source))
         {
-            values.push(property.clone());
+            values.push(property);
         } else {
-            grouped.push((source, vec![property.clone()]));
+            grouped.push((source, vec![property]));
         }
     }
     grouped

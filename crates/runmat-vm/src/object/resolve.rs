@@ -23,17 +23,20 @@ fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_na
     if let Some(caller_name) = caller_function_name {
         if let Some((caller_class, _)) = caller_name.rsplit_once('.') {
             if !caller_class.is_empty()
-                && runmat_builtins::get_class(caller_class).is_some()
-                && (runmat_builtins::is_class_or_subclass(caller_class, class_name)
-                    || runmat_builtins::is_class_or_subclass(class_name, caller_class))
+                && runmat_runtime::class_registry::get_class(caller_class).is_some()
+                && (runmat_runtime::class_registry::is_class_or_subclass(caller_class, class_name)
+                    || runmat_runtime::class_registry::is_class_or_subclass(
+                        class_name,
+                        caller_class,
+                    ))
             {
                 return true;
             }
         }
     }
     caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
-        runmat_builtins::is_class_or_subclass(&caller_class, class_name)
-            || runmat_builtins::is_class_or_subclass(class_name, &caller_class)
+        runmat_runtime::class_registry::is_class_or_subclass(&caller_class, class_name)
+            || runmat_runtime::class_registry::is_class_or_subclass(class_name, &caller_class)
     })
 }
 
@@ -49,7 +52,9 @@ fn caller_is_index_overload(
     if caller == method_name {
         return true;
     }
-    if let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) {
+    if let Some((method, owner)) =
+        runmat_runtime::class_registry::lookup_method(class_name, method_name)
+    {
         if caller == method.function_name {
             return true;
         }
@@ -59,16 +64,21 @@ fn caller_is_index_overload(
     }
     if let Some((caller_class, caller_method)) = caller.rsplit_once('.') {
         if caller_method == method_name
-            && runmat_builtins::is_class_or_subclass(class_name, caller_class)
+            && runmat_runtime::class_registry::is_class_or_subclass(class_name, caller_class)
         {
             return true;
         }
     }
     if let Some(caller_class) = caller_class_for_function(Some(caller)) {
-        if let Some((method, _owner)) = runmat_builtins::lookup_method(&caller_class, method_name) {
+        if let Some((method, _owner)) =
+            runmat_runtime::class_registry::lookup_method(&caller_class, method_name)
+        {
             if method.function_name == caller
-                && (runmat_builtins::is_class_or_subclass(class_name, &caller_class)
-                    || runmat_builtins::is_class_or_subclass(&caller_class, class_name))
+                && (runmat_runtime::class_registry::is_class_or_subclass(class_name, &caller_class)
+                    || runmat_runtime::class_registry::is_class_or_subclass(
+                        &caller_class,
+                        class_name,
+                    ))
             {
                 return true;
             }
@@ -79,13 +89,13 @@ fn caller_is_index_overload(
 
 fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
     let caller_function_name = caller_function_name?;
-    if runmat_builtins::get_class(caller_function_name).is_some() {
+    if runmat_runtime::class_registry::get_class(caller_function_name).is_some() {
         return Some(caller_function_name.to_string());
     }
-    if let Some(owner) = runmat_builtins::class_names()
+    if let Some(owner) = runmat_runtime::class_registry::class_names()
         .into_iter()
         .find(|class_name| {
-            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+            runmat_runtime::class_registry::get_class(class_name).is_some_and(|class_def| {
                 class_def
                     .methods
                     .values()
@@ -98,7 +108,7 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
     if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
         if !class_name.is_empty()
             && !method_name.is_empty()
-            && runmat_builtins::get_class(class_name).is_some()
+            && runmat_runtime::class_registry::get_class(class_name).is_some()
         {
             return Some(class_name.to_string());
         }
@@ -108,17 +118,17 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
 
 fn access_permitted(
     owner: &str,
-    access: &runmat_value::Access,
+    access: &runmat_types::MemberAccess,
     caller_function_name: Option<&str>,
 ) -> bool {
     match access {
-        runmat_value::Access::Public => true,
-        runmat_value::Access::Private => {
+        runmat_types::MemberAccess::Public => true,
+        runmat_types::MemberAccess::Private => {
             caller_class_for_function(caller_function_name).as_deref() == Some(owner)
         }
-        runmat_value::Access::Protected => caller_class_for_function(caller_function_name)
+        runmat_types::MemberAccess::Protected => caller_class_for_function(caller_function_name)
             .is_some_and(|caller_class| {
-                runmat_builtins::is_class_or_subclass(&caller_class, owner)
+                runmat_runtime::class_registry::is_class_or_subclass(&caller_class, owner)
             }),
     }
 }
@@ -150,7 +160,7 @@ pub async fn load_member(
             }
         }
         Value::Object(obj) => {
-            if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
+            if let Some(cls) = runmat_runtime::class_registry::get_class(&obj.class_name) {
                 if class_defines_member_subsref(&cls)
                     && !caller_is_index_overload(
                         caller_function_name,
@@ -162,7 +172,9 @@ pub async fn load_member(
                     return call_object_member_subsref(Value::Object(obj), field).await;
                 }
             }
-            if let Some((p, owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+            if let Some((p, owner)) =
+                runmat_runtime::class_registry::lookup_property(&obj.class_name, &field)
+            {
                 if p.is_static {
                     return Err(mex(
                         "RunMat:PropertyStaticAccess",
@@ -195,7 +207,7 @@ pub async fn load_member(
             } else if let Some(v) = obj.properties.get(&field) {
                 Ok(v.clone())
             } else if let Some((p2, owner)) =
-                runmat_builtins::lookup_property(&obj.class_name, &field)
+                runmat_runtime::class_registry::lookup_property(&obj.class_name, &field)
             {
                 if !access_permitted(&owner, &p2.get_access, caller_function_name) {
                     return Err(mex(
@@ -214,7 +226,7 @@ pub async fn load_member(
                     field, obj.class_name
                 )
                 .into())
-            } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
+            } else if let Some(cls) = runmat_runtime::class_registry::get_class(&obj.class_name) {
                 if class_defines_member_subsref(&cls) {
                     call_object_member_subsref(Value::Object(obj), field).await
                 } else {
@@ -229,7 +241,7 @@ pub async fn load_member(
             }
         }
         Value::HandleObject(handle) => {
-            if let Some(cls) = runmat_builtins::get_class(&handle.class_name) {
+            if let Some(cls) = runmat_runtime::class_registry::get_class(&handle.class_name) {
                 if class_defines_member_subsref(&cls)
                     && !caller_is_index_overload(
                         caller_function_name,
@@ -319,7 +331,7 @@ pub fn load_static_member(
     field: &str,
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
-    if let Some((p, owner)) = runmat_builtins::lookup_property(cls, field) {
+    if let Some((p, owner)) = runmat_runtime::class_registry::lookup_property(cls, field) {
         if !p.is_static {
             return Err(mex(
                 "RunMat:PropertyStaticAccess",
@@ -332,7 +344,7 @@ pub fn load_static_member(
                 &format!("Property '{}' is private", field),
             ));
         }
-        if let Some(v) = runmat_builtins::get_static_property_value(&owner, field) {
+        if let Some(v) = runmat_runtime::class_registry::get_static_property_value(&owner, field) {
             Ok(v)
         } else if let Some(v) = &p.default_value {
             Ok(v.clone())
@@ -341,7 +353,7 @@ pub fn load_static_member(
                 Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
             ))
         }
-    } else if let Some((m, _owner)) = runmat_builtins::lookup_method(cls, field) {
+    } else if let Some((m, _owner)) = runmat_runtime::class_registry::lookup_method(cls, field) {
         if !m.is_static {
             return Err(mex(
                 "RunMat:MethodStaticAccess",
@@ -353,7 +365,7 @@ pub fn load_static_member(
             bound_function: None,
             captures: vec![],
         }))
-    } else if runmat_builtins::class_has_enumeration_member(cls, field) {
+    } else if runmat_runtime::class_registry::class_has_enumeration_member(cls, field) {
         let mut value = runmat_value::ObjectInstance::new(cls.to_string());
         value.properties.insert(
             "__enum_member__".to_string(),
@@ -390,7 +402,7 @@ where
 {
     match base {
         Value::Object(mut obj) => {
-            if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
+            if let Some(cls) = runmat_runtime::class_registry::get_class(&obj.class_name) {
                 if class_defines_member_subsasgn(&cls)
                     && !caller_is_index_overload(
                         caller_function_name,
@@ -402,7 +414,9 @@ where
                     return call_object_member_subsasgn(Value::Object(obj), field, rhs).await;
                 }
             }
-            if let Some((p, owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+            if let Some((p, owner)) =
+                runmat_runtime::class_registry::lookup_property(&obj.class_name, &field)
+            {
                 if p.is_static {
                     return Err(mex(
                         "RunMat:PropertyStaticAccess",
@@ -447,7 +461,7 @@ where
                 }
                 dynamicprops::dynamic_property_assign(&mut obj, &field, rhs)?;
                 Ok(Value::Object(obj))
-            } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
+            } else if let Some(cls) = runmat_runtime::class_registry::get_class(&obj.class_name) {
                 if class_defines_member_subsasgn(&cls) {
                     call_object_member_subsasgn(Value::Object(obj), field, rhs).await
                 } else {
@@ -458,7 +472,8 @@ where
             }
         }
         Value::ClassRef(cls) => {
-            if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &field) {
+            if let Some((p, owner)) = runmat_runtime::class_registry::lookup_property(&cls, &field)
+            {
                 if !p.is_static {
                     return Err(mex(
                         "RunMat:PropertyStaticAccess",
@@ -477,14 +492,16 @@ where
                         &format!("Property '{}' is private", field),
                     ));
                 }
-                runmat_builtins::set_static_property_value_in_owner(&owner, &field, rhs)?;
+                runmat_runtime::class_registry::set_static_property_value_in_owner(
+                    &owner, &field, rhs,
+                )?;
                 Ok(Value::ClassRef(cls))
             } else {
                 Err(format!("Unknown property '{}' on class {}", field, cls).into())
             }
         }
         Value::HandleObject(handle) => {
-            if let Some(cls) = runmat_builtins::get_class(&handle.class_name) {
+            if let Some(cls) = runmat_runtime::class_registry::get_class(&handle.class_name) {
                 if class_defines_member_subsasgn(&cls)
                     && !caller_is_index_overload(
                         caller_function_name,
@@ -593,10 +610,8 @@ fn is_possible_graphics_handle_value(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{is_possible_graphics_handle_value, load_member, load_static_member, store_member};
-    use runmat_builtins::{
-        get_static_property_value, register_class, ClassDef, MethodDef, PropertyDef,
-    };
-    use runmat_value::{Access, IntValue, ObjectArray, ObjectInstance, Value};
+    use runmat_types::MemberAccess;
+    use runmat_value::{IntValue, ObjectArray, ObjectInstance, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -650,30 +665,38 @@ mod tests {
         let mut parent_properties = HashMap::new();
         parent_properties.insert(
             "version".to_string(),
-            PropertyDef {
+            runmat_runtime::class_registry::RuntimeProperty {
                 name: "version".to_string(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: Some(Value::Num(1.0)),
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: parent_properties,
-            methods: HashMap::new(),
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name.clone()),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: parent_properties,
+                methods: HashMap::new(),
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name.clone()),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
-        runmat_builtins::set_static_property_value(&parent_name, "version", Value::Num(3.0));
+        runmat_runtime::class_registry::set_static_property_value(
+            &parent_name,
+            "version",
+            Value::Num(3.0),
+        );
         let value = load_static_member(&child_name, "version", None)
             .expect("inherited static property should resolve through parent metadata owner");
         assert_eq!(value, Value::Num(3.0));
@@ -687,28 +710,32 @@ mod tests {
         let mut parent_properties = HashMap::new();
         parent_properties.insert(
             "version".to_string(),
-            PropertyDef {
+            runmat_runtime::class_registry::RuntimeProperty {
                 name: "version".to_string(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: Some(Value::Num(1.0)),
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: parent_properties,
-            methods: HashMap::new(),
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name.clone()),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: parent_properties,
+                methods: HashMap::new(),
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name.clone()),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
         let out = futures::executor::block_on(store_member(
             Value::ClassRef(child_name.clone()),
@@ -721,7 +748,7 @@ mod tests {
         .expect("storing inherited static property via child class ref should succeed");
         assert_eq!(out, Value::ClassRef(child_name));
         assert_eq!(
-            get_static_property_value(&parent_name, "version"),
+            runmat_runtime::class_registry::get_static_property_value(&parent_name, "version"),
             Some(Value::Num(9.0))
         );
     }
@@ -734,28 +761,32 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             "build".to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: "build".to_string(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "build_impl".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: parent_methods,
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name.clone()),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: parent_methods,
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name.clone()),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
         let value = load_static_member(&child_name, "build", None)
             .expect("inherited static method should resolve through parent metadata");
@@ -773,28 +804,32 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             "subsref".to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: "subsref".to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "OverIdx.subsref".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: parent_methods,
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: parent_methods,
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
         let obj = Value::Object(ObjectInstance::new(child_name));
         let value =
@@ -811,28 +846,32 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             "subsasgn".to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: "subsasgn".to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "OverIdx.subsasgn".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: parent_methods,
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: parent_methods,
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
         let out = futures::executor::block_on(store_member(
             Value::Object(ObjectInstance::new(child_name)),

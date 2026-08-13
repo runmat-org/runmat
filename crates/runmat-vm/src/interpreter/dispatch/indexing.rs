@@ -174,7 +174,7 @@ fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Optio
         Value::HandleObject(handle) => handle.class_name.as_str(),
         _ => return None,
     };
-    let class = runmat_builtins::get_class(class_name)?;
+    let class = runmat_runtime::class_registry::get_class(class_name)?;
     let supported = match op {
         ObjectIndexOp::Subsref => class_defines_member_subsref(&class),
         ObjectIndexOp::Subsasgn => class_defines_member_subsasgn(&class),

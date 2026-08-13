@@ -4,12 +4,14 @@
 //! builtin, class, or other entity is available in the current session.
 
 use runmat_builtins::{
-    builtin_functions, lookup_method, BuiltinCompletionPolicy, BuiltinDescriptor,
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    builtin_functions, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_types::MemberAccess;
 use runmat_value::Value;
 
 use crate::builtins::common::fs::contains_wildcards;
@@ -468,7 +470,7 @@ fn builtin_exists(name: &str) -> bool {
 }
 
 async fn class_exists(name: &str) -> BuiltinResult<bool> {
-    if runmat_builtins::get_class(name).is_some() {
+    if crate::class_registry::get_class(name).is_some() {
         return Ok(true);
     }
     if class_folder_exists(name).await? {
@@ -497,7 +499,7 @@ async fn class_file_exists(name: &str) -> BuiltinResult<bool> {
 
 fn method_exists(name: &str) -> bool {
     if let Some((class_name, method_name)) = split_method_name(name) {
-        lookup_method(&class_name, &method_name).is_some()
+        crate::class_registry::lookup_method(&class_name, &method_name).is_some()
     } else {
         false
     }
@@ -573,10 +575,9 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::{ClassDef, MethodDef};
     use runmat_filesystem as vfs;
     use runmat_thread_local::runmat_thread_local;
-    use runmat_value::{Access, IntValue, Value};
+    use runmat_value::{IntValue, Value};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::env;
@@ -869,23 +870,23 @@ pub(crate) mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             "parentOnly".to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: "parentOnly".to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "parent_only_impl".to_string(),
                 implicit_class_argument: None,
             },
         );
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent_name.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child_name.clone(),
             parent: Some(parent_name.clone()),
             properties: HashMap::new(),

@@ -5,6 +5,7 @@
 //! so MATLAB syntax such as `F(xq)` and `F(xq,yq)` works through the normal
 //! object indexing path.
 
+use runmat_types::MemberAccess;
 use std::cell::Cell as LocalCell;
 use std::collections::HashMap;
 
@@ -15,11 +16,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef, ResolveContext, Type,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    Access, CellArray, IntValue, IntegerStorage, NumericDType, ObjectInstance, Tensor, Value,
+    CellArray, IntValue, IntegerStorage, NumericDType, ObjectInstance, Tensor, Value,
 };
 
 use crate::builtins::common::spec::{
@@ -418,13 +419,13 @@ fn ensure_gridded_interpolant_class_registered() {
         for name in [GRID_VECTORS, VALUES, METHOD, EXTRAPOLATION_METHOD] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Public,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
                     default_value: None,
                 },
             );
@@ -432,17 +433,17 @@ fn ensure_gridded_interpolant_class_registered() {
         let mut methods = HashMap::new();
         methods.insert(
             OBJECT_SUBSREF_METHOD.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: OBJECT_SUBSREF_METHOD.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: BUILTIN_SUBSREF.to_string(),
                 implicit_class_argument: None,
             },
         );
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: CLASS_NAME.to_string(),
             parent: None,
             properties,

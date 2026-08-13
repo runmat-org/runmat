@@ -13,9 +13,8 @@ inventory = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = { workspace = true }
 runmat-async = { workspace = true }
-runmat-gc-api = { workspace = true }
 runmat-value = { workspace = true }
-once_cell = { workspace = true }
+runmat-types = { workspace = true }
 
 [dev-dependencies]
 runmat-macros = { workspace = true }

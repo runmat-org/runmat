@@ -6294,10 +6294,9 @@ name = "runmat-builtins"
 version = "0.6.1"
 dependencies = [
  "inventory",
- "once_cell",
  "runmat-async",
- "runmat-gc-api",
  "runmat-macros",
+ "runmat-types",
  "runmat-value",
  "serde",
  "sha2 0.10.9",
@@ -6497,7 +6496,6 @@ dependencies = [
  "page_size",
  "parking_lot",
  "runmat-accelerate-api",
- "runmat-builtins",
  "runmat-gc-api",
  "runmat-hir",
  "runmat-mir",
@@ -6565,7 +6563,7 @@ dependencies = [
  "runmat-execution",
  "runmat-parser",
  "runmat-test",
- "runmat-value",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6749,6 +6747,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-hir",
  "runmat-parser",
+ "runmat-types",
  "serde",
  "serde_json",
 ]
@@ -6848,6 +6847,7 @@ name = "runmat-parser"
 version = "0.6.1"
 dependencies = [
  "runmat-lexer",
+ "runmat-types",
  "serde",
 ]
 
@@ -6954,7 +6954,6 @@ dependencies = [
  "runmat-geometry-core",
  "runmat-geometry-io",
  "runmat-geometry-ops",
- "runmat-hir",
  "runmat-macros",
  "runmat-meshing",
  "runmat-meshing-core",
@@ -6963,6 +6962,7 @@ dependencies = [
  "runmat-test",
  "runmat-thread-local",
  "runmat-time",
+ "runmat-types",
  "runmat-value",
  "rustfft",
  "serde",
@@ -7038,6 +7038,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-test",
+ "runmat-types",
  "runmat-vm",
  "serde",
 ]
@@ -7150,6 +7151,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-types"
+version = "0.6.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "runmat-value"
 version = "0.6.1"
 dependencies = [
@@ -7161,6 +7172,7 @@ dependencies = [
  "runmat-execution",
  "runmat-gc-api",
  "runmat-thread-local",
+ "runmat-types",
  "serde",
 ]
 
@@ -7185,6 +7197,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-thread-local",
  "runmat-time",
+ "runmat-types",
  "runmat-value",
  "serde",
  "serde_json",

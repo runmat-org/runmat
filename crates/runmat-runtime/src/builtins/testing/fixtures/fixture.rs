@@ -58,7 +58,7 @@ async fn temporary_folder_fixture(args: Vec<Value>) -> BuiltinResult<Value> {
 async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> {
     validate_test_case(&receiver)?;
     let handle = fixture_handle(&fixture)?;
-    if runmat_builtins::is_class_or_subclass(&handle.class_name, PATH_FIXTURE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(&handle.class_name, PATH_FIXTURE_CLASS) {
         let path = handle_text_property(&handle, "Path")?;
         crate::call_builtin_async("addpath", &[Value::String(path.clone())]).await?;
         crate::testing::record_runtime_teardown(
@@ -66,7 +66,7 @@ async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> 
             vec![Value::String(path)],
         )
         .map_err(|message| testing_error("applyFixture", message))?;
-    } else if runmat_builtins::is_class_or_subclass(
+    } else if crate::class_registry::is_class_or_subclass(
         &handle.class_name,
         TEMPORARY_FOLDER_FIXTURE_CLASS,
     ) {
@@ -85,7 +85,7 @@ async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> 
             vec![Value::String(folder), Value::String("s".into())],
         )
         .map_err(|message| testing_error("applyFixture", message))?;
-    } else if !runmat_builtins::is_class_or_subclass(&handle.class_name, FIXTURE_CLASS) {
+    } else if !crate::class_registry::is_class_or_subclass(&handle.class_name, FIXTURE_CLASS) {
         return Err(testing_error(
             "applyFixture",
             format!(
@@ -128,7 +128,7 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
         Value::HandleObject(handle) => handle.class_name.as_str(),
         _ => "",
     };
-    if runmat_builtins::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
         Ok(())
     } else {
         Err(testing_error(

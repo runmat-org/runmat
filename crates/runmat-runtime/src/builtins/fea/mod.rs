@@ -14,13 +14,12 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ClassDef, MethodDef,
+    BuiltinSignatureDescriptor,
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    Access, IntValue, IntegerStorage, NumericScalar, ObjectInstance, Tensor, Value,
-};
+use runmat_types::MemberAccess;
+use runmat_value::{IntValue, IntegerStorage, NumericScalar, ObjectInstance, Tensor, Value};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -5351,20 +5350,20 @@ fn ensure_fea_classes_registered() {
     REGISTER.get_or_init(|| {
         let workflow_methods = workflow_methods();
         for class_name in [FEA_STUDY_CLASS, FEA_SWEEP_CLASS] {
-            runmat_builtins::register_class(ClassDef {
+            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: class_name.to_string(),
                 parent: None,
                 properties: HashMap::new(),
                 methods: workflow_methods.clone(),
             });
         }
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: FEA_RUN_RESULT_CLASS.to_string(),
             parent: None,
             properties: HashMap::new(),
             methods: run_result_methods(),
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: FEA_RESULTS_CLASS.to_string(),
             parent: None,
             properties: HashMap::new(),
@@ -5374,7 +5373,7 @@ fn ensure_fea_classes_registered() {
             if class_name == FEA_RUN_RESULT_CLASS {
                 continue;
             }
-            runmat_builtins::register_class(ClassDef {
+            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: class_name.to_string(),
                 parent: None,
                 properties: HashMap::new(),
@@ -5395,7 +5394,7 @@ fn ensure_fea_classes_registered() {
             FEA_COMPARE_CLASS,
             FEA_TRENDS_CLASS,
         ] {
-            runmat_builtins::register_class(ClassDef {
+            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: class_name.to_string(),
                 parent: None,
                 properties: HashMap::new(),
@@ -5409,7 +5408,7 @@ fn ensure_fea_classes_registered() {
     });
 }
 
-fn workflow_methods() -> HashMap<String, MethodDef> {
+fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [
         ("validate", VALIDATE_NAME),
         ("plan", PLAN_NAME),
@@ -5419,12 +5418,12 @@ fn workflow_methods() -> HashMap<String, MethodDef> {
     .map(|(name, function_name)| {
         (
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: function_name.to_string(),
                 implicit_class_argument: None,
             },
@@ -5433,7 +5432,7 @@ fn workflow_methods() -> HashMap<String, MethodDef> {
     .collect()
 }
 
-fn run_result_methods() -> HashMap<String, MethodDef> {
+fn run_result_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [
         ("results", RESULTS_NAME),
         ("field", FIELD_NAME),
@@ -5443,12 +5442,12 @@ fn run_result_methods() -> HashMap<String, MethodDef> {
     .map(|(name, function_name)| {
         (
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: function_name.to_string(),
                 implicit_class_argument: None,
             },
@@ -5457,18 +5456,18 @@ fn run_result_methods() -> HashMap<String, MethodDef> {
     .collect()
 }
 
-fn results_methods() -> HashMap<String, MethodDef> {
+fn results_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [("field", FIELD_NAME), ("plot", PLOT_NAME)]
         .into_iter()
         .map(|(name, function_name)| {
             (
                 name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: function_name.to_string(),
                     implicit_class_argument: None,
                 },
@@ -5477,18 +5476,18 @@ fn results_methods() -> HashMap<String, MethodDef> {
         .collect()
 }
 
-fn field_methods() -> HashMap<String, MethodDef> {
+fn field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [("plot", PLOT_NAME)]
         .into_iter()
         .map(|(name, function_name)| {
             (
                 name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: function_name.to_string(),
                     implicit_class_argument: None,
                 },

@@ -11,7 +11,8 @@ use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::RuntimeError;
-use runmat_value::{Access, MException, Value};
+use runmat_types::MemberAccess;
+use runmat_value::{MException, Value};
 
 pub enum BuiltinHandling {
     Completed,
@@ -36,15 +37,15 @@ fn current_class_context_from_function_name(current_function_name: &str) -> Opti
     if let Some((class_name, method_name)) = current_function_name.rsplit_once('.') {
         if !class_name.is_empty()
             && !method_name.is_empty()
-            && runmat_builtins::get_class(class_name).is_some()
+            && runmat_runtime::class_registry::get_class(class_name).is_some()
         {
             return Some(class_name.to_string());
         }
     }
-    runmat_builtins::class_names()
+    runmat_runtime::class_registry::class_names()
         .into_iter()
         .find(|class_name| {
-            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+            runmat_runtime::class_registry::get_class(class_name).is_some_and(|class_def| {
                 class_def.methods.values().any(|method| {
                     method.function_name == current_function_name
                         || method
@@ -134,7 +135,8 @@ fn imported_static_method_owner(
                 continue;
             }
             let class_name = path.join(".");
-            if let Some((method, owner)) = runmat_builtins::lookup_method(&class_name, method_name)
+            if let Some((method, owner)) =
+                runmat_runtime::class_registry::lookup_method(&class_name, method_name)
             {
                 if method.is_static && !owners.iter().any(|existing| existing == &owner) {
                     owners.push(owner);
@@ -146,7 +148,9 @@ fn imported_static_method_owner(
             continue;
         }
         let class_name = path[..path.len() - 1].join(".");
-        if let Some((method, owner)) = runmat_builtins::lookup_method(&class_name, method_name) {
+        if let Some((method, owner)) =
+            runmat_runtime::class_registry::lookup_method(&class_name, method_name)
+        {
             if method.is_static && !owners.iter().any(|existing| existing == &owner) {
                 owners.push(owner);
             }
@@ -399,19 +403,22 @@ pub async fn handle_prepared_user_function_call(
     };
     if current_class_context.is_some() {
         if let Some((class_name, method_name)) = static_candidate {
-            if runmat_builtins::get_class(&class_name).is_some() {
+            if runmat_runtime::class_registry::get_class(&class_name).is_some() {
                 if let Some((method, owner)) =
-                    runmat_builtins::lookup_method(&class_name, &method_name)
+                    runmat_runtime::class_registry::lookup_method(&class_name, &method_name)
                 {
                     if method.is_static {
                         let allowed = match method.access {
-                            Access::Public => true,
-                            Access::Private => {
+                            MemberAccess::Public => true,
+                            MemberAccess::Private => {
                                 current_class_context.as_deref() == Some(owner.as_str())
                             }
-                            Access::Protected => {
+                            MemberAccess::Protected => {
                                 current_class_context.as_ref().is_some_and(|caller_class| {
-                                    runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                                    runmat_runtime::class_registry::is_class_or_subclass(
+                                        caller_class,
+                                        &owner,
+                                    )
                                 })
                             }
                         };
@@ -469,14 +476,21 @@ pub async fn handle_prepared_user_function_call(
         current_class_context.as_ref(),
         local_method_candidate.as_ref(),
     ) {
-        if let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) {
+        if let Some((method, owner)) =
+            runmat_runtime::class_registry::lookup_method(class_name, method_name)
+        {
             if method.is_static {
                 let allowed = match method.access {
-                    Access::Public => true,
-                    Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
-                    Access::Protected => {
+                    MemberAccess::Public => true,
+                    MemberAccess::Private => {
+                        current_class_context.as_deref() == Some(owner.as_str())
+                    }
+                    MemberAccess::Protected => {
                         current_class_context.as_ref().is_some_and(|caller_class| {
-                            runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                            runmat_runtime::class_registry::is_class_or_subclass(
+                                caller_class,
+                                &owner,
+                            )
                         })
                     }
                 };
@@ -514,15 +528,21 @@ pub async fn handle_prepared_user_function_call(
     }
     if let Some(method_name) = local_method_candidate.as_ref() {
         if let Some(owner_class) = imported_static_method_owner(imports, method_name)? {
-            if let Some((method, owner)) = runmat_builtins::lookup_method(&owner_class, method_name)
+            if let Some((method, owner)) =
+                runmat_runtime::class_registry::lookup_method(&owner_class, method_name)
             {
                 if method.is_static {
                     let allowed = match method.access {
-                        Access::Public => true,
-                        Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
-                        Access::Protected => {
+                        MemberAccess::Public => true,
+                        MemberAccess::Private => {
+                            current_class_context.as_deref() == Some(owner.as_str())
+                        }
+                        MemberAccess::Protected => {
                             current_class_context.as_ref().is_some_and(|caller_class| {
-                                runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                                runmat_runtime::class_registry::is_class_or_subclass(
+                                    caller_class,
+                                    &owner,
+                                )
                             })
                         }
                     };

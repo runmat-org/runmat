@@ -1,4 +1,5 @@
 //! MATLAB-compatible `superclasses` builtin backed by RunMat class metadata.
+use runmat_types::MemberAccess;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -8,9 +9,8 @@ use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::superclasses_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    superclass_chain, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, Value};
@@ -106,7 +106,7 @@ pub const SUPERCLASSES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 fn superclasses_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let class_name = requested_class_name(&value)?;
-    let supers = if let Some(chain) = superclass_chain(&class_name) {
+    let supers = if let Some(chain) = crate::class_registry::superclass_chain(&class_name) {
         chain
     } else if known_leaf_class_without_registered_metadata(&class_name) {
         Vec::new()
@@ -207,17 +207,16 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{register_class, ClassDef, MethodDef};
-    use runmat_value::{Access, CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
+    use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
     use std::collections::HashMap;
 
-    fn method(name: &str) -> MethodDef {
-        MethodDef {
+    fn method(name: &str) -> crate::class_registry::RuntimeMethod {
+        crate::class_registry::RuntimeMethod {
             name: name.to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!("{name}_impl"),
             implicit_class_argument: None,
         }
@@ -236,19 +235,19 @@ mod tests {
         let parent = unique_class_name(&format!("{label}Parent"));
         let child = unique_class_name(&format!("{label}Child"));
 
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: grand.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([("root".to_string(), method("root"))]),
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent.clone(),
             parent: Some(grand.clone()),
             properties: HashMap::new(),
             methods: HashMap::from([("mid".to_string(), method("mid"))]),
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child.clone(),
             parent: Some(parent.clone()),
             properties: HashMap::new(),
@@ -328,13 +327,13 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn superclasses_uses_gpuarray_metadata_without_gather() {
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: "gpuArray".to_string(),
             parent: Some("handle".to_string()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: "handle".to_string(),
             parent: None,
             properties: HashMap::new(),

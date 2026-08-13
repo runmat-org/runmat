@@ -5,7 +5,7 @@ mod instance;
 mod listener;
 
 pub use array::ObjectArray;
-pub use dynamic_property::{Access, DynamicPropertyDef};
+pub use dynamic_property::DynamicPropertyDef;
 pub use handle::HandleRef;
 pub use instance::ObjectInstance;
 pub use listener::Listener;

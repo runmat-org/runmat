@@ -10,9 +10,10 @@ fn classdef_property_attributes_round_trip() {
     let class = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "A")
+        .find(|class| class.declaration.name.0[0].0 == "A")
         .unwrap();
     let prop = class
+        .declaration
         .properties
         .iter()
         .find(|property| property.name.0 == "p")
@@ -30,9 +31,10 @@ fn classdef_method_attributes_round_trip() {
     let class = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "B")
+        .find(|class| class.declaration.name.0[0].0 == "B")
         .unwrap();
     let method = class
+        .declaration
         .methods
         .iter()
         .find(|method| method.name.0 == "foo")
@@ -77,9 +79,10 @@ fn classdef_protected_access_values_round_trip() {
     let class = assembly
         .classes
         .iter()
-        .find(|class| class.name.0[0].0 == "D")
+        .find(|class| class.declaration.name.0[0].0 == "D")
         .unwrap();
     let prop = class
+        .declaration
         .properties
         .iter()
         .find(|property| property.name.0 == "p")
@@ -87,6 +90,7 @@ fn classdef_protected_access_values_round_trip() {
     assert_eq!(prop.attributes.get_access, MemberAccess::Protected);
     assert_eq!(prop.attributes.set_access, MemberAccess::Protected);
     let method = class
+        .declaration
         .methods
         .iter()
         .find(|method| method.name.0 == "f")

@@ -1,4 +1,6 @@
 //! MATLAB-compatible `display` builtin for Command Window variable output.
+#[cfg(test)]
+use runmat_types::MemberAccess;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
@@ -223,9 +225,8 @@ mod tests {
     use super::*;
     use crate::console::{reset_thread_buffer, take_thread_buffer};
     use futures::executor::block_on;
-    use runmat_builtins::{ClassDef, MethodDef};
-    use runmat_hir::{SourceId, Span};
-    use runmat_value::{Access, IntValue, ObjectInstance, Tensor};
+    use runmat_types::{SourceId, Span};
+    use runmat_value::{IntValue, ObjectInstance, Tensor};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -360,18 +361,18 @@ mod tests {
     #[test]
     fn display_dispatches_custom_object_display_method() {
         let class_name = "DisplayHookObject".to_string();
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_name.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
                 "display".to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: "display".to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: "DisplayHookObject.customDisplayImpl".to_string(),
                     implicit_class_argument: None,
                 },
@@ -409,18 +410,18 @@ mod tests {
     #[test]
     fn display_falls_back_to_overloaded_disp_method() {
         let class_name = "DispFallbackObject".to_string();
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_name.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
                 "disp".to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: "disp".to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: "DispFallbackObject.renderDisp".to_string(),
                     implicit_class_argument: None,
                 },
@@ -457,24 +458,24 @@ mod tests {
     fn display_dispatches_inherited_custom_object_display_method() {
         let parent_class_name = "DisplayHookParent".to_string();
         let child_class_name = "DisplayHookChild".to_string();
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent_class_name.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
                 "display".to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: "display".to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: "DisplayHookParent.renderDisplay".to_string(),
                     implicit_class_argument: None,
                 },
             )]),
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child_class_name.clone(),
             parent: Some(parent_class_name),
             properties: HashMap::new(),

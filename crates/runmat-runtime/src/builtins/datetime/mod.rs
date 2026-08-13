@@ -1,3 +1,4 @@
+use runmat_types::MemberAccess;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
@@ -9,9 +10,8 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef,
 };
-use runmat_value::{Access, CharArray, ObjectInstance, StringArray, Tensor, Value};
+use runmat_value::{CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{
@@ -597,13 +597,13 @@ fn ensure_datetime_class_registered() {
         let mut properties = HashMap::new();
         properties.insert(
             FORMAT_FIELD.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: FORMAT_FIELD.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: Some(Value::String(DEFAULT_DATETIME_FORMAT.to_string())),
             },
         );
@@ -623,19 +623,19 @@ fn ensure_datetime_class_registered() {
         ] {
             methods.insert(
                 name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: format!("{DATETIME_CLASS}.{name}"),
                     implicit_class_argument: None,
                 },
             );
         }
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: DATETIME_CLASS.to_string(),
             parent: None,
             properties,
@@ -655,13 +655,13 @@ fn ensure_calendar_duration_class_registered() {
         for name in [CALENDAR_MONTHS_FIELD, CALENDAR_DAYS_FIELD] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Public,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
                     default_value: Some(Value::Num(0.0)),
                 },
             );
@@ -671,19 +671,19 @@ fn ensure_calendar_duration_class_registered() {
         for name in ["plus", "minus", "eq", "ne"] {
             methods.insert(
                 name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: format!("{CALENDAR_DURATION_CLASS}.{name}"),
                     implicit_class_argument: None,
                 },
             );
         }
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: CALENDAR_DURATION_CLASS.to_string(),
             parent: None,
             properties,

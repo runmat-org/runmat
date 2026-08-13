@@ -329,7 +329,7 @@ async fn call_builtin_async_impl(
             return compatibility_checked_builtin_result(name, args, result);
         }
         // Fallback: treat as class constructor if class is registered.
-        if runmat_builtins::get_class(name).is_some() {
+        if crate::class_registry::get_class(name).is_some() {
             let result = call_registered_class_constructor(name, args, output_count).await?;
             return compatibility_checked_builtin_result(name, args, result);
         }
@@ -500,7 +500,8 @@ pub(crate) async fn try_call_registered_instance_method(
         Value::HandleObject(handle) => handle.class_name.as_str(),
         _ => return Ok(None),
     };
-    let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
+    let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    else {
         return Ok(None);
     };
     if method.is_static {
@@ -508,11 +509,11 @@ pub(crate) async fn try_call_registered_instance_method(
     }
     let caller_class = current_class_access_context();
     let access_allowed = match method.access {
-        runmat_value::Access::Public => true,
-        runmat_value::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-        runmat_value::Access::Protected => caller_class
+        runmat_types::MemberAccess::Public => true,
+        runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_types::MemberAccess::Protected => caller_class
             .as_deref()
-            .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
+            .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
     };
     if !access_allowed {
         return Err(build_runtime_error(format!(
@@ -590,13 +591,14 @@ async fn try_call_registered_static_method(
     if class_name.trim().is_empty() || method_name.trim().is_empty() {
         return Ok(None);
     }
-    if runmat_builtins::get_class(class_name).is_none() {
+    if crate::class_registry::get_class(class_name).is_none() {
         return Ok(None);
     }
-    let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
+    let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    else {
         return Ok(None);
     };
-    if !method.is_static || method.access != runmat_value::Access::Public {
+    if !method.is_static || method.access != runmat_types::MemberAccess::Public {
         return Ok(None);
     }
     if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
@@ -645,19 +647,20 @@ async fn call_registered_class_constructor(
     let requested_outputs = output_count.unwrap_or(1);
     let default_object = create_class_object(class_name.to_string()).await?;
     let constructor_method_name = class_name.rsplit('.').next().unwrap_or(class_name);
-    let Some((ctor, owner)) = runmat_builtins::lookup_method(class_name, constructor_method_name)
-        .or_else(|| runmat_builtins::lookup_method(class_name, class_name))
+    let Some((ctor, owner)) =
+        crate::class_registry::lookup_method(class_name, constructor_method_name)
+            .or_else(|| crate::class_registry::lookup_method(class_name, class_name))
     else {
         return Ok(default_object);
     };
     let owner_qualified = format!("{owner}.{constructor_method_name}");
     let caller_class = current_class_access_context();
     let ctor_access_allowed = match ctor.access {
-        runmat_value::Access::Public => true,
-        runmat_value::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-        runmat_value::Access::Protected => caller_class
+        runmat_types::MemberAccess::Public => true,
+        runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_types::MemberAccess::Protected => caller_class
             .as_deref()
-            .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
+            .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
     };
     if !ctor_access_allowed {
         return Err(build_runtime_error(format!(
@@ -871,8 +874,8 @@ mod tests {
         call_builtin, gather_if_needed_async, should_retry_with_gpu_gather, value_contains_gpu,
     };
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
-    use runmat_builtins::{register_class, ClassDef, MethodDef};
-    use runmat_value::{Access, Closure, StructValue, Value};
+    use runmat_types::MemberAccess;
+    use runmat_value::{Closure, StructValue, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1122,23 +1125,23 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             child_name.clone(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: child_name.clone(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: ctor_fn_name_for_invoker,
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent_name.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child_name.clone(),
             parent: Some(parent_name),
             properties: HashMap::new(),
@@ -1160,17 +1163,17 @@ mod tests {
         let mut private_methods = HashMap::new();
         private_methods.insert(
             private_class_name.clone(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: private_class_name.clone(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Private,
+                access: MemberAccess::Private,
                 function_name: "Point.origin".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: private_class_name.clone(),
             parent: None,
             properties: HashMap::new(),
@@ -1184,17 +1187,17 @@ mod tests {
         let mut public_methods = HashMap::new();
         public_methods.insert(
             public_class_name.clone(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: public_class_name.clone(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: unique_class_name("runtime_ctor_missing_body"),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: public_class_name.clone(),
             parent: None,
             properties: HashMap::new(),
@@ -1213,7 +1216,7 @@ mod tests {
     fn dotted_static_method_name_dispatches_to_registered_class_method() {
         let class_name = unique_class_name("runtime_static_dispatch");
         let fn_name = unique_class_name("runtime_static_fn");
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_name.clone(),
             parent: None,
             properties: HashMap::new(),
@@ -1221,12 +1224,12 @@ mod tests {
                 let mut methods = HashMap::new();
                 methods.insert(
                     "zero".to_string(),
-                    MethodDef {
+                    crate::class_registry::RuntimeMethod {
                         name: "zero".to_string(),
                         is_static: true,
                         is_abstract: false,
                         is_sealed: false,
-                        access: Access::Public,
+                        access: MemberAccess::Public,
                         function_name: fn_name.clone(),
                         implicit_class_argument: None,
                     },

@@ -1,5 +1,6 @@
 //! MATLAB-compatible `containers.Map` constructor and methods for RunMat.
 
+use runmat_types::MemberAccess;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,13 +16,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_gc::{GcHandle, GcRoot, RootId, Trace, Tracer};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    Access, CharArray, HandleRef, IntValue, IntegerStorage, LogicalArray, NumericDType,
-    ObjectInstance, StructValue, Tensor, Value,
+    CharArray, HandleRef, IntValue, IntegerStorage, LogicalArray, NumericDType, ObjectInstance,
+    StructValue, Tensor, Value,
 };
 
 use crate::builtins::common::random_args::keyword_of;
@@ -899,13 +899,13 @@ fn ensure_containers_map_class_registered() {
         for name in ["Count", "KeyType", "ValueType"] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: true,
-                    get_access: Access::Public,
-                    set_access: Access::Private,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Private,
                     default_value: None,
                 },
             );
@@ -922,19 +922,19 @@ fn ensure_containers_map_class_registered() {
         ] {
             methods.insert(
                 name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: function_name.to_string(),
                     implicit_class_argument: None,
                 },
             );
         }
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: CLASS_NAME.to_string(),
             parent: None,
             properties,

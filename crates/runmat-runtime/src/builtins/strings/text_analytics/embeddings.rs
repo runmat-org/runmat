@@ -1,4 +1,5 @@
 //! Word embedding compatibility objects and lookup helpers.
+use runmat_types::MemberAccess;
 
 use std::cell::Cell;
 use std::cmp::Ordering;
@@ -12,11 +13,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ClassDef, PropertyDef, ResolveContext, Type,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, CellArray, CharArray, ObjectInstance, StringArray, Tensor, Value};
+use runmat_value::{CellArray, CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
@@ -1396,7 +1397,7 @@ fn ensure_word_embedding_class_registered() {
         for name in ["Dimension", "Vocabulary", VECTOR_PROPERTY] {
             properties.insert(name.to_string(), property_def(name));
         }
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: WORD_EMBEDDING_CLASS.to_string(),
             parent: None,
             properties,
@@ -1406,14 +1407,14 @@ fn ensure_word_embedding_class_registered() {
     });
 }
 
-fn property_def(name: &str) -> PropertyDef {
-    PropertyDef {
+fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
+    crate::class_registry::RuntimeProperty {
         name: name.to_string(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
-        get_access: Access::Public,
-        set_access: Access::Public,
+        get_access: MemberAccess::Public,
+        set_access: MemberAccess::Public,
         default_value: None,
     }
 }

@@ -3,6 +3,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::MemberAccess;
 use runmat_value::{NumericScalar, Value};
 use std::sync::OnceLock;
 
@@ -242,13 +243,13 @@ pub(crate) fn ensure_indexing_context_classes_registered() {
 }
 
 fn register_indexing_context_class(name: &str) {
-    runmat_builtins::register_class(runmat_builtins::ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: name.to_string(),
         parent: None,
         properties: std::collections::HashMap::new(),
         methods: std::collections::HashMap::new(),
     });
-    runmat_builtins::register_class_enumerations(
+    crate::class_registry::register_class_enumerations(
         name,
         [
             INDEXING_CONTEXT_STATEMENT.to_string(),
@@ -576,7 +577,7 @@ async fn dispatch_num_arguments_overload(
 ) -> crate::BuiltinResult<Option<Value>> {
     let args = vec![target, subscript, indexing_context];
     if let Some((method, owner)) =
-        runmat_builtins::lookup_method(&class_name, NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD)
+        crate::class_registry::lookup_method(&class_name, NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD)
     {
         let owner_member = format!("{owner}.{NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD}");
         let mut candidates = vec![method.function_name];
@@ -813,8 +814,7 @@ pub async fn num_arguments_from_subscript_builtin(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ClassDef, MethodDef};
-    use runmat_value::{Access, CellArray, IntValue, ObjectInstance, StructValue, Tensor};
+    use runmat_value::{CellArray, IntValue, ObjectInstance, StructValue, Tensor};
     use std::collections::HashMap;
 
     fn substruct(kind: &str, subs: Value) -> Value {
@@ -1052,23 +1052,23 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("OverIdx.{NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD}"),
                 implicit_class_argument: None,
             },
         );
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: base.to_string(),
             parent: None,
             properties: HashMap::new(),
             methods,
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child.to_string(),
             parent: Some(base.to_string()),
             properties: HashMap::new(),

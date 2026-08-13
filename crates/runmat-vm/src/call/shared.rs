@@ -500,12 +500,24 @@ pub(crate) async fn call_object_member_subsasgn(
     call_object_member_method(base, ObjectIndexOp::Subsasgn, field, Some(rhs)).await
 }
 
-pub(crate) fn class_defines_member_subsref(class: &runmat_builtins::ClassDef) -> bool {
-    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsref.protocol_name()).is_some()
+pub(crate) fn class_defines_member_subsref(
+    class: &runmat_runtime::class_registry::RuntimeClass,
+) -> bool {
+    runmat_runtime::class_registry::lookup_method(
+        &class.name,
+        ObjectIndexOp::Subsref.protocol_name(),
+    )
+    .is_some()
 }
 
-pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -> bool {
-    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsasgn.protocol_name()).is_some()
+pub(crate) fn class_defines_member_subsasgn(
+    class: &runmat_runtime::class_registry::RuntimeClass,
+) -> bool {
+    runmat_runtime::class_registry::lookup_method(
+        &class.name,
+        ObjectIndexOp::Subsasgn.protocol_name(),
+    )
+    .is_some()
 }
 
 pub(crate) async fn call_object_index_descriptor_method(
@@ -520,7 +532,7 @@ pub(crate) async fn call_object_index_descriptor_method_with_outputs(
 ) -> Result<Value, RuntimeError> {
     if let Some(class_name) = class_name_from_base(&descriptor.base) {
         if let Some((method, owner)) =
-            runmat_builtins::lookup_method(class_name, descriptor.op.protocol_name())
+            runmat_runtime::class_registry::lookup_method(class_name, descriptor.op.protocol_name())
         {
             let mut semantic_args = vec![
                 descriptor.base.clone(),
@@ -999,10 +1011,10 @@ mod tests {
     use crate::bytecode::ArgSpec;
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, ClassDef, MethodDef};
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
-    use runmat_value::{Access, HandleRef, IntValue, Value};
+    use runmat_types::MemberAccess;
+    use runmat_value::{HandleRef, IntValue, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1157,30 +1169,34 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             OBJECT_PROTOCOL_SUBSREF.to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: OBJECT_PROTOCOL_SUBSREF.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "subsref_impl".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: parent_methods,
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: parent_methods,
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
-        let child = ClassDef {
+        let child = runmat_runtime::class_registry::RuntimeClass {
             name: child_name,
             parent: None,
             properties: HashMap::new(),
@@ -1196,30 +1212,34 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             OBJECT_PROTOCOL_SUBSASGN.to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: OBJECT_PROTOCOL_SUBSASGN.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "subsasgn_impl".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: parent_methods,
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: parent_methods,
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
-        let child = ClassDef {
+        let child = runmat_runtime::class_registry::RuntimeClass {
             name: child_name,
             parent: None,
             properties: HashMap::new(),

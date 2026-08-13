@@ -1,11 +1,11 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef,
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, ObjectInstance, StructValue, Tensor, Value};
+use runmat_types::MemberAccess;
+use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -427,23 +427,23 @@ fn serializable_to_object<T: Serialize>(
 fn ensure_geometry_classes_registered() {
     static REGISTER: OnceLock<()> = OnceLock::new();
     REGISTER.get_or_init(|| {
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: GEOMETRY_ASSET_CLASS.to_string(),
             parent: None,
             properties: HashMap::new(),
             methods: geometry_asset_methods(),
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: GEOMETRY_INSPECT_RESULT_CLASS.to_string(),
             parent: None,
             properties: HashMap::new(),
-            methods: HashMap::<String, MethodDef>::new(),
+            methods: HashMap::<String, crate::class_registry::RuntimeMethod>::new(),
         });
         triangulation::register_delaunaytri_class();
     });
 }
 
-fn geometry_asset_methods() -> HashMap<String, MethodDef> {
+fn geometry_asset_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [
         ("listRegions", GEOMETRY_LIST_REGIONS_NAME),
         ("meshes", GEOMETRY_MESHES_NAME),
@@ -452,12 +452,12 @@ fn geometry_asset_methods() -> HashMap<String, MethodDef> {
     .map(|(name, function_name)| {
         (
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: function_name.to_string(),
                 implicit_class_argument: None,
             },

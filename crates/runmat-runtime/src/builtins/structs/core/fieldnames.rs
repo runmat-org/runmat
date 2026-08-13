@@ -1,4 +1,6 @@
 //! RunMat `fieldnames` builtin for struct and gated object introspection.
+#[cfg(test)]
+use runmat_types::MemberAccess;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -258,7 +260,7 @@ fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
         if !visited.insert(name.clone()) {
             break;
         }
-        let Some(class_def) = runmat_builtins::get_class(&name) else {
+        let Some(class_def) = crate::class_registry::get_class(&name) else {
             break;
         };
         for (prop_name, prop) in &class_def.properties {
@@ -274,10 +276,7 @@ fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ClassDef, PropertyDef};
-    use runmat_value::{
-        Access, CellArray, HandleRef, IntValue, ObjectInstance, StructValue, Value,
-    };
+    use runmat_value::{CellArray, HandleRef, IntValue, ObjectInstance, StructValue, Value};
     use std::collections::HashMap;
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -424,7 +423,7 @@ pub(crate) mod tests {
     fn fieldnames_object_includes_class_and_dynamic_properties() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let class_name = "runmat.unittest.FieldnamesObject";
-        let mut def = ClassDef {
+        let mut def = crate::class_registry::RuntimeClass {
             name: class_name.to_string(),
             parent: None,
             properties: HashMap::new(),
@@ -432,29 +431,29 @@ pub(crate) mod tests {
         };
         def.properties.insert(
             "Value".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "Value".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
         def.properties.insert(
             "Version".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "Version".to_string(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(def);
+        crate::class_registry::register_class(def);
 
         let mut obj = ObjectInstance::new(class_name.to_string());
         obj.properties.insert("Step".to_string(), Value::Num(2.0));
@@ -474,7 +473,7 @@ pub(crate) mod tests {
         let parent_name = "runmat.unittest.FieldnamesParent";
         let child_name = "runmat.unittest.FieldnamesChild";
 
-        let mut parent = ClassDef {
+        let mut parent = crate::class_registry::RuntimeClass {
             name: parent_name.to_string(),
             parent: None,
             properties: HashMap::new(),
@@ -482,19 +481,19 @@ pub(crate) mod tests {
         };
         parent.properties.insert(
             "ParentValue".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "ParentValue".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(parent);
+        crate::class_registry::register_class(parent);
 
-        let mut child = ClassDef {
+        let mut child = crate::class_registry::RuntimeClass {
             name: child_name.to_string(),
             parent: Some(parent_name.to_string()),
             properties: HashMap::new(),
@@ -502,17 +501,17 @@ pub(crate) mod tests {
         };
         child.properties.insert(
             "ChildValue".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "ChildValue".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(child);
+        crate::class_registry::register_class(child);
 
         let obj = ObjectInstance::new(child_name.to_string());
         let Value::Cell(cell) = run_fieldnames(Value::Object(obj)).expect("fieldnames object")
@@ -531,7 +530,7 @@ pub(crate) mod tests {
     fn fieldnames_handle_object_merges_class_and_target() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let class_name = "runmat.unittest.FieldnamesHandle";
-        let mut def = ClassDef {
+        let mut def = crate::class_registry::RuntimeClass {
             name: class_name.to_string(),
             parent: None,
             properties: HashMap::new(),
@@ -539,17 +538,17 @@ pub(crate) mod tests {
         };
         def.properties.insert(
             "Enabled".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "Enabled".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(def);
+        crate::class_registry::register_class(def);
 
         let mut payload = ObjectInstance::new(class_name.to_string());
         payload
@@ -579,7 +578,7 @@ pub(crate) mod tests {
         let parent_name = "runmat.unittest.FieldnamesHandleParent";
         let child_name = "runmat.unittest.FieldnamesHandleChild";
 
-        let mut parent = ClassDef {
+        let mut parent = crate::class_registry::RuntimeClass {
             name: parent_name.to_string(),
             parent: None,
             properties: HashMap::new(),
@@ -587,19 +586,19 @@ pub(crate) mod tests {
         };
         parent.properties.insert(
             "ParentEnabled".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "ParentEnabled".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(parent);
+        crate::class_registry::register_class(parent);
 
-        let mut child = ClassDef {
+        let mut child = crate::class_registry::RuntimeClass {
             name: child_name.to_string(),
             parent: Some(parent_name.to_string()),
             properties: HashMap::new(),
@@ -607,17 +606,17 @@ pub(crate) mod tests {
         };
         child.properties.insert(
             "ChildEnabled".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "ChildEnabled".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(child);
+        crate::class_registry::register_class(child);
 
         let mut payload = ObjectInstance::new(child_name.to_string());
         payload

@@ -11,7 +11,6 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 runmat-value = { workspace = true }
 runmat-gc-api = { workspace = true }
-runmat-builtins = { workspace = true }
 runmat-time = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }

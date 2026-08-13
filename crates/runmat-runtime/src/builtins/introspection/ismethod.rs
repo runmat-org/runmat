@@ -1,4 +1,5 @@
 //! MATLAB-compatible `ismethod` builtin backed by RunMat class metadata.
+use runmat_types::MemberAccess;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -7,12 +8,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::introspection::type_resolvers::ismethod_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    lookup_method, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, Listener, MException, Value};
+use runmat_value::{Listener, MException, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::ismethod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -137,8 +137,8 @@ fn value_has_public_method(receiver: &Value, method_name: &str) -> bool {
         _ => return false,
     };
 
-    lookup_method(&class_name, method_name)
-        .is_some_and(|(method, _owner)| matches!(method.access, Access::Public))
+    crate::class_registry::lookup_method(&class_name, method_name)
+        .is_some_and(|(method, _owner)| matches!(method.access, MemberAccess::Public))
 }
 
 fn receiver_class_name(receiver: &Value) -> Option<String> {
@@ -170,8 +170,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{register_class, ClassDef, MethodDef};
-    use runmat_value::{Access, CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
+    use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
     use std::collections::HashMap;
 
     fn unique_class_name(label: &str) -> String {
@@ -182,8 +181,12 @@ mod tests {
         )
     }
 
-    fn method(name: &str, access: Access, is_static: bool) -> MethodDef {
-        MethodDef {
+    fn method(
+        name: &str,
+        access: MemberAccess,
+        is_static: bool,
+    ) -> crate::class_registry::RuntimeMethod {
+        crate::class_registry::RuntimeMethod {
             name: name.to_string(),
             is_static,
             is_abstract: false,
@@ -201,14 +204,14 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             "inherited".to_string(),
-            method("inherited", Access::Public, false),
+            method("inherited", MemberAccess::Public, false),
         );
         parent_methods.insert(
             "hidden".to_string(),
-            method("hidden", Access::Private, false),
+            method("hidden", MemberAccess::Private, false),
         );
 
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent.clone(),
             parent: None,
             properties: HashMap::new(),
@@ -216,14 +219,20 @@ mod tests {
         });
 
         let mut child_methods = HashMap::new();
-        child_methods.insert("run".to_string(), method("run", Access::Public, false));
-        child_methods.insert("make".to_string(), method("make", Access::Public, true));
+        child_methods.insert(
+            "run".to_string(),
+            method("run", MemberAccess::Public, false),
+        );
+        child_methods.insert(
+            "make".to_string(),
+            method("make", MemberAccess::Public, true),
+        );
         child_methods.insert(
             "secret".to_string(),
-            method("secret", Access::Protected, false),
+            method("secret", MemberAccess::Protected, false),
         );
 
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child.clone(),
             parent: Some(parent.clone()),
             properties: HashMap::new(),
@@ -269,7 +278,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ismethod_respects_public_visibility() {
-        let (_parent, child) = register_pair("Access");
+        let (_parent, child) = register_pair("MemberAccess");
         let receiver = object(&child);
 
         assert!(!call(receiver.clone(), Value::String("secret".to_string())));
@@ -325,9 +334,9 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             "__runmat_ismethod_marker".to_string(),
-            method("__runmat_ismethod_marker", Access::Public, false),
+            method("__runmat_ismethod_marker", MemberAccess::Public, false),
         );
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: "gpuArray".to_string(),
             parent: None,
             properties: HashMap::new(),

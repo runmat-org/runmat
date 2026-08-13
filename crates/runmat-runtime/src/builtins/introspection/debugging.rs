@@ -921,7 +921,7 @@ fn getcallinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_hir::SourceId;
+    use runmat_types::SourceId;
     use runmat_value::{IntValue, IntegerStorage};
 
     fn cell_len(value: &Value) -> usize {

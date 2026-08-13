@@ -1,20 +1,14 @@
 use runmat_gc_api::GcHandle;
+use runmat_types::MemberAccess;
 
 // -------- Class registry (scaffolding) --------
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Access {
-    Public,
-    Private,
-    Protected,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicPropertyDef {
     pub name: String,
     pub defining_class: String,
     pub metadata_handle: Option<GcHandle>,
-    pub get_access: Access,
-    pub set_access: Access,
+    pub get_access: MemberAccess,
+    pub set_access: MemberAccess,
     pub dependent: bool,
     pub hidden: bool,
     pub transient: bool,
@@ -31,8 +25,8 @@ impl DynamicPropertyDef {
             name,
             defining_class,
             metadata_handle: None,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             dependent: false,
             hidden: false,
             transient: false,

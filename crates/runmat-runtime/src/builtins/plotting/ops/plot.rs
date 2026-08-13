@@ -1077,8 +1077,8 @@ pub(crate) mod tests {
         let source = "plot(a, b);";
         let _source_guard = crate::source_context::replace_current_source(Some(source));
         let spans = vec![
-            runmat_hir::Span { start: 5, end: 6 }, // "a"
-            runmat_hir::Span { start: 8, end: 9 }, // "b"
+            runmat_types::Span { start: 5, end: 6 }, // "a"
+            runmat_types::Span { start: 8, end: 9 }, // "b"
         ];
         let _callsite_guard = crate::callsite::push_callsite(None, Some(spans));
 

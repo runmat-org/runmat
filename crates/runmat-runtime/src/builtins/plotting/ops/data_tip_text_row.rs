@@ -1,4 +1,5 @@
 //! MATLAB-compatible `dataTipTextRow` data-tip row constructor.
+use runmat_types::MemberAccess;
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -10,10 +11,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef, ResolveContext, Type,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, CharArray, HandleRef, ObjectInstance, StringArray, Value};
+use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -217,20 +218,20 @@ fn ensure_class_registered() {
         for name in ["Label", "Value", "Format"] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Public,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
                     default_value: None,
                 },
             );
         }
 
-        let methods: HashMap<String, MethodDef> = HashMap::new();
-        runmat_builtins::register_class(ClassDef {
+        let methods: HashMap<String, crate::class_registry::RuntimeMethod> = HashMap::new();
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: CLASS_NAME.to_string(),
             parent: Some("handle".to_string()),
             properties,

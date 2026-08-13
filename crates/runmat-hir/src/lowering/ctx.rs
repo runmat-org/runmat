@@ -5,16 +5,17 @@ use crate::hir::{
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
-    CallSyntax, CapturedBinding, ClassArgumentBlock, ClassEnumeration, ClassEvent, ClassId,
-    ClassKind, ClassMethod, ClassProperty, ClassResolution, CommandArgument, DefPath,
-    DefPathSegment, EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy, ExprId,
-    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, FunctionOutputArity,
-    FunctionResolution, HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass,
-    HirCommandCall, HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport,
-    HirIndex, HirModule, HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution,
-    IndexComponent, IndexKind, IndexResultContext, IndexingSemantics, LoweringContext,
-    LoweringResult, MemberAccess, MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation,
-    PlaceMutationKind, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
+    CallSyntax, CapturedBinding, ClassArgumentBlock, ClassDeclaration, ClassId, ClassKind,
+    ClassPropertyDefault, ClassResolution, CommandArgument, DefPath, DefPathSegment, EntrypointId,
+    EntrypointName, EntrypointOrigin, EntrypointPolicy, EnumerationDeclaration, EventDeclaration,
+    ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName,
+    FunctionOutputArity, FunctionResolution, HirAssembly, HirBinding, HirBlock, HirCall,
+    HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirError, HirExpr, HirExprKind,
+    HirFunction, HirImport, HirIndex, HirModule, HirPlace, HirStmt as HirStmtNode, HirStmtKind,
+    ImportResolution, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics,
+    InheritanceDeclaration, LoweringContext, LoweringResult, MemberAccess, MemberName,
+    MethodDeclaration, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind,
+    PropertyDeclaration, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
     SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
     WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
     SPAWN_EXTENSION_NAME,
@@ -80,6 +81,7 @@ struct LoweringCtx {
     local_function_output_arities: HashMap<FunctionId, FunctionOutputArity>,
     external_function_output_arities: HashMap<FunctionId, FunctionOutputArity>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
+    external_class_declarations: Vec<runmat_types::ExternalClassDeclaration>,
 }
 
 struct LowerFunctionSpec<'a> {
@@ -108,13 +110,16 @@ pub fn lower(prog: &AstProgram, context: &LoweringContext<'_>) -> Result<Lowerin
 
 impl LoweringCtx {
     fn class_for_id(&self, id: ClassId) -> Option<&HirClass> {
-        self.assembly.classes.iter().find(|class| class.id == id)
+        self.assembly
+            .classes
+            .iter()
+            .find(|class| class.declaration.id == id)
     }
 
     fn class_has_public_static_property(&self, class_name: &str, property_name: &str) -> bool {
         if let Some(class_id) = self.class_id_for_name(class_name) {
             if let Some(class_def) = self.class_for_id(class_id) {
-                if class_def.properties.iter().any(|property| {
+                if class_def.declaration.properties.iter().any(|property| {
                     property.name.0 == property_name
                         && property.attributes.is_static
                         && matches!(property.attributes.get_access, MemberAccess::Public)
@@ -124,14 +129,29 @@ impl LoweringCtx {
                 }
             }
         }
-        if let Some((property, _owner)) =
-            runmat_builtins::lookup_property(class_name, property_name)
-        {
-            return property.is_static
-                && property.get_access == runmat_value::Access::Public
-                && property.set_access == runmat_value::Access::Public;
-        }
-        false
+        self.external_class_declaration(class_name)
+            .is_some_and(|class| {
+                class
+                    .properties
+                    .iter()
+                    .find(|property| property.name.0 == property_name)
+                    .is_some_and(|property| {
+                        property.attributes.is_static
+                            && property.attributes.get_access == MemberAccess::Public
+                            && property.attributes.set_access == MemberAccess::Public
+                    })
+            })
+    }
+
+    fn external_class_declaration(
+        &self,
+        name: &str,
+    ) -> Option<runmat_types::ExternalClassDeclaration> {
+        self.external_class_declarations
+            .iter()
+            .find(|declaration| declaration.name.display_name().as_deref() == Some(name))
+            .cloned()
+            .or_else(|| runmat_builtins::standard_class_declaration(name))
     }
 
     fn class_id_for_name(&self, name: &str) -> Option<ClassId> {
@@ -148,8 +168,10 @@ impl LoweringCtx {
         self.assembly
             .classes
             .iter()
-            .find(|class| class.name.0.len() == 1 && class.name.0[0].0 == name)
-            .map(|class| class.id)
+            .find(|class| {
+                class.declaration.name.0.len() == 1 && class.declaration.name.0[0].0 == name
+            })
+            .map(|class| class.declaration.id)
     }
 
     fn qualified_name_string(name: &QualifiedName) -> String {
@@ -175,14 +197,16 @@ impl LoweringCtx {
         let method_name = qualified.0[qualified.0.len() - 1].0.as_str();
         let class_segments = &qualified.0[..qualified.0.len() - 1];
         self.assembly.classes.iter().any(|class| {
-            class.name.0.len() == class_segments.len()
+            class.declaration.name.0.len() == class_segments.len()
                 && class
+                    .declaration
                     .name
                     .0
                     .iter()
                     .zip(class_segments.iter())
                     .all(|(a, b)| a.0 == b.0)
                 && class
+                    .declaration
                     .methods
                     .iter()
                     .any(|method| method.is_static && method.name.0 == method_name)
@@ -242,6 +266,7 @@ impl LoweringCtx {
             local_function_output_arities: HashMap::new(),
             external_function_output_arities: context.function_output_arities.clone(),
             captures: HashMap::new(),
+            external_class_declarations: context.external_class_declarations.to_vec(),
         };
 
         ctx.assembly.modules.push(HirModule {
@@ -1175,6 +1200,7 @@ impl LoweringCtx {
         let class_id = self.reserve_class_name(name);
         self.assembly.modules[self.module.0].classes.push(class_id);
         let mut properties = Vec::new();
+        let mut property_defaults = Vec::new();
         let mut methods = Vec::new();
         let mut events = Vec::new();
         let mut enumerations = Vec::new();
@@ -1214,11 +1240,18 @@ impl LoweringCtx {
                             .as_ref()
                             .map(|expr| self.lower_expr_semantic(expr))
                             .transpose()?;
-                        properties.push(ClassProperty {
-                            name: crate::MemberName(prop_name.clone()),
+                        let property_name = crate::MemberName(prop_name.clone());
+                        if let Some(value) = default {
+                            property_defaults.push(ClassPropertyDefault {
+                                property: property_name.clone(),
+                                value,
+                            });
+                        }
+                        properties.push(PropertyDeclaration {
+                            name: property_name,
                             attributes: attributes.clone(),
                             declared_attributes: declared_attributes.clone(),
-                            default,
+                            has_default: property_decl.default.is_some(),
                             span: property_decl.span,
                         });
                     }
@@ -1311,7 +1344,7 @@ impl LoweringCtx {
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                             }
-                            methods.push(ClassMethod {
+                            methods.push(MethodDeclaration {
                                 function: function_id,
                                 name: crate::MethodName(method_name.clone()),
                                 is_static,
@@ -1356,7 +1389,7 @@ impl LoweringCtx {
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                             }
-                            methods.push(ClassMethod {
+                            methods.push(MethodDeclaration {
                                 function: function_id,
                                 name: crate::MethodName(method_name),
                                 is_static,
@@ -1389,8 +1422,8 @@ impl LoweringCtx {
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
-                        events.push(ClassEvent {
-                            name: SymbolName(event.name.clone()),
+                        events.push(EventDeclaration {
+                            name: crate::MemberName(event.name.clone()),
                             declared_attributes: declared_attributes.clone(),
                             span: event.span,
                         });
@@ -1418,8 +1451,8 @@ impl LoweringCtx {
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
-                        enumerations.push(ClassEnumeration {
-                            name: SymbolName(enumeration.name.clone()),
+                        enumerations.push(EnumerationDeclaration {
+                            name: crate::MemberName(enumeration.name.clone()),
                             declared_attributes: declared_attributes.clone(),
                             span: enumeration.span,
                         });
@@ -1444,7 +1477,7 @@ impl LoweringCtx {
         });
 
         let builtin_super_class = super_class
-            .filter(|super_name| runmat_builtins::get_class(super_name).is_some())
+            .filter(|super_name| self.external_class_declaration(super_name).is_some())
             .map(ToOwned::to_owned);
 
         let resolved_super = super_class.and_then(|super_name| {
@@ -1456,18 +1489,25 @@ impl LoweringCtx {
                         .classes
                         .iter()
                         .find(|candidate| {
-                            candidate.name.0.len() == 1 && candidate.name.0[0].0 == super_name
+                            candidate.declaration.name.0.len() == 1
+                                && candidate.declaration.name.0[0].0 == super_name
                         })
-                        .map(|candidate| candidate.id)
+                        .map(|candidate| candidate.declaration.id)
                 })
             }
         });
 
-        let kind = if super_class
-            .is_some_and(|name| runmat_builtins::is_class_or_subclass(name, "handle"))
-            || resolved_super
-                .and_then(|id| self.assembly.classes.iter().find(|class| class.id == id))
-                .is_some_and(|class| matches!(class.kind, ClassKind::Handle))
+        let kind = if super_class.is_some_and(|name| {
+            self.external_class_declaration(name)
+                .is_some_and(|declaration| matches!(declaration.kind, ClassKind::Handle))
+        }) || resolved_super
+            .and_then(|id| {
+                self.assembly
+                    .classes
+                    .iter()
+                    .find(|class| class.declaration.id == id)
+            })
+            .is_some_and(|class| matches!(class.declaration.kind, ClassKind::Handle))
         {
             ClassKind::Handle
         } else {
@@ -1475,22 +1515,27 @@ impl LoweringCtx {
         };
 
         Ok(HirClass {
-            id: class_id,
             module: self.module,
-            name: qualified,
-            declared_super_class: super_class.map(ToOwned::to_owned),
-            super_class: resolved_super,
-            builtin_super_class,
-            kind,
-            is_sealed,
-            is_abstract,
-            declared_attributes: semantic_attributes(class_attributes),
-            properties,
-            methods,
-            events,
-            enumerations,
+            declaration: ClassDeclaration {
+                id: class_id,
+                name: qualified,
+                inheritance: InheritanceDeclaration {
+                    declared_super_class: super_class.map(ToOwned::to_owned),
+                    resolved_super_class: resolved_super,
+                    builtin_super_class,
+                },
+                kind,
+                is_sealed,
+                is_abstract,
+                declared_attributes: semantic_attributes(class_attributes),
+                properties,
+                methods,
+                events,
+                enumerations,
+                span,
+            },
+            property_defaults,
             arguments,
-            span,
         })
     }
 
@@ -1928,13 +1973,11 @@ impl LoweringCtx {
             let Some((text, span)) = syms_argument_text(arg, allow_word_args) else {
                 continue;
             };
-            for token in runmat_builtins::symbolic::symbolic_declaration_tokens(&text) {
+            for token in runmat_types::symbolic_declaration_tokens(&text) {
                 if saw_declared_symbol && is_syms_assumption_keyword(token) {
                     continue;
                 }
-                if let Ok(declaration) =
-                    runmat_builtins::symbolic::parse_symbolic_declaration(token)
-                {
+                if let Ok(declaration) = runmat_types::parse_symbolic_declaration(token) {
                     self.binding_for_write(&declaration.name, span);
                     for parameter in declaration.parameters {
                         self.binding_for_write(&parameter, span);
@@ -2716,8 +2759,16 @@ impl LoweringCtx {
                     });
                 }
                 if let AstExpr::Ident(class_name, _) = &**base {
-                    if let Some((method, _)) = runmat_builtins::lookup_method(class_name, name) {
-                        if !method.is_static || method.access != runmat_value::Access::Public {
+                    if let Some(method) =
+                        self.external_class_declaration(class_name)
+                            .and_then(|declaration| {
+                                declaration
+                                    .methods
+                                    .into_iter()
+                                    .find(|method| method.name.0 == *name)
+                            })
+                    {
+                        if !method.is_static || method.attributes.access != MemberAccess::Public {
                             return Err(HirError::new(format!(
                                 "method {class_name}.{name} is not accessible as a public static method"
                             ))
@@ -2731,7 +2782,12 @@ impl LoweringCtx {
                                 span: base.span(),
                             });
                         }
-                        let function_name = method.function_name;
+                        let Some(function_name) = method.callable.display_name() else {
+                            return Err(HirError::new(format!(
+                                "method {class_name}.{name} has no callable name"
+                            ))
+                            .with_span(span));
+                        };
                         return Ok(HirExpr {
                             id: self.alloc_expr_id(),
                             kind: HirExprKind::Call(self.call_for_name(
@@ -3733,8 +3789,8 @@ fn property_attributes(
                 ))
             })?;
             let access = parse_member_access_value(class_name, "properties", raw)?;
-            result.access = access.clone();
-            result.get_access = access.clone();
+            result.access = access;
+            result.get_access = access;
             result.set_access = access;
         } else if attr.name.eq_ignore_ascii_case("GetAccess") {
             let raw = attr.value.as_deref().ok_or_else(|| {

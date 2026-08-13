@@ -93,7 +93,7 @@ pub fn localfunctions_builtin_registered(args: Vec<Value>) -> crate::BuiltinResu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_hir::SourceId;
+    use runmat_types::SourceId;
     use std::sync::Arc;
 
     #[test]

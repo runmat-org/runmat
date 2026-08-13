@@ -2,8 +2,8 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_hir::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_thread_local::runmat_thread_local;
+use runmat_types::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_value::Value;
 use std::cell::RefCell;
 

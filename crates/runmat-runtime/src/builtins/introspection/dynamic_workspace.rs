@@ -6,7 +6,7 @@ use runmat_builtins::{
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor,
 };
-use runmat_hir::{
+use runmat_types::{
     ASSIGNIN_BUILTIN_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME,
 };
 use runmat_value::Value;

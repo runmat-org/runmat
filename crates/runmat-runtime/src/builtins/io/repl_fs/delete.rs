@@ -668,7 +668,7 @@ async fn process_handle_value(
         Value::HandleObject(handle) => {
             let mut method_dispatched = false;
             if let Some((delete_method, _owner)) =
-                runmat_builtins::lookup_method(&handle.class_name, "delete")
+                crate::class_registry::lookup_method(&handle.class_name, "delete")
             {
                 if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
                     &delete_method.function_name,

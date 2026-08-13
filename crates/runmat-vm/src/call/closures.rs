@@ -8,10 +8,11 @@ use crate::call::shared::{
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
-use runmat_builtins::{builtin_function_by_name, builtin_functions, get_class, lookup_method};
+use runmat_builtins::{builtin_function_by_name, builtin_functions};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
-use runmat_value::{Access, Closure, Value};
+use runmat_types::MemberAccess;
+use runmat_value::{Closure, Value};
 
 fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
     let caller_function_name = caller_function_name?;
@@ -20,10 +21,10 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
             return Some(class_name.to_string());
         }
     }
-    runmat_builtins::class_names()
+    runmat_runtime::class_registry::class_names()
         .into_iter()
         .find(|class_name| {
-            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+            runmat_runtime::class_registry::get_class(class_name).is_some_and(|class_def| {
                 class_def
                     .methods
                     .values()
@@ -34,17 +35,17 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
 
 fn method_access_permitted(
     owner: &str,
-    access: &Access,
+    access: &MemberAccess,
     caller_function_name: Option<&str>,
 ) -> bool {
     match access {
-        Access::Public => true,
-        Access::Private => {
+        MemberAccess::Public => true,
+        MemberAccess::Private => {
             caller_class_for_function(caller_function_name).as_deref() == Some(owner)
         }
-        Access::Protected => {
+        MemberAccess::Protected => {
             caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
-                runmat_builtins::is_class_or_subclass(&caller_class, owner)
+                runmat_runtime::class_registry::is_class_or_subclass(&caller_class, owner)
             })
         }
     }
@@ -52,8 +53,8 @@ fn method_access_permitted(
 
 fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_name: &str) -> bool {
     caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
-        runmat_builtins::is_class_or_subclass(&caller_class, class_name)
-            || runmat_builtins::is_class_or_subclass(class_name, &caller_class)
+        runmat_runtime::class_registry::is_class_or_subclass(&caller_class, class_name)
+            || runmat_runtime::class_registry::is_class_or_subclass(class_name, &caller_class)
     })
 }
 
@@ -236,12 +237,13 @@ async fn call_member_index_on_object_like(
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     if args.is_empty()
-        && get_class(class_name).is_some_and(|class_def| class_defines_member_subsref(&class_def))
+        && runmat_runtime::class_registry::get_class(class_name)
+            .is_some_and(|class_def| class_defines_member_subsref(&class_def))
         && !caller_has_internal_class_access(caller_function_name, class_name)
     {
         return Box::pin(call_object_member_subsref(receiver, name)).await;
     }
-    if let Some((m, owner)) = lookup_method(class_name, &name) {
+    if let Some((m, owner)) = runmat_runtime::class_registry::lookup_method(class_name, &name) {
         if m.is_static {
             return Err(mex(
                 "MethodStaticOnInstance",
@@ -354,7 +356,7 @@ pub(crate) async fn call_rhs_operator_method_ordered_with_outputs(
     };
 
     let method_args = vec![lhs.clone(), rhs.clone()];
-    if let Some((m, owner)) = lookup_method(&class_name, &name) {
+    if let Some((m, owner)) = runmat_runtime::class_registry::lookup_method(&class_name, &name) {
         if m.is_static {
             return Err(mex(
                 "MethodStaticOnInstance",
@@ -479,7 +481,7 @@ pub fn load_method_closure(
             }))
         }
         Value::ClassRef(cls) => {
-            if let Some((m, owner)) = lookup_method(&cls, &name) {
+            if let Some((m, owner)) = runmat_runtime::class_registry::lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(mex(
                         "MethodNotStatic",
@@ -582,7 +584,7 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
             .await
         }
         Value::ClassRef(cls) => {
-            if let Some((m, owner)) = lookup_method(&cls, &name) {
+            if let Some((m, owner)) = runmat_runtime::class_registry::lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(mex(
                         "MethodNotStatic",
@@ -604,7 +606,7 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
                 )
                 .await;
             }
-            if get_class(&cls).is_none() {
+            if runmat_runtime::class_registry::get_class(&cls).is_none() {
                 return Err(mex(
                     "UndefinedFunction",
                     &format!("Undefined function in direct call: {cls}.{name}"),
@@ -637,9 +639,9 @@ pub fn collect_method_args(
 mod tests {
     use super::{call_method_or_member_index_with_outputs, load_method_closure};
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, ClassDef, MethodDef};
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId};
-    use runmat_value::{Access, Value};
+    use runmat_types::MemberAccess;
+    use runmat_value::Value;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -647,12 +649,14 @@ mod tests {
     fn classref_external_method_uses_external_boundary_semantic_resolution() {
         let class_name = "ClassRefExternalMethodResolutionTest".to_string();
         let resolved_name = format!("{class_name}.remote_inc");
-        register_class(ClassDef {
-            name: class_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: class_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
         let _resolver_guard =
             runmat_runtime::user_functions::install_semantic_function_resolver(Some(Arc::new(
                 move |name| (name == resolved_name).then_some(7331),
@@ -783,22 +787,24 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             "inst".to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: "inst".to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "inst".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: class_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods,
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: class_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods,
+            },
+        );
 
         let err = block_on(call_method_or_member_index_with_outputs(
             Value::ClassRef(class_name),

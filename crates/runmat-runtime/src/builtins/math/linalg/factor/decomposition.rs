@@ -1,4 +1,5 @@
 //! MATLAB-compatible `decomposition` objects for reusable linear solves.
+use runmat_types::MemberAccess;
 
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -12,12 +13,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    Access, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    NumericDType, ObjectInstance, Tensor, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
+    ObjectInstance, Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -556,26 +556,26 @@ fn ensure_decomposition_class_registered() {
         ] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Private,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Private,
                     default_value: None,
                 },
             );
         }
         properties.insert(
             MATRIX_FIELD.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: MATRIX_FIELD.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Private,
-                set_access: Access::Private,
+                get_access: MemberAccess::Private,
+                set_access: MemberAccess::Private,
                 default_value: None,
             },
         );
@@ -594,19 +594,19 @@ fn ensure_decomposition_class_registered() {
         ] {
             methods.insert(
                 method_name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: method_name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: format!("{CLASS_NAME}.{method_name}"),
                     implicit_class_argument: None,
                 },
             );
         }
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: CLASS_NAME.to_string(),
             parent: None,
             properties,
@@ -2537,7 +2537,7 @@ mod tests {
     #[test]
     fn decomposition_ldivide_is_not_a_public_method() {
         let _ = call_constructor(vec![tensor(&[1.0], 1, 1)]).expect("register class");
-        let class = runmat_builtins::get_class(CLASS_NAME).expect("decomposition class");
+        let class = crate::class_registry::get_class(CLASS_NAME).expect("decomposition class");
         assert!(!class.methods.contains_key("ldivide"));
 
         assert!(runmat_builtins::builtin_function_by_name("decomposition.ldivide").is_none());

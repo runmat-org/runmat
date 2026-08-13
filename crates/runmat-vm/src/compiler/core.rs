@@ -341,32 +341,47 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
         .iter()
         .map(|class| {
             let name = class
+                .declaration
                 .name
                 .0
                 .iter()
                 .map(|part| part.0.clone())
                 .collect::<Vec<_>>()
                 .join(".");
-            let mut super_class = class.builtin_super_class.clone().or_else(|| {
-                class.super_class.and_then(|class_id| {
-                    hir.classes
-                        .iter()
-                        .find(|candidate| candidate.id == class_id)
-                        .map(|super_class| {
-                            super_class
-                                .name
-                                .0
+            let mut super_class = class
+                .declaration
+                .inheritance
+                .builtin_super_class
+                .clone()
+                .or_else(|| class.declaration.inheritance.declared_super_class.clone())
+                .or_else(|| {
+                    class
+                        .declaration
+                        .inheritance
+                        .resolved_super_class
+                        .and_then(|class_id| {
+                            hir.classes
                                 .iter()
-                                .map(|part| part.0.clone())
-                                .collect::<Vec<_>>()
-                                .join(".")
+                                .find(|candidate| candidate.declaration.id == class_id)
+                                .map(|super_class| {
+                                    super_class
+                                        .declaration
+                                        .name
+                                        .0
+                                        .iter()
+                                        .map(|part| part.0.clone())
+                                        .collect::<Vec<_>>()
+                                        .join(".")
+                                })
                         })
-                })
-            });
-            if super_class.is_none() && matches!(class.kind, runmat_hir::ClassKind::Handle) {
+                });
+            if super_class.is_none()
+                && matches!(class.declaration.kind, runmat_hir::ClassKind::Handle)
+            {
                 super_class = Some("handle".to_string());
             }
             let properties = class
+                .declaration
                 .properties
                 .iter()
                 .map(|property| {
@@ -375,21 +390,21 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                     } else {
                         property.name.0.clone()
                     };
-                    let default = property
-                        .default
-                        .as_ref()
+                    let default = class
+                        .property_default(&property.name)
                         .and_then(hir_property_default_to_value);
                     (
                         name,
                         property.attributes.is_static,
                         property.attributes.is_constant,
                         default,
-                        member_access_name(property.attributes.get_access.clone()).to_string(),
-                        member_access_name(property.attributes.set_access.clone()).to_string(),
+                        member_access_name(property.attributes.get_access).to_string(),
+                        member_access_name(property.attributes.set_access).to_string(),
                     )
                 })
                 .collect();
             let methods = class
+                .declaration
                 .methods
                 .iter()
                 .map(|method| {
@@ -405,11 +420,12 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                         method.is_static,
                         method.attributes.is_abstract,
                         method.attributes.is_sealed,
-                        member_access_name(method.attributes.access.clone()).to_string(),
+                        member_access_name(method.attributes.access).to_string(),
                     )
                 })
                 .collect();
             let enumerations = class
+                .declaration
                 .enumerations
                 .iter()
                 .map(|enumeration| enumeration.name.0.clone())
@@ -417,8 +433,8 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
             (
                 name,
                 super_class,
-                class.is_sealed,
-                class.is_abstract,
+                class.declaration.is_sealed,
+                class.declaration.is_abstract,
                 properties,
                 methods,
                 enumerations,

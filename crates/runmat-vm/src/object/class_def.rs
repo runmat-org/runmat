@@ -1,7 +1,7 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{self, ClassDef, MethodDef, PropertyDef};
 use runmat_runtime::RuntimeError;
-use runmat_value::{Access, Value};
+use runmat_types::MemberAccess;
+use runmat_value::Value;
 
 pub fn register_class(
     name: String,
@@ -13,7 +13,7 @@ pub fn register_class(
     enumerations: Vec<String>,
 ) -> Result<(), RuntimeError> {
     if let Some(parent) = super_class.as_deref() {
-        if runmat_builtins::is_class_sealed(parent) {
+        if runmat_runtime::class_registry::is_class_sealed(parent) {
             return Err(mex(
                 "RunMat:ClassSealed",
                 &format!("Cannot subclass sealed class '{}'.", parent),
@@ -23,18 +23,18 @@ pub fn register_class(
     let mut prop_map = std::collections::HashMap::new();
     for (p, is_static, is_constant, default_value, get_access, set_access) in properties {
         let gacc = if get_access.eq_ignore_ascii_case("private") {
-            Access::Private
+            MemberAccess::Private
         } else if get_access.eq_ignore_ascii_case("protected") {
-            Access::Protected
+            MemberAccess::Protected
         } else {
-            Access::Public
+            MemberAccess::Public
         };
         let sacc = if set_access.eq_ignore_ascii_case("private") {
-            Access::Private
+            MemberAccess::Private
         } else if set_access.eq_ignore_ascii_case("protected") {
-            Access::Protected
+            MemberAccess::Protected
         } else {
-            Access::Public
+            MemberAccess::Public
         };
         let (is_dep, clean_name) = if let Some(stripped) = p.strip_prefix("@dep:") {
             (true, stripped.to_string())
@@ -43,7 +43,7 @@ pub fn register_class(
         };
         prop_map.insert(
             clean_name.clone(),
-            PropertyDef {
+            runmat_runtime::class_registry::RuntimeProperty {
                 name: clean_name,
                 is_static,
                 is_constant,
@@ -57,15 +57,15 @@ pub fn register_class(
     let mut method_map = std::collections::HashMap::new();
     for (mname, fname, is_static, is_method_abstract, is_method_sealed, access) in methods {
         let access = if access.eq_ignore_ascii_case("private") {
-            Access::Private
+            MemberAccess::Private
         } else if access.eq_ignore_ascii_case("protected") {
-            Access::Protected
+            MemberAccess::Protected
         } else {
-            Access::Public
+            MemberAccess::Public
         };
         method_map.insert(
             mname.clone(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: mname,
                 is_static,
                 is_abstract: is_method_abstract,
@@ -110,14 +110,14 @@ pub fn register_class(
             ));
         }
     }
-    let def = ClassDef {
+    let def = runmat_runtime::class_registry::RuntimeClass {
         name: name.clone(),
         parent: super_class.clone(),
         properties: prop_map,
         methods: method_map,
     };
-    runmat_builtins::register_class_with_modifiers(def, is_sealed, is_abstract);
-    runmat_builtins::register_class_enumerations(&name, enumerations);
+    runmat_runtime::class_registry::register_class_with_modifiers(def, is_sealed, is_abstract);
+    runmat_runtime::class_registry::register_class_enumerations(&name, enumerations);
     Ok(())
 }
 
@@ -131,7 +131,7 @@ fn collect_required_abstract_methods(
         if !visited.insert(class_name.clone()) {
             break;
         }
-        let Some(class_def) = runmat_builtins::get_class(&class_name) else {
+        let Some(class_def) = runmat_runtime::class_registry::get_class(&class_name) else {
             break;
         };
         cursor = class_def.parent.clone();
@@ -161,7 +161,7 @@ fn collect_inherited_sealed_methods(
         if !visited.insert(class_name.clone()) {
             break;
         }
-        let Some(class_def) = runmat_builtins::get_class(&class_name) else {
+        let Some(class_def) = runmat_runtime::class_registry::get_class(&class_name) else {
             break;
         };
         for (method_name, method) in &class_def.methods {

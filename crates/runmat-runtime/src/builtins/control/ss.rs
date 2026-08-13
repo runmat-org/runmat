@@ -1,4 +1,5 @@
 //! MATLAB-compatible `ss` state-space model constructor for RunMat.
+use runmat_types::MemberAccess;
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -6,10 +7,9 @@ use std::collections::HashMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, CellArray, CharArray, ObjectInstance, Tensor, Value};
+use runmat_value::{CellArray, CharArray, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::{
     spec::{
@@ -240,20 +240,20 @@ fn ensure_ss_class_registered() {
         ] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Public,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
                     default_value: None,
                 },
             );
         }
 
-        let methods: HashMap<String, MethodDef> = HashMap::new();
-        runmat_builtins::register_class(ClassDef {
+        let methods: HashMap<String, crate::class_registry::RuntimeMethod> = HashMap::new();
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: SS_CLASS.to_string(),
             parent: None,
             properties,

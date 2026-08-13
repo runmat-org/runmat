@@ -1,4 +1,5 @@
 //! MATLAB-compatible `memoize` and `MemoizedFunction` support.
+use runmat_types::MemberAccess;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -11,12 +12,11 @@ use std::sync::Mutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ClassDef, MethodDef,
-    PropertyDef,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    Access, CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+    CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
     IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, SparseTensor, StringArray,
     StructValue, Tensor, Value,
 };
@@ -394,28 +394,32 @@ pub(crate) async fn clear_all_memoized_caches_builtin() -> BuiltinResult<Value> 
 }
 
 fn ensure_memoized_function_class_registered() {
-    if runmat_builtins::get_class(MEMOIZED_FUNCTION_CLASS).is_some() {
+    if crate::class_registry::get_class(MEMOIZED_FUNCTION_CLASS).is_some() {
         return;
     }
 
     let mut properties = HashMap::new();
     for (name, set_access, default_value) in [
-        (FUNCTION_PROPERTY, Access::Private, None),
-        (ENABLED_PROPERTY, Access::Public, Some(Value::Bool(true))),
+        (FUNCTION_PROPERTY, MemberAccess::Private, None),
+        (
+            ENABLED_PROPERTY,
+            MemberAccess::Public,
+            Some(Value::Bool(true)),
+        ),
         (
             CACHE_SIZE_PROPERTY,
-            Access::Public,
+            MemberAccess::Public,
             Some(Value::Num(DEFAULT_CACHE_SIZE as f64)),
         ),
     ] {
         properties.insert(
             name.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: name.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
+                get_access: MemberAccess::Public,
                 set_access,
                 default_value,
             },
@@ -430,19 +434,19 @@ fn ensure_memoized_function_class_registered() {
     ] {
         methods.insert(
             method_name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: method_name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: function_name.to_string(),
                 implicit_class_argument: None,
             },
         );
     }
 
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: MEMOIZED_FUNCTION_CLASS.to_string(),
         parent: Some("handle".to_string()),
         properties,

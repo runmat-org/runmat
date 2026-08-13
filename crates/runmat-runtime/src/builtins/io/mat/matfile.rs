@@ -1,4 +1,5 @@
 //! MATLAB-compatible `matfile` compatibility object.
+use runmat_types::MemberAccess;
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -7,11 +8,10 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, ObjectInstance, StringArray, StructValue, Value};
+use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 
 use super::load::read_mat_file_for_builtin;
 use super::save::encode_workspace_to_mat_bytes;
@@ -367,13 +367,13 @@ pub fn ensure_matfile_class_registered() {
         let mut properties = HashMap::new();
         properties.insert(
             PROPERTIES_FIELD.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: PROPERTIES_FIELD.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Private,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Private,
                 default_value: None,
             },
         );
@@ -381,30 +381,30 @@ pub fn ensure_matfile_class_registered() {
         let mut methods = HashMap::new();
         methods.insert(
             OBJECT_SUBSREF_METHOD.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: OBJECT_SUBSREF_METHOD.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: MATFILE_SUBSREF.to_string(),
                 implicit_class_argument: None,
             },
         );
         methods.insert(
             OBJECT_SUBSASGN_METHOD.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: OBJECT_SUBSASGN_METHOD.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: MATFILE_SUBSASGN.to_string(),
                 implicit_class_argument: None,
             },
         );
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: MATFILE_CLASS.to_string(),
             parent: None,
             properties,

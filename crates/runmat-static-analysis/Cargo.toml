@@ -11,6 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 runmat-hir = { workspace = true }
 runmat-mir = { workspace = true }
+runmat-types = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-vm = { workspace = true }

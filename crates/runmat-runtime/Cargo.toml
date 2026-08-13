@@ -12,12 +12,12 @@ links = "runmat_runtime_native"
 
 [dependencies]
 runmat-value = { workspace = true }
+runmat-types = { workspace = true }
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-macros = { workspace = true }
 runmat-async = { workspace = true }
-runmat-hir = { workspace = true }
 runmat-test = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }

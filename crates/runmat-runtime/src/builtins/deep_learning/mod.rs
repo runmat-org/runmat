@@ -1,11 +1,12 @@
 //! Deep Learning Toolbox compatibility builtins.
+use runmat_types::MemberAccess;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ResolveContext, Type,
+    ResolveContext, Type,
 };
-use runmat_value::{Access, ObjectInstance, StringArray, Tensor, Value};
+use runmat_value::{ObjectInstance, StringArray, Tensor, Value};
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -275,19 +276,19 @@ pub(super) fn ensure_dlarray_class_registered() {
             .map(|name| {
                 (
                     name.to_string(),
-                    MethodDef {
+                    crate::class_registry::RuntimeMethod {
                         name: name.to_string(),
                         is_static: false,
                         is_abstract: false,
                         is_sealed: false,
-                        access: Access::Public,
+                        access: MemberAccess::Public,
                         function_name: format!("dlarray.{name}"),
                         implicit_class_argument: None,
                     },
                 )
             })
             .collect::<HashMap<_, _>>();
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: "dlarray".to_string(),
             parent: None,
             properties: HashMap::new(),

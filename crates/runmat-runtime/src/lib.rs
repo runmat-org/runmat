@@ -10,9 +10,10 @@
     clippy::useless_conversion
 )]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+use runmat_types::MemberAccess;
 
 use runmat_builtins::BuiltinErrorDescriptor;
-use runmat_value::{Access, Value};
+use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -23,6 +24,7 @@ pub mod geometry;
 pub mod operations;
 
 pub mod callsite;
+pub mod class_registry;
 pub mod compatibility;
 pub mod console;
 pub mod data;
@@ -33,6 +35,7 @@ pub mod output_context;
 pub mod output_count;
 pub mod source_context;
 pub mod testing;
+pub mod value_fact;
 
 pub mod builtins;
 pub mod comparison;
@@ -168,14 +171,14 @@ fn active_constructor_receiver_for(class_name: &str) -> Option<Value> {
             .find(|receiver| {
                 constructor_receiver_class_name(receiver).is_some_and(|receiver_class| {
                     receiver_class == class_name
-                        || runmat_builtins::is_class_or_subclass(receiver_class, class_name)
+                        || crate::class_registry::is_class_or_subclass(receiver_class, class_name)
                 })
             })
             .cloned()
     })
 }
 
-fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeError {
+fn undefined_callable_error(identity: &runmat_types::CallableIdentity) -> RuntimeError {
     let detail = format!("Undefined function for callable identity {identity:?}");
     build_runtime_error(detail)
         .with_identifier(IDENT_UNDEFINED_FUNCTION)
@@ -245,16 +248,16 @@ pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<String> {
     }
 }
 
-fn class_member_identity(class_name: &str, member: &str) -> runmat_hir::CallableIdentity {
-    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-        runmat_hir::SymbolName(class_name.to_string()),
-        runmat_hir::SymbolName(member.to_string()),
+fn class_member_identity(class_name: &str, member: &str) -> runmat_types::CallableIdentity {
+    runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+        runmat_types::SymbolName(class_name.to_string()),
+        runmat_types::SymbolName(member.to_string()),
     ]))
 }
 
-pub(crate) fn qualified_name_segments(name: &str) -> Vec<runmat_hir::SymbolName> {
+pub(crate) fn qualified_name_segments(name: &str) -> Vec<runmat_types::SymbolName> {
     name.split('.')
-        .map(|segment| runmat_hir::SymbolName(segment.to_string()))
+        .map(|segment| runmat_types::SymbolName(segment.to_string()))
         .collect()
 }
 
@@ -266,31 +269,31 @@ pub(crate) fn is_well_formed_qualified_name(name: &str) -> bool {
 pub(crate) fn callable_identity_for_handle_name(
     name: &str,
 ) -> (
-    runmat_hir::CallableIdentity,
-    runmat_hir::CallableFallbackPolicy,
+    runmat_types::CallableIdentity,
+    runmat_types::CallableFallbackPolicy,
 ) {
     if is_well_formed_qualified_name(name) {
         let segments = qualified_name_segments(name);
         (
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(segments)),
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
         )
     } else {
         (
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name.to_string())),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(name.to_string())),
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
         )
     }
 }
 
-pub(crate) fn external_callable_identity_for_name(name: &str) -> runmat_hir::CallableIdentity {
+pub(crate) fn external_callable_identity_for_name(name: &str) -> runmat_types::CallableIdentity {
     if !is_well_formed_qualified_name(name) {
-        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-            runmat_hir::SymbolName(name.to_string()),
+        runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+            runmat_types::SymbolName(name.to_string()),
         ]))
     } else {
         let segments = qualified_name_segments(name);
-        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+        runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(segments))
     }
 }
 
@@ -302,7 +305,7 @@ pub(crate) async fn dispatch_object_external_member(
 ) -> BuiltinResult<Value> {
     dispatch_callable_with_policy(
         class_member_identity(&class_name, member),
-        runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+        runmat_types::CallableFallbackPolicy::ExternalBoundary,
         args,
         requested_outputs,
     )
@@ -318,8 +321,8 @@ async fn dispatch_named_with_requested_outputs(
 }
 
 pub(crate) async fn dispatch_callable_with_policy(
-    identity: runmat_hir::CallableIdentity,
-    fallback_policy: runmat_hir::CallableFallbackPolicy,
+    identity: runmat_types::CallableIdentity,
+    fallback_policy: runmat_types::CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
@@ -850,7 +853,7 @@ pub(crate) async fn make_anon_builtin(params: String, body: String) -> crate::Bu
 }
 
 pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Value> {
-    if runmat_builtins::is_class_abstract(&class_name) {
+    if crate::class_registry::is_class_abstract(&class_name) {
         return Err(build_runtime_error(format!(
             "Cannot instantiate abstract class '{}'.",
             class_name
@@ -858,9 +861,9 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
         .with_identifier("RunMat:AbstractMethodMissing")
         .build());
     }
-    if let Some(def) = runmat_builtins::get_class(&class_name) {
+    if let Some(def) = crate::class_registry::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
-        let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+        let mut chain: Vec<crate::class_registry::RuntimeClass> = Vec::new();
         let mut is_handle_class = false;
         let mut visited = std::collections::HashSet::new();
         // Walk up to root
@@ -873,7 +876,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
             if !visited.insert(name.clone()) {
                 break;
             }
-            if let Some(cd) = runmat_builtins::get_class(&name) {
+            if let Some(cd) = crate::class_registry::get_class(&name) {
                 if cd
                     .parent
                     .as_ref()
@@ -934,8 +937,8 @@ pub async fn call_super_constructor(
             .next()
             .filter(|name| !name.trim().is_empty())
             .unwrap_or(super_class_name.as_str());
-        let ctor_lookup = runmat_builtins::lookup_method(&super_class_name, ctor_name)
-            .or_else(|| runmat_builtins::lookup_method(&super_class_name, &super_class_name));
+        let ctor_lookup = crate::class_registry::lookup_method(&super_class_name, ctor_name)
+            .or_else(|| crate::class_registry::lookup_method(&super_class_name, &super_class_name));
         let Some((ctor, _owner)) = ctor_lookup else {
             return Ok::<Option<Value>, RuntimeError>(None);
         };
@@ -1058,7 +1061,8 @@ pub async fn call_super_method(
     method_name: String,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let Some((method, owner)) = runmat_builtins::lookup_method(&super_class_name, &method_name)
+    let Some((method, owner)) =
+        crate::class_registry::lookup_method(&super_class_name, &method_name)
     else {
         return Err(build_runtime_error(format!(
             "Undefined superclass method '{}@{}'",
@@ -1076,11 +1080,11 @@ pub async fn call_super_method(
         .build());
     }
     let access_allowed = match method.access {
-        runmat_value::Access::Public => true,
-        runmat_value::Access::Protected => {
-            runmat_builtins::is_class_or_subclass(&class_name, &owner)
+        runmat_types::MemberAccess::Public => true,
+        runmat_types::MemberAccess::Protected => {
+            crate::class_registry::is_class_or_subclass(&class_name, &owner)
         }
-        runmat_value::Access::Private => class_name == owner,
+        runmat_types::MemberAccess::Private => class_name == owner,
     };
     if !access_allowed {
         return Err(build_runtime_error(format!(
@@ -1110,82 +1114,81 @@ pub(crate) async fn classref_builtin(class_name: String) -> crate::BuiltinResult
 }
 
 pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
-    use runmat_builtins::*;
     let mut props = std::collections::HashMap::new();
     props.insert(
         "x".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "x".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(0.0)),
         },
     );
     props.insert(
         "y".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "y".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(0.0)),
         },
     );
     props.insert(
         "staticValue".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "staticValue".to_string(),
             is_static: true,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(42.0)),
         },
     );
     props.insert(
         "secret".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "secret".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Private,
-            set_access: Access::Private,
+            get_access: MemberAccess::Private,
+            set_access: MemberAccess::Private,
             default_value: Some(Value::Num(99.0)),
         },
     );
     let mut methods = std::collections::HashMap::new();
     methods.insert(
         "move".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "move".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Point.move".to_string(),
             implicit_class_argument: None,
         },
     );
     methods.insert(
         "origin".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "origin".to_string(),
             is_static: true,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Point.origin".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Point".to_string(),
         parent: None,
         properties: props,
@@ -1196,30 +1199,30 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut ns_props = std::collections::HashMap::new();
     ns_props.insert(
         "x".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "x".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(1.0)),
         },
     );
     ns_props.insert(
         "y".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "y".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(2.0)),
         },
     );
     let ns_methods = std::collections::HashMap::new();
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "pkg.PointNS".to_string(),
         parent: None,
         properties: ns_props,
@@ -1231,17 +1234,17 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut shape_methods = std::collections::HashMap::new();
     shape_methods.insert(
         "area".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "area".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Shape.area".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Shape".to_string(),
         parent: None,
         properties: shape_props,
@@ -1251,30 +1254,30 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut circle_props = std::collections::HashMap::new();
     circle_props.insert(
         "r".to_string(),
-        PropertyDef {
+        crate::class_registry::RuntimeProperty {
             name: "r".to_string(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
-            get_access: Access::Public,
-            set_access: Access::Public,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
             default_value: Some(Value::Num(0.0)),
         },
     );
     let mut circle_methods = std::collections::HashMap::new();
     circle_methods.insert(
         "area".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "area".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Circle.area".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Circle".to_string(),
         parent: Some("Shape".to_string()),
         properties: circle_props,
@@ -1286,17 +1289,17 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut ctor_methods = std::collections::HashMap::new();
     ctor_methods.insert(
         "Ctor".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "Ctor".to_string(),
             is_static: true,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "Ctor.Ctor".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "Ctor".to_string(),
         parent: None,
         properties: ctor_props,
@@ -1308,24 +1311,24 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let mut overidx_methods = std::collections::HashMap::new();
     overidx_methods.insert(
         OBJECT_SUBSREF_METHOD.to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: OBJECT_SUBSREF_METHOD.to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSREF_METHOD}"),
             implicit_class_argument: None,
         },
     );
     overidx_methods.insert(
         OBJECT_SUBSASGN_METHOD.to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: OBJECT_SUBSASGN_METHOD.to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSASGN_METHOD}"),
             implicit_class_argument: None,
         },
@@ -1333,14 +1336,14 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     overidx_methods.insert(
         crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
             .to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name:
                 crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
                     .to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: format!(
                 "OverIdx.{}",
                 crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
@@ -1360,12 +1363,12 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     ] {
         overidx_methods.insert(
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("OverIdx.{name}"),
                 implicit_class_argument: None,
             },
@@ -1377,18 +1380,18 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     ] {
         overidx_methods.insert(
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("OverIdx.{name}"),
                 implicit_class_argument: None,
             },
         );
     }
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "OverIdx".to_string(),
         parent: None,
         properties: overidx_props,
@@ -1396,7 +1399,7 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     });
 
     // Class without indexing protocol methods, used by negative subsref/subsasgn contracts.
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: "NoIdx".to_string(),
         parent: None,
         properties: std::collections::HashMap::new(),
@@ -1453,8 +1456,8 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
     }
 
     async fn call_by_identity(
-        identity: runmat_hir::CallableIdentity,
-        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        identity: runmat_types::CallableIdentity,
+        fallback_policy: runmat_types::CallableFallbackPolicy,
         args: &[Value],
         requested_outputs: usize,
     ) -> crate::BuiltinResult<Value> {
@@ -1558,8 +1561,8 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 ));
             }
             dispatch_callable_with_policy(
-                runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(method_name)),
-                runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                runmat_types::CallableIdentity::Method(runmat_types::MethodId(method_name)),
+                runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
                 rest,
                 requested_outputs,
             )
@@ -1674,8 +1677,7 @@ mod tests {
     use super::*;
     use crate::builtins::introspection::test_methods::*;
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, ClassDef, PropertyDef};
-    use runmat_value::{Access, HandleRef, IntegerStorage, Tensor};
+    use runmat_value::{HandleRef, IntegerStorage, Tensor};
     use std::collections::HashMap;
     use std::sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -2351,37 +2353,37 @@ mod tests {
         let mut props_a = HashMap::new();
         props_a.insert(
             "fromA".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "fromA".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: Some(Value::Num(1.0)),
             },
         );
         let mut props_b = HashMap::new();
         props_b.insert(
             "fromB".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "fromB".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: Some(Value::Num(2.0)),
             },
         );
 
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_a.clone(),
             parent: Some(class_b.clone()),
             properties: props_a,
             methods: HashMap::new(),
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_b,
             parent: Some(class_a.clone()),
             properties: props_b,
@@ -2401,8 +2403,8 @@ mod tests {
     #[test]
     fn create_class_object_abstract_class_reports_stable_identifier() {
         let class_name = unique_class_name("runtime_ctor_abstract");
-        runmat_builtins::register_class_with_modifiers(
-            ClassDef {
+        crate::class_registry::register_class_with_modifiers(
+            crate::class_registry::RuntimeClass {
                 name: class_name.clone(),
                 parent: None,
                 properties: HashMap::new(),
@@ -2423,20 +2425,20 @@ mod tests {
         let (identity, fallback_policy) = callable_identity_for_handle_name("pkg..remote_inc");
         assert!(matches!(
             identity,
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(name))
                 if name == "pkg..remote_inc"
         ));
         assert_eq!(
             fallback_policy,
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution
         );
     }
 
     #[test]
     fn unresolved_callable_without_display_name_reports_typed_identity() {
         let err = block_on(dispatch_callable_with_policy(
-            runmat_hir::CallableIdentity::AnonymousFunction(runmat_hir::FunctionId(77)),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableIdentity::AnonymousFunction(runmat_types::FunctionId(77)),
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![],
             1,
         ))
@@ -2451,12 +2453,12 @@ mod tests {
     #[test]
     fn unresolved_malformed_external_callable_reports_typed_identity() {
         let err = block_on(dispatch_callable_with_policy(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("pkg".to_string()),
-                runmat_hir::SymbolName("".to_string()),
-                runmat_hir::SymbolName("remote".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("pkg".to_string()),
+                runmat_types::SymbolName("".to_string()),
+                runmat_types::SymbolName("remote".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
             vec![],
             1,
         ))
@@ -2472,10 +2474,10 @@ mod tests {
     #[test]
     fn unresolved_method_callable_reports_typed_identity() {
         let err = block_on(dispatch_callable_with_policy(
-            runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(
+            runmat_types::CallableIdentity::Method(runmat_types::MethodId(
                 "missing_method".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![],
             1,
         ))
@@ -2564,10 +2566,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::None,
+            runmat_types::CallableFallbackPolicy::None,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2592,10 +2594,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2622,10 +2624,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::ObjectDispatch,
+            runmat_types::CallableFallbackPolicy::ObjectDispatch,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2650,10 +2652,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("resolved_target".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("resolved_target".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2678,11 +2680,11 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("pkg".to_string()),
-                runmat_hir::SymbolName("resolved_target".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("pkg".to_string()),
+                runmat_types::SymbolName("resolved_target".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2709,10 +2711,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                runmat_hir::SymbolName("pkg..resolved_target".to_string()),
+            runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
+                runmat_types::SymbolName("pkg..resolved_target".to_string()),
             ])),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            runmat_types::CallableFallbackPolicy::ExternalBoundary,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2737,10 +2739,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+            runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2767,10 +2769,10 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(
+            runmat_types::CallableIdentity::Method(runmat_types::MethodId(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2797,17 +2799,17 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
-                package: runmat_hir::PackageName("Point".to_string()),
-                module: runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName("Point".to_string()),
-                    runmat_hir::SymbolName("origin".to_string()),
+            runmat_types::CallableIdentity::Imported(runmat_types::DefPath {
+                package: runmat_types::PackageName("Point".to_string()),
+                module: runmat_types::QualifiedName(vec![
+                    runmat_types::SymbolName("Point".to_string()),
+                    runmat_types::SymbolName("origin".to_string()),
                 ]),
-                item: vec![runmat_hir::DefPathSegment::Function(
-                    runmat_hir::SymbolName("origin".to_string()),
+                item: vec![runmat_types::DefPathSegment::Function(
+                    runmat_types::SymbolName("origin".to_string()),
                 )],
             }),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );
@@ -2838,17 +2840,17 @@ mod tests {
         ));
 
         let request = crate::user_functions::CallableRequest::resolved(
-            runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
-                package: runmat_hir::PackageName("Point".to_string()),
-                module: runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName("Point".to_string()),
-                    runmat_hir::SymbolName("origin".to_string()),
+            runmat_types::CallableIdentity::Imported(runmat_types::DefPath {
+                package: runmat_types::PackageName("Point".to_string()),
+                module: runmat_types::QualifiedName(vec![
+                    runmat_types::SymbolName("Point".to_string()),
+                    runmat_types::SymbolName("origin".to_string()),
                 ]),
-                item: vec![runmat_hir::DefPathSegment::Function(
-                    runmat_hir::SymbolName("other".to_string()),
+                item: vec![runmat_types::DefPathSegment::Function(
+                    runmat_types::SymbolName("other".to_string()),
                 )],
             }),
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
         );

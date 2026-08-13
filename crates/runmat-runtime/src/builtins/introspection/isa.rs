@@ -9,9 +9,8 @@ use crate::builtins::introspection::type_resolvers::isa_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
-    get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -252,7 +251,7 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
         if name.eq_ignore_ascii_case(requested_lower) {
             return true;
         }
-        if let Some(def) = get_class(&name) {
+        if let Some(def) = crate::class_registry::get_class(&name) {
             cursor = def.parent.clone();
         } else {
             break;
@@ -265,10 +264,10 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
+    use crate::class_registry::RuntimeClass;
     use runmat_accelerate_api::{
         AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
     };
-    use runmat_builtins::ClassDef;
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
         IntegerStorage, Listener, LogicalArray, ObjectInstance, SparseTensor, StringArray,
@@ -545,13 +544,13 @@ pub(crate) mod tests {
 
         // Register a class that derives from handle and ensure inheritance is respected.
         let class_name = "pkg.TestHandle";
-        let def = ClassDef {
+        let def = crate::class_registry::RuntimeClass {
             name: class_name.into(),
             parent: Some("handle".into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
-        runmat_builtins::register_class(def);
+        crate::class_registry::register_class(def);
         let obj = Value::Object(ObjectInstance::new(class_name.into()));
         let handle_result = isa_builtin(obj.clone(), Value::from("handle")).expect("isa");
         assert_eq!(handle_result, Value::Bool(true));
@@ -565,13 +564,13 @@ pub(crate) mod tests {
         let class_a = unique_class_name("runmat.unittest.CycleA");
         let class_b = unique_class_name("runmat.unittest.CycleB");
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_a.clone(),
             parent: Some(class_b.clone()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_b.clone(),
             parent: Some(class_a.clone()),
             properties: HashMap::new(),

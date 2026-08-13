@@ -1,4 +1,5 @@
 //! MATLAB-compatible triangulation objects and helpers.
+use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -10,11 +11,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_geometry_ops::{boundary_edges, delaunay_2d, nearest_neighbor_indices, point_locations};
 use runmat_macros::runtime_builtin;
-use runmat_value::{Access, IntegerStorage, NumericScalar, ObjectInstance, Tensor, Value};
+use runmat_value::{IntegerStorage, NumericScalar, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::{
@@ -431,13 +431,13 @@ fn ensure_registered() {
         ] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Public,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
                     default_value: None,
                 },
             );
@@ -447,19 +447,19 @@ fn ensure_registered() {
         for name in ["freeBoundary", "nearestNeighbor", "pointLocation"] {
             methods.insert(
                 name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: format!("{DELAUNAY_TRI_CLASS}.{name}"),
                     implicit_class_argument: None,
                 },
             );
         }
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: DELAUNAY_TRI_CLASS.to_string(),
             parent: None,
             properties,

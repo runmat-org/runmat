@@ -120,7 +120,7 @@ pub fn qualify_that(
         .with_builtin(builtin)
         .build());
     };
-    if !runmat_builtins::is_class_or_subclass(
+    if !crate::class_registry::is_class_or_subclass(
         &constraint.class_name,
         "matlab.unittest.constraints.Constraint",
     ) {
@@ -214,7 +214,7 @@ fn validate_receiver(builtin: &'static str, receiver: &Value) -> BuiltinResult<(
             .build())
         }
     };
-    if runmat_builtins::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
         Ok(())
     } else {
         Err(build_runtime_error(format!(

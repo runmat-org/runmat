@@ -13,7 +13,6 @@ pub(crate) mod interpreter;
 pub(crate) mod layout;
 pub(crate) mod object;
 pub(crate) mod ops;
-#[cfg(feature = "runmat-runtime")]
 mod program_execution;
 pub(crate) mod runtime;
 
@@ -39,7 +38,6 @@ pub use interpreter::state::{InterpreterOutcome, InterpreterState};
 pub use layout::{
     derive_layout, LayoutError, VmAssemblyLayout, VmEntrypointLayout, VmFunctionLayout, VmSlotId,
 };
-#[cfg(feature = "runmat-runtime")]
 pub use program_execution::{execute_program_request, materialize_deferred_call};
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,

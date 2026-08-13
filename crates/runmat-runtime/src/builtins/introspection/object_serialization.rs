@@ -121,7 +121,7 @@ async fn dispatch_registered_method(
     args: Vec<Value>,
     builtin: &'static str,
 ) -> crate::BuiltinResult<Option<Value>> {
-    if let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) {
+    if let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name) {
         let owner_member = format!("{owner}.{method_name}");
         let mut candidates = Vec::with_capacity(2);
         if !method.function_name.trim().is_empty() {

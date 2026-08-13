@@ -1059,8 +1059,10 @@ impl Callable {
         match self {
             Callable::Builtin { name } => {
                 let request = user_functions::CallableRequest::resolved(
-                    runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name.clone())),
-                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                    runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
+                        name.clone(),
+                    )),
+                    runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
                     args.to_vec(),
                     1,
                 );
@@ -1073,7 +1075,7 @@ impl Callable {
                 let identity = crate::external_callable_identity_for_name(name);
                 let request = user_functions::CallableRequest::resolved(
                     identity.clone(),
-                    runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    runmat_types::CallableFallbackPolicy::ExternalBoundary,
                     args.to_vec(),
                     1,
                 );

@@ -44,7 +44,7 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
         Value::HandleObject(handle) => handle.class_name.as_str(),
         _ => "",
     };
-    if !runmat_builtins::is_class_or_subclass(
+    if !crate::class_registry::is_class_or_subclass(
         plugin_class,
         "matlab.unittest.plugins.TestRunnerPlugin",
     ) {
@@ -53,7 +53,7 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
     let Value::HandleObject(handle) = &runner else {
         return Err(runner_error("addPlugin requires a TestRunner handle"));
     };
-    if !runmat_builtins::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
+    if !crate::class_registry::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
         return Err(runner_error("addPlugin requires a TestRunner handle"));
     }
     runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
@@ -94,7 +94,7 @@ async fn run(runner: Value, suite: Value) -> BuiltinResult<Value> {
     let Value::HandleObject(handle) = &runner else {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     };
-    if !runmat_builtins::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
+    if !crate::class_registry::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     }
     let plugins = runmat_gc::gc_with_value(&handle.target, |target| {

@@ -9,7 +9,7 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
-runmat-value = { workspace = true }
+runmat-types = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-execution = { workspace = true }

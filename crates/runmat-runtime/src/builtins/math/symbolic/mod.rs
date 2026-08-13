@@ -6,7 +6,7 @@ pub(crate) mod sym;
 pub(crate) mod syms;
 pub(crate) mod vpa;
 
-use runmat_builtins::symbolic::is_valid_symbolic_identifier;
+use runmat_types::symbolic::is_valid_symbolic_identifier;
 use runmat_value::SymbolicFunction;
 use runmat_value::{SymbolicArray, SymbolicExpr, Tensor, Value};
 

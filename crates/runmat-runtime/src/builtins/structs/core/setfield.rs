@@ -21,9 +21,10 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::MemberAccess;
 use runmat_value::{
-    Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, NumericScalar,
-    ObjectInstance, StructValue, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, NumericScalar, ObjectInstance,
+    StructValue, Tensor, Value,
 };
 use std::convert::TryFrom;
 
@@ -938,14 +939,14 @@ fn assign_complex_tensor_element(
 }
 
 async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
-    if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
         if prop.is_static {
             return Err(setfield_flow(format!(
                 "You cannot access the static property '{}' through an instance of class '{}'.",
                 name, obj.class_name
             )));
         }
-        if prop.get_access == Access::Private {
+        if prop.get_access == MemberAccess::Private {
             return Err(setfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
@@ -971,8 +972,8 @@ async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult
         return Ok(value.clone());
     }
 
-    if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
-        if prop.get_access == Access::Private {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
+        if prop.get_access == MemberAccess::Private {
             return Err(setfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
@@ -999,14 +1000,14 @@ async fn write_object_property(
         return Ok(());
     }
 
-    if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
         if prop.is_static {
             return Err(setfield_static_access(format!(
                 "Property '{}' is static; use classref('{}').{}",
                 name, obj.class_name, name
             )));
         }
-        if prop.set_access == Access::Private {
+        if prop.set_access == MemberAccess::Private {
             return Err(setfield_private_access(format!(
                 "Property '{name}' is private"
             )));
@@ -1478,11 +1479,9 @@ fn is_struct_array(cell: &CellArray) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ClassDef, PropertyDef};
     use runmat_gc::gc_allocate;
     use runmat_value::{
-        Access, CellArray, HandleRef, IntValue, IntegerStorage, LogicalArray, ObjectInstance,
-        StructValue,
+        CellArray, HandleRef, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StructValue,
     };
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -1807,7 +1806,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_assigns_object_property() {
-        let mut class_def = ClassDef {
+        let mut class_def = crate::class_registry::RuntimeClass {
             name: "Simple".to_string(),
             parent: None,
             properties: Default::default(),
@@ -1815,17 +1814,17 @@ pub(crate) mod tests {
         };
         class_def.properties.insert(
             "x".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "x".to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(class_def);
+        crate::class_registry::register_class(class_def);
 
         let mut obj = ObjectInstance::new("Simple".to_string());
         obj.properties.insert("x".to_string(), Value::Num(0.0));
@@ -1867,7 +1866,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_errors_on_static_property_assignment() {
-        let mut class_def = ClassDef {
+        let mut class_def = crate::class_registry::RuntimeClass {
             name: "StaticSetfield".to_string(),
             parent: None,
             properties: Default::default(),
@@ -1875,17 +1874,17 @@ pub(crate) mod tests {
         };
         class_def.properties.insert(
             "version".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "version".to_string(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(class_def);
+        crate::class_registry::register_class(class_def);
 
         let obj = ObjectInstance::new("StaticSetfield".to_string());
         let err = error_message(
@@ -1907,7 +1906,7 @@ pub(crate) mod tests {
         let parent_name = "runmat.unittest.StaticSetfieldParent";
         let child_name = "runmat.unittest.StaticSetfieldChild";
 
-        let mut parent = ClassDef {
+        let mut parent = crate::class_registry::RuntimeClass {
             name: parent_name.to_string(),
             parent: None,
             properties: Default::default(),
@@ -1915,18 +1914,18 @@ pub(crate) mod tests {
         };
         parent.properties.insert(
             "version".to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: "version".to_string(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Public,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
                 default_value: None,
             },
         );
-        runmat_builtins::register_class(parent);
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(parent);
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child_name.to_string(),
             parent: Some(parent_name.to_string()),
             properties: Default::default(),

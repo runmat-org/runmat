@@ -138,7 +138,7 @@ pub fn inputname_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Va
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_hir::{SourceId, Span};
+    use runmat_types::{SourceId, Span};
     use runmat_value::{IntegerStorage, Tensor};
 
     fn span_of(source: &str, needle: &str) -> Span {

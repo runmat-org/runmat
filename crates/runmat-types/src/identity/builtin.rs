@@ -1,0 +1,15 @@
+pub const FEVAL_BUILTIN_NAME: &str = "feval";
+pub const EVAL_BUILTIN_NAME: &str = "eval";
+pub const EVALC_BUILTIN_NAME: &str = "evalc";
+pub const EVALIN_BUILTIN_NAME: &str = "evalin";
+pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
+pub const RUN_BUILTIN_NAME: &str = "run";
+pub const RUNTESTS_BUILTIN_NAME: &str = "runtests";
+pub const NARGIN_BUILTIN_NAME: &str = "nargin";
+pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
+pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";
+pub const NARGOUTCHK_BUILTIN_NAME: &str = "nargoutchk";
+pub const AWAIT_EXTENSION_NAME: &str = "await";
+pub const SPAWN_EXTENSION_NAME: &str = "spawn";
+pub const TEST_CLASS_REGISTRATION_BUILTIN_NAME: &str = "__register_test_classes";
+pub const DISCARD_OUTPUT_NAME: &str = "~";

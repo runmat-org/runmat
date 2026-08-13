@@ -88,7 +88,7 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
         Value::HandleObject(handle) => handle.class_name.as_str(),
         _ => "",
     };
-    if runmat_builtins::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
         Ok(())
     } else {
         Err(testing_diagnostic_error(
@@ -121,7 +121,7 @@ fn diagnostic_message(value: Value) -> BuiltinResult<String> {
         Value::String(message) => Ok(message),
         Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
         Value::Object(object)
-            if runmat_builtins::is_class_or_subclass(
+            if crate::class_registry::is_class_or_subclass(
                 &object.class_name,
                 "matlab.unittest.diagnostics.Diagnostic",
             ) =>
