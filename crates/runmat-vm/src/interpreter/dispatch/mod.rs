@@ -380,18 +380,21 @@ async fn await_execution_value(
                 value = pending;
             }
             AwaitAction::ExecuteFuture { handle, call } => {
-                let descriptor = crate::call::descriptor::CallableDescriptor::resolved(
+                let descriptor = runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                     runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(
                         call.function,
                     )),
                     call.arguments,
                     call.requested_outputs,
                     runmat_hir::CallableFallbackPolicy::None,
-                    crate::call::descriptor::CallableCallKind::Direct,
+                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
                 );
-                let result = crate::call::descriptor::execute_callable_descriptor(descriptor)
-                    .await
-                    .map(|value| calls::normalize_requested_outputs(value, call.requested_outputs));
+                let result =
+                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor)
+                        .await
+                        .map(|value| {
+                            calls::normalize_requested_outputs(value, call.requested_outputs)
+                        });
                 let stored = result.as_ref().map(Clone::clone).map_err(|error| {
                     runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
                 });
@@ -966,7 +969,9 @@ pub async fn dispatch_instruction(
                 ))?);
             }
             elems.reverse();
-            stack.push(crate::ops::cells::create_cell_2d(elems, *rows, *cols)?);
+            stack.push(runmat_runtime::object::cell::create_cell_2d(
+                elems, *rows, *cols,
+            )?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

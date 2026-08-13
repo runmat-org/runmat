@@ -6,7 +6,7 @@ pub(crate) mod call;
 pub(crate) mod compiler;
 pub mod coverage;
 pub(crate) mod instr {
-    pub use crate::bytecode::instr::{ArgSpec, Instr};
+    pub use crate::bytecode::instr::Instr;
 }
 pub(crate) mod interpreter;
 pub(crate) mod layout;
@@ -17,8 +17,8 @@ pub(crate) mod runtime;
 
 pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
-    ArgSpec, AsyncMetadata, AwaitSite, Bytecode, EmitLabel, FunctionBytecode, FunctionRegistry,
-    Instr, SpawnSite, StackEffect,
+    AsyncMetadata, AwaitSite, Bytecode, EmitLabel, FunctionBytecode, FunctionRegistry, Instr,
+    SpawnSite, StackEffect,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
@@ -43,21 +43,6 @@ pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,
     PendingWorkspaceGuard, WorkspaceAssignedReport,
 };
-
-#[doc(hidden)]
-pub fn expand_cell_indices_for_call(
-    cell: &runmat_value::CellArray,
-    indices: &[runmat_value::Value],
-) -> Result<Vec<runmat_value::Value>, runmat_runtime::RuntimeError> {
-    ops::cells::expand_cell_indices(cell, indices)
-}
-
-#[doc(hidden)]
-pub fn expand_all_cell_for_call(
-    cell: &runmat_value::CellArray,
-) -> Result<Vec<runmat_value::Value>, runmat_runtime::RuntimeError> {
-    ops::cells::expand_all_cell_values(cell)
-}
 
 #[doc(hidden)]
 pub fn reset_thread_state_for_tests() {

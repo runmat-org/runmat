@@ -139,6 +139,40 @@ if (endExprOwners.length !== 1 || relative(endExprOwners[0]) !== "crates/runmat-
   throw new Error(`EndExpr must have exactly one runtime owner; found ${endExprOwners.map(relative).join(", ")}`);
 }
 
+const runtimeCellOwner = path.join(repo, "crates/runmat-runtime/src/object/cell.rs");
+if (!fs.existsSync(runtimeCellOwner)) {
+  throw new Error(`missing R10 runtime cell-semantics owner ${relative(runtimeCellOwner)}`);
+}
+const legacyVmCellOwner = path.join(repo, "crates/runmat-vm/src/ops/cells.rs");
+if (fs.existsSync(legacyVmCellOwner)) {
+  throw new Error(`legacy VM cell-semantics authority remains at ${relative(legacyVmCellOwner)}`);
+}
+
+const argumentSpecOwners = files.filter((file) =>
+  /\bpub\s+struct\s+ArgumentSpec\b/.test(fs.readFileSync(file, "utf8")),
+);
+if (
+  argumentSpecOwners.length !== 1 ||
+  relative(argumentSpecOwners[0]) !== "crates/runmat-runtime/src/call/arguments.rs"
+) {
+  throw new Error(
+    `ArgumentSpec must have exactly one runtime owner; found ${argumentSpecOwners.map(relative).join(", ")}`,
+  );
+}
+
+for (const [runtimeOwner, legacyOwner, label] of [
+  ["crates/runmat-runtime/src/call/descriptor.rs", "crates/runmat-vm/src/call/descriptor.rs", "callable descriptor"],
+  ["crates/runmat-runtime/src/call/identity.rs", null, "callable identity operations"],
+  ["crates/runmat-runtime/src/object/indexing.rs", null, "object indexing protocol"],
+]) {
+  const owner = path.join(repo, runtimeOwner);
+  if (!fs.existsSync(owner)) throw new Error(`missing R10 runtime ${label} owner ${relative(owner)}`);
+  if (legacyOwner) {
+    const legacy = path.join(repo, legacyOwner);
+    if (fs.existsSync(legacy)) throw new Error(`legacy VM ${label} authority remains at ${relative(legacy)}`);
+  }
+}
+
 for (const [source, identities, targetSlice] of runtimeAmbientAuthorities) {
   const file = path.join(repo, source);
   const text = fs.readFileSync(file, "utf8");

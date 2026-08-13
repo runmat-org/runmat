@@ -1,11 +1,12 @@
 use crate::call::shared::{
     call_object_member_subsasgn, call_object_member_subsref,
     call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
-    class_defines_member_subsasgn, class_defines_member_subsref, external_qualified_display_name,
-    ObjectIndexOp,
+    class_defines_member_subsasgn, class_defines_member_subsref,
 };
 use crate::interpreter::errors::mex;
 use runmat_runtime::builtins::introspection::dynamicprops;
+use runmat_runtime::call::identity::external_qualified_display_name;
+use runmat_runtime::object::indexing::ObjectIndexOp;
 use runmat_runtime::RuntimeError;
 use runmat_value::{Closure, StructValue, Tensor, Value};
 
@@ -291,7 +292,7 @@ pub async fn load_member(
                 Err(format!("Undefined field '{}'", field).into())
             }
         }
-        Value::Cell(ca) => crate::ops::cells::gather_cell_member(&ca, &field),
+        Value::Cell(ca) => runmat_runtime::object::cell::gather_cell_member(&ca, &field),
         Value::MException(mexn) => {
             let value = match field.as_str() {
                 "identifier" => Value::String(mexn.identifier.clone()),
@@ -553,7 +554,9 @@ where
             st.fields.insert(field, rhs);
             Ok(Value::Struct(st))
         }
-        Value::Cell(ca) => crate::ops::cells::assign_cell_member(ca, field, rhs, on_write),
+        Value::Cell(ca) => {
+            runmat_runtime::object::cell::assign_cell_member(ca, field, rhs, on_write)
+        }
         _ => Err(mex("StoreMember", "StoreMember on non-object")),
     }
 }

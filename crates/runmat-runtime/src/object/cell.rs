@@ -1,7 +1,7 @@
-use crate::interpreter::errors::mex;
-use runmat_runtime::builtins::common::tensor::tensor_element_len;
-use runmat_runtime::indexing::selectors::IndexScalar;
-use runmat_runtime::RuntimeError;
+use crate::builtins::common::tensor::tensor_element_len;
+use crate::indexing::selectors::IndexScalar;
+use crate::runtime_error::semantic_error as mex;
+use crate::RuntimeError;
 use runmat_value::{CellArray, NumericScalar, StructValue, Tensor, Value};
 
 const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
@@ -9,7 +9,7 @@ const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
 const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
 
 fn map_cell_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("ShapeMismatch", &format!("{context}: {err}"))
+    mex("ShapeMismatch", format!("{context}: {err}"))
 }
 
 fn empty_numeric_cell_value() -> Result<Value, RuntimeError> {
@@ -174,7 +174,7 @@ fn row_major_pos_from_linear(ca: &CellArray, idx: usize) -> Result<usize, Runtim
 }
 
 pub fn create_cell_2d(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, RuntimeError> {
-    runmat_runtime::make_cell_with_shape(values, vec![rows, cols])
+    crate::make_cell_with_shape(values, vec![rows, cols])
         .map_err(|e| map_cell_shape_error("cell creation error", e))
 }
 

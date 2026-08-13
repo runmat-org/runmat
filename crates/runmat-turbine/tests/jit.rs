@@ -1,10 +1,11 @@
 use cranelift::prelude::isa::CallConv;
+use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
 };
 use runmat_value::{CellArray, StructValue, Value};
-use runmat_vm::{ArgSpec, Bytecode, FunctionBytecode, Instr};
+use runmat_vm::{Bytecode, FunctionBytecode, Instr};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
@@ -1352,7 +1353,7 @@ fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
                 Instr::LoadConst(11.0),
                 Instr::CallSemanticFunctionExpandMultiOutput(
                     function,
-                    vec![ArgSpec {
+                    vec![ArgumentSpec {
                         is_expand: false,
                         num_indices: 0,
                         expand_all: false,
@@ -1422,7 +1423,7 @@ fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
                 Instr::LoadConst(6.0),
                 Instr::CallSemanticFunctionExpandMultiOutput(
                     function,
-                    vec![ArgSpec {
+                    vec![ArgumentSpec {
                         is_expand: false,
                         num_indices: 0,
                         expand_all: false,
@@ -1493,7 +1494,7 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
                 Instr::LoadVar(0),
                 Instr::CallSemanticFunctionExpandMultiOutput(
                     function,
-                    vec![ArgSpec {
+                    vec![ArgumentSpec {
                         is_expand: true,
                         num_indices: 0,
                         expand_all: true,
@@ -1534,7 +1535,7 @@ fn test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path() {
                     "a".to_string(),
                 )),
                 fallback_policy: ::runmat_hir::CallableFallbackPolicy::ObjectDispatch,
-                specs: vec![ArgSpec {
+                specs: vec![ArgumentSpec {
                     is_expand: false,
                     num_indices: 0,
                     expand_all: false,
@@ -1578,7 +1579,7 @@ fn test_jit_method_member_expand_missing_struct_member_does_not_succeed_with_zer
                     "missing_field".to_string(),
                 )),
                 fallback_policy: ::runmat_hir::CallableFallbackPolicy::ObjectDispatch,
-                specs: vec![ArgSpec {
+                specs: vec![ArgumentSpec {
                     is_expand: false,
                     num_indices: 0,
                     expand_all: false,

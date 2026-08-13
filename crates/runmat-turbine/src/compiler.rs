@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
-use runmat_vm::ArgSpec;
+use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_vm::{FunctionRegistry, Instr};
 use std::collections::{BTreeSet, HashMap};
 
@@ -57,7 +57,7 @@ struct MethodMemberExpandedCall<'a> {
     identity: &'a runmat_hir::CallableIdentity,
     fallback_policy: runmat_hir::CallableFallbackPolicy,
     args: &'a [StackEntry],
-    specs: &'a [ArgSpec],
+    specs: &'a [ArgumentSpec],
     out_count: usize,
 }
 
@@ -1130,7 +1130,7 @@ impl BytecodeCompiler {
 
     fn pop_non_expanding_call_args(
         stack: &mut StackSimulator,
-        specs: &[ArgSpec],
+        specs: &[ArgumentSpec],
     ) -> Result<Vec<Value>> {
         if specs.iter().any(|spec| spec.is_expand) {
             return Self::unsupported_expanded_call_jit();
@@ -1140,7 +1140,7 @@ impl BytecodeCompiler {
 
     fn pop_expanded_call_arg_entries(
         stack: &mut StackSimulator,
-        specs: &[ArgSpec],
+        specs: &[ArgumentSpec],
     ) -> Result<Vec<StackEntry>> {
         let mut entries = Vec::new();
         for spec in specs.iter().rev() {
@@ -1193,7 +1193,7 @@ impl BytecodeCompiler {
         identity: &runmat_hir::CallableIdentity,
         fallback_policy: runmat_hir::CallableFallbackPolicy,
         args: &[StackEntry],
-        specs: &[ArgSpec],
+        specs: &[ArgumentSpec],
         out_count: usize,
     ) -> Result<Vec<Value>> {
         let Some(function) =
@@ -1369,7 +1369,10 @@ impl BytecodeCompiler {
         Some(args_ptr)
     }
 
-    fn store_turbine_arg_specs(builder: &mut FunctionBuilder, specs: &[ArgSpec]) -> Option<Value> {
+    fn store_turbine_arg_specs(
+        builder: &mut FunctionBuilder,
+        specs: &[ArgumentSpec],
+    ) -> Option<Value> {
         if specs.is_empty() {
             return None;
         }
@@ -1468,7 +1471,7 @@ impl BytecodeCompiler {
         runmat_call_semantic_function_expanded_values_id: FuncId,
         function_id: usize,
         args: &[StackEntry],
-        specs: &[ArgSpec],
+        specs: &[ArgumentSpec],
         out_count: usize,
     ) -> Result<Vec<Value>> {
         let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
@@ -1510,7 +1513,7 @@ impl BytecodeCompiler {
         module: &mut JITModule,
         runmat_call_feval_expanded_values_id: FuncId,
         args: &[StackEntry],
-        specs: &[ArgSpec],
+        specs: &[ArgumentSpec],
         out_count: usize,
     ) -> Result<Vec<Value>> {
         let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
@@ -1568,7 +1571,7 @@ impl BytecodeCompiler {
         runmat_call_builtin_expanded_values_id: FuncId,
         name: &str,
         args: &[StackEntry],
-        specs: &[ArgSpec],
+        specs: &[ArgumentSpec],
         out_count: usize,
     ) -> Result<Vec<Value>> {
         let name_ptr = Self::store_utf8_bytes(builder, name.as_bytes())

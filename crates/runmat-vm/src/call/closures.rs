@@ -1,14 +1,16 @@
-use crate::call::descriptor::{
-    execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
-    CallableDescriptor,
-};
 use crate::call::shared::{
     call_getfield_with_indices, call_object_member_subsref, class_defines_member_subsref,
-    external_qualified_display_name, external_qualified_identity,
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
+use runmat_runtime::call::descriptor::{
+    execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
+    CallableDescriptor,
+};
+use runmat_runtime::call::identity::{
+    external_qualified_display_name, external_qualified_identity,
+};
 use runmat_runtime::RuntimeError;
 use runmat_types::MemberAccess;
 use runmat_value::{Closure, Value};

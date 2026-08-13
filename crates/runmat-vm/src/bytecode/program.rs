@@ -291,6 +291,12 @@ impl FunctionRegistry {
     }
 }
 
+impl runmat_runtime::call::descriptor::FunctionNameResolver for FunctionRegistry {
+    fn resolve_function(&self, name: &str) -> Option<FunctionId> {
+        self.resolve_name(name)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,

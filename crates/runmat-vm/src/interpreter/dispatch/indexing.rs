@@ -1,11 +1,12 @@
-use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
     call_object_index_descriptor_method, call_object_index_descriptor_method_with_outputs,
     class_defines_member_subsasgn, class_defines_member_subsref, expand_brace_values,
-    ObjectIndexDescriptor, ObjectIndexOp, ObjectParenExprSelectorSpec,
 };
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
 use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
+use runmat_runtime::call::descriptor::{
+    execute_callable_descriptor, CallableCallKind, CallableDescriptor,
+};
 use runmat_runtime::indexing as runtime_indexing;
 use runmat_runtime::indexing::plan::{
     build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
@@ -19,6 +20,9 @@ use runmat_runtime::indexing::selectors::{
 use runmat_runtime::indexing::write_linear as idx_write_linear;
 use runmat_runtime::indexing::write_slice as idx_write_slice;
 use runmat_runtime::indexing::EndExpr;
+use runmat_runtime::object::indexing::{
+    ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector, ObjectParenExprSelectorSpec,
+};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
 use std::future::Future;
@@ -395,7 +399,7 @@ fn gather_cell_with_plan(
     plan: &runmat_runtime::indexing::plan::IndexPlan,
 ) -> Result<Value, RuntimeError> {
     let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
-    crate::ops::cells::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
+    runmat_runtime::object::cell::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
 }
 
 fn gather_object_array_with_plan(
@@ -488,7 +492,7 @@ async fn execute_brace_operation(
                     }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                         Value::Object(obj),
-                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                        ObjectIndexSelector::IndexValues {
                             values: raw_indices.to_vec(),
                         },
                     ))
@@ -503,7 +507,7 @@ async fn execute_brace_operation(
                     }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                         Value::HandleObject(handle),
-                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                        ObjectIndexSelector::IndexValues {
                             values: raw_indices.to_vec(),
                         },
                     ))
@@ -511,7 +515,7 @@ async fn execute_brace_operation(
                 }
                 Value::Cell(ca) => {
                     let indices = resolve_cell_indices(raw_indices).await?;
-                    crate::ops::cells::index_cell_value(&ca, &indices)?
+                    runmat_runtime::object::cell::index_cell_value(&ca, &indices)?
                 }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
@@ -555,7 +559,7 @@ async fn execute_brace_operation(
                     }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
                         Value::Object(obj),
-                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                        ObjectIndexSelector::IndexValues {
                             values: raw_indices.to_vec(),
                         },
                         rhs,
@@ -571,7 +575,7 @@ async fn execute_brace_operation(
                     }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
                         Value::HandleObject(handle),
-                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                        ObjectIndexSelector::IndexValues {
                             values: raw_indices.to_vec(),
                         },
                         rhs,
@@ -583,7 +587,7 @@ async fn execute_brace_operation(
                         let indices = resolve_cell_indices(raw_indices).await?;
                         match rhs {
                             Value::OutputList(values) if values.len() == 1 => {
-                                crate::ops::cells::assign_cell_value(
+                                runmat_runtime::object::cell::assign_cell_value(
                                     ca,
                                     &indices,
                                     values.into_iter().next().unwrap_or(Value::Num(0.0)),
@@ -598,7 +602,7 @@ async fn execute_brace_operation(
                                     "Cell brace assignment target count does not match source value count",
                                 ))
                             }
-                            other => crate::ops::cells::assign_cell_value(
+                            other => runmat_runtime::object::cell::assign_cell_value(
                                 ca,
                                 &indices,
                                 other,
@@ -609,9 +613,12 @@ async fn execute_brace_operation(
                         }
                     } else {
                         let positions =
-                            crate::ops::cells::resolve_cell_assignment_positions(&ca, raw_indices)?;
+                            runmat_runtime::object::cell::resolve_cell_assignment_positions(
+                                &ca,
+                                raw_indices,
+                            )?;
                         match rhs {
-                            Value::OutputList(values) => crate::ops::cells::assign_cell_value_multi(
+                            Value::OutputList(values) => runmat_runtime::object::cell::assign_cell_value_multi(
                                 ca,
                                 &positions,
                                 &values,
@@ -619,7 +626,7 @@ async fn execute_brace_operation(
                                     runmat_gc::gc_record_write(oldv, newv);
                                 },
                             )?,
-                            other if positions.len() == 1 => crate::ops::cells::assign_cell_value(
+                            other if positions.len() == 1 => runmat_runtime::object::cell::assign_cell_value(
                                 ca,
                                 &positions,
                                 other,
@@ -1037,7 +1044,7 @@ pub async fn paren_index_value(
             }
             let descriptor = ObjectIndexDescriptor::subsref_paren(
                 base,
-                crate::call::shared::ObjectIndexSelector::IndexValues {
+                ObjectIndexSelector::IndexValues {
                     values: raw_indices,
                 },
             );
@@ -1296,7 +1303,7 @@ pub async fn dispatch_indexing(
                     }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren(
                         Value::Object(obj),
-                        crate::call::shared::ObjectIndexSelector::ScalarIndices { indices },
+                        ObjectIndexSelector::ScalarIndices { indices },
                         rhs,
                     );
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
@@ -1310,7 +1317,7 @@ pub async fn dispatch_indexing(
                     }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren(
                         Value::HandleObject(handle),
-                        crate::call::shared::ObjectIndexSelector::ScalarIndices { indices },
+                        ObjectIndexSelector::ScalarIndices { indices },
                         rhs,
                     );
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
@@ -1371,9 +1378,11 @@ pub async fn dispatch_indexing(
                     }
                     stack.push(Value::StringArray(sa));
                 }
-                Value::Cell(ca) => stack.push(crate::ops::cells::assign_cell_paren_with_policy(
-                    ca, &indices, &rhs, delete,
-                )?),
+                Value::Cell(ca) => {
+                    stack.push(runmat_runtime::object::cell::assign_cell_paren_with_policy(
+                        ca, &indices, &rhs, delete,
+                    )?)
+                }
                 Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
                 Value::SparseTensor(sparse) => stack.push(
                     idx_write_linear::assign_sparse_scalar(sparse, &indices, &rhs, delete).await?,
@@ -1751,7 +1760,7 @@ pub async fn dispatch_indexing(
                     let selected: Vec<usize> =
                         plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
                     stack.push(
-                        crate::ops::cells::assign_cell_paren_linear_indices_with_policy(
+                        runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
                             ca, &selected, &rhs, delete,
                         )?,
                     );
@@ -2558,7 +2567,7 @@ pub async fn dispatch_indexing(
                         .map(|idx| (*idx as usize) + 1)
                         .collect();
                     stack.push(
-                        crate::ops::cells::assign_cell_paren_linear_indices_with_policy(
+                        runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
                             ca, &selected, &rhs, delete,
                         )?,
                     );

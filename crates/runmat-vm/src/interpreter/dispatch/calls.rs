@@ -1,15 +1,17 @@
 use crate::bytecode::instr::PropertyDefaultLiteral;
-use crate::bytecode::ArgSpec;
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
-use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{build_expanded_args_from_specs, expand_brace_values};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
+use runmat_runtime::call::arguments::ArgumentSpec;
+use runmat_runtime::call::descriptor::{
+    execute_callable_descriptor, CallableCallKind, CallableDescriptor,
+};
 use runmat_runtime::RuntimeError;
 use runmat_types::MemberAccess;
 use runmat_value::{MException, Value};
@@ -171,7 +173,7 @@ fn imported_static_method_owner(
 
 pub async fn build_builtin_expand_multi_args(
     stack: &mut Vec<Value>,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
     build_expanded_args_from_specs(
         stack,
@@ -186,7 +188,7 @@ pub async fn build_builtin_expand_multi_args(
 
 pub async fn build_feval_expand_multi_args(
     stack: &mut Vec<Value>,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
     build_expanded_args_from_specs(
         stack,
@@ -201,7 +203,7 @@ pub async fn build_feval_expand_multi_args(
 
 pub async fn build_user_function_expand_multi_args(
     stack: &mut Vec<Value>,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
     build_expanded_args_from_specs(
         stack,
@@ -784,7 +786,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     stack: &mut Vec<Value>,
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
-    specs: &[ArgSpec],
+    specs: &[ArgumentSpec],
     requested_outputs: usize,
     current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {

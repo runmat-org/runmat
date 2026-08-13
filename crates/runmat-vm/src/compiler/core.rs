@@ -1,7 +1,7 @@
 use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::call::builtins::is_vm_intrinsic_builtin;
 use crate::compiler::CompileError;
-use crate::instr::{ArgSpec, Instr};
+use crate::instr::Instr;
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
@@ -14,6 +14,7 @@ use runmat_mir::{
     MirPlace, MirPlaceMutation, MirRvalue, MirShortCircuitOp, MirStmt, MirStmtKind,
     MirTerminatorKind,
 };
+use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_runtime::indexing::EndExpr;
 use std::collections::{HashMap, HashSet};
 
@@ -3032,12 +3033,12 @@ impl Compiler {
         Ok(())
     }
 
-    fn mir_call_arg_specs(&self, args: &[MirCallArg]) -> (Vec<ArgSpec>, bool) {
+    fn mir_call_arg_specs(&self, args: &[MirCallArg]) -> (Vec<ArgumentSpec>, bool) {
         let mut has_expansion = false;
         let specs = args
             .iter()
             .map(|arg| match arg {
-                MirCallArg::Single(_) => ArgSpec {
+                MirCallArg::Single(_) => ArgumentSpec {
                     is_expand: false,
                     num_indices: 0,
                     expand_all: false,
@@ -3048,7 +3049,7 @@ impl Compiler {
                     ..
                 } => {
                     has_expansion = true;
-                    ArgSpec {
+                    ArgumentSpec {
                         is_expand: true,
                         num_indices: indices.len(),
                         expand_all: *expand_all,

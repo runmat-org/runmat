@@ -18,9 +18,10 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use futures::task::noop_waker;
 use log::{debug, error, info, warn};
+use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::Value;
-use runmat_vm::{ArgSpec, Bytecode, FunctionRegistry, Instr, InterpreterOutcome};
+use runmat_vm::{Bytecode, FunctionRegistry, Instr, InterpreterOutcome};
 use std::cell::{Cell, RefCell};
 use std::env;
 use std::future::Future;
@@ -828,7 +829,7 @@ impl TurbineEngine {
         }
     }
 
-    fn hash_arg_specs<H: Hasher>(hasher: &mut H, specs: &[ArgSpec]) {
+    fn hash_arg_specs<H: Hasher>(hasher: &mut H, specs: &[ArgumentSpec]) {
         specs.len().hash(hasher);
         for spec in specs {
             spec.is_expand.hash(hasher);
@@ -1274,7 +1275,7 @@ fn read_turbine_value_args(args_ptr: *const TurbineValue, args_len: i32) -> Resu
 fn read_turbine_arg_specs(
     specs_ptr: *const TurbineArgSpec,
     specs_len: i32,
-) -> Result<Vec<ArgSpec>> {
+) -> Result<Vec<ArgumentSpec>> {
     if specs_len < 0 {
         return Err(execution_error("negative TurbineArgSpec count"));
     }
@@ -1288,7 +1289,7 @@ fn read_turbine_arg_specs(
     unsafe { std::slice::from_raw_parts(specs_ptr, specs_len as usize) }
         .iter()
         .map(|spec| {
-            Ok(ArgSpec {
+            Ok(ArgumentSpec {
                 is_expand: spec.is_expand != 0,
                 num_indices: spec.num_indices as usize,
                 expand_all: spec.expand_all != 0,
@@ -1301,10 +1302,11 @@ fn turbine_expand_cell_indices(
     cell: &runmat_value::CellArray,
     indices: &[Value],
 ) -> Result<Vec<Value>> {
-    runmat_vm::expand_cell_indices_for_call(cell, indices).map_err(TurbineError::ExecutionError)
+    runmat_runtime::object::cell::expand_cell_indices(cell, indices)
+        .map_err(TurbineError::ExecutionError)
 }
 
-fn expand_turbine_args(args: Vec<Value>, specs: &[ArgSpec]) -> Result<Vec<Value>> {
+fn expand_turbine_args(args: Vec<Value>, specs: &[ArgumentSpec]) -> Result<Vec<Value>> {
     let expected_args = specs.iter().fold(0usize, |count, spec| {
         count + 1 + if spec.is_expand { spec.num_indices } else { 0 }
     });
@@ -1330,7 +1332,7 @@ fn expand_turbine_args(args: Vec<Value>, specs: &[ArgSpec]) -> Result<Vec<Value>
         let values = if spec.expand_all {
             match value {
                 Value::OutputList(values) => values,
-                Value::Cell(cell) => runmat_vm::expand_all_cell_for_call(&cell)
+                Value::Cell(cell) => runmat_runtime::object::cell::expand_all_cell_values(&cell)
                     .map_err(TurbineError::ExecutionError)?,
                 other => {
                     return Err(execution_error(format!(

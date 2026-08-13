@@ -41,6 +41,7 @@ pub mod execution;
 pub mod indexing;
 pub mod interaction;
 pub mod interrupt;
+pub mod object;
 pub mod output_context;
 pub mod output_count;
 pub mod source_context;
@@ -48,6 +49,7 @@ pub mod testing;
 pub mod value_fact;
 
 pub mod builtins;
+pub mod call;
 pub mod comparison;
 pub mod plotting_hooks;
 pub mod replay;
