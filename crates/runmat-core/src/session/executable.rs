@@ -11,12 +11,7 @@ impl RunMatSession {
     ) -> std::result::Result<(Value, crate::CoverageFragment), RunError> {
         let coverage = runmat_vm::coverage::CoverageSession::start(&self.runtime_context);
         let value = self.invoke_executable(unit, invocation, control).await?;
-        let program_revision = unit
-            .revision()
-            .program_revision
-            .as_ref()
-            .map(runmat_execution::ProgramRevision::canonical_identity)
-            .unwrap_or_else(|| unit.revision().source_digest.clone());
+        let program_revision = unit.revision().program_revision.canonical_identity();
         let fragment = unit
             .coverage_plan()
             .fragment(program_revision, coverage.counts());
@@ -39,7 +34,7 @@ impl RunMatSession {
         let runtime = self
             .runtime_context
             .clone()
-            .with_program_revision(unit.revision().program_revision.clone());
+            .with_program_revision(Some(unit.revision().program_revision.clone()));
         runtime
             .scope(self.invoke_executable_in_context(unit, invocation, control))
             .await
@@ -147,7 +142,7 @@ impl RunMatSession {
             Some(&unit.source().relative_path),
             self.runtime_context
                 .clone()
-                .with_program_revision(unit.revision().program_revision.clone()),
+                .with_program_revision(Some(unit.revision().program_revision.clone())),
         )
         .await?
         {
@@ -188,7 +183,7 @@ impl RunMatSession {
             unit.functions(),
             self.runtime_context
                 .clone()
-                .with_program_revision(unit.revision().program_revision.clone()),
+                .with_program_revision(Some(unit.revision().program_revision.clone())),
         )
         .await
     }

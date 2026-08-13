@@ -835,14 +835,26 @@ impl RunMatSession {
                 })
                 .collect(),
         );
-        let revision = crate::ExecutableRevision::derive(&source, program_revision);
-        Ok(crate::ExecutableUnit::new(
+        let revision = crate::ExecutableRevision::derive(
+            &source,
+            program_revision,
+            crate::program_environment(self.compat_mode),
+        );
+        crate::ExecutableUnit::new(
             source,
             revision,
             source_map,
+            prepared.mir,
             prepared.analysis,
             prepared.bytecode,
-        ))
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableProduct")
+                    .build(),
+            )
+        })
     }
 
     #[cfg(test)]
@@ -947,7 +959,7 @@ impl RunMatSession {
                 project_symbol_aliases,
             )
         };
-        let (lowering, analysis, mut bytecode) = {
+        let (lowering, mir, analysis, mut bytecode) = {
             let _span = info_span!("runtime.lower").entered();
             let function_names = self.function_registry.names.clone();
             let function_output_arities = function_output_arities(&self.function_registry);
@@ -983,6 +995,9 @@ impl RunMatSession {
                     .lowering
                     .expect("canonical frontend returned no lowering without an error"),
                 frontend
+                    .mir
+                    .expect("canonical frontend returned no MIR without an error"),
+                frontend
                     .facts
                     .expect("canonical frontend returned no facts without an error"),
                 frontend
@@ -990,6 +1005,19 @@ impl RunMatSession {
                     .expect("canonical frontend returned no bytecode without an error"),
             )
         };
+        if bytecode.layout.is_none() {
+            bytecode.layout = Some(runmat_vm::derive_layout(&lowering.assembly, &mir).map_err(
+                |error| {
+                    RunError::Runtime(
+                        build_runtime_error(format!(
+                            "failed to retain executable VM layout: {error:?}"
+                        ))
+                        .with_identifier("RunMat:ExecutableLayout")
+                        .build(),
+                    )
+                },
+            )?);
+        }
         let project_cache_namespace = source_catalog
             .as_ref()
             .and_then(runmat_package::DiscoveredSourceSymbols::project_revision)
@@ -1010,6 +1038,7 @@ impl RunMatSession {
         Ok(PreparedExecution {
             ast,
             lowering,
+            mir,
             analysis,
             bytecode,
             project_cache_namespace,

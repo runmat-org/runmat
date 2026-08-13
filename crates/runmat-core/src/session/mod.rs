@@ -127,6 +127,7 @@ pub struct RunMatSession {
 pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
+    mir: runmat_mir::MirAssembly,
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
     project_cache_namespace: Option<String>,

@@ -66,7 +66,8 @@ async fn core_executor_has_the_same_portable_lifecycle_contract() {
             .iter()
             .map(|result| result.state.disposition)
             .collect::<Vec<_>>(),
-        vec![TerminalDisposition::Passed, TerminalDisposition::Failed]
+        vec![TerminalDisposition::Passed, TerminalDisposition::Failed],
+        "{run:#?}"
     );
     assert_eq!(
         run.events
@@ -188,6 +189,50 @@ async fn executable_unit_retains_exact_program_point_analysis() {
     assert!(!unit.analysis().program_points.is_empty());
     assert_eq!(unit.analysis().functions.len(), 1);
     assert!(!unit.analysis().dependencies.is_empty());
+    assert_eq!(unit.mir().bodies.len(), 1);
+    assert_eq!(unit.vm_layout().functions.len(), 1);
+    assert!(!unit
+        .revision()
+        .program_revision
+        .canonical_identity()
+        .is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn loose_executable_revision_is_stable_and_source_sensitive() {
+    let source = ExecutableSource::new(
+        "path:loose",
+        "stable.m",
+        "function y = stable(); y = 1; end\n",
+    );
+    let mut first = RunMatSession::with_options(false, false).unwrap();
+    let first = first
+        .compile_executable_unit(source.clone(), None)
+        .await
+        .unwrap();
+    let mut second = RunMatSession::with_options(false, false).unwrap();
+    let second = second.compile_executable_unit(source, None).await.unwrap();
+    assert_eq!(first.revision(), second.revision());
+
+    let environment = second.revision().program_revision.environment();
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let changed = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:loose",
+                "stable.m",
+                "function y = stable(); y = 2; end\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_ne!(first.revision(), changed.revision());
+    assert_eq!(
+        changed.revision().program_revision.environment(),
+        environment
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

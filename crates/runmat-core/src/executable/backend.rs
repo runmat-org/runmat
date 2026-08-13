@@ -53,13 +53,10 @@ impl ExecutableUnit {
     }
 
     pub(crate) fn backend_cache_namespace(&self) -> String {
-        match &self.revision().program_revision {
-            Some(revision) => format!(
-                "{}|{}",
-                revision.canonical_identity(),
-                self.revision().source_digest
-            ),
-            None => self.revision().source_digest.clone(),
-        }
+        format!(
+            "{}|{}",
+            self.revision().program_revision.canonical_identity(),
+            self.revision().source_digest
+        )
     }
 }

@@ -249,11 +249,7 @@ fn nonempty_span(span: &runmat_hir::Span) -> bool {
 fn stable_site_id(revision: &ExecutableRevision, key: &SiteKey) -> (String, u64) {
     let mut digest = Sha256::new();
     frame(&mut digest, b"runmat-coverage-site-v1");
-    let revision = revision
-        .program_revision
-        .as_ref()
-        .map(runmat_execution::ProgramRevision::canonical_identity)
-        .unwrap_or_else(|| revision.source_digest.clone());
+    let revision = revision.program_revision.canonical_identity();
     frame(&mut digest, revision.as_bytes());
     frame(&mut digest, &[key.kind_rank]);
     frame(&mut digest, key.owner_identity.as_bytes());

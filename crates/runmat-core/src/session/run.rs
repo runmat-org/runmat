@@ -682,6 +682,7 @@ impl RunMatSession {
         let PreparedExecution {
             ast,
             lowering,
+            mir: _,
             analysis,
             mut bytecode,
             project_cache_namespace,
