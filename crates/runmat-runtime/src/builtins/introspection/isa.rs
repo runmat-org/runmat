@@ -10,6 +10,9 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
     get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor, Value,
 };
@@ -91,6 +94,8 @@ pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISA_ERRORS,
 };
+const ISA_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Host integer values expose their exact class and integer/numeric abstract categories; gpuArray remains the resident object's class." }];
+pub const ISA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isa(integer_A, type_name)", inputs: &ISA_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Host integer class/category checks use dtype metadata exactly. Resident values match gpuArray only; isUnderlyingType owns resident underlying-class inspection." }];
 
 #[runtime_builtin(
     name = "isa",
@@ -100,6 +105,7 @@ pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(isa_type),
     descriptor(crate::builtins::introspection::isa::ISA_DESCRIPTOR),
+    integer_capabilities(crate::builtins::introspection::isa::ISA_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
@@ -143,6 +149,9 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
         return false;
     }
     let requested_lower = trimmed.to_ascii_lowercase();
+    if matches!(value, Value::GpuTensor(_)) {
+        return requested_lower == "gpuarray";
+    }
     match requested_lower.as_str() {
         "numeric" => is_numeric(value),
         "float" => is_float(value),

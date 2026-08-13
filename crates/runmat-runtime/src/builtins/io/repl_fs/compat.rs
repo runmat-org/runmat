@@ -164,6 +164,11 @@ simple_descriptor!(
     &OUTPUT_THREE_TEXT,
     BuiltinOutputMode::ByRequestedOutputCount
 );
+pub const ISFILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isfile is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access.",
+};
 
 pub const FILEPARTS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
@@ -179,6 +184,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const ISFOLDER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isfolder is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access.",
+};
 simple_descriptor!(
     ISFOLDER_SIGNATURES,
     ISFOLDER_DESCRIPTOR,
@@ -187,6 +197,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const ISENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isenv accepts host-text environment names; integer and resident numeric paths reject before provider or environment access.",
+};
 simple_descriptor!(
     ISENV_SIGNATURES,
     ISENV_DESCRIPTOR,
@@ -528,6 +543,7 @@ async fn fileparts_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISFILE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISFILE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn isfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -542,6 +558,7 @@ async fn isfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISFOLDER_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISFOLDER_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn isfolder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -553,6 +570,12 @@ async fn path_predicate_builtin(
     args: Vec<Value>,
     predicate: fn(&vfs::FsMetadata) -> bool,
 ) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(compat_error(
+            name,
+            format!("{name}: path must be text; provider-resident numeric values are invalid"),
+        ));
+    }
     let args = gather_args(name, &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
@@ -604,9 +627,16 @@ async fn path_predicate_builtin(
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::bool_type),
     descriptor(crate::builtins::io::repl_fs::compat::ISENV_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::ISENV_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn isenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(compat_error(
+            "isenv",
+            "isenv: name must be text; provider-resident numeric values are invalid",
+        ));
+    }
     let args = gather_args("isenv", &args).await?;
     if args.len() != 1 {
         return Err(compat_error("isenv", "isenv: expected exactly one input"));
@@ -631,6 +661,18 @@ async fn isenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         value => Ok(Value::Bool(
             runtime_env::var(&scalar_text(value, "isenv", "name")?).is_ok(),
         )),
+    }
+}
+
+fn value_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Closure(value) => value.captures.iter().any(value_contains_resident),
+        Value::OutputList(values) => values.iter().any(value_contains_resident),
+        _ => false,
     }
 }
 
@@ -1811,6 +1853,19 @@ mod tests {
             .unwrap(),
             Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn path_and_environment_predicates_reject_resident_numeric_inputs_before_access() {
+        for result in [
+            run(isfile_builtin(vec![unowned_resident_value()])),
+            run(isfolder_builtin(vec![unowned_resident_value()])),
+            run(isenv_builtin(vec![unowned_resident_value()])),
+        ] {
+            let error = result.expect_err("resident numeric input must be invalid text");
+            assert!(error.message().contains("provider-resident numeric"));
+            assert!(!error.message().contains("no acceleration provider"));
+        }
     }
 
     #[test]

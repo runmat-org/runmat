@@ -1,6 +1,7 @@
 use super::*;
 use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
@@ -15,6 +16,12 @@ const HEIGHT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCap
 }];
 pub const HEIGHT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "n = height(integer_A)", inputs: &HEIGHT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All integer classes share the array row-count contract; resident inputs are answered from handle shape without gather." }];
+pub const ISCATEGORICAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "iscategorical is a universal object-type predicate; integer host or resident values return scalar false without gathering or converting numeric payload data.",
+    };
 
 #[runtime_builtin(
     name = "height",
@@ -109,14 +116,12 @@ pub(crate) async fn istimetable_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Return true for categorical arrays.",
     keywords = "iscategorical,categorical,predicate",
     descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::predicates::ISCATEGORICAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> {
-    let host = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
     Ok(Value::Bool(matches!(
-        host,
+        value,
         Value::Object(ref object) if object.is_class(CATEGORICAL_CLASS)
     )))
 }

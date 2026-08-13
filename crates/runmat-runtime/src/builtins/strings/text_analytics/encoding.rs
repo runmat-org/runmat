@@ -5,13 +5,14 @@ use std::collections::HashMap;
 
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ClassDef, IntValue, LogicalArray, ObjectInstance,
-    PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ClassDef, IntValue, LogicalArray, ObjectInstance, PropertyDef, ResolveContext,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -343,6 +344,12 @@ pub const IS_VOCABULARY_WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IS_VOCABULARY_WORD_ERRORS,
 };
+pub const IS_VOCABULARY_WORD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "isVocabularyWord accepts vocabulary objects, textual words, and logical options; integer and resident numeric values are invalid and reject before provider access.",
+    };
 
 #[runtime_builtin(
     name = "wordEncoding",
@@ -480,9 +487,18 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::IS_VOCABULARY_WORD_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::strings::text_analytics::encoding::IS_VOCABULARY_WORD_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn is_vocabulary_word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(encoding_error(
+            "isVocabularyWord",
+            "isVocabularyWord: provider-resident numeric inputs are not vocabulary objects, words, or controls",
+        ));
+    }
     let gathered = gather_args(args, "isVocabularyWord").await?;
     let (object, words, options) = parse_is_vocabulary_word_args(gathered)?;
     let vocabulary = if object.is_class(WORD_ENCODING_CLASS) {
@@ -514,6 +530,18 @@ async fn is_vocabulary_word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     LogicalArray::new(flags, words.shape)
         .map(Value::LogicalArray)
         .map_err(|err| encoding_error("isVocabularyWord", err))
+}
+
+fn value_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Closure(value) => value.captures.iter().any(value_contains_resident),
+        Value::OutputList(values) => values.iter().any(value_contains_resident),
+        _ => false,
+    }
 }
 
 async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {

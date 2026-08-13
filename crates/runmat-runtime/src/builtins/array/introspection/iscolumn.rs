@@ -6,9 +6,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -73,6 +74,7 @@ pub const ISCOLUMN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+pub const ISCOLUMN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "iscolumn is a universal shape predicate; integer class and values are irrelevant and resident shape metadata is read without gathering payload data." };
 
 fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
@@ -86,11 +88,18 @@ fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::array::introspection::iscolumn::ISCOLUMN_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::iscolumn::ISCOLUMN_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::iscolumn"
 )]
 async fn iscolumn_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let dims = value_dimensions(&value).await?;
-    Ok(Value::Bool(dims.get(1).copied().unwrap_or(1) == 1))
+    let effective_rank = dims
+        .iter()
+        .rposition(|extent| *extent != 1)
+        .map_or(2, |index| (index + 1).max(2));
+    Ok(Value::Bool(
+        effective_rank <= 2 && dims.get(1).copied().unwrap_or(1) == 1,
+    ))
 }
 
 #[cfg(test)]
@@ -114,6 +123,20 @@ mod tests {
         assert_eq!(
             block_on(iscolumn_builtin(Value::Num(1.0))).unwrap(),
             Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn ignores_trailing_singletons_but_rejects_effective_higher_rank_arrays() {
+        let column = Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap();
+        assert_eq!(
+            block_on(iscolumn_builtin(Value::Tensor(column))).unwrap(),
+            Value::Bool(true)
+        );
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 1, 2]).unwrap();
+        assert_eq!(
+            block_on(iscolumn_builtin(Value::Tensor(tensor))).unwrap(),
+            Value::Bool(false)
         );
     }
 }

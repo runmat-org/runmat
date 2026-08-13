@@ -483,22 +483,75 @@ pub(crate) async fn permute_gpu(
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
-        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-            if let Ok(out) = provider.permute(&handle, &zero_based) {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        permute_error(
+            builtin,
+            format!("{builtin}: no acceleration provider owns the input handle"),
+        )
+    })?;
+    let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+        let native = provider.permute(&handle, &zero_based);
+        gpu_helpers::restore_handle_metadata(&handle, &metadata);
+        if let Ok(out) = native {
+            if valid_native_permute_output(&handle, &out, provider, order) {
                 return Ok(Value::GpuTensor(out));
             }
+            gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
+            return Err(permute_error(
+                builtin,
+                format!("{builtin}: provider returned an invalid permute result"),
+            ));
         }
-        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        let permuted = permute_tensor(builtin, host_tensor, order)?;
-        gpu_helpers::upload_tensor(provider, &permuted)
-            .map(Value::GpuTensor)
-            .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
-    } else {
-        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        permute_tensor(builtin, host_tensor, order).map(tensor::tensor_into_value)
     }
+    let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+    let host_tensor = match host? {
+        Value::Tensor(tensor) => tensor,
+        other => {
+            return Err(permute_error(
+                builtin,
+                format!("{builtin}: expected real tensor input, got {other:?}"),
+            ))
+        }
+    };
+    let permuted = permute_tensor(builtin, host_tensor, order)?;
+    gpu_helpers::restore_class_preserving_value(
+        &handle,
+        tensor::tensor_into_value(permuted),
+        builtin,
+    )
+}
+
+fn valid_native_permute_output(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    order: &[usize],
+) -> bool {
+    let mut padded = input.shape.clone();
+    padded.resize(order.len(), 1);
+    let expected_shape: Vec<usize> = order.iter().map(|&dim| padded[dim - 1]).collect();
+    output.shape == expected_shape
+        && output.device_id == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && !gpu_helpers::same_gpu_handle(input, output)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::handle_storage(input)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output)
+            == runmat_accelerate_api::handle_integer_type(input)
+        && runmat_accelerate_api::handle_is_logical(output)
+            == runmat_accelerate_api::handle_is_logical(input)
+        && gpu_helpers::gpu_class_metadata_matches(
+            output,
+            runmat_accelerate_api::handle_precision(input),
+            runmat_accelerate_api::handle_integer_type(input),
+            runmat_accelerate_api::handle_is_logical(input),
+        )
 }
 
 pub(crate) fn permute_generic<T: Clone>(

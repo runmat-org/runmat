@@ -18,9 +18,12 @@ use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -157,6 +160,15 @@ pub const IPERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IPERMUTE_ERRORS,
 };
+const IPERMUTE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is permuted structurally without changing class or values.",
+    }];
+pub const IPERMUTE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "A = ipermute(integer_B, order)", inputs: &IPERMUTE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Host and resident integer storage is reordered exactly; provider fallback restores the result to the owning provider." }];
 
 #[runtime_builtin(
     name = "ipermute",
@@ -166,6 +178,7 @@ pub const IPERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "custom",
     type_resolver(ipermute_type),
     descriptor(crate::builtins::array::shape::ipermute::IPERMUTE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::ipermute::IPERMUTE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

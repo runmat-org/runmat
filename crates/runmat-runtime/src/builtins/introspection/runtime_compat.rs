@@ -1,8 +1,9 @@
 //! MATLAB runtime/version compatibility helpers.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -49,6 +50,7 @@ pub const RUNTIME_COMPAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+pub const ISDEPLOYED_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "isdeployed accepts no arguments and has no integer data, control, output-class, or provider surface." };
 
 #[runtime_builtin(
     name = "version",
@@ -100,6 +102,7 @@ fn ver_less_than_builtin(product: Value, version: Value) -> BuiltinResult<Value>
     summary = "Return false because RunMat is not MATLAB Compiler deployed code.",
     keywords = "isdeployed,deployment,runtime",
     descriptor(crate::builtins::introspection::runtime_compat::RUNTIME_COMPAT_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::runtime_compat::ISDEPLOYED_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
 fn isdeployed_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

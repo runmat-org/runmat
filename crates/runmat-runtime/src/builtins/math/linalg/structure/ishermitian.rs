@@ -2,9 +2,11 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderHermitianKind};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -133,6 +135,37 @@ pub const ISHERMITIAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISHERMITIAN_ERRORS,
 };
 
+const ISHERMITIAN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "ishermitian-integer-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "ishermitian with typed-integer input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IshermitianIntegerInputExtension"),
+    };
+const ISHERMITIAN_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ishermitian-tolerance-form",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ishermitian tolerance arguments are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IshermitianToleranceExtension"),
+};
+const ISHERMITIAN_FLAG_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ishermitian-flag-aliases",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ishermitian flag aliases beyond 'nonskew' and 'skew' are RunMat extensions",
+    error_identifier: Some("RunMat:compatibility:IshermitianFlagAliasExtension"),
+};
+const ISHERMITIAN_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    ISHERMITIAN_INTEGER_INPUT_EXTENSION,
+    ISHERMITIAN_TOLERANCE_EXTENSION,
+    ISHERMITIAN_FLAG_ALIAS_EXTENSION,
+];
+pub const ISHERMITIAN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "MATLAB documents single, double, and logical matrix inputs; RunMat integer matrices and tolerance arguments are separately declared and gated extensions.",
+    };
+
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
@@ -190,9 +223,31 @@ fn ishermitian_error_with_detail(
     accel = "metadata",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::ishermitian::ISHERMITIAN_DESCRIPTOR),
+    extensions(ISHERMITIAN_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::ishermitian::ISHERMITIAN_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISHERMITIAN_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if rest.iter().any(is_tolerance_argument) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISHERMITIAN_TOLERANCE_EXTENSION,
+            NAME,
+        )?;
+    }
+    if rest.iter().any(is_flag_alias_argument) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISHERMITIAN_FLAG_ALIAS_EXTENSION,
+            NAME,
+        )?;
+    }
     let (mode, tol) = parse_optional_args(&rest)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "ishermitian")?;
     match value {
@@ -205,25 +260,73 @@ async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
     }
 }
 
+fn is_tolerance_argument(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn is_flag_alias_argument(value: &Value) -> bool {
+    let text = match value {
+        Value::String(value) => Some(value.as_str()),
+        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].as_str()),
+        _ => None,
+    };
+    text.is_some_and(|value| {
+        !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "skew" | "nonskew"
+        )
+    }) || matches!(value, Value::CharArray(value) if value.rows == 1 && {
+        let text = value.data.iter().collect::<String>().trim().to_ascii_lowercase();
+        !matches!(text.as_str(), "skew" | "nonskew")
+    })
+}
+
+fn value_has_integer_storage(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
 async fn ishermitian_gpu(
     handle: GpuTensorHandle,
     mode: HermitianMode,
     tol: f64,
 ) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
         let provider_mode = match mode {
             HermitianMode::Hermitian => ProviderHermitianKind::Hermitian,
             HermitianMode::Skew => ProviderHermitianKind::Skew,
         };
         match provider.ishermitian(&handle, provider_mode, tol).await {
-            Ok(result) => return Ok(Value::Bool(result)),
+            Ok(result) => {
+                gpu_helpers::restore_handle_metadata(&handle, &metadata);
+                return Ok(Value::Bool(result));
+            }
             Err(err) => {
                 log::debug!("ishermitian: provider hook unavailable, falling back to host: {err}");
             }
         }
+        gpu_helpers::restore_handle_metadata(&handle, &metadata);
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let matrix = MatrixInput::from_value(Value::Tensor(tensor))?;
+    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        ishermitian_error_with_detail(
+            &ISHERMITIAN_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
+    let host = gpu_helpers::download_value_preserving_residency_async(owner, &handle).await?;
+    let matrix = MatrixInput::from_value(host)?;
     let result = evaluate_matrix(&matrix, mode, tol);
     Ok(Value::Bool(result))
 }
@@ -691,6 +794,29 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn compatibility_mode_rejects_integer_and_tolerance_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_error = block_on(super::ishermitian_builtin(
+            Value::Int(IntValue::I32(1)),
+            Vec::new(),
+        ))
+        .expect_err("integer input is an extension");
+        assert_eq!(
+            integer_error.identifier(),
+            ISHERMITIAN_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let tolerance_error = block_on(super::ishermitian_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("tolerance form is an extension");
+        assert_eq!(
+            tolerance_error.identifier(),
+            ISHERMITIAN_TOLERANCE_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
     fn ishermitian_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = ISHERMITIAN_DESCRIPTOR
             .signatures
@@ -1071,6 +1197,7 @@ pub(crate) mod tests {
     }
 
     fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::ishermitian_builtin(value, rest))
     }
 }

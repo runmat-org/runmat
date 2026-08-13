@@ -1,9 +1,10 @@
 //! MATLAB-compatible `iscell` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -37,6 +38,7 @@ pub const ISCELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+pub const ISCELL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "iscell is a universal container predicate; integer values return scalar false without reading or converting payload storage." };
 
 fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
@@ -50,6 +52,7 @@ fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::cells::core::iscell::ISCELL_DESCRIPTOR),
+    integer_audit(crate::builtins::cells::core::iscell::ISCELL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::cells::core::iscell"
 )]
 fn iscell_builtin(value: Value) -> crate::BuiltinResult<Value> {

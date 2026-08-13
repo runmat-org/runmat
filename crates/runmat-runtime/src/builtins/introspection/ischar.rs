@@ -8,8 +8,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::type_resolvers::ischar_type;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -70,6 +71,7 @@ pub const ISCHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISCHAR_ERRORS,
 };
+pub const ISCHAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "ischar is a universal type predicate; integer host or resident values return scalar false from metadata without payload conversion or provider access." };
 
 #[runtime_builtin(
     name = "ischar",
@@ -79,6 +81,7 @@ pub const ISCHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(ischar_type),
     descriptor(crate::builtins::introspection::ischar::ISCHAR_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::ischar::ISCHAR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::ischar"
 )]
 fn ischar_builtin(value: Value) -> crate::BuiltinResult<Value> {

@@ -3,13 +3,13 @@
 use encoding_rs::{Encoding, UTF_8};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance,
+    ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -158,6 +158,12 @@ descriptor!(
     &IN_INTEGER_SCALAR,
     &OUT_ANY
 );
+pub const IS_STRING_SCALAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "isStringScalar is a universal type predicate; integer host or resident values return scalar false without reading numeric payload data.",
+    };
 
 const BLANKS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "blanks-gpu-input",
@@ -275,6 +281,12 @@ descriptor!(
     &IN_TEXT,
     &OUT_BOOL
 );
+pub const ISLETTER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "isletter classifies text only; integer and other nontext values return scalar false without numeric conversion or provider access.",
+    };
 descriptor!(
     ISSPACE_DESCRIPTOR,
     "tf = isspace(text)",
@@ -549,6 +561,7 @@ async fn blanks_builtin(n: Value) -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::strings::core::compat::IS_STRING_SCALAR_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::compat::IS_STRING_SCALAR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 fn is_string_scalar_builtin(value: Value) -> BuiltinResult<Value> {
@@ -699,9 +712,13 @@ async fn isstrprop_builtin(text: Value, prop: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(tensor_type),
     descriptor(crate::builtins::strings::core::compat::ISLETTER_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::compat::ISLETTER_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn isletter_builtin(text: Value) -> BuiltinResult<Value> {
+    if !matches!(text, Value::String(_) | Value::CharArray(_)) {
+        return Ok(Value::Bool(false));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("isletter"))?;
@@ -2308,6 +2325,13 @@ mod tests {
         assert_eq!(
             block(isletter_builtin(Value::CharArray(CharArray::new_row("a1")))).unwrap(),
             Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
+        );
+        assert_eq!(
+            block(isletter_builtin(Value::Int(
+                runmat_builtins::IntValue::U64(u64::MAX,)
+            )))
+            .unwrap(),
+            Value::Bool(false)
         );
     }
 

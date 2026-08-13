@@ -196,6 +196,7 @@ pub async fn download_value_preserving_residency_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> crate::BuiltinResult<Value> {
+    let source_guard = HandleMetadataRestoreGuard::new(handle);
     if provider.device_id() != handle.device_id {
         return Err(
             build_runtime_error("gpu download: provider does not own the input handle")
@@ -204,10 +205,16 @@ pub async fn download_value_preserving_residency_async(
                 .build(),
         );
     }
-    let precision = runmat_accelerate_api::handle_precision(handle);
-    let integer = runmat_accelerate_api::handle_integer_type(handle);
-    let logical = runmat_accelerate_api::handle_is_logical(handle);
-    if !gpu_class_metadata_matches(handle, precision, integer, logical) {
+    let precision = source_guard.snapshot.precision;
+    let integer = source_guard.snapshot.integer;
+    let logical = source_guard.snapshot.logical;
+    let expected_class = expected_gpu_class_name(precision, integer, logical);
+    if source_guard
+        .snapshot
+        .class_name
+        .as_deref()
+        .is_some_and(|actual| expected_class != Some(actual))
+    {
         return Err(build_runtime_error(
             "gpu download: class metadata contradicts the physical payload metadata",
         )
@@ -268,7 +275,7 @@ pub async fn download_value_preserving_residency_async(
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build()
         })?;
-    let expected_storage = runmat_accelerate_api::handle_storage(handle);
+    let expected_storage = source_guard.snapshot.storage;
     if host.shape != handle.shape || host.storage != expected_storage {
         return Err(provider_payload_mismatch(
             handle,
@@ -279,7 +286,7 @@ pub async fn download_value_preserving_residency_async(
             ),
         ));
     }
-    if runmat_accelerate_api::handle_is_logical(handle) {
+    if logical {
         let bits = host
             .data
             .into_iter()
@@ -294,8 +301,7 @@ pub async fn download_value_preserving_residency_async(
             });
     }
 
-    let precision =
-        runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
+    let precision = precision.unwrap_or_else(|| provider.precision());
     if host.storage == GpuTensorStorage::ComplexInterleaved {
         if host.data.len() % 2 != 0 {
             return Err(build_runtime_error(
@@ -666,6 +672,40 @@ mod preserving_download_tests {
         }
     }
 
+    struct MutatingDownloadProvider;
+
+    impl runmat_accelerate_api::AccelProvider for MutatingDownloadProvider {
+        fn upload(
+            &self,
+            _host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("unused")
+        }
+
+        fn download<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                runmat_accelerate_api::set_handle_logical(handle, true);
+                runmat_accelerate_api::set_handle_class_name(handle, "logical");
+                Ok(runmat_accelerate_api::HostTensorOwned {
+                    data: vec![1.0],
+                    shape: handle.shape.clone(),
+                    storage: GpuTensorStorage::Real,
+                })
+            })
+        }
+
+        fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "mutating download test provider".into()
+        }
+    }
+
     #[test]
     fn owner_download_preserves_integer_source_residency_and_metadata() {
         test_support::with_test_provider(|provider| {
@@ -723,6 +763,30 @@ mod preserving_download_tests {
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build();
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    }
+
+    #[test]
+    fn preserving_download_restores_metadata_mutated_by_provider() {
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: u64::MAX - 8,
+        };
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+        runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::set_handle_class_name(&handle, "double");
+        let result = block_on(download_value_preserving_residency_async(
+            &MutatingDownloadProvider,
+            &handle,
+        ))
+        .expect("valid payload should download");
+        assert!(matches!(result, Value::Tensor(_)));
+        assert!(!runmat_accelerate_api::handle_is_logical(&handle));
+        assert_eq!(
+            runmat_accelerate_api::handle_class_name(&handle).as_deref(),
+            Some("double")
+        );
     }
 
     #[test]

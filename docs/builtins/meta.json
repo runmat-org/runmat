@@ -79224,6 +79224,35 @@
           "when": "B has unsupported type for ipermute.",
           "message": "ipermute: unsupported input type"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = ipermute(integer_B, order)",
+          "inputs": [
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer class is permuted structurally without changing class or values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host and resident integer storage is reordered exactly; provider fallback restores the result to the owning provider."
+        }
       ]
     },
     {
@@ -79253,7 +79282,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isStringScalar is a universal type predicate; integer host or resident values return scalar false without reading numeric payload data."
+      }
     },
     {
       "name": "isUnderlyingType",
@@ -79295,6 +79328,35 @@
           "identifier": "RunMat:isUnderlyingType:TypeNameInvalid",
           "when": "Second argument is not a string scalar or row character vector.",
           "message": "isUnderlyingType: TYPENAME must be a string scalar or character vector"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isUnderlyingType(integer_X, typename)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The predicate inspects the exact signedness and width of host or resident integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Returns a host logical scalar from authoritative dtype metadata without reading or gathering payload values."
         }
       ]
     },
@@ -79402,7 +79464,11 @@
           "when": "Inputs do not match a supported isVocabularyWord form.",
           "message": "isVocabularyWord received invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isVocabularyWord accepts vocabulary objects, textual words, and logical options; integer and resident numeric values are invalid and reject before provider access."
+      }
     },
     {
       "name": "isa",
@@ -79444,6 +79510,35 @@
           "identifier": null,
           "when": "Second argument is not a string scalar or row character vector.",
           "message": "isa: TYPE must be a string scalar or character vector"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isa(integer_A, type_name)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Host integer values expose their exact class and integer/numeric abstract categories; gpuArray remains the resident object's class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Host integer class/category checks use dtype metadata exactly. Resident values match gpuArray only; isUnderlyingType owns resident underlying-class inspection."
         }
       ]
     },
@@ -79505,7 +79600,11 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "iscategorical is a universal object-type predicate; integer host or resident values return scalar false without gathering or converting numeric payload data."
+      }
     },
     {
       "name": "iscell",
@@ -79534,7 +79633,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "iscell is a universal container predicate; integer values return scalar false without reading or converting payload storage."
+      }
     },
     {
       "name": "iscellstr",
@@ -79558,12 +79661,16 @@
               "ty": "LogicalArray",
               "arity": "Required",
               "default": null,
-              "description": "True when input is a cell array of character row vectors."
+              "description": "True when input is a cell array of character arrays."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "iscellstr is a universal container predicate; integer values or integer cell members return scalar false without numeric conversion."
+      }
     },
     {
       "name": "ischar",
@@ -79592,7 +79699,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "ischar is a universal type predicate; integer host or resident values return scalar false from metadata without payload conversion or provider access."
+      }
     },
     {
       "name": "iscolumn",
@@ -79621,7 +79732,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "iscolumn is a universal shape predicate; integer class and values are irrelevant and resident shape metadata is read without gathering payload data."
+      }
     },
     {
       "name": "isdeployed",
@@ -79657,7 +79772,11 @@
           "when": "Arguments are malformed or unsupported.",
           "message": "runtime compatibility helper: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isdeployed accepts no arguments and has no integer data, control, output-class, or provider surface."
+      }
     },
     {
       "name": "isdiag",
@@ -79699,7 +79818,19 @@
           "when": "Runtime fails while gathering GPU input or constructing an internal matrix view.",
           "message": "isdiag: internal runtime failure"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "isdiag-integer-input",
+          "mode": "RunMatOnly",
+          "description": "isdiag with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsdiagIntegerInputExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension."
+      }
     },
     {
       "name": "isempty",
@@ -79728,7 +79859,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isempty is a universal shape predicate; integer class and values are irrelevant and resident shape metadata is read without gathering payload data."
+      }
     },
     {
       "name": "isenv",
@@ -79757,7 +79892,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isenv accepts host-text environment names; integer and resident numeric paths reject before provider or environment access."
+      }
     },
     {
       "name": "isequal",
@@ -79798,6 +79937,35 @@
           "identifier": "RunMat:isequal:Internal",
           "when": "Internal gather/host normalization fails.",
           "message": "isequal: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isequal(integer_A, B, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Variadic numeric inputs compare by value across classes; exact integer storage is never preconverted to floating point."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Same-shape numeric values compare class-insensitively using exact signed/unsigned/integer/floating ordering; resident values gather exactly and return a host logical scalar."
         }
       ]
     },
@@ -79840,6 +80008,35 @@
           "identifier": "RunMat:isequal:Internal",
           "when": "Internal gather/host normalization fails.",
           "message": "isequal: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isequaln(integer_A, B, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Variadic numeric inputs compare by value across classes; exact integer storage is never preconverted to floating point."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Shares exact class-insensitive numeric equality with isequal while treating corresponding floating missing values as equal."
         }
       ]
     },
@@ -79930,7 +80127,11 @@
           "when": "Internal logical-array assembly failed.",
           "message": "isfield: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isfield is a universal structure predicate; an integer target returns false and integer field names reject without numeric conversion or provider access."
+      }
     },
     {
       "name": "isfile",
@@ -79959,7 +80160,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isfile is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access."
+      }
     },
     {
       "name": "isfinite",
@@ -80001,6 +80206,35 @@
           "when": "Internal mask-construction or gather path fails.",
           "message": "isfinite: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isfinite(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every fixed-width integer value is finite."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Returns a same-shaped all-true logical mask directly from integer class and shape; resident execution or exact fallback preserves typed storage."
+        }
       ]
     },
     {
@@ -80030,7 +80264,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isfolder is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access."
+      }
     },
     {
       "name": "isgpuarray",
@@ -80096,25 +80334,12 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = isgraphics()",
-          "inputs": [],
-          "outputs": [
-            {
-              "name": "tf",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "True when input resolves to a valid plotting graphics handle."
-            }
-          ]
-        },
-        {
           "label": "tf = isgraphics(h)",
           "inputs": [
             {
               "name": "h",
               "ty": "Any",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
               "description": "Candidate plotting handle value."
             }
@@ -80128,9 +80353,49 @@
               "description": "True when input resolves to a valid plotting graphics handle."
             }
           ]
+        },
+        {
+          "label": "tf = isgraphics(h, type)",
+          "inputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Candidate plotting handle value."
+            },
+            {
+              "name": "type",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Required graphics object type."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when input resolves to a valid plotting graphics handle."
+            }
+          ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "isgraphics-integer-handle-alias",
+          "mode": "RunMatOnly",
+          "description": "isgraphics numeric integer handle aliases are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsgraphicsIntegerHandleExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "MATLAB graphics predicates operate on graphics objects; numeric integer handle aliases are a separately declared RunMat-only extension and compatibility mode returns same-shaped false."
+      }
     },
     {
       "name": "ishandle",
@@ -80138,25 +80403,12 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = ishandle()",
-          "inputs": [],
-          "outputs": [
-            {
-              "name": "tf",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "True when input resolves to a valid plotting handle."
-            }
-          ]
-        },
-        {
           "label": "tf = ishandle(h)",
           "inputs": [
             {
               "name": "h",
               "ty": "Any",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
               "description": "Candidate plotting handle value."
             }
@@ -80172,7 +80424,19 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "ishandle-integer-handle-alias",
+          "mode": "RunMatOnly",
+          "description": "ishandle numeric integer handle aliases are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IshandleIntegerHandleExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "MATLAB graphics predicates operate on graphics objects; numeric integer handle aliases are a separately declared RunMat-only extension and compatibility mode returns same-shaped false."
+      }
     },
     {
       "name": "ishermitian",
@@ -80318,7 +80582,31 @@
           "when": "Runtime fails while creating internal tensors or coercing values.",
           "message": "ishermitian: internal runtime failure"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "ishermitian-integer-input",
+          "mode": "RunMatOnly",
+          "description": "ishermitian with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IshermitianIntegerInputExtension"
+        },
+        {
+          "id": "ishermitian-tolerance-form",
+          "mode": "RunMatOnly",
+          "description": "ishermitian tolerance arguments are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IshermitianToleranceExtension"
+        },
+        {
+          "id": "ishermitian-flag-aliases",
+          "mode": "RunMatOnly",
+          "description": "ishermitian flag aliases beyond 'nonskew' and 'skew' are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:IshermitianFlagAliasExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "MATLAB documents single, double, and logical matrix inputs; RunMat integer matrices and tolerance arguments are separately declared and gated extensions."
+      }
     },
     {
       "name": "isinf",
@@ -80359,6 +80647,35 @@
           "identifier": "RunMat:isinf:InternalError",
           "when": "Internal mask-construction or gather path fails.",
           "message": "isinf: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isinf(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "No fixed-width integer value is infinite."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Returns a same-shaped all-false logical mask directly from integer class and shape; resident execution or exact fallback preserves typed storage."
         }
       ]
     },
@@ -80444,7 +80761,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "isletter classifies text only; integer and other nontext values return scalar false without numeric conversion or provider access."
+      }
     },
     {
       "name": "islogical",
