@@ -4,9 +4,13 @@ use async_recursion::async_recursion;
 use num_complex::{Complex32, Complex64};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor,
+    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, NumericDType, NumericStorage, Tensor,
     Value,
 };
 use runmat_macros::runtime_builtin;
@@ -46,7 +50,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses elem_div for B./A when shapes match, scalar_div for tensor ./ scalar cases (B ./ a), and scalar_rdiv for scalar ./ tensor cases (b ./ A); implicit expansion or unsupported operand kinds fall back to the CPU before 'like' prototypes are honoured.",
+    notes: "Uses validated exact-owner elem_div for supported same-class resident pairs, including provider-supported implicit expansion and typed-integer division; scalar_div/scalar_rdiv retain floating scalar cases, while exact integer scalar values are uploaded in the resident integer class. Unsupported or mixed-class cases use a class-preserving host fallback before 'like' prototypes are honoured.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::ldivide")]
@@ -71,6 +75,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ldivide";
+
+pub const LDIVIDE_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ldivide-like-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ldivide with a 'like' output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LdivideLikePrototypeExtension"),
+};
+pub const LDIVIDE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LDIVIDE_LIKE_EXTENSION];
+const LDIVIDE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "An integer divisor requires the dividend to use the same integer class or to be scalar double; complex integer division is rejected." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "An integer dividend requires the divisor to use the same integer class or to be scalar double; compatible dimensions expand implicitly." },
+];
+pub const LDIVIDE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "C = ldivide(A, B)", inputs: &LDIVIDE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Integer quotients round to nearest with half ties away from zero and saturate to the integer class. Resident fallback reads authoritative storage and restores the result to the owning provider." }];
 
 const LDIVIDE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -216,6 +234,8 @@ fn ldivide_error_with_detail(
     keywords = "ldivide,element-wise left division,gpu,.\\",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    extensions(LDIVIDE_EXTENSIONS),
+    integer_capabilities(LDIVIDE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::elementwise::ldivide::LDIVIDE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::ldivide"
 )]
@@ -229,14 +249,140 @@ async fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRes
         return Err(builtin_error("complex integer arithmetic is not supported"));
     }
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
+    validate_integer_admission(&lhs, &rhs)?;
     let template = parse_output_template(&rest)?;
-    let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => ldivide_gpu_pair(la, lb).await,
-        (Value::GpuTensor(la), rhs) => ldivide_gpu_host_left(la, rhs).await,
-        (lhs, Value::GpuTensor(rb)) => ldivide_gpu_host_right(lhs, rb).await,
-        (lhs, rhs) => Ok(ldivide_host(lhs, rhs)?),
-    }?;
+    if matches!(template, OutputTemplate::Like(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LDIVIDE_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let source = preferred_ldivide_source(&lhs, &rhs);
+    let native = match (&lhs, &rhs) {
+        (Value::GpuTensor(divisor), Value::GpuTensor(numerator)) => {
+            try_ldivide_gpu_pair(divisor, numerator).await?
+        }
+        (Value::GpuTensor(divisor), numerator) => {
+            try_ldivide_gpu_host_left(divisor, numerator).await?
+        }
+        (divisor, Value::GpuTensor(numerator)) => {
+            try_ldivide_gpu_host_right(divisor, numerator).await?
+        }
+        _ => None,
+    };
+    let base = if let Some(handle) = native {
+        let provenance = [&lhs, &rhs]
+            .into_iter()
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => runmat_accelerate_api::handle_provenance(handle),
+                _ => None,
+            })
+            .find(|provenance| *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        runmat_accelerate_api::set_handle_provenance(&handle, provenance);
+        gpu_helpers::resident_gpu_value(handle)
+    } else if let Some(source) = source.as_ref() {
+        let lhs = gather_ldivide_operand(lhs).await?;
+        let rhs = gather_ldivide_operand(rhs).await?;
+        let host = ldivide_host(lhs, rhs)?;
+        restore_ldivide_residency(source, host)?
+    } else {
+        ldivide_host(lhs, rhs)?
+    };
     apply_output_template(base, &template).await
+}
+
+fn preferred_ldivide_source(lhs: &Value, rhs: &Value) -> Option<GpuTensorHandle> {
+    let handles = [lhs, rhs].map(|value| match value {
+        Value::GpuTensor(handle) => Some(handle),
+        _ => None,
+    });
+    handles
+        .iter()
+        .flatten()
+        .find(|handle| runmat_accelerate_api::handle_is_explicit(handle))
+        .or_else(|| handles.iter().flatten().next())
+        .map(|handle| (*handle).clone())
+}
+
+fn integer_class(value: &Value) -> Option<&'static str> {
+    match value {
+        Value::Int(value) => Some(value.class_name()),
+        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerStorage::class_name),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_integer_type(handle).map(|ty| match ty {
+                runmat_accelerate_api::IntegerElementType::I8 => "int8",
+                runmat_accelerate_api::IntegerElementType::I16 => "int16",
+                runmat_accelerate_api::IntegerElementType::I32 => "int32",
+                runmat_accelerate_api::IntegerElementType::I64 => "int64",
+                runmat_accelerate_api::IntegerElementType::U8 => "uint8",
+                runmat_accelerate_api::IntegerElementType::U16 => "uint16",
+                runmat_accelerate_api::IntegerElementType::U32 => "uint32",
+                runmat_accelerate_api::IntegerElementType::U64 => "uint64",
+            })
+        }
+        _ => None,
+    }
+}
+
+fn is_scalar_double(value: &Value) -> bool {
+    match value {
+        Value::Num(_) => true,
+        Value::Tensor(tensor) => {
+            tensor::is_scalar_tensor(tensor) && tensor.numeric_dtype() == NumericDType::F64
+        }
+        Value::GpuTensor(handle) => {
+            is_scalar_shape(&handle.shape)
+                && runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_precision(handle)
+                    == Some(runmat_accelerate_api::ProviderPrecision::F64)
+        }
+        _ => false,
+    }
+}
+
+fn validate_integer_admission(lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
+    match (integer_class(lhs), integer_class(rhs)) {
+        (None, None) => Ok(()),
+        (Some(left), Some(right)) if left == right => Ok(()),
+        (Some(_), Some(_)) => Err(builtin_error(
+            "ldivide: integer operands must have the same integer class",
+        )),
+        (Some(_), None) if is_scalar_double(rhs) => Ok(()),
+        (None, Some(_)) if is_scalar_double(lhs) => Ok(()),
+        _ => Err(builtin_error(
+            "ldivide: integer arrays can only be combined with scalar double values",
+        )),
+    }
+}
+
+async fn gather_ldivide_operand(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(&value)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME)),
+        _ => Ok(value),
+    }
+}
+
+fn restore_ldivide_residency(source: &GpuTensorHandle, mut host: Value) -> BuiltinResult<Value> {
+    if matches!(host, Value::Num(_) | Value::Int(_) | Value::Bool(_)) {
+        host = Value::Tensor(
+            tensor::value_into_tensor_for(BUILTIN_NAME, host)
+                .map_err(|error| builtin_error(format!("ldivide: {error}")))?,
+        );
+    }
+    let restored = gpu_helpers::restore_class_preserving_value(source, host, BUILTIN_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(source) && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(builtin_error(
+            "ldivide: provider cannot preserve explicit gpuArray output",
+        ));
+    }
+    Ok(restored)
 }
 
 #[derive(Clone)]
@@ -500,151 +646,173 @@ fn promote_integer_real_storage_to_complex(storage: NumericStorage) -> ComplexSt
     )
 }
 
-async fn ldivide_gpu_pair(
-    divisor: GpuTensorHandle,
-    numerator: GpuTensorHandle,
-) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if divisor.shape == numerator.shape {
-            if let Ok(handle) = provider.elem_div(&numerator, &divisor).await {
-                return Ok(Value::GpuTensor(handle));
-            }
-        }
-        // Try N-D broadcast on device using repmat + elem_div (B ./ A)
-        if let Some((out_shape, reps_num, reps_div)) =
-            broadcast_reps(&numerator.shape, &divisor.shape)
-        {
-            let made_num = reps_num.iter().any(|&r| r != 1);
-            let made_div = reps_div.iter().any(|&r| r != 1);
-            let num_expanded = if made_num {
-                provider
-                    .repmat(&numerator, &reps_num)
-                    .map_err(|e| builtin_error(format!("ldivide: {e}")))?
-            } else {
-                numerator.clone()
-            };
-            let div_expanded = if made_div {
-                provider
-                    .repmat(&divisor, &reps_div)
-                    .map_err(|e| builtin_error(format!("ldivide: {e}")))?
-            } else {
-                divisor.clone()
-            };
-            let result = provider
-                .elem_div(&num_expanded, &div_expanded)
-                .await
-                .map_err(|e| builtin_error(format!("ldivide: {e}")));
-            if made_num {
-                let _ = provider.free(&num_expanded);
-            }
-            if made_div {
-                let _ = provider.free(&div_expanded);
-            }
-            if let Ok(handle) = result {
-                if handle.shape == out_shape {
-                    return Ok(Value::GpuTensor(handle));
-                } else {
-                    let _ = provider.free(&handle);
-                }
-            }
-        }
-        if is_scalar_shape(&divisor.shape) {
-            if let Some(scalar) = gpu_scalar_value(&divisor).await? {
-                if let Ok(handle) = provider.scalar_div(&numerator, scalar) {
-                    return Ok(Value::GpuTensor(handle));
-                }
-            }
-        }
-        if is_scalar_shape(&numerator.shape) {
-            if let Some(scalar) = gpu_scalar_value(&numerator).await? {
-                if let Ok(handle) = provider.scalar_rdiv(&divisor, scalar) {
-                    return Ok(Value::GpuTensor(handle));
-                }
-            }
-        }
+async fn try_ldivide_gpu_pair(
+    divisor: &GpuTensorHandle,
+    numerator: &GpuTensorHandle,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(provider) = common_ldivide_owner(divisor, numerator) else {
+        return Ok(None);
+    };
+    if !ldivide_pair_metadata_supported(divisor, numerator) {
+        return Ok(None);
     }
-    let divisor_host = gpu_helpers::gather_tensor_async(&divisor)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let numerator_host = gpu_helpers::gather_tensor_async(&numerator)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    ldivide_host(Value::Tensor(divisor_host), Value::Tensor(numerator_host))
+    let expected_shape = BroadcastPlan::new(&divisor.shape, &numerator.shape)
+        .map_err(|_| ldivide_error(&LDIVIDE_ERROR_SIZE_MISMATCH))?
+        .output_shape()
+        .to_vec();
+    let output = match provider.elem_div(numerator, divisor).await {
+        Ok(output) => output,
+        Err(_) => return Ok(None),
+    };
+    if validate_ldivide_output(&output, divisor, Some(numerator), provider, &expected_shape) {
+        Ok(Some(output))
+    } else {
+        gpu_helpers::free_unprotected_exact_owner(&output, &[divisor, numerator]);
+        Ok(None)
+    }
 }
 
-fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    let rank = a.len().max(b.len()).max(1);
-    let mut out = vec![1usize; rank];
-    let aa = crate::builtins::common::broadcast::align_shape(a, rank);
-    let bb = crate::builtins::common::broadcast::align_shape(b, rank);
-    for i in 0..rank {
-        let (ad, bd) = (aa[i], bb[i]);
-        if ad == bd {
-            out[i] = ad;
-        } else if ad == 1 {
-            out[i] = bd;
-        } else if bd == 1 {
-            out[i] = ad;
-        } else {
-            return None;
-        }
-    }
-    let reps_a: Vec<usize> = (0..rank)
-        .map(|i| if aa[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    let reps_b: Vec<usize> = (0..rank)
-        .map(|i| if bb[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    Some((out, reps_a, reps_b))
-}
-
-async fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(scalar) = extract_scalar_f64(&numerator)? {
+async fn try_ldivide_gpu_host_left(
+    divisor: &GpuTensorHandle,
+    numerator: &Value,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(divisor) else {
+        return Ok(None);
+    };
+    if let Value::Num(scalar) = numerator {
+        if runmat_accelerate_api::handle_integer_type(divisor).is_some() {
             if let Some(uploaded) =
-                gpu_helpers::upload_exact_integer_scalar_like(provider, &divisor, scalar)
+                gpu_helpers::upload_exact_integer_scalar_like(provider, divisor, *scalar)
             {
-                let result = provider.elem_div(&uploaded, &divisor).await;
-                let _ = provider.free(&uploaded);
-                if let Ok(handle) = result {
-                    return Ok(Value::GpuTensor(handle));
+                let result = provider.elem_div(&uploaded, divisor).await.ok();
+                let valid = result.as_ref().is_some_and(|output| {
+                    validate_ldivide_output(
+                        output,
+                        divisor,
+                        Some(&uploaded),
+                        provider,
+                        &divisor.shape,
+                    )
+                });
+                if let Some(output) = result.as_ref().filter(|_| !valid) {
+                    gpu_helpers::free_unprotected_exact_owner(output, &[divisor, &uploaded]);
                 }
+                gpu_helpers::free_unprotected_exact_owner(&uploaded, &[divisor]);
+                return Ok(result.filter(|_| valid));
             }
-            if let Ok(handle) = provider.scalar_rdiv(&divisor, scalar) {
-                return Ok(Value::GpuTensor(handle));
+        } else if ldivide_float_handle_supported(divisor) {
+            if let Ok(output) = provider.scalar_rdiv(divisor, *scalar) {
+                if validate_ldivide_output(&output, divisor, None, provider, &divisor.shape) {
+                    return Ok(Some(output));
+                }
+                gpu_helpers::free_unprotected_exact_owner(&output, &[divisor]);
             }
         }
     }
-    let divisor_host = gpu_helpers::gather_tensor_async(&divisor)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    ldivide_host(Value::Tensor(divisor_host), numerator)
+    Ok(None)
 }
 
-async fn ldivide_gpu_host_right(
-    divisor: Value,
-    numerator: GpuTensorHandle,
-) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(scalar) = extract_scalar_f64(&divisor)? {
+async fn try_ldivide_gpu_host_right(
+    divisor: &Value,
+    numerator: &GpuTensorHandle,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(numerator) else {
+        return Ok(None);
+    };
+    if let Value::Num(scalar) = divisor {
+        if runmat_accelerate_api::handle_integer_type(numerator).is_some() {
             if let Some(uploaded) =
-                gpu_helpers::upload_exact_integer_scalar_like(provider, &numerator, scalar)
+                gpu_helpers::upload_exact_integer_scalar_like(provider, numerator, *scalar)
             {
-                let result = provider.elem_div(&numerator, &uploaded).await;
-                let _ = provider.free(&uploaded);
-                if let Ok(handle) = result {
-                    return Ok(Value::GpuTensor(handle));
+                let result = provider.elem_div(numerator, &uploaded).await.ok();
+                let valid = result.as_ref().is_some_and(|output| {
+                    validate_ldivide_output(
+                        output,
+                        numerator,
+                        Some(&uploaded),
+                        provider,
+                        &numerator.shape,
+                    )
+                });
+                if let Some(output) = result.as_ref().filter(|_| !valid) {
+                    gpu_helpers::free_unprotected_exact_owner(output, &[numerator, &uploaded]);
                 }
+                gpu_helpers::free_unprotected_exact_owner(&uploaded, &[numerator]);
+                return Ok(result.filter(|_| valid));
             }
-            if let Ok(handle) = provider.scalar_div(&numerator, scalar) {
-                return Ok(Value::GpuTensor(handle));
+        } else if ldivide_float_handle_supported(numerator) {
+            if let Ok(output) = provider.scalar_div(numerator, *scalar) {
+                if validate_ldivide_output(&output, numerator, None, provider, &numerator.shape) {
+                    return Ok(Some(output));
+                }
+                gpu_helpers::free_unprotected_exact_owner(&output, &[numerator]);
             }
         }
     }
-    let numerator_host = gpu_helpers::gather_tensor_async(&numerator)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    ldivide_host(divisor, Value::Tensor(numerator_host))
+    Ok(None)
+}
+
+fn common_ldivide_owner(
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+    let left_owner = gpu_helpers::exact_provider_for_handle(left)?;
+    let right_owner = gpu_helpers::exact_provider_for_handle(right)?;
+    (std::ptr::eq(left_owner, right_owner) && left.device_id == right.device_id)
+        .then_some(left_owner)
+}
+
+fn ldivide_float_handle_supported(handle: &GpuTensorHandle) -> bool {
+    runmat_accelerate_api::handle_storage(handle) == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(handle)
+        && runmat_accelerate_api::handle_precision(handle).is_some()
+}
+
+fn ldivide_pair_metadata_supported(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
+    if runmat_accelerate_api::handle_storage(left) != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_storage(right)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_is_logical(left)
+        || runmat_accelerate_api::handle_is_logical(right)
+    {
+        return false;
+    }
+    match (
+        runmat_accelerate_api::handle_integer_type(left),
+        runmat_accelerate_api::handle_integer_type(right),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        (None, None) => {
+            runmat_accelerate_api::handle_precision(left)
+                == runmat_accelerate_api::handle_precision(right)
+                && runmat_accelerate_api::handle_precision(left).is_some()
+        }
+        _ => false,
+    }
+}
+
+fn validate_ldivide_output(
+    output: &GpuTensorHandle,
+    class_source: &GpuTensorHandle,
+    other_source: Option<&GpuTensorHandle>,
+    owner: &dyn runmat_accelerate_api::AccelProvider,
+    expected_shape: &[usize],
+) -> bool {
+    output.shape == expected_shape
+        && output.device_id == class_source.device_id
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
+        && !gpu_helpers::same_gpu_handle(output, class_source)
+        && other_source.is_none_or(|source| !gpu_helpers::same_gpu_handle(output, source))
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output)
+            == runmat_accelerate_api::handle_integer_type(class_source)
+        && runmat_accelerate_api::handle_is_logical(output)
+            == runmat_accelerate_api::handle_is_logical(class_source)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(class_source)
 }
 
 fn scalar_real_value(value: &Value) -> Option<f64> {
@@ -1005,36 +1173,6 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
         .map_err(|e| builtin_error(format!("ldivide: {e}")))
 }
 
-fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
-    match value {
-        Value::Num(n) => Ok(Some(*n)),
-        Value::Int(i) => Ok(Some(provider_scalar_from_integer(i))),
-        Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(Some(tensor::tensor_value_f64(t, 0))),
-        Value::LogicalArray(l) if l.data.len() == 1 => {
-            Ok(Some(if l.data[0] != 0 { 1.0 } else { 0.0 }))
-        }
-        Value::CharArray(ca) if ca.rows * ca.cols == 1 => Ok(Some(
-            ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0),
-        )),
-        _ => Ok(None),
-    }
-}
-
-fn provider_scalar_from_integer(value: &IntValue) -> f64 {
-    value.to_f64()
-}
-
-async fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
-    if !is_scalar_shape(&handle.shape) {
-        return Ok(None);
-    }
-    let tensor = gpu_helpers::gather_tensor_async(handle)
-        .await
-        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
-    Ok(tensor::tensor_values_f64(&tensor).first().copied())
-}
-
 fn is_scalar_shape(shape: &[usize]) -> bool {
     shape.iter().copied().product::<usize>() <= 1
 }
@@ -1044,6 +1182,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext,
@@ -1055,19 +1195,6 @@ pub(crate) mod tests {
 
     fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ldivide_builtin(lhs, rhs, rest))
-    }
-
-    #[test]
-    fn provider_scalar_extractor_reads_typed_integer_tensor_storage() {
-        let tensor =
-            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
-                .expect("integer tensor");
-        let value = Value::Tensor(tensor);
-
-        assert_eq!(
-            extract_scalar_f64(&value).expect("scalar"),
-            Some(9_007_199_254_740_993_u64 as f64)
-        );
     }
 
     #[test]
@@ -1162,6 +1289,7 @@ pub(crate) mod tests {
 
     #[test]
     fn ldivide_like_complex_conversion_reads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(IntegerStorage::U32(vec![4, 5]), vec![1, 2]).unwrap();
 
         let result =
@@ -1178,6 +1306,7 @@ pub(crate) mod tests {
 
     #[test]
     fn ldivide_like_complex_conversion_preserves_single_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::from_f32(vec![4.0, 5.0], vec![1, 2]).unwrap();
 
         let result =
@@ -1449,6 +1578,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_gpu_prototype_keeps_residency() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1479,6 +1609,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let divisor = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).unwrap();
             let proto_view = HostTensorView {
@@ -1503,6 +1634,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_host_gathers_gpu_value() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![8.0, 18.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
@@ -1536,6 +1668,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_complex_prototype_yields_complex() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let result = ldivide_builtin(
@@ -1575,6 +1708,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ldivide_like_keyword_char_array() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let keyword = CharArray::new_row("LIKE");
             let lhs = Value::Num(2.0);
@@ -1604,9 +1738,11 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn ldivide_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let lhs = Tensor::new(vec![4.0, 9.0, 16.0, 25.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![2.0, 3.0, 4.0, 5.0], vec![2, 2]).unwrap();
         let cpu = ldivide_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
@@ -1618,11 +1754,12 @@ pub(crate) mod tests {
             data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
-        let provider = runmat_accelerate_api::provider().unwrap();
         let ha = provider.upload(&view_l).unwrap();
         let hb = provider.upload(&view_r).unwrap();
-        let gpu = block_on(ldivide_gpu_pair(ha, hb)).unwrap();
-        let gathered = test_support::gather(gpu).expect("gather");
+        let gpu = block_on(try_ldivide_gpu_pair(&ha, &hb))
+            .unwrap()
+            .expect("native ldivide");
+        let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
         match cpu {
             Value::Tensor(t) => {
                 assert_eq!(gathered.materialize_f64().len(), t.materialize_f64().len());
@@ -1653,5 +1790,84 @@ pub(crate) mod tests {
             Value::Int(IntValue::I32(v)) => assert_eq!(v, 1),
             other => panic!("expected int32 scalar, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ldivide_like_is_gated_in_matlab_mode() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = ldivide_builtin(
+            Value::Num(2.0),
+            Value::Num(5.0),
+            vec![Value::from("like"), Value::Num(0.0)],
+        )
+        .expect_err("like form must be gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:LdivideLikePrototypeExtension")
+        );
+    }
+
+    #[test]
+    fn ldivide_resident_integer_fallback_preserves_source_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let divisor =
+                Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).expect("divisor");
+            let source = gpu_helpers::upload_tensor(provider, &divisor).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&source);
+            let result = ldivide_builtin(
+                Value::GpuTensor(source.clone()),
+                Value::Num(10.0),
+                Vec::new(),
+            )
+            .expect("resident ldivide");
+            let Value::GpuTensor(output) = result else {
+                panic!("explicit gpuArray result must remain resident");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            assert!(!gpu_helpers::same_gpu_handle(&source, &output));
+            let original = test_support::gather(Value::GpuTensor(source)).expect("source survives");
+            assert_eq!(
+                original.integer_storage(),
+                Some(&IntegerStorage::I32(vec![2, 4]))
+            );
+        });
+    }
+
+    #[test]
+    fn ldivide_fallback_prefers_explicit_second_resident_operand() {
+        test_support::with_test_provider(|provider| {
+            let scalar = Tensor::new(vec![2.0], vec![1, 1]).expect("scalar");
+            let automatic = gpu_helpers::upload_tensor(provider, &scalar).expect("automatic");
+            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let integer =
+                Tensor::new_integer(IntegerStorage::I32(vec![6, 10]), vec![2, 1]).expect("integer");
+            let explicit = gpu_helpers::upload_tensor(provider, &integer).expect("explicit");
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+
+            let result = ldivide_builtin(
+                Value::GpuTensor(automatic),
+                Value::GpuTensor(explicit.clone()),
+                Vec::new(),
+            )
+            .expect("fallback ldivide");
+            let Value::GpuTensor(output) = result else {
+                panic!("explicit second operand must preserve resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::I32)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::I32(vec![3, 5]))
+            );
+            let original = test_support::gather(Value::GpuTensor(explicit)).expect("source");
+            assert_eq!(
+                original.integer_storage(),
+                Some(&IntegerStorage::I32(vec![6, 10]))
+            );
+        });
     }
 }

@@ -4762,13 +4762,7 @@ impl AccelProvider for InProcessProvider {
             seq
         };
 
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: vec![1, count],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.allocate_tensor(data, vec![1, count]))
     }
 
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -7025,14 +7019,7 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.ln()).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor(out, a.shape.clone()))
         })
     }
 

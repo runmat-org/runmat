@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses provider elem_lt kernels when available; otherwise inputs gather back to host memory transparently."
+    "notes": "Uses provider elem_lt kernels when both inputs share an exact device owner. Device results are validated for owner, shape, logical storage, and aliasing before use."
   },
   "fusion": {
     "elementwise": true,
@@ -31,13 +31,15 @@
     "integration": "builtins::logical::rel::lt::tests::lt_gpu_provider_roundtrip",
     "gpu": "builtins::logical::rel::lt::tests::lt_wgpu_matches_host"
   },
-  "description": "`lt(A, B)` (or `A < B`) compares inputs element-wise for less-than relations. Scalar expansion and output-shape behavior follow MATLAB semantics.",
+  "description": "`lt(A, B)` (or `A < B`) compares inputs element-wise and returns logical results. Numeric comparisons support exact mixed-integer handling, implicit expansion, and complex values ordered by their real parts.",
   "behaviors": [
     "Numeric, logical, and character inputs compare element-wise using MATLAB's implicit expansion rules.",
     "Character arrays compare by Unicode code point; mixing them with numeric arrays behaves like comparing numeric codes (`'A' < 66`).",
     "String scalars and string arrays compare lexically; implicit expansion works across string dimensions.",
-    "Complex inputs are not supported, matching MATLAB's behaviour.",
-    "Mixed numeric/string inputs raise MATLAB-compatible type errors."
+    "Complex numeric inputs compare their real parts; imaginary components do not participate in the ordering.",
+    "Any numeric comparison involving `NaN` returns `false`.",
+    "Mixed numeric/string inputs raise type errors.",
+    "Sparse numeric comparisons are not implemented yet."
   ],
   "examples": [
     {
@@ -82,7 +84,7 @@
     },
     {
       "question": "Can I compare complex numbers with `lt`?",
-      "answer": "No. MATLAB does not define relational ordering for complex numbers, so RunMat raises a MATLAB-compatible error when complex inputs are supplied."
+      "answer": "Yes. RunMat compares the real components and ignores the imaginary components for ordering."
     },
     {
       "question": "How are strings compared?",
@@ -94,7 +96,7 @@
     },
     {
       "question": "Do I need to gather results manually after a GPU comparison?",
-      "answer": "No. When both inputs are `gpuArray` values and the provider supports `elem_lt`, the result stays on the GPU. Otherwise, RunMat gathers inputs transparently and returns a host logical array."
+      "answer": "No. A supported same-owner comparison stays on that GPU. During fallback, automatic residency may return a host logical array, while explicit residency restores the result to the exact originating owner."
     },
     {
       "question": "Does implicit expansion apply to string arrays?",
@@ -135,8 +137,8 @@
     "label": "`crates/runmat-runtime/src/builtins/logical/rel/lt.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/rel/lt.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload planner keeps intermediate results on the GPU when fused expressions benefit from device execution. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
+  "gpu_residency": "When both operands share an exact GPU owner and the provider supports `elem_lt`, the logical result remains on that owner. Mixed owners are rejected. Host fallback from automatically resident operands may return a host logical result; if either operand is explicitly resident, fallback restores the result to that exact owner or returns an error.",
   "gpu_behavior": [
-    "When both operands are `gpuArray` values and the active acceleration provider implements the `elem_lt` hook, RunMat executes the comparison entirely on the device and returns a `gpuArray` logical result. If the provider does not expose this hook, the runtime gathers the inputs to host memory automatically and performs the CPU comparison instead of failing."
+    "When both operands are GPU values on the same owner and the provider implements `elem_lt`, RunMat executes the comparison on-device and validates the logical result. Unsupported or mixed host/device cases gather for CPU comparison; explicit residency causes the result to be uploaded back to the originating owner, while automatic residency may remain on the host."
   ]
 }

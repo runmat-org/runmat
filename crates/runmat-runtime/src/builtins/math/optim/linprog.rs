@@ -2,7 +2,11 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     StructValue, Tensor, Value,
 };
@@ -19,6 +23,133 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const NAME: &str = "linprog";
 const ALGORITHM: &str = "active-set vertex enumeration";
 const TOL: f64 = 1.0e-8;
+
+macro_rules! linprog_integer_extension {
+    ($name:ident, $id:literal, $role:literal, $identifier:literal) => {
+        pub const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: concat!(
+                "linprog with a typed-integer ",
+                $role,
+                " input is a RunMat extension"
+            ),
+            error_identifier: Some($identifier),
+        };
+    };
+}
+linprog_integer_extension!(
+    LINPROG_INTEGER_F_EXTENSION,
+    "linprog-integer-f",
+    "f",
+    "RunMat:compatibility:LinprogIntegerFExtension"
+);
+linprog_integer_extension!(
+    LINPROG_INTEGER_A_EXTENSION,
+    "linprog-integer-a",
+    "A",
+    "RunMat:compatibility:LinprogIntegerAExtension"
+);
+linprog_integer_extension!(
+    LINPROG_INTEGER_B_EXTENSION,
+    "linprog-integer-b",
+    "b",
+    "RunMat:compatibility:LinprogIntegerBExtension"
+);
+linprog_integer_extension!(
+    LINPROG_INTEGER_AEQ_EXTENSION,
+    "linprog-integer-aeq",
+    "Aeq",
+    "RunMat:compatibility:LinprogIntegerAeqExtension"
+);
+linprog_integer_extension!(
+    LINPROG_INTEGER_BEQ_EXTENSION,
+    "linprog-integer-beq",
+    "beq",
+    "RunMat:compatibility:LinprogIntegerBeqExtension"
+);
+linprog_integer_extension!(
+    LINPROG_INTEGER_LB_EXTENSION,
+    "linprog-integer-lb",
+    "lb",
+    "RunMat:compatibility:LinprogIntegerLbExtension"
+);
+linprog_integer_extension!(
+    LINPROG_INTEGER_UB_EXTENSION,
+    "linprog-integer-ub",
+    "ub",
+    "RunMat:compatibility:LinprogIntegerUbExtension"
+);
+pub const LINPROG_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linprog-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linprog with explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinprogExplicitGpuInputExtension"),
+};
+pub const LINPROG_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
+    LINPROG_INTEGER_F_EXTENSION,
+    LINPROG_INTEGER_A_EXTENSION,
+    LINPROG_INTEGER_B_EXTENSION,
+    LINPROG_INTEGER_AEQ_EXTENSION,
+    LINPROG_INTEGER_BEQ_EXTENSION,
+    LINPROG_INTEGER_LB_EXTENSION,
+    LINPROG_INTEGER_UB_EXTENSION,
+    LINPROG_GPU_INPUT_EXTENSION,
+];
+const LINPROG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 7] = [
+    BuiltinIntegerInputCapability {
+        name: "f",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "Public linprog requires double f; RunMat mode admits exact-binary64 typed integers.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public A is single or double; typed integers are independently gated.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "b",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public b is single or double; typed integers are independently gated.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Aeq",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public Aeq is double; typed integers are independently gated.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "beq",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public beq is single or double; typed integers are independently gated.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "lb",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public lb is double; typed integers are independently gated.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "ub",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public ub is double; typed integers are independently gated.",
+    },
+];
+pub const LINPROG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "linprog(integer-valued solver inputs)", inputs: &LINPROG_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Every typed-integer role is a separately gated RunMat extension. Values must be exactly representable before crossing the host binary64 solver boundary." }];
 
 const LINPROG_OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "x",
@@ -352,6 +483,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "linprog,linear programming,optimization,linear constraints,bounds",
     accel = "sink",
     type_resolver(linear_programming_type),
+    extensions(LINPROG_EXTENSIONS),
+    integer_capabilities(LINPROG_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::optim::linprog::LINPROG_DESCRIPTOR),
     builtin_path = "crate::builtins::math::optim::linprog"
 )]
@@ -361,6 +494,22 @@ async fn linprog_builtin(f: Value, a: Value, b: Value, rest: Vec<Value>) -> Buil
             &LINPROG_ERROR_INVALID_ARGUMENT,
             "too many input arguments",
         ));
+    }
+
+    ensure_linprog_input_policy("f", &f, &LINPROG_INTEGER_F_EXTENSION).await?;
+    ensure_linprog_input_policy("A", &a, &LINPROG_INTEGER_A_EXTENSION).await?;
+    ensure_linprog_input_policy("b", &b, &LINPROG_INTEGER_B_EXTENSION).await?;
+    if let Some(value) = rest.first() {
+        ensure_linprog_input_policy("Aeq", value, &LINPROG_INTEGER_AEQ_EXTENSION).await?;
+    }
+    if let Some(value) = rest.get(1) {
+        ensure_linprog_input_policy("beq", value, &LINPROG_INTEGER_BEQ_EXTENSION).await?;
+    }
+    if let Some(value) = rest.get(2) {
+        ensure_linprog_input_policy("lb", value, &LINPROG_INTEGER_LB_EXTENSION).await?;
+    }
+    if let Some(value) = rest.get(3) {
+        ensure_linprog_input_policy("ub", value, &LINPROG_INTEGER_UB_EXTENSION).await?;
     }
 
     let f = numeric_vector("f", f, FiniteMode::Finite).await?;
@@ -404,6 +553,29 @@ async fn linprog_builtin(f: Value, a: Value, b: Value, rest: Vec<Value>) -> Buil
         b_eq,
     };
     Ok(finalize(solve_linprog(&problem)))
+}
+
+async fn ensure_linprog_input_policy(
+    label: &str,
+    value: &Value,
+    integer_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(integer_extension, NAME)?;
+        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+        {
+            return Err(linprog_error_with_detail(
+                &LINPROG_ERROR_INVALID_INPUT,
+                format!("{label} integer values must be exactly representable as double"),
+            ));
+        }
+    }
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&LINPROG_GPU_INPUT_EXTENSION, NAME)?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -1089,21 +1261,13 @@ mod tests {
     }
 
     #[test]
-    fn numeric_inputs_read_typed_integer_storage_despite_poisoned_mirrors() {
+    fn numeric_inputs_read_exact_typed_integer_storage() {
         let vector =
             Tensor::new_integer(IntegerStorage::I64(vec![-7, 3]), vec![2, 1]).expect("vector");
         assert_eq!(
             block_on(numeric_vector("f", V::Tensor(vector), FiniteMode::Finite)).unwrap(),
             vec![-7.0, 3.0]
         );
-
-        let wide = 9_007_199_254_740_993_u64;
-        let matrix =
-            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("matrix");
-        let parsed = block_on(numeric_matrix("A", V::Tensor(matrix)))
-            .unwrap()
-            .expect("matrix input");
-        assert_eq!(parsed.data, vec![wide as f64]);
     }
 
     fn run(f: V, a: V, b: V, rest: Vec<V>, outputs: usize) -> Vec<V> {
@@ -1262,5 +1426,27 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:linprog:InvalidInput"));
+    }
+
+    #[test]
+    fn linprog_typed_integer_roles_are_gated_in_matlab_mode() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let f = Tensor::new_integer(IntegerStorage::I32(vec![1]), vec![1, 1]).unwrap();
+        let error = block_on(linprog_builtin(V::Tensor(f), empty(), empty(), Vec::new()))
+            .expect_err("typed f must be gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:LinprogIntegerFExtension")
+        );
+    }
+
+    #[test]
+    fn linprog_runmat_integer_boundary_rejects_lossy_uint64() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let f = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+            .unwrap();
+        let error = block_on(linprog_builtin(V::Tensor(f), empty(), empty(), Vec::new()))
+            .expect_err("lossy integer boundary must reject");
+        assert!(error.message().contains("exactly representable as double"));
     }
 }

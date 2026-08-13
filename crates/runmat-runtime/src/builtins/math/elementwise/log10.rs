@@ -5,9 +5,13 @@
 //! falls back to the host whenever complex numbers are required or the provider lacks a dedicated
 //! kernel.
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
@@ -16,11 +20,10 @@ use runmat_macros::runtime_builtin;
 use super::log::{detect_gpu_requires_complex, log_complex_parts, log_complex_parts_f32};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -48,29 +51,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log10",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: Some(FusionKernelTemplate {
-        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            let expr = match ctx.scalar_ty {
-                ScalarType::F64 => {
-                    format!("log({input}) * f64({})", std::f64::consts::LOG10_E)
-                }
-                ScalarType::F32 => format!(
-                    "log({input}) * {:.10}",
-                    std::f32::consts::LOG10_E
-                ),
-                other => return Err(FusionError::UnsupportedPrecision(other)),
-            };
-            Ok(expr)
-        },
-    }),
+    elementwise: None,
     reduction: None,
-    emits_nan: false,
-    notes: "Fusion planner emits WGSL `log` multiplied by log10(e); providers can override with fused kernels when available.",
+    emits_nan: true,
+    notes: "Fusion is disabled because real inputs can require complex promotion and explicit gpuArray inputs have a distinct complex-domain contract.",
 };
 
 const BUILTIN_NAME: &str = "log10";
@@ -107,6 +91,45 @@ const LOG10_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "log10: internal error",
 };
 const LOG10_ERRORS: [BuiltinErrorDescriptor; 2] = [LOG10_ERROR_INVALID_INPUT, LOG10_ERROR_INTERNAL];
+const LOG10_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log10-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log10 with integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log10IntegerInputExtension"),
+};
+const LOG10_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log10-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log10 with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log10LogicalInputExtension"),
+};
+const LOG10_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "log10-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "log10 with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Log10CharacterInputExtension"),
+};
+const LOG10_EXPLICIT_GPU_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "log10-explicit-real-gpu-complex-promotion",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "complex promotion from an explicit real gpuArray is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Log10ExplicitGpuComplexExtension"),
+    };
+pub const LOG10_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    LOG10_INTEGER_INPUT_EXTENSION,
+    LOG10_LOGICAL_INPUT_EXTENSION,
+    LOG10_CHARACTER_INPUT_EXTENSION,
+    LOG10_EXPLICIT_GPU_COMPLEX_EXTENSION,
+];
+const LOG10_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Accepted only in RunMat mode and inside the exact binary64 integer interval.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "Y = log10(integer_X)", inputs: &LOG10_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Resident integer input is downloaded exactly through its owner before double-domain computation." }];
 pub const LOG10_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LOG10_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -140,9 +163,12 @@ fn log10_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::log10::LOG10_DESCRIPTOR),
+    extensions(LOG10_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::elementwise::log10::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::log10"
 )]
 async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
+    ensure_log10_extensions(&value).await?;
     match value {
         Value::GpuTensor(handle) => log10_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -162,25 +188,82 @@ async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let tensor = gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-        return log10_tensor(tensor);
+async fn ensure_log10_extensions(value: &Value) -> BuiltinResult<()> {
+    let integer = matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some());
+    if integer {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG10_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+        {
+            return Err(log10_error_with_detail(
+                &LOG10_ERROR_INVALID_INPUT,
+                "integer input lies outside the exact binary64 interval",
+            ));
+        }
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if crate::builtins::common::validation::value_has_logical_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG10_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG10_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        log10_error_with_detail(
+            &LOG10_ERROR_INTERNAL,
+            "GPU provider unavailable for input owner",
+        )
+    })?;
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let gathered =
+            gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+        let result = log10_real(gathered)?;
+        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
+    }
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved
+    {
+        let gathered =
+            gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+        let result = match gathered {
+            Value::ComplexTensor(ct) => log10_complex_tensor(ct)?,
+            other => log10_real(other)?,
+        };
+        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
+    }
+    {
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
                 if let Ok(out) = provider.unary_log10(&handle).await {
-                    return Ok(Value::GpuTensor(out));
+                    return validate_log10_gpu_output(provider, &handle, out);
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-                return log10_tensor(tensor);
+                if runmat_accelerate_api::handle_is_explicit(&handle) {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &LOG10_EXPLICIT_GPU_COMPLEX_EXTENSION,
+                        BUILTIN_NAME,
+                    )?;
+                }
+                let gathered =
+                    gpu_helpers::download_value_preserving_residency_async(provider, &handle)
+                        .await?;
+                let result = log10_real(gathered)?;
+                return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
             }
             Err(err) => {
                 if err.message() == "interaction pending..." {
@@ -190,10 +273,48 @@ async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    log10_tensor(tensor)
+    let gathered =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let result = log10_real(gathered)?;
+    if matches!(result, Value::Complex(_, _) | Value::ComplexTensor(_))
+        && runmat_accelerate_api::handle_is_explicit(&handle)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOG10_EXPLICIT_GPU_COMPLEX_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME)
+}
+
+fn validate_log10_gpu_output(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    source: &GpuTensorHandle,
+    out: GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let valid = !gpu_helpers::same_gpu_handle(source, &out)
+        && out.shape == source.shape
+        && out.device_id == source.device_id
+        && gpu_helpers::exact_provider_for_handle(&out)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(&out) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&out)
+            == runmat_accelerate_api::handle_precision(source)
+        && runmat_accelerate_api::handle_integer_type(&out).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&out);
+    if !valid {
+        gpu_helpers::free_unprotected_exact_owner(&out, &[source]);
+        return Err(log10_error_with_detail(
+            &LOG10_ERROR_INTERNAL,
+            "provider returned malformed log10 output",
+        ));
+    }
+    runmat_accelerate_api::set_handle_provenance(
+        &out,
+        runmat_accelerate_api::handle_provenance(source)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+    );
+    Ok(gpu_helpers::resident_gpu_value(out))
 }
 
 fn log10_real(value: Value) -> BuiltinResult<Value> {
@@ -348,12 +469,31 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
         IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
     };
 
     fn log10_builtin(value: Value) -> BuiltinResult<Value> {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::log10_builtin(value))
+    }
+
+    #[test]
+    fn log10_integer_extension_is_rejected_in_matlab_mode() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(super::log10_builtin(Value::Int(IntValue::I64(10))))
+            .expect_err("integer log10 is a RunMat extension");
+        assert_eq!(
+            error.identifier(),
+            LOG10_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn log10_fusion_is_disabled_until_complex_domain_is_representable() {
+        assert!(FUSION_SPEC.elementwise.is_none());
     }
 
     #[test]
@@ -558,13 +698,19 @@ pub(crate) mod tests {
     #[test]
     fn log10_integer_gpu_gathers_exact_storage_before_floating_domain() {
         test_support::with_test_provider(|provider| {
-            let wide = 9_007_199_254_740_993_u64;
+            let wide = 9_007_199_254_740_992_u64;
             let tensor =
                 Tensor::new_integer(IntegerStorage::U64(vec![1, wide]), vec![1, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-            let Value::Tensor(output) = log10_builtin(Value::GpuTensor(handle)).expect("log10")
+            let Value::GpuTensor(output) = log10_builtin(Value::GpuTensor(handle)).expect("log10")
             else {
-                panic!("expected host double tensor");
+                panic!("expected restored GPU tensor");
+            };
+            let Value::Tensor(output) = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &output),
+            )
+            .expect("download log10 result") else {
+                panic!("expected real tensor result");
             };
             assert_eq!(
                 output.into_numeric_storage().unwrap(),
@@ -669,15 +815,19 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = log10_builtin(Value::GpuTensor(handle)).expect("log10");
-            match result {
-                Value::ComplexTensor(ct) => {
-                    assert_eq!(ct.shape, vec![1, 2]);
-                    let expected_im = std::f64::consts::PI * LOG10_E;
-                    assert!((ct.materialize_f64()[0].1 - expected_im).abs() < 1e-12);
-                }
-                other => panic!("expected complex tensor, got {other:?}"),
-            }
+            let Value::GpuTensor(result) = log10_builtin(Value::GpuTensor(handle)).expect("log10")
+            else {
+                panic!("expected restored GPU result");
+            };
+            let Value::ComplexTensor(ct) = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &result),
+            )
+            .expect("download complex result") else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(ct.shape, vec![1, 2]);
+            let expected_im = std::f64::consts::PI * LOG10_E;
+            assert!((ct.materialize_f64()[0].1 - expected_im).abs() < 1e-12);
         });
     }
 
@@ -695,19 +845,18 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn log10_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let tensor = Tensor::new(vec![1.0, 10.0, 1000.0, 0.1], vec![4, 1]).unwrap();
         let cpu = log10_real(Value::Tensor(tensor.clone())).expect("cpu log10");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .expect("upload");
+        let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(log10_gpu(handle)).expect("gpu log10");
         let gathered = test_support::gather(gpu_value).expect("gather");
         match cpu {

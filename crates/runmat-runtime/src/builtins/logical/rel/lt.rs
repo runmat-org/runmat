@@ -2,9 +2,12 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -66,6 +69,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "lt";
+const LT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every integer class may be compared without conversion loss.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every integer class may be compared without conversion loss.",
+    },
+];
+pub const LT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "tf = lt(A,B)", inputs: &LT_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+    output_class: BuiltinIntegerOutputClassRule::Logical,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+    notes: "Mixed integer classes and floating operands compare exactly with MATLAB broadcasting; resident fallback restores explicit outputs to the owner.",
+}];
 
 const LT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -137,6 +165,7 @@ fn lt_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "elementwise",
     type_resolver(logical_binary_type),
     descriptor(crate::builtins::logical::rel::lt::LT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::rel::lt::LT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::rel::lt"
 )]
 async fn lt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -145,7 +174,93 @@ async fn lt_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             return result;
         }
     }
-    lt_host(lhs, rhs).await
+    let residency = comparison_residency(&lhs, &rhs)?;
+    let result = lt_host(lhs, rhs).await?;
+    restore_explicit_logical_result(result, residency)
+}
+
+#[derive(Clone, Copy)]
+struct ComparisonResidency {
+    owner: &'static dyn runmat_accelerate_api::AccelProvider,
+    explicit: bool,
+}
+
+fn comparison_residency(
+    lhs: &Value,
+    rhs: &Value,
+) -> crate::BuiltinResult<Option<ComparisonResidency>> {
+    let handles: Vec<&GpuTensorHandle> = [lhs, rhs]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
+    let Some(first) = handles.first() else {
+        return Ok(None);
+    };
+    let owner = gpu_helpers::exact_provider_for_handle(first).ok_or_else(|| {
+        build_runtime_error("lt: no exact owner for GPU operand")
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    for handle in &handles[1..] {
+        let other = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+            build_runtime_error("lt: no exact owner for GPU operand")
+                .with_builtin(BUILTIN_NAME)
+                .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
+        if !std::ptr::eq(owner, other) {
+            return Err(
+                build_runtime_error("lt: GPU operands have different owners")
+                    .with_builtin(BUILTIN_NAME)
+                    .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build(),
+            );
+        }
+    }
+    Ok(Some(ComparisonResidency {
+        owner,
+        explicit: handles
+            .iter()
+            .any(|handle| runmat_accelerate_api::handle_is_explicit(handle)),
+    }))
+}
+
+fn restore_explicit_logical_result(
+    result: Value,
+    residency: Option<ComparisonResidency>,
+) -> crate::BuiltinResult<Value> {
+    let Some(residency) = residency.filter(|value| value.explicit) else {
+        return Ok(result);
+    };
+    let tensor = match &result {
+        Value::Bool(value) => Tensor::new(vec![f64::from(*value)], vec![1, 1]),
+        Value::LogicalArray(array) => tensor::logical_to_tensor(array),
+        _ => return Ok(result),
+    }
+    .map_err(|error| {
+        build_runtime_error(format!("lt: {error}"))
+            .with_builtin(BUILTIN_NAME)
+            .build()
+    })?;
+    let output = gpu_helpers::upload_tensor(residency.owner, &tensor).map_err(|error| {
+        build_runtime_error(format!(
+            "lt: failed to preserve explicit gpuArray residency: {error}"
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier("RunMat:lt:GpuUploadFailed")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
+    })?;
+    runmat_accelerate_api::set_handle_logical(&output, true);
+    runmat_accelerate_api::mark_handle_explicit(&output);
+    Ok(gpu_helpers::resident_gpu_value(output))
 }
 
 async fn try_lt_gpu(
@@ -469,6 +584,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
 
     fn run_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -618,9 +735,11 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn lt_wgpu_matches_host() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let lhs = Tensor::new(vec![0.0, 2.0, 5.0, 7.0], vec![4, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.5, 4.0, 8.0], vec![4, 1]).unwrap();
         let cpu = run_lt_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
@@ -633,7 +752,6 @@ pub(crate) mod tests {
             data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
-        let provider = runmat_accelerate_api::provider().expect("provider");
         let handle_l = provider.upload(&view_l).expect("upload lhs");
         let handle_r = provider.upload(&view_r).expect("upload rhs");
         let gpu = run_lt(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).unwrap();

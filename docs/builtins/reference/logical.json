@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Prefers a device-side elem\\_ne(X, 0) cast when the provider supports elem_ne and zeros_like; otherwise gathers to the host, converts, and re-uploads the logical result."
+    "notes": "Prefers a device-side elem\\_ne(X, 0) cast when the provider supports elem_ne and zeros_like. Provider results are validated for exact owner, shape, storage kind, and aliasing."
   },
   "fusion": {
     "elementwise": false,
@@ -30,14 +30,15 @@
     "unit": "builtins::logical::ops::tests",
     "integration": "builtins::logical::ops::tests::logical_gpu_roundtrip"
   },
-  "description": "`logical(X)` converts numeric, character, and other supported inputs into logical values. Zero maps to false and nonzero maps to true, with coercion behavior following MATLAB semantics.",
+  "description": "`logical(X)` converts supported real numeric and character inputs into logical values. Zero maps to false and nonzero maps to true. NaN and complex numeric inputs are rejected. When RunMat extensions are enabled, string arrays and symbolic numeric constants are additionally accepted.",
   "behaviors": [
     "`logical` accepts scalars, dense arrays, N-D tensors, and gpuArrays. Shapes are preserved bit-for-bit.",
-    "Non-zero numeric values, `NaN`, and `Inf` map to `true`; `0` and `-0` map to `false`.",
-    "Complex inputs are considered `true` when either the real or imaginary component is non-zero.",
+    "Finite non-zero real numeric values and real infinities map to `true`; `0` and `-0` map to `false`.",
+    "NaN and complex numeric inputs raise conversion errors rather than being coerced.",
     "Character arrays are converted elementwise by interpreting code points (so `'A'` becomes `true`, `'\\0'` becomes `false`).",
-    "Strings, structs, cells, objects, and other non-numeric types raise MATLAB-compatible errors (`\"Conversion to logical from <type> is not possible\"`).",
-    "Scalar results become logical scalars (`true`/`false`); higher-rank arrays produce dense logical arrays."
+    "When RunMat extensions are enabled, string arrays convert elementwise by whether each element is nonempty; scalar strings remain unsupported.",
+    "Structs, cells, objects, and other unsupported types raise conversion errors.",
+    "Scalar results become logical scalars (`true`/`false`); dense higher-rank arrays produce dense logical arrays, and sparse inputs preserve sparse storage."
   ],
   "examples": [
     {
@@ -51,14 +52,14 @@
       "output": "mask =\n  2×3 logical array\n     1     0     1\n     0     1     0"
     },
     {
-      "description": "Treating NaN and Inf values as true",
-      "input": "flags = logical([NaN Inf 0])",
+      "description": "Treating real infinities as true",
+      "input": "flags = logical([-Inf Inf 0])",
       "output": "flags =\n  1×3 logical array\n     1     1     0"
     },
     {
-      "description": "Converting complex numbers to logical scalars",
-      "input": "z = logical(3 + 4i);\nw = logical(0 + 0i)",
-      "output": "z =\n     1\nw =\n     0"
+      "description": "Rejecting complex numeric conversion",
+      "input": "logical(3 + 4i)",
+      "output": "Error: conversion to logical from complex numeric data is not possible"
     },
     {
       "description": "Converting character arrays to logical values",
@@ -79,15 +80,15 @@
   "faqs": [
     {
       "question": "Which input types does `logical` support?",
-      "answer": "Numeric, logical, complex, character, and gpuArray values are accepted. Strings, structs, cells, objects, and function handles are rejected with MATLAB-compatible error messages."
+      "answer": "Real numeric, logical, character, sparse numeric, and supported gpuArray values are accepted. NaN and complex numeric values are rejected. Enabling RunMat extensions additionally accepts string arrays and symbolic numeric constants; structs, cells, objects, and function handles remain unsupported."
     },
     {
       "question": "How are NaN or Inf values treated?",
-      "answer": "They evaluate to `true`. MATLAB defines logical conversion as “non-zero”, and `NaN` / `Inf` both satisfy that rule."
+      "answer": "Real positive and negative infinity evaluate to `true`. NaN is rejected with a conversion error."
     },
     {
       "question": "How does `logical` handle complex numbers?",
-      "answer": "The result is `true` when either the real or imaginary component is non-zero (or `NaN`/`Inf`). Only `0 + 0i` converts to `false`."
+      "answer": "Complex numeric inputs are rejected, including values whose imaginary component is zero."
     },
     {
       "question": "Does the builtin change array shapes?",
@@ -99,7 +100,7 @@
     },
     {
       "question": "Can I convert strings with `logical`?",
-      "answer": "No. MATLAB rejects string inputs, and RunMat mirrors that behaviour: `\"logical: conversion to logical from string is not possible\"`."
+      "answer": "Scalar strings are rejected. When RunMat extensions are enabled, string arrays are accepted as an extension: each nonempty element becomes `true` and each empty element becomes `false`."
     },
     {
       "question": "What about structs, cells, or objects?",
@@ -107,7 +108,7 @@
     },
     {
       "question": "Does the GPU path allocate new buffers?",
-      "answer": "Only when the provider cannot operate in-place. The preferred path performs `elem_ne` against a zero tensor and reuses the resulting buffer. Fallback paths allocate a new gpuArray after gathering to the host."
+      "answer": "Yes. The preferred device path computes `elem_ne` against a zero tensor into a distinct logical result. Fallback may create a host result, and explicit residency may require a new upload to the original owner."
     },
     {
       "question": "Where can I learn more?",
@@ -136,10 +137,10 @@
     "label": "crates/runmat-runtime/src/builtins/logical/ops.rs",
     "url": "crates/runmat-runtime/src/builtins/logical/ops.rs"
   },
-  "gpu_residency": "You rarely need to call `gpuArray` manually. When the acceleration provider is active, RunMat keeps logical conversions on the GPU by issuing `elem_ne(X, 0)` kernels (backed by `zeros_like` allocations) and flagging the handle as logical metadata. Explicit `gpuArray` calls are available for MATLAB compatibility or when you want to pin residency before interacting with external libraries. When the provider lacks the necessary hook, RunMat documents the fallback: it gathers the data, converts it on the host, and—if a provider is still available—re-uploads the logical mask so downstream GPU code continues to work without residency surprises.",
+  "gpu_residency": "When the acceleration provider supports the required hooks, RunMat creates a logical result on the input's exact GPU owner. If fallback is needed, automatically resident inputs may return a host logical value; explicitly resident inputs are restored to the originating owner or the operation fails rather than silently changing the residency contract.",
   "gpu_behavior": [
-    "When a GPU provider implements `elem_ne` and `zeros_like`, RunMat performs the conversion in-place on the device by evaluating `elem_ne(X, 0)`, then marks the resulting handle as logical so predicates like `islogical` work without downloads.",
-    "If the provider cannot service the request (missing hooks, unsupported dtype, or allocation failure), the value is transparently gathered to the host, converted, and—when a provider is still available—re-uploaded as a logical gpuArray. The fallback is documented so users understand potential host/device transitions.",
+    "When a GPU provider implements `elem_ne` and `zeros_like`, RunMat evaluates `elem_ne(X, 0)` into a new device result and marks that result as logical. The result is validated before use and does not alias the input.",
+    "If the provider cannot service the request, RunMat converts through the host. Automatically resident inputs may remain on the host; explicit `gpuArray` inputs are re-uploaded to the same owner or return an error.",
     "Handles that are already flagged as logical (`gpuArray.logical`) are returned without modification.",
     "Scalars remain scalars: converting a `gpuArray` scalar preserves the residency and returns a logical gpuArray scalar."
   ]

@@ -6,7 +6,11 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorView, ProviderLinsolveOptions, ProviderLinsolveResult,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, NumericDType, Tensor, Value,
 };
@@ -142,6 +146,79 @@ const LINSOLVE_ERRORS: [BuiltinErrorDescriptor; 3] = [
     LINSOLVE_ERROR_INVALID_INPUT,
     LINSOLVE_ERROR_INTERNAL,
 ];
+const LINSOLVE_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linsolve-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linsolve with integer A or B is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinsolveIntegerInputExtension"),
+};
+const LINSOLVE_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linsolve-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linsolve with logical A or B is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinsolveLogicalInputExtension"),
+};
+const LINSOLVE_EXPLICIT_GPU_TWO_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "linsolve-explicit-gpu-two-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "two-output linsolve with explicit gpuArray input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:LinsolveExplicitGpuTwoOutputExtension"),
+    };
+const LINSOLVE_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linsolve-integer-option-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linsolve with a typed-integer structural option is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinsolveIntegerOptionExtension"),
+};
+const LINSOLVE_TEXT_TRANSA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linsolve-text-transa-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linsolve with a text-valued TRANSA option is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinsolveTextTransaExtension"),
+};
+const LINSOLVE_RCOND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "linsolve-rcond-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "linsolve with the RCOND option is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LinsolveRcondExtension"),
+};
+pub const LINSOLVE_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    LINSOLVE_INTEGER_INPUT_EXTENSION,
+    LINSOLVE_LOGICAL_INPUT_EXTENSION,
+    LINSOLVE_EXPLICIT_GPU_TWO_OUTPUT_EXTENSION,
+    LINSOLVE_INTEGER_OPTION_EXTENSION,
+    LINSOLVE_TEXT_TRANSA_EXTENSION,
+    LINSOLVE_RCOND_EXTENSION,
+];
+const LINSOLVE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat-only exact-owner promotion into an exact binary64 boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat-only exact-owner promotion into an exact binary64 boundary.",
+    },
+];
+const LINSOLVE_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "opts structural fields",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer LT, UT, RECT, SYM, and POSDEF values are independently gated structural controls.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "X = linsolve(integer_A, integer_B)", inputs: &LINSOLVE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer operands are a gated RunMat extension and are promoted only when exactly representable in binary64." },
+    BuiltinIntegerCapabilityDescriptor { form: "X = linsolve(A, B, opts_with_integer_field)", inputs: &LINSOLVE_INTEGER_OPTION_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "RunMat-only typed-integer truth controls are classified before option coercion." },
+];
 
 pub const LINSOLVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LINSOLVE_SIGNATURES,
@@ -223,6 +300,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "linsolve",
     type_resolver(left_divide_type),
     descriptor(crate::builtins::math::linalg::solve::linsolve::LINSOLVE_DESCRIPTOR),
+    extensions(LINSOLVE_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::solve::linsolve::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
 async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -374,9 +453,48 @@ fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
 /// Public helper for the VM multi-output surface.
 pub async fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinResult<LinsolveEval> {
     let options = options_from_rest(rest)?;
+    ensure_linsolve_extensions(&lhs, &rhs).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&lhs, NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, NAME)?;
     evaluate(lhs, rhs, options).await
+}
+
+async fn ensure_linsolve_extensions(lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
+    let integer = |value: &Value| {
+        matches!(value, Value::Int(_))
+            || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+            || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
+    };
+    if integer(lhs) || integer(rhs) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LINSOLVE_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
+        for value in [lhs, rhs] {
+            if integer(value)
+                && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(
+                    value,
+                )
+                .await?
+            {
+                return Err(builtin_error(
+                    "linsolve: integer input lies outside the exact binary64 interval",
+                ));
+            }
+        }
+    }
+    if crate::builtins::common::validation::value_has_logical_class(lhs)
+        || crate::builtins::common::validation::value_has_logical_class(rhs)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LINSOLVE_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if matches!(crate::output_count::current_output_count(), Some(2)) && [lhs, rhs].iter().any(|value| matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_is_explicit(h))) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LINSOLVE_EXPLICIT_GPU_TWO_OUTPUT_EXTENSION, NAME)?;
+    }
+    Ok(())
 }
 
 async fn try_gpu_linsolve(
@@ -387,12 +505,46 @@ async fn try_gpu_linsolve(
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider() {
+    let gpu_handles: Vec<&GpuTensorHandle> = [lhs, rhs]
+        .into_iter()
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let provider = match gpu_handles
+        .first()
+        .map(|handle| gpu_helpers::exact_provider_for_handle(handle))
+        .unwrap_or_else(runmat_accelerate_api::provider)
+    {
         Some(p) => p,
         None => return Ok(None),
     };
+    if gpu_handles.iter().any(|handle| {
+        gpu_helpers::exact_provider_for_handle(handle)
+            .is_none_or(|owner| !std::ptr::eq(owner, provider))
+    }) {
+        return Ok(None);
+    }
 
     if contains_complex(lhs) || contains_complex(rhs) {
+        return Ok(None);
+    }
+    let host_extension_input = gpu_handles.is_empty()
+        && (value_has_integer_class(lhs)
+            || value_has_integer_class(rhs)
+            || crate::builtins::common::validation::value_has_logical_class(lhs)
+            || crate::builtins::common::validation::value_has_logical_class(rhs));
+    if host_extension_input
+        || (provider.precision() != runmat_accelerate_api::ProviderPrecision::F64
+            && [lhs, rhs].iter().any(|value| {
+                value_has_integer_class(value)
+                    || crate::builtins::common::validation::value_has_logical_class(value)
+            }))
+    {
         return Ok(None);
     }
 
@@ -415,26 +567,87 @@ async fn try_gpu_linsolve(
     }
 
     let mut provider_opts: ProviderLinsolveOptions = options.into();
-    provider_opts.need_rcond =
-        matches!(crate::output_count::current_output_count(), Some(2)) || options.rcond.is_some();
+    let lhs_rows = lhs_operand.handle().shape.first().copied().unwrap_or(1);
+    let lhs_cols = lhs_operand.handle().shape.get(1).copied().unwrap_or(1);
+    let effective_rows = if options.transposed {
+        lhs_cols
+    } else {
+        lhs_rows
+    };
+    let effective_cols = if options.transposed {
+        lhs_rows
+    } else {
+        lhs_cols
+    };
+    let rectangular = effective_rows != effective_cols;
+    let wants_second_output = matches!(crate::output_count::current_output_count(), Some(2));
+    if rectangular && wants_second_output {
+        release_operand(provider, &mut lhs_operand);
+        release_operand(provider, &mut rhs_operand);
+        return Ok(None);
+    }
+    provider_opts.need_rcond = wants_second_output || options.rcond.is_some();
     let result = provider
         .linsolve(lhs_operand.handle(), rhs_operand.handle(), &provider_opts)
         .await
         .ok();
-
-    release_operand(provider, &mut lhs_operand);
-    release_operand(provider, &mut rhs_operand);
 
     if let Some(ProviderLinsolveResult {
         solution,
         reciprocal_condition,
     }) = result
     {
+        let aliases_lhs = gpu_helpers::same_gpu_handle(&solution, lhs_operand.handle());
+        let aliases_rhs = gpu_helpers::same_gpu_handle(&solution, rhs_operand.handle());
+        let expected_rows = effective_cols;
+        let expected_cols = rhs_operand.handle().shape.get(1).copied().unwrap_or(1);
+        let valid = !aliases_lhs
+            && !aliases_rhs
+            && solution.shape == vec![expected_rows, expected_cols]
+            && solution.device_id == provider.device_id()
+            && gpu_helpers::exact_provider_for_handle(&solution)
+                .is_some_and(|owner| std::ptr::eq(owner, provider))
+            && runmat_accelerate_api::handle_storage(&solution)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_precision(&solution) == Some(provider.precision())
+            && runmat_accelerate_api::handle_integer_type(&solution).is_none()
+            && !runmat_accelerate_api::handle_is_logical(&solution);
+        if !valid {
+            if !aliases_lhs && !aliases_rhs {
+                gpu_helpers::free_unprotected_exact_owner(
+                    &solution,
+                    &[lhs_operand.handle(), rhs_operand.handle()],
+                );
+            }
+            release_operand(provider, &mut lhs_operand);
+            release_operand(provider, &mut rhs_operand);
+            return Err(builtin_error(
+                "linsolve: provider returned malformed or aliased output",
+            ));
+        }
+        let provenance = gpu_handles
+            .iter()
+            .filter_map(|handle| runmat_accelerate_api::handle_provenance(handle))
+            .find(|provenance| *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        runmat_accelerate_api::set_handle_provenance(&solution, provenance);
+        runmat_accelerate_api::mark_residency(&solution);
+        release_operand(provider, &mut lhs_operand);
+        release_operand(provider, &mut rhs_operand);
         let eval = LinsolveEval::new(Value::GpuTensor(solution), Some(reciprocal_condition));
         return Ok(Some(eval));
     }
 
+    release_operand(provider, &mut lhs_operand);
+    release_operand(provider, &mut rhs_operand);
+
     Ok(None)
+}
+
+fn value_has_integer_class(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
 }
 
 fn parse_options(value: &Value) -> BuiltinResult<SolveOptions> {
@@ -456,11 +669,24 @@ fn parse_options(value: &Value) -> BuiltinResult<SolveOptions> {
             "SYM" => opts.symmetric = parse_bool_field("SYM", raw_value)?,
             "POSDEF" => opts.posdef = parse_bool_field("POSDEF", raw_value)?,
             "TRANSA" => {
+                if matches!(
+                    raw_value,
+                    Value::CharArray(_) | Value::String(_) | Value::StringArray(_)
+                ) {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &LINSOLVE_TEXT_TRANSA_EXTENSION,
+                        NAME,
+                    )?;
+                }
                 let transa = parse_transa(raw_value)?;
                 opts.transposed = transa != TransposeMode::None;
                 opts.conjugate = transa == TransposeMode::Conjugate;
             }
             "RCOND" => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LINSOLVE_RCOND_EXTENSION,
+                    NAME,
+                )?;
                 let threshold = parse_scalar_f64("RCOND", raw_value)?;
                 if threshold < 0.0 {
                     return Err(argument_error("linsolve: RCOND must be non-negative"));
@@ -483,6 +709,14 @@ fn parse_options(value: &Value) -> BuiltinResult<SolveOptions> {
 }
 
 fn parse_bool_field(name: &str, value: &Value) -> BuiltinResult<bool> {
+    if matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LINSOLVE_INTEGER_OPTION_EXTENSION,
+            NAME,
+        )?;
+    }
     match value {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(!i.is_zero()),
@@ -526,9 +760,17 @@ enum TransposeMode {
 }
 
 fn parse_transa(value: &Value) -> BuiltinResult<TransposeMode> {
-    let text = tensor::value_to_string(value).ok_or_else(|| {
-        argument_error("linsolve: TRANSA must be a character vector or string scalar")
-    })?;
+    match value {
+        Value::Bool(false) => return Ok(TransposeMode::None),
+        Value::Bool(true) => return Ok(TransposeMode::Conjugate),
+        Value::LogicalArray(array) if array.len() == 1 && array.data[0] == 0 => {
+            return Ok(TransposeMode::None)
+        }
+        Value::LogicalArray(array) if array.len() == 1 => return Ok(TransposeMode::Conjugate),
+        _ => {}
+    }
+    let text = tensor::value_to_string(value)
+        .ok_or_else(|| argument_error("linsolve: TRANSA must be a logical scalar"))?;
     if text.is_empty() {
         return Err(argument_error("linsolve: TRANSA cannot be empty"));
     }
@@ -537,7 +779,7 @@ fn parse_transa(value: &Value) -> BuiltinResult<TransposeMode> {
         "T" => Ok(TransposeMode::Transpose),
         "C" => Ok(TransposeMode::Conjugate),
         other => Err(argument_error(format!(
-            "linsolve: TRANSA must be 'N', 'T', or 'C', got '{other}'"
+            "linsolve: extended text TRANSA must be 'N', 'T', or 'C', got '{other}'"
         ))),
     }
 }
@@ -660,7 +902,11 @@ fn prepare_gpu_operand(
 ) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
-            if is_scalar_handle(handle) {
+            if handle.device_id != provider.device_id()
+                || gpu_helpers::exact_provider_for_handle(handle)
+                    .is_none_or(|owner| !std::ptr::eq(owner, provider))
+                || is_scalar_handle(handle)
+            {
                 Ok(None)
             } else {
                 Ok(Some(PreparedOperand::borrowed(handle)))
@@ -742,9 +988,16 @@ fn solve_real(lhs: Tensor, rhs: Tensor, options: &SolveOptions) -> BuiltinResult
         return Ok((solution, rcond));
     }
 
-    let (solution, rcond) = solve_general_real(&lhs_effective, &rhs_effective)?;
+    let (solution, rcond, rank) = solve_general_real(&lhs_effective, &rhs_effective)?;
     enforce_rcond(options, rcond)?;
-    Ok((solution, rcond))
+    Ok((
+        solution,
+        if lhs_effective.rows() == lhs_effective.cols() {
+            rcond
+        } else {
+            rank
+        },
+    ))
 }
 
 fn solve_complex(
@@ -783,9 +1036,16 @@ fn solve_complex(
         return Ok((solution, rcond));
     }
 
-    let (solution, rcond) = solve_general_complex(&lhs_effective, &rhs_effective)?;
+    let (solution, rcond, rank) = solve_general_complex(&lhs_effective, &rhs_effective)?;
     enforce_rcond(options, rcond)?;
-    Ok((solution, rcond))
+    Ok((
+        solution,
+        if lhs_effective.rows == lhs_effective.cols {
+            rcond
+        } else {
+            rank
+        },
+    ))
 }
 
 fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
@@ -952,7 +1212,7 @@ fn backward_substitution_complex(
     Ok((tensor, rcond))
 }
 
-fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
+fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64, f64)> {
     let lhs_values = tensor::tensor_values_f64_cow(lhs);
     let rhs_values = tensor::tensor_values_f64_cow(rhs);
     let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), lhs_values.as_ref());
@@ -960,17 +1220,22 @@ fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
+    let rank = svd
+        .singular_values
+        .iter()
+        .filter(|value| **value > tol)
+        .count() as f64;
     let solution = svd
         .solve(&b, tol)
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     let tensor = matrix_real_to_tensor(solution, real_solution_dtype(lhs, rhs))?;
-    Ok((tensor, rcond))
+    Ok((tensor, rcond, rank))
 }
 
 fn solve_general_complex(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
-) -> BuiltinResult<(ComplexTensor, f64)> {
+) -> BuiltinResult<(ComplexTensor, f64, f64)> {
     let a_data: Vec<Complex64> = lhs
         .materialize_f64()
         .iter()
@@ -986,11 +1251,16 @@ fn solve_general_complex(
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows, lhs.cols);
+    let rank = svd
+        .singular_values
+        .iter()
+        .filter(|value| **value > tol)
+        .count() as f64;
     let solution = svd
         .solve(&b, tol)
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     let tensor = matrix_complex_to_tensor(solution)?;
-    Ok((tensor, rcond))
+    Ok((tensor, rcond, rank))
 }
 
 fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tensor> {
@@ -1198,6 +1468,7 @@ pub(crate) mod tests {
     }
 
     fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::evaluate_args(a, b, rest))
     }
 
@@ -1251,7 +1522,78 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderTelemetry;
 
     fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::linsolve_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn linsolve_integer_extension_is_rejected_in_matlab_mode() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let lhs = Tensor::new_integer(IntegerStorage::I32(vec![1]), vec![1, 1]).unwrap();
+        let error = block_on(super::linsolve_builtin(
+            Value::Tensor(lhs),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("integer linsolve is a RunMat extension");
+        assert_eq!(
+            error.identifier(),
+            LINSOLVE_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn linsolve_option_extensions_are_independently_gated() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let mut integer_option = StructValue::new();
+        integer_option
+            .fields
+            .insert("LT".to_string(), Value::Int(IntValue::I8(1)));
+        let error = match options_from_rest(&[Value::Struct(integer_option)]) {
+            Err(error) => error,
+            Ok(_) => panic!("typed structural option must be gated"),
+        };
+        assert_eq!(
+            error.identifier(),
+            LINSOLVE_INTEGER_OPTION_EXTENSION.error_identifier
+        );
+
+        let mut text_transa = StructValue::new();
+        text_transa
+            .fields
+            .insert("TRANSA".to_string(), Value::from("T"));
+        let error = match options_from_rest(&[Value::Struct(text_transa)]) {
+            Err(error) => error,
+            Ok(_) => panic!("text TRANSA must be gated"),
+        };
+        assert_eq!(
+            error.identifier(),
+            LINSOLVE_TEXT_TRANSA_EXTENSION.error_identifier
+        );
+
+        let mut rcond = StructValue::new();
+        rcond.fields.insert("RCOND".to_string(), Value::Num(0.1));
+        let error = match options_from_rest(&[Value::Struct(rcond)]) {
+            Err(error) => error,
+            Ok(_) => panic!("RCOND must be gated"),
+        };
+        assert_eq!(
+            error.identifier(),
+            LINSOLVE_RCOND_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn linsolve_documented_logical_transa_does_not_require_extension() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let mut options = StructValue::new();
+        options
+            .fields
+            .insert("TRANSA".to_string(), Value::Bool(true));
+        let parsed = options_from_rest(&[Value::Struct(options)]).expect("logical TRANSA");
+        assert!(parsed.transposed);
+        assert!(parsed.conjugate);
     }
 
     fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> BuiltinResult<LinsolveEval> {
@@ -1755,6 +2097,18 @@ pub(crate) mod tests {
         approx_eq(rcond_value, 1.0);
     }
 
+    #[test]
+    fn linsolve_rectangular_second_output_reports_rank() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+        let a = Tensor::new(vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+
+        let eval = evaluate_args(Value::Tensor(a), Value::Tensor(b), &[]).expect("evaluate");
+
+        assert_eq!(eval.reciprocal_condition(), Value::Num(1.0));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gpu_round_trip_matches_cpu() {
@@ -1819,7 +2173,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn provider_upload_path_reads_typed_integer_storage_exactly() {
+    fn typed_integer_host_inputs_keep_the_double_solve_boundary_on_host() {
         test_support::with_test_provider(|provider| {
             provider.reset_telemetry();
             let a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
@@ -1835,8 +2189,8 @@ pub(crate) mod tests {
             approx_eq(tensor.materialize_f64()[1], 2.0);
 
             let telemetry = provider.telemetry_snapshot();
-            assert!(telemetry.linsolve.count >= 1);
-            assert!(fallback_count(&telemetry, "linsolve:host_reupload") >= 1);
+            assert_eq!(telemetry.linsolve.count, 0);
+            assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 0);
         });
     }
 
@@ -1920,10 +2274,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_square_linsolve_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -1988,10 +2343,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_square_linsolve_uses_device_path_without_output_count() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2050,10 +2406,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_square_linsolve_recovers_rcond_output_on_device() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2113,10 +2470,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_square_linsolve_with_rcond_option_stays_on_device() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2188,10 +2546,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_tall_linsolve_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2254,10 +2613,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_posdef_linsolve_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2347,10 +2707,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_transposed_posdef_linsolve_uses_cholesky_path() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2431,10 +2792,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_symmetric_linsolve_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2501,10 +2863,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_transposed_square_linsolve_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2577,10 +2940,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_conjugate_square_linsolve_avoids_host_reupload_fallback_for_real_inputs() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2654,10 +3018,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_transposed_rectangular_linsolve_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
             return;
         }
@@ -2736,10 +3101,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_triangular_hint_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         let a = Tensor::new(
             vec![3.0, -1.0, 4.0, 0.0, 2.0, 1.0, 0.0, 0.0, 5.0],
             vec![3, 3],
@@ -2805,10 +3171,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_transposed_triangular_hint_avoids_host_reupload_fallback() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         let a = Tensor::new(
             vec![3.0, 1.0, 0.0, 0.0, 4.0, 2.0, 0.0, 0.0, 5.0],
             vec![3, 3],
@@ -2884,10 +3251,11 @@ pub(crate) mod tests {
     #[test]
     fn wgpu_round_trip_matches_cpu() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

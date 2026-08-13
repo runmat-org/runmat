@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Providers may implement the kron hook to execute entirely on the device; the runtime gathers and evaluates on the host when the hook is missing."
+    "notes": "Validated floating-point inputs use the owning provider's kron hook when available. Unsupported provider cases gather to the host for exact evaluation and restore the result to the source provider when its class can be preserved."
   },
   "fusion": {
     "elementwise": false,
@@ -32,9 +32,10 @@
   },
   "description": "`kron(A, B)` forms the Kronecker (tensor) product of `A` and `B`. Output sizing and column-major block ordering follow MATLAB semantics.",
   "behaviors": [
-    "Works with scalars, vectors, matrices, and higher-rank tensors; trailing singleton dimensions are honoured.",
+    "Works with scalars, vectors, and matrices. Higher-rank tensor inputs are a RunMat extension and are rejected while strict compatibility mode disables extensions.",
     "If either input is complex, the output is complex and uses MATLAB's complex arithmetic rules.",
     "Logical and char inputs are promoted to double precision before multiplication.",
+    "All eight integer classes are supported. Integer operands must have the same class, or the other operand must be a scalar double; multiplication preserves the integer class and saturates on overflow. Complex integer arithmetic is rejected.",
     "Scalar arguments act as uniform scalars (`kron(a, B)` behaves like `a * B`).",
     "Empty dimensions propagate; if any replicated dimension is zero, the result is empty along that axis.",
     "Invalid inputs (non-numeric/non-logical, or values that would overflow the maximum size) raise descriptive MATLAB-style errors."
@@ -100,7 +101,7 @@
     },
     {
       "question": "Does the GPU path always stay on-device?",
-      "answer": "When the provider supplies a `kron` hook, execution stays on-device. Otherwise RunMat gathers to the host, computes the product, and re-uploads the result when a provider is available."
+      "answer": "Supported real floating-point operands stay on-device when their exact owning provider supplies a valid `kron` result. Unsupported cases gather automatically, compute on the host, and restore the class-preserving result to the source provider. Explicit `gpuArray` inputs either produce a resident result or raise an error; the source handles are not consumed."
     }
   ],
   "links": [
@@ -187,6 +188,6 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's planner keeps values resident on the GPU whenever it is profitable. Explicit `gpuArray` calls remain supported for MATLAB compatibility and for users who want direct control over residency.",
   "gpu_behavior": [
-    "When a GPU provider is active, RunMat first consults the provider's `kron` hook so the operation can run entirely on the device. Providers that have not implemented this hook fall back to a safe path: the runtime gathers both operands to host memory, performs the Kronecker product in Rust, and then attempts to upload the result back to the originating device so downstream GPU work can continue without additional copies."
+    "For real floating-point operands, RunMat uses the exact owning provider's `kron` hook when the operands share a compatible device and precision; mixed host/resident floating inputs may upload the host operand temporarily and use the same path. Provider outputs are validated for shape, ownership, device, storage, precision, and non-aliasing. Typed-integer and otherwise unsupported cases gather automatically, compute with class-preserving host semantics, and restore the result to the source provider when possible. An explicit `gpuArray` source must remain resident or the call errors, while automatically resident values may return to host only when their class cannot be represented safely."
   ]
 }

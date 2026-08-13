@@ -18,12 +18,12 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host when the provider lacks unary_log1p or reduce_min, or when complex outputs are required."
+    "notes": "Uses `reduce_min` plus `unary_log1p` for resident real data when possible; otherwise computes on the host and restores the result to the exact owner when representable."
   },
   "fusion": {
-    "elementwise": true,
+    "elementwise": false,
     "reduction": false,
-    "max_inputs": 1,
+    "max_inputs": 0,
     "constants": "inline"
   },
   "requires_feature": null,
@@ -31,14 +31,15 @@
     "unit": "builtins::math::elementwise::log1p::tests",
     "integration": "builtins::math::elementwise::log1p::tests::log1p_gpu_provider_roundtrip"
   },
-  "description": "`Y = log1p(X)` evaluates `log(1 + X)` element-wise with improved near-zero accuracy. Input coercion and complex/domain behavior follow MATLAB semantics.",
+  "description": "`Y = log1p(X)` evaluates `log(1 + X)` element-wise with improved near-zero accuracy for floating-point inputs and principal-branch complex promotion. Integer, logical, character, and explicit-GPU real-to-complex forms are separately gated RunMat extensions.",
   "behaviors": [
-    "Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before execution.",
-    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "In RunMat extension mode, logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before execution; compatibility mode rejects this extension.",
+    "In RunMat extension mode, character arrays are interpreted as their numeric code points and return dense double tensors; compatibility mode rejects this extension.",
+    "Integer input is a RunMat-only extension. All eight integer classes are accepted only when every value is exactly representable in binary64, and the result is double or complex double.",
     "Values equal to `-1` yield `-Inf`, matching MATLAB's handling of `log(0)`.",
     "Inputs smaller than `-1` promote to complex outputs: `log1p(-2)` returns `0 + iπ`.",
     "Complex inputs follow MATLAB's definition by computing the natural logarithm of `1 + z`.",
-    "Existing GPU tensors remain on the device when the registered provider implements `unary_log1p` alongside `reduce_min`. RunMat queries the device-side minimum to confirm the data stays within the real-valued domain; otherwise it gathers to the host, computes the exact result, and preserves residency metadata."
+    "Existing real GPU tensors remain on the device when their exact owner implements `unary_log1p` alongside `reduce_min`. Other paths gather through that owner, compute on the host, and restore the result when its class and precision are representable."
   ],
   "examples": [
     {
@@ -78,7 +79,7 @@
     },
     {
       "question": "How are logical arrays handled?",
-      "answer": "Logical values convert to doubles before applying `log1p`, so `log1p([true false])` yields a double array `[log(2), 0]`."
+      "answer": "In RunMat extension mode, logical values convert to doubles before applying `log1p`, so `log1p([true false])` yields a double array `[log(2), 0]`. Compatibility mode rejects logical input."
     },
     {
       "question": "What about inputs smaller than `-1`?",
@@ -90,15 +91,15 @@
     },
     {
       "question": "What happens when the GPU provider lacks `unary_log1p`?",
-      "answer": "RunMat gathers the tensor to the host, computes the result in double precision, and returns it. This ensures users always see MATLAB-compatible behavior without manual residency management."
+      "answer": "RunMat gathers through the input's exact owner, computes on the host in the input's floating class, and restores the result to that owner when representable; otherwise it returns the correctly typed host value."
     },
     {
       "question": "Is double precision guaranteed?",
-      "answer": "Yes. RunMat stores dense numeric tensors in double precision (`f64`). GPU providers may choose single precision internally but convert back to double when returning data to the runtime."
+      "answer": "No single rule applies to every input: double input produces double output and single input preserves single precision. Integer, logical, and character extensions produce double-domain output."
     },
     {
       "question": "Can `log1p` participate in fusion?",
-      "answer": "Yes. The fusion planner recognizes `log1p` as an element-wise op. Providers that support fused kernels can materialize `log(1 + x)` directly in generated WGSL."
+      "answer": "Not currently. Fusion is disabled because replacing `log1p(x)` with a raw fused `log(1 + x)` would lose the near-zero accuracy that defines this function."
     },
     {
       "question": "What's the inverse of `log1p`?",
@@ -227,9 +228,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs"
   },
-  "gpu_residency": "```matlab:runnable\nG = gpuArray(linspace(-0.5, 0.5, 5));\nout = log1p(G);\nrealResult = gather(out);\n```\n\nExpected output:\n\n```matlab\nrealResult = [-0.6931 -0.2877 0 0.2231 0.4055];\n```",
+  "gpu_residency": "RunMat resolves the exact provider that owns a resident input. Real data can stay on device through `reduce_min` and `unary_log1p`; integer, logical, complex, unsupported-hook, and real-to-complex paths gather through that owner and restore the correctly typed result when representable. Explicit `gpuArray` input that requires real-to-complex promotion is a RunMat-only extension and is rejected in compatibility mode.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors resident on the GPU whenever the provider exposes the `unary_log1p` hook together with `reduce_min`. The runtime uses the device-side minimum to ensure that `1 + X` stays non-negative; when complex outputs are required or either hook is missing, RunMat automatically gathers the tensor, computes on the CPU using double precision, and returns the result with the expected MATLAB semantics."
+    "RunMat Accelerate uses the exact owning provider's `reduce_min` to determine whether resident real data stays in the real domain, then validates any `unary_log1p` output for non-aliasing, shape, device, owner, storage, and precision. Fallbacks download through that owner, compute on the host, and restore when representable while preserving provenance. `log1p` is intentionally excluded from fusion to retain its near-zero accuracy."
   ],
   "syntax": {
     "example": {
@@ -237,7 +238,7 @@
       "input": "Y = log1p(X)"
     },
     "points": [
-      "`X` is a numeric array of any shape — scalars, vectors, matrices, or N-D tensors. Real and complex inputs are both supported; logical and character inputs are promoted to double before evaluation.",
+      "`X` is a real or complex floating array of any shape — scalars, vectors, matrices, or N-D tensors. RunMat extension mode additionally accepts exact-binary64 integers, logical values, and character arrays and promotes them to double; compatibility mode rejects those extensions.",
       "`Y` has the same shape as `X` and equals `log(1 + X)` computed element-wise with high accuracy for small `|X|`. For `X = -1` the result is `-Inf`; for real `X < -1` the output promotes to complex (principal branch).",
       "Use `log1p` instead of `log(1 + x)` whenever `x` can be close to zero. Forming `1 + x` in double precision drops bits of `x` (catastrophic cancellation), so `log(1 + 1e-15)` is wrong by nearly 10%, while `log1p(1e-15)` is correct to the last bit."
     ]

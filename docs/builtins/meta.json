@@ -84227,6 +84227,59 @@
           "when": "Internal conversion/allocation/provider path fails.",
           "message": "kron: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "kron-nd-input",
+          "mode": "RunMatOnly",
+          "description": "kron with an N-D operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KronNdInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "K = kron(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Native integer storage remains authoritative; paired integer operands must use the same class and complex integer arithmetic is rejected."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar double may scale an integer operand; other mixed numeric arrays are rejected by the settled integer arithmetic rule."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer products preserve the integer class and saturate. Resident fallback gathers authoritative storage without consuming source handles and restores eligible output to the owning provider."
+        }
       ]
     },
     {
@@ -85188,6 +85241,59 @@
           "when": "Provider interaction, gather/upload, or internal tensor construction failed.",
           "message": "ldivide: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ldivide-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "ldivide with a 'like' output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LdivideLikePrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = ldivide(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer divisor requires the dividend to use the same integer class or to be scalar double; complex integer division is rejected."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer dividend requires the divisor to use the same integer class or to be scalar double; compatible dimensions expand implicitly."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Integer quotients round to nearest with half ties away from zero and saturate to the integer class. Resident fallback reads authoritative storage and restores the result to the owning provider."
+        }
       ]
     },
     {
@@ -85236,12 +85342,51 @@
           "identifier": "RunMat:le:SizeMismatch",
           "when": "Operands are not broadcast-compatible.",
           "message": "le: array sizes are not compatible for broadcasting"
-        },
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.LE.COMPLEX_UNSUPPORTED",
-          "identifier": "RunMat:le:ComplexNotSupported",
-          "when": "At least one operand is complex.",
-          "message": "le: complex numbers are not supported"
+          "form": "tf = le(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All numeric classes may be compared without a lossy conversion; signed, unsigned, and floating counterparts are compared exactly."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Mixed numeric classes are documented and compatible dimensions expand implicitly."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "BroadcastCompatible",
+          "notes": "Integer comparisons remain exact across class boundaries. Complex inputs compare real components only, and resident fallback restores a logical result to the owning provider."
         }
       ]
     },
@@ -85423,7 +85568,7 @@
           "outputs": [
             {
               "name": "n",
-              "ty": "IntegerScalar",
+              "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
               "description": "Largest dimension extent of input."
@@ -85431,7 +85576,43 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.LENGTH.UNSUPPORTED_TABLE",
+          "identifier": "RunMat:length:UnsupportedTable",
+          "when": "The input is a table or timetable.",
+          "message": "length: tables and timetables are not supported; use height, width, or size"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "n = length(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer values are not inspected; only array shape participates."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "All integer classes use shape metadata only. Resident input requires no provider access and the result is a host double scalar."
+        }
+      ]
     },
     {
       "name": "lettersPattern",
@@ -86735,6 +86916,181 @@
           "when": "Objective, constraint, or bound dimensions/types are invalid.",
           "message": "linprog: invalid input"
         }
+      ],
+      "extensions": [
+        {
+          "id": "linprog-integer-f",
+          "mode": "RunMatOnly",
+          "description": "linprog with a typed-integer f input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogIntegerFExtension"
+        },
+        {
+          "id": "linprog-integer-a",
+          "mode": "RunMatOnly",
+          "description": "linprog with a typed-integer A input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogIntegerAExtension"
+        },
+        {
+          "id": "linprog-integer-b",
+          "mode": "RunMatOnly",
+          "description": "linprog with a typed-integer b input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogIntegerBExtension"
+        },
+        {
+          "id": "linprog-integer-aeq",
+          "mode": "RunMatOnly",
+          "description": "linprog with a typed-integer Aeq input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogIntegerAeqExtension"
+        },
+        {
+          "id": "linprog-integer-beq",
+          "mode": "RunMatOnly",
+          "description": "linprog with a typed-integer beq input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogIntegerBeqExtension"
+        },
+        {
+          "id": "linprog-integer-lb",
+          "mode": "RunMatOnly",
+          "description": "linprog with a typed-integer lb input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogIntegerLbExtension"
+        },
+        {
+          "id": "linprog-integer-ub",
+          "mode": "RunMatOnly",
+          "description": "linprog with a typed-integer ub input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogIntegerUbExtension"
+        },
+        {
+          "id": "linprog-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "linprog with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinprogExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "linprog(integer-valued solver inputs)",
+          "inputs": [
+            {
+              "name": "f",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public linprog requires double f; RunMat mode admits exact-binary64 typed integers."
+            },
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public A is single or double; typed integers are independently gated."
+            },
+            {
+              "name": "b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public b is single or double; typed integers are independently gated."
+            },
+            {
+              "name": "Aeq",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public Aeq is double; typed integers are independently gated."
+            },
+            {
+              "name": "beq",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public beq is single or double; typed integers are independently gated."
+            },
+            {
+              "name": "lb",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public lb is double; typed integers are independently gated."
+            },
+            {
+              "name": "ub",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public ub is double; typed integers are independently gated."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Every typed-integer role is a separately gated RunMat extension. Values must be exactly representable before crossing the host binary64 solver boundary."
+        }
       ]
     },
     {
@@ -86902,101 +87258,283 @@
           "when": "Runtime fails while solving or executing provider fallback paths.",
           "message": "linsolve: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "linsolve-integer-input",
+          "mode": "RunMatOnly",
+          "description": "linsolve with integer A or B is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinsolveIntegerInputExtension"
+        },
+        {
+          "id": "linsolve-logical-input",
+          "mode": "RunMatOnly",
+          "description": "linsolve with logical A or B is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinsolveLogicalInputExtension"
+        },
+        {
+          "id": "linsolve-explicit-gpu-two-output",
+          "mode": "RunMatOnly",
+          "description": "two-output linsolve with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinsolveExplicitGpuTwoOutputExtension"
+        },
+        {
+          "id": "linsolve-integer-option-control",
+          "mode": "RunMatOnly",
+          "description": "linsolve with a typed-integer structural option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinsolveIntegerOptionExtension"
+        },
+        {
+          "id": "linsolve-text-transa-option",
+          "mode": "RunMatOnly",
+          "description": "linsolve with a text-valued TRANSA option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinsolveTextTransaExtension"
+        },
+        {
+          "id": "linsolve-rcond-option",
+          "mode": "RunMatOnly",
+          "description": "linsolve with the RCOND option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinsolveRcondExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = linsolve(integer_A, integer_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat-only exact-owner promotion into an exact binary64 boundary."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat-only exact-owner promotion into an exact binary64 boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer operands are a gated RunMat extension and are promoted only when exactly representable in binary64."
+        },
+        {
+          "form": "X = linsolve(A, B, opts_with_integer_field)",
+          "inputs": [
+            {
+              "name": "opts structural fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer LT, UT, RECT, SYM, and POSDEF values are independently gated structural controls."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat-only typed-integer truth controls are classified before option coercion."
+        }
       ]
     },
     {
       "name": "linspace",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = linspace(start, stop)",
+          "inputs": [
+            {
+              "name": "start",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Starting value."
+            },
+            {
+              "name": "stop",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Ending value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of linearly spaced values."
+            }
+          ]
+        },
+        {
+          "label": "x = linspace(start, stop, n)",
+          "inputs": [
+            {
+              "name": "start",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Starting value."
+            },
+            {
+              "name": "stop",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Ending value."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "100",
+              "description": "Number of points."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of linearly spaced values."
+            }
+          ]
+        }
+      ],
       "errors": [
         {
           "code": "RM.LINSPACE.ARG_COUNT",
           "identifier": null,
-          "message": "linspace: expected at most three input arguments",
-          "when": "More than three input arguments are provided."
+          "when": "More than three input arguments are provided.",
+          "message": "linspace: expected at most three input arguments"
         },
         {
           "code": "RM.LINSPACE.COUNT_NOT_SCALAR",
           "identifier": null,
-          "message": "linspace: number of points must be a scalar",
-          "when": "The count argument is not a numeric scalar value."
+          "when": "The count argument is not a numeric scalar value.",
+          "message": "linspace: number of points must be a scalar"
         },
         {
           "code": "RM.LINSPACE.COUNT_NOT_FINITE",
           "identifier": null,
-          "message": "linspace: number of points must not be infinite",
-          "when": "The count argument is infinite."
+          "when": "The count argument is infinite.",
+          "message": "linspace: number of points must not be infinite"
         },
         {
           "code": "RM.LINSPACE.COUNT_TOO_LARGE",
           "identifier": null,
-          "message": "linspace: number of points is too large for this platform",
-          "when": "The count argument exceeds platform limits."
+          "when": "The count argument exceeds platform limits.",
+          "message": "linspace: number of points is too large for this platform"
         }
       ],
-      "output_mode": "Fixed",
-      "signatures": [
+      "integer_capabilities": [
         {
+          "form": "x = linspace(integer_start, integer_stop[, n])",
           "inputs": [
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Starting value.",
               "name": "start",
-              "ty": "NumericScalar"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer endpoints are rejected; linspace endpoints must be single or double."
             },
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Ending value.",
               "name": "stop",
-              "ty": "NumericScalar"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer endpoints are rejected; linspace endpoints must be single or double."
             }
           ],
-          "label": "x = linspace(start, stop)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of linearly spaced values.",
-              "name": "x",
-              "ty": "NumericArray"
-            }
-          ]
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ScalarOnly",
+          "notes": "Host and resident integer endpoints are rejected before numeric sequence generation."
         },
         {
+          "form": "x = linspace(start, stop, integer_n)",
           "inputs": [
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Starting value.",
-              "name": "start",
-              "ty": "NumericScalar"
-            },
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Ending value.",
-              "name": "stop",
-              "ty": "NumericScalar"
-            },
-            {
-              "arity": "Optional",
-              "default": "100",
-              "description": "Number of points.",
               "name": "n",
-              "ty": "NumericScalar"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are accepted as exact structural counts."
             }
           ],
-          "label": "x = linspace(start, stop, n)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of linearly spaced values.",
-              "name": "x",
-              "ty": "NumericArray"
-            }
-          ]
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The count is read exactly; output class follows the floating-point endpoints."
         }
       ]
     },
@@ -87292,6 +87830,61 @@
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "log: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "log-integer-input",
+          "mode": "RunMatOnly",
+          "description": "log with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LogIntegerInputExtension"
+        },
+        {
+          "id": "log-logical-input",
+          "mode": "RunMatOnly",
+          "description": "log with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LogLogicalInputExtension"
+        },
+        {
+          "id": "log-character-input",
+          "mode": "RunMatOnly",
+          "description": "log with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LogCharacterInputExtension"
+        },
+        {
+          "id": "log-explicit-real-gpu-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "complex promotion from an explicit real gpuArray is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LogExplicitGpuComplexExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = log(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Accepted only in RunMat mode and only inside the exact binary64 integer interval."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Resident integer input is downloaded exactly through its owner before entering the double logarithm domain."
+        }
       ]
     },
     {
@@ -87333,6 +87926,61 @@
           "identifier": "RunMat:log10:Internal",
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "log10: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "log10-integer-input",
+          "mode": "RunMatOnly",
+          "description": "log10 with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log10IntegerInputExtension"
+        },
+        {
+          "id": "log10-logical-input",
+          "mode": "RunMatOnly",
+          "description": "log10 with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log10LogicalInputExtension"
+        },
+        {
+          "id": "log10-character-input",
+          "mode": "RunMatOnly",
+          "description": "log10 with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log10CharacterInputExtension"
+        },
+        {
+          "id": "log10-explicit-real-gpu-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "complex promotion from an explicit real gpuArray is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log10ExplicitGpuComplexExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = log10(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Accepted only in RunMat mode and inside the exact binary64 integer interval."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Resident integer input is downloaded exactly through its owner before double-domain computation."
         }
       ]
     },
@@ -87376,6 +88024,61 @@
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "log1p: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "log1p-integer-input",
+          "mode": "RunMatOnly",
+          "description": "log1p with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pIntegerInputExtension"
+        },
+        {
+          "id": "log1p-logical-input",
+          "mode": "RunMatOnly",
+          "description": "log1p with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pLogicalInputExtension"
+        },
+        {
+          "id": "log1p-character-input",
+          "mode": "RunMatOnly",
+          "description": "log1p with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pCharacterInputExtension"
+        },
+        {
+          "id": "log1p-explicit-real-gpu-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "complex promotion from an explicit real gpuArray is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pExplicitGpuComplexExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = log1p(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Accepted only in RunMat mode and inside the exact binary64 integer interval."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Resident integer input is downloaded exactly through its owner before double-domain computation."
+        }
       ]
     },
     {
@@ -87417,6 +88120,55 @@
           "identifier": "RunMat:log2:Internal",
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "log2: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "log2-integer-input",
+          "mode": "RunMatOnly",
+          "description": "log2 with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log2IntegerInputExtension"
+        },
+        {
+          "id": "log2-logical-input",
+          "mode": "RunMatOnly",
+          "description": "log2 with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log2LogicalInputExtension"
+        },
+        {
+          "id": "log2-character-input",
+          "mode": "RunMatOnly",
+          "description": "log2 with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log2CharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = log2(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode promotes all eight integer classes to the binary64 logarithm domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "This is a gated RunMat extension; resident integer inputs gather exactly from their owning provider."
         }
       ]
     },
@@ -87471,6 +88223,49 @@
           "identifier": "RunMat:logical:InternalError",
           "when": "Internal logical buffer materialization fails.",
           "message": "logical: internal conversion error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "logical-string-array-input",
+          "mode": "RunMatOnly",
+          "description": "logical with string-array input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LogicalStringArrayInputExtension"
+        },
+        {
+          "id": "logical-symbolic-constant-input",
+          "mode": "RunMatOnly",
+          "description": "logical with a symbolic numeric constant is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LogicalSymbolicConstantInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = logical(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes convert elementwise without floating materialization; zero becomes false and every nonzero value becomes true."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host conversion reads authoritative integer storage exactly; resident conversion uses a validated owning-provider path or exact gather and class-preserving restoration."
         }
       ]
     },
@@ -87567,97 +88362,169 @@
     },
     {
       "name": "logspace",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = logspace(start, stop)",
+          "inputs": [
+            {
+              "name": "start",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Starting exponent value."
+            },
+            {
+              "name": "stop",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Ending exponent value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of logarithmically spaced values."
+            }
+          ]
+        },
+        {
+          "label": "x = logspace(start, stop, n)",
+          "inputs": [
+            {
+              "name": "start",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Starting exponent value."
+            },
+            {
+              "name": "stop",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Ending exponent value."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "50",
+              "description": "Number of points."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of logarithmically spaced values."
+            }
+          ]
+        }
+      ],
       "errors": [
         {
           "code": "RM.LOGSPACE.ARG_COUNT",
           "identifier": null,
-          "message": "logspace: expected two or three input arguments",
-          "when": "More than three input arguments are provided."
+          "when": "More than three input arguments are provided.",
+          "message": "logspace: expected two or three input arguments"
         },
         {
           "code": "RM.LOGSPACE.COUNT_NOT_SCALAR",
           "identifier": null,
-          "message": "logspace: number of points must be a scalar",
-          "when": "The count argument is not a numeric scalar value."
+          "when": "The count argument is not a numeric scalar value.",
+          "message": "logspace: number of points must be a scalar"
         },
         {
           "code": "RM.LOGSPACE.COUNT_NOT_FINITE",
           "identifier": null,
-          "message": "logspace: number of points must be finite",
-          "when": "The count argument is NaN or infinite."
+          "when": "The count argument is NaN or infinite.",
+          "message": "logspace: number of points must be finite"
         },
         {
           "code": "RM.LOGSPACE.COUNT_TOO_LARGE",
           "identifier": null,
-          "message": "logspace: number of points is too large for this platform",
-          "when": "The count argument exceeds platform limits."
+          "when": "The count argument exceeds platform limits.",
+          "message": "logspace: number of points is too large for this platform"
         }
       ],
-      "output_mode": "Fixed",
-      "signatures": [
+      "integer_capabilities": [
         {
+          "form": "x = logspace(start,stop,integer_n)",
           "inputs": [
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Starting exponent value.",
-              "name": "start",
-              "ty": "NumericScalar"
-            },
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Ending exponent value.",
-              "name": "stop",
-              "ty": "NumericScalar"
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The point count accepts an exact real integer scalar; nonpositive signed values produce an empty row and oversized values reject before allocation."
             }
           ],
-          "label": "x = logspace(start, stop)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of logarithmically spaced values.",
-              "name": "x",
-              "ty": "NumericArray"
-            }
-          ]
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The exact integer count controls row length; floating endpoints determine output precision and explicit endpoint residency determines device placement."
         },
         {
+          "form": "x = logspace(integer_start,integer_stop[,n])",
           "inputs": [
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Starting exponent value.",
               "name": "start",
-              "ty": "NumericScalar"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "Rejected",
+              "notes": "Endpoints are restricted to documented single or double scalars."
             },
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Ending exponent value.",
               "name": "stop",
-              "ty": "NumericScalar"
-            },
-            {
-              "arity": "Optional",
-              "default": "50",
-              "description": "Number of points.",
-              "name": "n",
-              "ty": "NumericScalar"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "Rejected",
+              "notes": "Endpoints are restricted to documented single or double scalars."
             }
           ],
-          "label": "x = logspace(start, stop, n)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of logarithmically spaced values.",
-              "name": "x",
-              "ty": "NumericArray"
-            }
-          ]
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Typed-integer endpoints are rejected on host and from resident dtype metadata before provider access."
         }
       ]
     },
@@ -88596,12 +89463,51 @@
           "identifier": "RunMat:lt:SizeMismatch",
           "when": "Operands are not broadcast-compatible.",
           "message": "lt: array sizes are not compatible for broadcasting"
-        },
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.LT.COMPLEX_UNSUPPORTED",
-          "identifier": "RunMat:lt:ComplexNotSupported",
-          "when": "At least one operand is complex.",
-          "message": "lt: complex numbers are not supported"
+          "form": "tf = lt(A,B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every integer class may be compared without conversion loss."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every integer class may be compared without conversion loss."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Mixed integer classes and floating operands compare exactly with MATLAB broadcasting; resident fallback restores explicit outputs to the owner."
         }
       ]
     },
@@ -88818,6 +89724,49 @@
           "identifier": "RunMat:lu:Internal",
           "when": "Runtime cannot materialize LU outputs.",
           "message": "lu: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "lu-integer-input",
+          "mode": "RunMatOnly",
+          "description": "lu with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LuIntegerInputExtension"
+        },
+        {
+          "id": "lu-logical-input",
+          "mode": "RunMatOnly",
+          "description": "lu with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LuLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[L,U,P] = lu(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode admits integer matrices at an explicit binary64 factorization boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Gated RunMat extension; documented MATLAB input classes remain single and double."
         }
       ]
     },

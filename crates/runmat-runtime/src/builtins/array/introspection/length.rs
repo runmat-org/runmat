@@ -8,9 +8,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::containers::map::map_length;
 use crate::runtime_error::RuntimeError;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -27,7 +30,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Reads tensor metadata from handles; falls back to gathering only when provider metadata is absent.",
+    notes: "Reads shape metadata carried by resident handles and returns a host double scalar without provider access or gather.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -47,13 +50,23 @@ fn length_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         Type::Unknown
     } else {
-        Type::Int
+        Type::Num
     }
 }
 
+const LENGTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Integer values are not inspected; only array shape participates.",
+}];
+pub const LENGTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "n = length(integer_A)", inputs: &LENGTH_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "All integer classes use shape metadata only. Resident input requires no provider access and the result is a host double scalar." }];
+
 const LENGTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
-    ty: BuiltinParamType::IntegerScalar,
+    ty: BuiltinParamType::NumericScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Largest dimension extent of input.",
@@ -73,7 +86,14 @@ const LENGTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     outputs: &LENGTH_OUTPUT,
 }];
 
-const LENGTH_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+const LENGTH_ERROR_UNSUPPORTED_TABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LENGTH.UNSUPPORTED_TABLE",
+    identifier: Some("RunMat:length:UnsupportedTable"),
+    when: "The input is a table or timetable.",
+    message: "length: tables and timetables are not supported; use height, width, or size",
+};
+
+const LENGTH_ERRORS: [BuiltinErrorDescriptor; 1] = [LENGTH_ERROR_UNSUPPORTED_TABLE];
 
 pub const LENGTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LENGTH_SIGNATURES,
@@ -89,10 +109,24 @@ pub const LENGTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "length,largest dimension,vector length,gpu metadata,array size",
     accel = "metadata",
     type_resolver(length_type),
+    integer_capabilities(LENGTH_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::array::introspection::length::LENGTH_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::length"
 )]
 async fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    if matches!(&value, Value::Object(object) if crate::builtins::table::is_tabular_object(object))
+    {
+        return Err(
+            crate::build_runtime_error(LENGTH_ERROR_UNSUPPORTED_TABLE.message)
+                .with_builtin("length")
+                .with_identifier(
+                    LENGTH_ERROR_UNSUPPORTED_TABLE
+                        .identifier
+                        .expect("length table error identifier"),
+                )
+                .build(),
+        );
+    }
     if let Some(count) = map_length(&value) {
         return Ok(Value::Num(count as f64));
     }
@@ -109,6 +143,8 @@ async fn max_dimension(value: &Value) -> Result<usize, RuntimeError> {
 pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
 
     fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {
         block_on(super::length_builtin(value))
@@ -119,13 +155,13 @@ pub(crate) mod tests {
     };
 
     #[test]
-    fn length_type_returns_int() {
+    fn length_type_returns_double_numeric() {
         assert_eq!(
             super::length_type(
                 &[Type::Tensor { shape: None }],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::Int
+            Type::Num
         );
     }
 
@@ -248,14 +284,28 @@ pub(crate) mod tests {
             assert_eq!(result, Value::Num(4.0));
         });
     }
+
+    #[test]
+    fn length_rejects_table_values() {
+        let table = crate::builtins::table::table_from_columns(
+            vec!["A".into()],
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+            )],
+        )
+        .expect("table");
+        let error = length_builtin(table).expect_err("length(table) must reject");
+        assert_eq!(error.identifier(), Some("RunMat:length:UnsupportedTable"));
+    }
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn length_wgpu_tensor_uses_handle_shape() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         let tensor = Tensor::new((0..24).map(|v| v as f64).collect(), vec![6, 4]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
