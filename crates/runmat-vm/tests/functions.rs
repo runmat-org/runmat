@@ -273,6 +273,74 @@ fn argument_validation_helpers_are_callable_builtins() {
 }
 
 #[test]
+fn arguments_block_validators_preserve_wide_integer_values() {
+    let values = execute_source(
+        r#"
+        x = uint64(9007199254740992) + uint64(1);
+        y = checked(x);
+        function out = checked(value)
+            arguments
+                value {mustBeInteger, mustBePositive, mustBeNonzero, mustBeGreaterThan(9007199254740992)}
+            end
+            out = value;
+        end
+        "#,
+    );
+    assert!(
+        values.iter().any(|value| matches!(
+            value,
+            runmat_builtins::Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993))
+        )),
+        "expected exact uint64 output, got {values:?}"
+    );
+}
+
+#[test]
+fn arguments_block_in_range_requires_matching_numeric_classes() {
+    let err = execute_source_result(
+        r#"
+        x = uint64(3);
+        y = checked(x);
+        function out = checked(value)
+            arguments
+                value {mustBeInRange(1, 5)}
+            end
+            out = value;
+        end
+        "#,
+    )
+    .expect_err("double bounds must not silently validate uint64 data");
+    assert!(
+        err.message().contains("same numeric class"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn arguments_block_resident_integer_validation_preserves_source_ownership() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let provider = runmat_accelerate_api::provider().expect("test provider");
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        r#"
+        x = uint64(9007199254740993);
+        g = gpuArray(x);
+        y = checked(g);
+        if ~isgpuarray(y) || gather(y) ~= x
+            error('resident validator changed the source');
+        end
+        function out = checked(value)
+            arguments
+                value {mustBePositive, mustBeNonzero}
+            end
+            out = value;
+        end
+        "#,
+    );
+}
+
+#[test]
 fn unresolved_external_function_handle_fails_without_legacy_fallback() {
     let err = execute_source_result("h = @definitely_missing_callback; y = feval(h, 1);")
         .expect_err("unresolved external callback should fail");

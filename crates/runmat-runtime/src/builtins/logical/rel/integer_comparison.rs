@@ -11,7 +11,7 @@ use crate::builtins::common::broadcast::{broadcast_shapes, BroadcastPlan};
 use crate::builtins::common::gpu_helpers;
 
 #[derive(Clone, Copy)]
-pub(crate) enum IntegerComparisonOp {
+pub enum IntegerComparisonOp {
     Eq,
     Ne,
     Lt,
@@ -21,7 +21,7 @@ pub(crate) enum IntegerComparisonOp {
 }
 
 #[derive(Debug)]
-pub(crate) enum IntegerComparisonError {
+pub enum IntegerComparisonError {
     SizeMismatch,
     Internal,
 }
@@ -190,7 +190,7 @@ fn free_rejected_gpu_handle(handle: &GpuTensorHandle, protected: &[&GpuTensorHan
 /// Performs a comparison when native integer storage is compared against other
 /// native integer storage or real numeric storage. This keeps integer values
 /// exact even when the other operand is an f64 array.
-pub(crate) fn try_integer_comparison(
+pub fn try_integer_comparison(
     lhs: &Value,
     rhs: &Value,
     operation: IntegerComparisonOp,
@@ -214,6 +214,30 @@ pub(crate) fn try_integer_comparison(
         }
     };
     Ok(Some(result))
+}
+
+/// Performs an exact host ordering comparison for real numeric/logical/character operands.
+/// Native integers remain in integer storage and mixed integer/floating comparisons use the
+/// lossless MATLAB relational ordering rules.
+pub fn try_real_ordering_comparison(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerComparisonOp,
+) -> Result<Option<Value>, IntegerComparisonError> {
+    let Some(lhs) = real_operand(lhs) else {
+        return Ok(None);
+    };
+    let Some(rhs) = real_operand(rhs) else {
+        return Ok(None);
+    };
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, lhs_index, rhs_index) in plan.iter() {
+        let ordering = compare_real_values(lhs.value_at(lhs_index), rhs.value_at(rhs_index));
+        data.push(matches_optional_relation(ordering, operation) as u8);
+    }
+    logical_result(data, plan.output_shape().to_vec()).map(Some)
 }
 
 /// Performs exact equality/inequality when a complex operand or its real
@@ -259,7 +283,7 @@ pub(crate) fn try_complex_integer_equality_comparison(
 /// Performs MATLAB ordering comparisons for complex values by comparing only
 /// their real components. Integer-backed components remain exact across
 /// complex/complex and complex/real mixed-class comparisons.
-pub(crate) fn try_complex_ordering_comparison(
+pub fn try_complex_ordering_comparison(
     lhs: &Value,
     rhs: &Value,
     operation: IntegerComparisonOp,

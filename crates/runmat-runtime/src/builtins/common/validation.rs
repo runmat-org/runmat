@@ -7,10 +7,14 @@ use runmat_accelerate_api::{
     handle_integer_type, handle_is_logical, handle_storage, GpuTensorStorage,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    ComplexTensor, IntValue, IntegerStorage, NumericDType, SparseTensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage,
+    NumericDType, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -19,6 +23,10 @@ use crate::builtins::common::tensor;
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::underlying_type::underlying_type_matches;
 use crate::builtins::logical::rel::integer_comparison::integer_f64_order;
+use crate::builtins::logical::rel::integer_comparison::{
+    try_complex_ordering_comparison, try_real_ordering_comparison, IntegerComparisonError,
+    IntegerComparisonOp,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// MATLAB stores complex integer arrays, but does not support arithmetic on
@@ -62,6 +70,8 @@ pub fn reject_typed_complex_integer_tensor(
 pub enum ValidationAtom {
     Number(f64),
     Integer(IntValue),
+    ComplexNumber(f64, f64),
+    ComplexInteger(IntValue, IntValue),
     Text(String),
     Bool(bool),
 }
@@ -168,6 +178,222 @@ pub const VALIDATOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &VALIDATION_ERRORS,
 };
 
+const ALL_INTEGER_CLASSES: &[runmat_builtins::BuiltinIntegerClass] =
+    &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES;
+
+const VALIDATOR_INTEGER_VALUE: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are validated directly from authoritative class, shape, or exact element storage.",
+    }];
+
+const VALIDATOR_INTEGER_VALUE_AND_BOUND: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes participate in exact mixed numeric comparisons without conversion through binary64.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "bound",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer, logical, single, and double compatible-size bounds retain their native values during comparison.",
+    },
+];
+
+const VALIDATOR_INTEGER_RANGE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "All eight integer classes are accepted, and the documented form requires both range bounds to use the same class as A.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "lower",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "The lower bound must share A's integer class and is compared exactly.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "upper",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "The upper bound must share A's integer class and is compared exactly.",
+    },
+];
+
+const VALIDATOR_INTEGER_MEMBER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Membership reads authoritative integer elements exactly.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "S",
+        classes: ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Unlike nondouble numeric inputs normally share a class; double retains the documented cross-class exception.",
+    },
+];
+
+macro_rules! validator_integer_capability {
+    ($constant:ident, $form:literal, $inputs:expr, $backend:expr, $overload:expr, $notes:literal) => {
+        pub const $constant: [BuiltinIntegerCapabilityDescriptor; 1] =
+            [BuiltinIntegerCapabilityDescriptor {
+                form: $form,
+                inputs: $inputs,
+                computation_domain: BuiltinIntegerComputationDomain::Predicate,
+                output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: $backend,
+                overload: $overload,
+                notes: $notes,
+            }];
+    };
+}
+
+validator_integer_capability!(MUST_BE_A_INTEGER_CAPABILITIES, "mustBeA(integer_A, class_names)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::FunctionSpecific, "Class validation uses wrapper identity for explicit gpuArray values and the underlying integer class for ordinary host or internally automatic-resident values; payload data is never converted.");
+validator_integer_capability!(MUST_BE_COLUMN_INTEGER_CAPABILITIES, "mustBeColumn(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::StructuralParameter, "Column validation reads shape metadata only and supports resident integer arrays without gathering.");
+validator_integer_capability!(MUST_BE_FINITE_INTEGER_CAPABILITIES, "mustBeFinite(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::ElementwiseShapePreserving, "Every native integer value is finite; compatibility is decided from exact class metadata without floating conversion.");
+validator_integer_capability!(MUST_BE_FLOAT_INTEGER_CAPABILITIES, "mustBeFloat(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::FunctionSpecific, "Every native integer class fails isfloat-style validation from metadata without gathering or conversion.");
+validator_integer_capability!(MUST_BE_GREATER_THAN_INTEGER_CAPABILITIES, "mustBeGreaterThan(integer_A, numeric_B)", &VALIDATOR_INTEGER_VALUE_AND_BOUND, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "R2026a compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path.");
+validator_integer_capability!(MUST_BE_GREATER_THAN_OR_EQUAL_INTEGER_CAPABILITIES, "mustBeGreaterThanOrEqual(integer_A, numeric_B)", &VALIDATOR_INTEGER_VALUE_AND_BOUND, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "R2026a compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path.");
+validator_integer_capability!(MUST_BE_IN_RANGE_INTEGER_CAPABILITIES, "mustBeInRange(integer_A, integer_lower, integer_upper, flags...)", &VALIDATOR_INTEGER_RANGE_INPUTS, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "Documented same-class bounds and selectable open/closed endpoints compare exactly without binary64 materialization.");
+validator_integer_capability!(MUST_BE_INTEGER_INTEGER_CAPABILITIES, "mustBeInteger(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::ElementwiseShapePreserving, "Every native integer class is integral by construction; this validator checks value integrality rather than integer storage class.");
+validator_integer_capability!(
+    MUST_BE_LESS_THAN_INTEGER_CAPABILITIES,
+    "mustBeLessThan(integer_A, numeric_B)",
+    &VALIDATOR_INTEGER_VALUE_AND_BOUND,
+    BuiltinIntegerBackendRule::GatherFallback,
+    BuiltinIntegerOverloadKind::BroadcastCompatible,
+    "R2026a compatible-size comparison is exact across mixed integer and floating classes."
+);
+validator_integer_capability!(
+    MUST_BE_LESS_THAN_OR_EQUAL_INTEGER_CAPABILITIES,
+    "mustBeLessThanOrEqual(integer_A, numeric_B)",
+    &VALIDATOR_INTEGER_VALUE_AND_BOUND,
+    BuiltinIntegerBackendRule::GatherFallback,
+    BuiltinIntegerOverloadKind::BroadcastCompatible,
+    "R2026a compatible-size comparison is exact across mixed integer and floating classes."
+);
+validator_integer_capability!(MUST_BE_MEMBER_INTEGER_CAPABILITIES, "mustBeMember(integer_A, integer_or_double_S)", &VALIDATOR_INTEGER_MEMBER_INPUTS, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::Multiple, "Exact membership preserves the documented same-class rule and double cross-class exception without rounding wide integers.");
+validator_integer_capability!(MUST_BE_NEGATIVE_INTEGER_CAPABILITIES, "mustBeNegative(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::ElementwiseShapePreserving, "All elements compare exactly against zero; unsigned nonempty arrays fail and empty arrays pass.");
+validator_integer_capability!(
+    MUST_BE_NON_NAN_INTEGER_CAPABILITIES,
+    "mustBeNonNan(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::HostAndGpu,
+    BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+    "Native integer storage cannot contain NaN and passes from metadata without conversion."
+);
+validator_integer_capability!(
+    MUST_BE_NONEMPTY_INTEGER_CAPABILITIES,
+    "mustBeNonempty(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::HostAndGpu,
+    BuiltinIntegerOverloadKind::StructuralParameter,
+    "Emptiness is decided from shape metadata without payload access."
+);
+validator_integer_capability!(MUST_BE_NONMISSING_INTEGER_CAPABILITIES, "mustBeNonmissing(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::ElementwiseShapePreserving, "Native integer classes have no standard missing representation and therefore pass without conversion; public validator and delegated anymissing type lists are not fully synchronized.");
+validator_integer_capability!(
+    MUST_BE_NONNEGATIVE_INTEGER_CAPABILITIES,
+    "mustBeNonnegative(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::GatherFallback,
+    BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+    "All elements compare exactly against zero."
+);
+validator_integer_capability!(
+    MUST_BE_NONPOSITIVE_INTEGER_CAPABILITIES,
+    "mustBeNonpositive(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::GatherFallback,
+    BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+    "All elements compare exactly against zero."
+);
+validator_integer_capability!(MUST_BE_NONSPARSE_INTEGER_CAPABILITIES, "mustBeNonsparse(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::StructuralParameter, "Dense host and resident integer arrays pass from storage metadata; sparse integer arrays fail.");
+validator_integer_capability!(
+    MUST_BE_NONZERO_INTEGER_CAPABILITIES,
+    "mustBeNonzero(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::GatherFallback,
+    BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+    "All integer elements compare exactly against zero without a floating compatibility view."
+);
+validator_integer_capability!(
+    MUST_BE_NUMERIC_INTEGER_CAPABILITIES,
+    "mustBeNumeric(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::HostAndGpu,
+    BuiltinIntegerOverloadKind::FunctionSpecific,
+    "All native integer classes satisfy isnumeric-style validation from class metadata."
+);
+validator_integer_capability!(
+    MUST_BE_NUMERIC_OR_LOGICAL_INTEGER_CAPABILITIES,
+    "mustBeNumericOrLogical(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::HostAndGpu,
+    BuiltinIntegerOverloadKind::FunctionSpecific,
+    "All native integer classes satisfy the numeric branch from class metadata."
+);
+validator_integer_capability!(
+    MUST_BE_POSITIVE_INTEGER_CAPABILITIES,
+    "mustBePositive(integer_A)",
+    &VALIDATOR_INTEGER_VALUE,
+    BuiltinIntegerBackendRule::GatherFallback,
+    BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+    "All elements compare exactly against zero; empty arrays pass."
+);
+
+pub const MUST_BE_FILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeFile is a text/path validator; integer host or resident values reject without numeric conversion or provider access." };
+pub const MUST_BE_FOLDER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeFolder is a text/path validator; integer host or resident values reject without numeric conversion or provider access." };
+pub const MUST_BE_NONZERO_LENGTH_TEXT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeNonzeroLengthText is a text validator; integer host or resident values fail without numeric conversion or provider access." };
+
+const MUST_BE_INTEGER_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mustBeInteger.resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "explicit gpuArray validation is not documented for mustBeInteger",
+    error_identifier: Some("RunMat:compatibility:mustBeIntegerResidentInput"),
+};
+const MUST_BE_FINITE_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mustBeFinite.resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "explicit gpuArray validation is not documented for mustBeFinite",
+    error_identifier: Some("RunMat:compatibility:mustBeFiniteResidentInput"),
+};
+const MUST_BE_NON_NAN_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mustBeNonNan.resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "explicit gpuArray validation is not documented for mustBeNonNan",
+    error_identifier: Some("RunMat:compatibility:mustBeNonNanResidentInput"),
+};
+const MUST_BE_NONZERO_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mustBeNonzero.resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "explicit gpuArray validation is not documented for mustBeNonzero",
+    error_identifier: Some("RunMat:compatibility:mustBeNonzeroResidentInput"),
+};
+pub const MUST_BE_INTEGER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [MUST_BE_INTEGER_RESIDENT_EXTENSION];
+pub const MUST_BE_FINITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [MUST_BE_FINITE_RESIDENT_EXTENSION];
+pub const MUST_BE_NON_NAN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [MUST_BE_NON_NAN_RESIDENT_EXTENSION];
+pub const MUST_BE_NONZERO_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [MUST_BE_NONZERO_RESIDENT_EXTENSION];
+
 pub const ISVARNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISVARNAME_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -251,7 +477,12 @@ fn check_validator(builtin: &str, ok: bool) -> BuiltinResult<Value> {
 }
 
 pub fn dispatch_validator(builtin: &str, args: Vec<Value>) -> BuiltinResult<Value> {
+    futures::executor::block_on(dispatch_validator_async(builtin, args))
+}
+
+pub async fn dispatch_validator_async(builtin: &str, args: Vec<Value>) -> BuiltinResult<Value> {
     let value = require_args(builtin, &args, 1, usize::MAX)?;
+    validate_resident_metadata(value)?;
     match builtin {
         "mustBeA" => {
             require_exact_arg_count(builtin, &args, 2)?;
@@ -267,7 +498,8 @@ pub fn dispatch_validator(builtin: &str, args: Vec<Value>) -> BuiltinResult<Valu
         }),
         "mustBeFinite" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_finite(value))
+            ensure_resident_extension(value, builtin)?;
+            check_validator(builtin, value_is_finite_async(value).await?)
         }
         "mustBeFloat" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -281,45 +513,50 @@ pub fn dispatch_validator(builtin: &str, args: Vec<Value>) -> BuiltinResult<Valu
             require_exact_arg_count(builtin, &args, 2)?;
             check_validator(
                 builtin,
-                value_is_greater_than(value, numeric_arg(&args, 1)?),
+                value_is_greater_than_values_async(value, &args[1]).await?,
             )
         }
         "mustBeGreaterThanOrEqual" => {
             require_exact_arg_count(builtin, &args, 2)?;
             check_validator(
                 builtin,
-                value_is_greater_than_or_equal(value, numeric_arg(&args, 1)?),
+                value_is_greater_than_or_equal_values_async(value, &args[1]).await?,
             )
         }
         "mustBeInRange" => {
             require_arg_count(builtin, &args, 3, 5)?;
-            let lower = numeric_arg(&args, 1)?;
-            let upper = numeric_arg(&args, 2)?;
             let inclusivity = range_inclusivity_arg(builtin, &args[3..])?;
-            check_validator(builtin, value_is_in_range(value, lower, upper, inclusivity))
+            check_validator(
+                builtin,
+                value_is_in_range_documented_async(value, &args[1], &args[2], inclusivity).await?,
+            )
         }
         "mustBeInteger" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_integer(value))
+            ensure_resident_extension(value, builtin)?;
+            check_validator(builtin, value_is_integer_async(value).await?)
         }
         "mustBeLessThan" => {
             require_exact_arg_count(builtin, &args, 2)?;
-            check_validator(builtin, value_is_less_than(value, numeric_arg(&args, 1)?))
+            check_validator(
+                builtin,
+                value_is_less_than_values_async(value, &args[1]).await?,
+            )
         }
         "mustBeLessThanOrEqual" => {
             require_exact_arg_count(builtin, &args, 2)?;
             check_validator(
                 builtin,
-                value_is_less_than_or_equal(value, numeric_arg(&args, 1)?),
+                value_is_less_than_or_equal_values_async(value, &args[1]).await?,
             )
         }
         "mustBeMember" => {
             require_exact_arg_count(builtin, &args, 2)?;
-            check_validator(builtin, value_is_member(value, &args[1])?)
+            check_validator(builtin, value_is_member_async(value, &args[1]).await?)
         }
         "mustBeNegative" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_negative(value))
+            check_validator(builtin, value_is_negative_async(value).await?)
         }
         "mustBeNonempty" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -327,19 +564,20 @@ pub fn dispatch_validator(builtin: &str, args: Vec<Value>) -> BuiltinResult<Valu
         }
         "mustBeNonmissing" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_nonmissing(value))
+            check_validator(builtin, value_is_nonmissing_async(value).await?)
         }
         "mustBeNonNan" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_non_nan(value))
+            ensure_resident_extension(value, builtin)?;
+            check_validator(builtin, value_is_non_nan_async(value).await?)
         }
         "mustBeNonnegative" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_nonnegative(value))
+            check_validator(builtin, value_is_nonnegative_async(value).await?)
         }
         "mustBeNonpositive" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_nonpositive(value))
+            check_validator(builtin, value_is_nonpositive_async(value).await?)
         }
         "mustBeNonsparse" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -347,7 +585,8 @@ pub fn dispatch_validator(builtin: &str, args: Vec<Value>) -> BuiltinResult<Valu
         }
         "mustBeNonzero" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_nonzero(value))
+            ensure_resident_extension(value, builtin)?;
+            check_validator(builtin, value_is_nonzero_async(value).await?)
         }
         "mustBeNonzeroLengthText" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -363,7 +602,7 @@ pub fn dispatch_validator(builtin: &str, args: Vec<Value>) -> BuiltinResult<Valu
         }
         "mustBePositive" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_positive(value))
+            check_validator(builtin, value_is_positive_async(value).await?)
         }
         "mustBeReal" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -499,7 +738,7 @@ pub fn value_is_float(value: &Value) -> bool {
 }
 
 pub fn value_is_numeric_or_logical(value: &Value) -> bool {
-    value_is_numeric(value) || matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+    value_is_numeric(value) || value_has_logical_class(value)
 }
 
 pub fn value_is_text(value: &Value) -> bool {
@@ -559,7 +798,7 @@ pub fn value_is_real(value: &Value) -> bool {
 pub fn value_is_integer(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
-        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Bool(_) | Value::LogicalArray(_) | Value::CharArray(_) => true,
         Value::Num(v) => v.is_finite() && v.fract() == 0.0,
         Value::Tensor(t) if t.integer_storage().is_some() => true,
         Value::Tensor(t) => tensor::tensor_values_f64_cow(t)
@@ -570,12 +809,13 @@ pub fn value_is_integer(value: &Value) -> bool {
             .materialize_f64()
             .iter()
             .all(|v| v.is_finite() && v.fract() == 0.0),
-        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
-        Value::ComplexTensor(t) if t.integer_storage().is_some() => value_is_real(value),
-        Value::ComplexTensor(t) => t
-            .materialize_f64()
-            .iter()
-            .all(|(re, im)| *im == 0.0 && re.is_finite() && re.fract() == 0.0),
+        Value::Complex(re, im) => {
+            re.is_finite() && re.fract() == 0.0 && im.is_finite() && im.fract() == 0.0
+        }
+        Value::ComplexTensor(t) if t.integer_storage().is_some() => true,
+        Value::ComplexTensor(t) => t.materialize_f64().iter().all(|(re, im)| {
+            re.is_finite() && re.fract() == 0.0 && im.is_finite() && im.fract() == 0.0
+        }),
         Value::GpuTensor(handle) => {
             handle_is_logical(handle) || handle_integer_type(handle).is_some()
         }
@@ -606,36 +846,48 @@ pub fn value_is_nonmissing(value: &Value) -> bool {
 }
 
 pub fn value_is_positive(value: &Value) -> bool {
+    if let Some(result) = complex_real_values_all(value, |v| v > 0.0, int_is_positive) {
+        return result;
+    }
     if let Some(result) = exact_integer_values_all(value, int_is_positive) {
         return result;
     }
-    numeric_values_all(value, |v| v.is_finite() && v > 0.0)
+    numeric_values_all(value, |v| v > 0.0)
 }
 
 pub fn value_is_negative(value: &Value) -> bool {
+    if let Some(result) = complex_real_values_all(value, |v| v < 0.0, int_is_negative) {
+        return result;
+    }
     if let Some(result) = exact_integer_values_all(value, int_is_negative) {
         return result;
     }
-    numeric_values_all(value, |v| v.is_finite() && v < 0.0)
+    numeric_values_all(value, |v| v < 0.0)
 }
 
 pub fn value_is_nonnegative(value: &Value) -> bool {
+    if let Some(result) = complex_real_values_all(value, |v| v >= 0.0, int_is_nonnegative) {
+        return result;
+    }
     if let Some(result) = exact_integer_values_all(value, int_is_nonnegative) {
         return result;
     }
-    numeric_values_all(value, |v| v.is_finite() && v >= 0.0)
+    numeric_values_all(value, |v| v >= 0.0)
 }
 
 pub fn value_is_nonpositive(value: &Value) -> bool {
+    if let Some(result) = complex_real_values_all(value, |v| v <= 0.0, int_is_nonpositive) {
+        return result;
+    }
     if let Some(result) = exact_integer_values_all(value, int_is_nonpositive) {
         return result;
     }
-    numeric_values_all(value, |v| v.is_finite() && v <= 0.0)
+    numeric_values_all(value, |v| v <= 0.0)
 }
 
 pub fn value_is_nonzero(value: &Value) -> bool {
     match value {
-        Value::Complex(re, im) => re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0),
+        Value::Complex(re, im) => *re != 0.0 || *im != 0.0,
         Value::ComplexTensor(t) if t.integer_storage().is_some() => {
             let integer_data = t.integer_storage().expect("checked integer data");
             (0..integer_data.len()).all(|index| integer_data.is_nonzero_at(index).unwrap_or(false))
@@ -643,12 +895,12 @@ pub fn value_is_nonzero(value: &Value) -> bool {
         Value::ComplexTensor(t) => t
             .materialize_f64()
             .iter()
-            .all(|(re, im)| re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0)),
+            .all(|(re, im)| *re != 0.0 || *im != 0.0),
         _ => {
             if let Some(result) = exact_integer_values_all(value, |integer| !integer.is_zero()) {
                 return result;
             }
-            numeric_values_all(value, |v| v.is_finite() && v != 0.0)
+            numeric_values_all(value, |v| v != 0.0)
         }
     }
 }
@@ -729,9 +981,418 @@ pub fn value_is_in_range(
     })
 }
 
+async fn resident_host_value(value: &Value) -> BuiltinResult<Option<Value>> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(None);
+    };
+    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| {
+            build_runtime_error("argument validation: no acceleration provider owns the input")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
+    crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(owner, handle)
+        .await
+        .map(Some)
+}
+
+async fn host_value(value: &Value) -> BuiltinResult<Value> {
+    validate_resident_metadata(value)?;
+    Ok(match resident_host_value(value).await? {
+        Some(value) => value,
+        None => value.clone(),
+    })
+}
+
+fn explicit_resident(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_provenance(handle) == Some(runmat_accelerate_api::GpuHandleProvenance::Explicit))
+}
+
+pub fn ensure_resident_extension(value: &Value, builtin: &str) -> BuiltinResult<()> {
+    if !explicit_resident(value) {
+        return Ok(());
+    }
+    let extension = match builtin {
+        "mustBeFinite" => &MUST_BE_FINITE_RESIDENT_EXTENSION,
+        "mustBeInteger" => &MUST_BE_INTEGER_RESIDENT_EXTENSION,
+        "mustBeNonNan" => &MUST_BE_NON_NAN_RESIDENT_EXTENSION,
+        "mustBeNonzero" => &MUST_BE_NONZERO_RESIDENT_EXTENSION,
+        _ => return Ok(()),
+    };
+    crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
+}
+
+pub fn validate_resident_metadata(value: &Value) -> BuiltinResult<()> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(());
+    };
+    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| {
+            build_runtime_error("argument validation: no acceleration provider owns the input")
+                .with_identifier("RunMat:validators:ProviderOwnershipMismatch")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
+    let storage = handle_storage(handle);
+    let integer = handle_integer_type(handle);
+    let logical = handle_is_logical(handle);
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let expected_class =
+        crate::builtins::common::gpu_helpers::expected_gpu_class_name(precision, integer, logical);
+    let class_valid = runmat_accelerate_api::handle_class_name(handle)
+        .as_deref()
+        .is_none_or(|class_name| Some(class_name) == expected_class);
+    let physical_valid = if integer.is_some() {
+        storage == GpuTensorStorage::Real && precision.is_none() && !logical
+    } else if logical {
+        storage == GpuTensorStorage::Real && precision == Some(owner.precision())
+    } else {
+        precision == Some(owner.precision())
+    };
+    if !physical_valid || !class_valid {
+        return Err(build_runtime_error(
+            "argument validation: resident input has contradictory physical class metadata",
+        )
+        .with_identifier("RunMat:validators:ProviderPayloadMismatch")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
+        .into());
+    }
+    Ok(())
+}
+
+pub async fn value_is_finite_async(value: &Value) -> BuiltinResult<bool> {
+    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some() || handle_is_logical(handle))
+    {
+        return Ok(true);
+    }
+    let value = host_value(value).await?;
+    Ok(value_is_finite(&value))
+}
+
+pub async fn value_is_integer_async(value: &Value) -> BuiltinResult<bool> {
+    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some() || handle_is_logical(handle))
+    {
+        return Ok(true);
+    }
+    let value = host_value(value).await?;
+    Ok(value_is_integer(&value))
+}
+
+pub async fn value_is_non_nan_async(value: &Value) -> BuiltinResult<bool> {
+    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some() || handle_is_logical(handle))
+    {
+        return Ok(true);
+    }
+    let value = host_value(value).await?;
+    Ok(value_is_non_nan(&value))
+}
+
+pub async fn value_is_nonmissing_async(value: &Value) -> BuiltinResult<bool> {
+    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some() || handle_is_logical(handle))
+    {
+        return Ok(true);
+    }
+    let value = host_value(value).await?;
+    Ok(value_is_nonmissing(&value))
+}
+
+pub async fn value_is_positive_async(value: &Value) -> BuiltinResult<bool> {
+    value_is_ordered_against_zero_async(value, IntegerComparisonOp::Gt).await
+}
+
+pub async fn value_is_negative_async(value: &Value) -> BuiltinResult<bool> {
+    value_is_ordered_against_zero_async(value, IntegerComparisonOp::Lt).await
+}
+
+pub async fn value_is_nonnegative_async(value: &Value) -> BuiltinResult<bool> {
+    value_is_ordered_against_zero_async(value, IntegerComparisonOp::Ge).await
+}
+
+pub async fn value_is_nonpositive_async(value: &Value) -> BuiltinResult<bool> {
+    value_is_ordered_against_zero_async(value, IntegerComparisonOp::Le).await
+}
+
+pub async fn value_is_nonzero_async(value: &Value) -> BuiltinResult<bool> {
+    let value = host_value(value).await?;
+    Ok(value_is_nonzero(&value))
+}
+
+async fn value_is_ordered_against_zero_async(
+    value: &Value,
+    operation: IntegerComparisonOp,
+) -> BuiltinResult<bool> {
+    let value = host_value(value).await?;
+    comparison_all_normalized(&value, &Value::Num(0.0), operation)
+}
+
+pub async fn value_is_greater_than_values_async(
+    value: &Value,
+    bound: &Value,
+) -> BuiltinResult<bool> {
+    compare_values_async(value, bound, IntegerComparisonOp::Gt).await
+}
+
+pub async fn value_is_greater_than_or_equal_values_async(
+    value: &Value,
+    bound: &Value,
+) -> BuiltinResult<bool> {
+    compare_values_async(value, bound, IntegerComparisonOp::Ge).await
+}
+
+pub async fn value_is_less_than_values_async(value: &Value, bound: &Value) -> BuiltinResult<bool> {
+    compare_values_async(value, bound, IntegerComparisonOp::Lt).await
+}
+
+pub async fn value_is_less_than_or_equal_values_async(
+    value: &Value,
+    bound: &Value,
+) -> BuiltinResult<bool> {
+    compare_values_async(value, bound, IntegerComparisonOp::Le).await
+}
+
+async fn compare_values_async(
+    value: &Value,
+    bound: &Value,
+    operation: IntegerComparisonOp,
+) -> BuiltinResult<bool> {
+    let value = host_value(value).await?;
+    let bound = host_value(bound).await?;
+    comparison_all_normalized(&value, &bound, operation)
+}
+
+pub async fn value_is_in_range_values_async(
+    value: &Value,
+    lower: &Value,
+    upper: &Value,
+    inclusivity: RangeInclusivity,
+) -> BuiltinResult<bool> {
+    let value = host_value(value).await?;
+    let lower = host_value(lower).await?;
+    let upper = host_value(upper).await?;
+    let lower_op = if inclusivity.lower {
+        IntegerComparisonOp::Ge
+    } else {
+        IntegerComparisonOp::Gt
+    };
+    let upper_op = if inclusivity.upper {
+        IntegerComparisonOp::Le
+    } else {
+        IntegerComparisonOp::Lt
+    };
+    Ok(comparison_all_normalized(&value, &lower, lower_op)?
+        && comparison_all_normalized(&value, &upper, upper_op)?)
+}
+
+pub async fn value_is_in_range_documented_async(
+    value: &Value,
+    lower: &Value,
+    upper: &Value,
+    inclusivity: RangeInclusivity,
+) -> BuiltinResult<bool> {
+    ensure_same_numeric_class("mustBeInRange", value, lower)?;
+    ensure_same_numeric_class("mustBeInRange", value, upper)?;
+    value_is_in_range_values_async(value, lower, upper, inclusivity).await
+}
+
+fn comparison_all_normalized(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerComparisonOp,
+) -> BuiltinResult<bool> {
+    if let Value::SparseTensor(sparse) = lhs {
+        if let Some(rhs) = scalar_numeric_value(rhs) {
+            return sparse_scalar_comparison_all(sparse, &rhs, true, operation);
+        }
+    }
+    if let Value::SparseTensor(sparse) = rhs {
+        if let Some(lhs) = scalar_numeric_value(lhs) {
+            return sparse_scalar_comparison_all(sparse, &lhs, false, operation);
+        }
+    }
+    let lhs_dense;
+    let rhs_dense;
+    let lhs = if let Value::SparseTensor(sparse) = lhs {
+        lhs_dense = Value::Tensor(
+            sparse
+                .to_dense()
+                .map_err(|error| invalid_argument_error("argumentValidation", error))?,
+        );
+        &lhs_dense
+    } else {
+        lhs
+    };
+    let rhs = if let Value::SparseTensor(sparse) = rhs {
+        rhs_dense = Value::Tensor(
+            sparse
+                .to_dense()
+                .map_err(|error| invalid_argument_error("argumentValidation", error))?,
+        );
+        &rhs_dense
+    } else {
+        rhs
+    };
+    comparison_all(lhs, rhs, operation)
+}
+
+fn comparison_all(lhs: &Value, rhs: &Value, operation: IntegerComparisonOp) -> BuiltinResult<bool> {
+    let map_error = |error| match error {
+        IntegerComparisonError::SizeMismatch => invalid_argument_error(
+            "argumentValidation",
+            "numeric inputs are not compatible for implicit expansion",
+        ),
+        IntegerComparisonError::Internal => {
+            invalid_argument_error("argumentValidation", "numeric comparison failed")
+        }
+    };
+    let result = if let Some(result) =
+        try_real_ordering_comparison(lhs, rhs, operation).map_err(&map_error)?
+    {
+        result
+    } else {
+        try_complex_ordering_comparison(lhs, rhs, operation)
+            .map_err(map_error)?
+            .ok_or_else(|| {
+                invalid_argument_error("argumentValidation", "expected comparable numeric inputs")
+            })?
+    };
+    logical_value_all_true(&result)
+}
+
+fn scalar_numeric_value(value: &Value) -> Option<Value> {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(value.clone()),
+        Value::Complex(real, _) => Some(Value::Num(*real)),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 1 => tensor
+            .numeric_value_at(0)
+            .map(|value| match value.into_int_value() {
+                Some(value) => Value::Int(value),
+                None => Value::Num(floating_numeric_scalar_to_f64(value)),
+            }),
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            Some(Value::Bool(array.data[0] != 0))
+        }
+        Value::ComplexTensor(tensor) if tensor::complex_tensor_element_len(tensor) == 1 => {
+            tensor.numeric_value_at(0).map(|(real, _)| {
+                if let Some(real) = real.into_int_value() {
+                    Value::Int(real)
+                } else {
+                    Value::Num(floating_numeric_scalar_to_f64(real))
+                }
+            })
+        }
+        _ => None,
+    }
+}
+
+fn sparse_scalar_comparison_all(
+    sparse: &SparseTensor,
+    scalar: &Value,
+    sparse_is_left: bool,
+    operation: IntegerComparisonOp,
+) -> BuiltinResult<bool> {
+    for index in 0..sparse.nnz() {
+        let value = sparse.numeric_value_at(index).ok_or_else(|| {
+            invalid_argument_error("argumentValidation", "invalid sparse storage")
+        })?;
+        let value = match value.into_int_value() {
+            Some(value) => Value::Int(value),
+            None => Value::Num(floating_numeric_scalar_to_f64(value)),
+        };
+        let matches = if sparse_is_left {
+            comparison_all(&value, scalar, operation)?
+        } else {
+            comparison_all(scalar, &value, operation)?
+        };
+        if !matches {
+            return Ok(false);
+        }
+    }
+    if sparse.nnz() < sparse.rows.saturating_mul(sparse.cols) {
+        let zero = Value::Num(0.0);
+        return if sparse_is_left {
+            comparison_all(&zero, scalar, operation)
+        } else {
+            comparison_all(scalar, &zero, operation)
+        };
+    }
+    Ok(true)
+}
+
+fn floating_numeric_scalar_to_f64(value: runmat_builtins::NumericScalar) -> f64 {
+    match value {
+        runmat_builtins::NumericScalar::F64(value) => value,
+        runmat_builtins::NumericScalar::F32(value) => f64::from(value),
+        _ => unreachable!("integer numeric scalar was handled before floating conversion"),
+    }
+}
+
+fn logical_value_all_true(value: &Value) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(value) => Ok(*value),
+        Value::LogicalArray(array) => Ok(array.data.iter().all(|value| *value != 0)),
+        _ => Err(invalid_argument_error(
+            "argumentValidation",
+            "comparison did not return logical data",
+        )
+        .into()),
+    }
+}
+
+fn ensure_same_numeric_class(builtin: &str, lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
+    let lhs = numeric_class_name(lhs)
+        .ok_or_else(|| invalid_argument_error(builtin, "expected numeric input"))?;
+    let rhs = numeric_class_name(rhs)
+        .ok_or_else(|| invalid_argument_error(builtin, "expected numeric bound"))?;
+    if lhs != rhs {
+        return Err(invalid_argument_error(
+            builtin,
+            "bounds must have the same numeric class as the value",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn numeric_class_name(value: &Value) -> Option<String> {
+    match value {
+        Value::GpuTensor(handle) if handle_is_logical(handle) => Some("logical".into()),
+        Value::GpuTensor(handle) if handle_integer_type(handle).is_some() => {
+            crate::builtins::common::gpu_helpers::expected_gpu_class_name(
+                None,
+                handle_integer_type(handle),
+                false,
+            )
+            .map(str::to_owned)
+        }
+        Value::GpuTensor(handle) => crate::builtins::common::gpu_helpers::expected_gpu_class_name(
+            runmat_accelerate_api::handle_precision(handle),
+            None,
+            false,
+        )
+        .map(str::to_owned),
+        _ if value_is_numeric_or_logical(value) => {
+            Some(class_name_for_value(value).to_ascii_lowercase())
+        }
+        _ => None,
+    }
+}
+
 pub fn value_is_column(value: &Value) -> bool {
-    let (_, cols) = value_shape_2d(value);
-    cols == 1
+    let shape: &[usize] = match value {
+        Value::Tensor(value) => &value.shape,
+        Value::ComplexTensor(value) => &value.shape,
+        Value::LogicalArray(value) => &value.shape,
+        Value::StringArray(value) => &value.shape,
+        Value::Cell(value) => &value.shape,
+        Value::CharArray(value) => &value.shape,
+        Value::GpuTensor(handle) => &handle.shape,
+        _ => {
+            let (_, cols) = value_shape_2d(value);
+            return cols == 1;
+        }
+    };
+    shape.get(1).copied().unwrap_or(1) == 1 && shape.iter().skip(2).all(|extent| *extent == 1)
 }
 
 pub fn value_is_vector(value: &Value) -> Result<bool, RuntimeError> {
@@ -744,11 +1405,15 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
     if requested.is_empty() {
         return false;
     }
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        return requested.eq_ignore_ascii_case("gpuarray");
+    }
     match requested.to_ascii_lowercase().as_str() {
         "numeric" => value_is_numeric(value),
         "float" => value_is_float(value),
         "integer" => value_has_native_integer_class(value),
-        "logical" => matches!(value, Value::Bool(_) | Value::LogicalArray(_)),
+        "logical" => value_has_logical_class(value),
         "char" => matches!(value, Value::CharArray(_)),
         "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
         "cell" => matches!(value, Value::Cell(_)),
@@ -759,12 +1424,16 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
                 || matches!(value, Value::Tensor(t) if t.numeric_dtype() == NumericDType::F64)
                 || matches!(value, Value::SparseTensor(t) if t.integer_storage().is_none())
                 || matches!(value, Value::ComplexTensor(t) if t.numeric_dtype() == NumericDType::F64)
+                || matches!(value, Value::GpuTensor(handle) if !handle_is_logical(handle) && handle_integer_type(handle).is_none() && runmat_accelerate_api::handle_precision(handle) == Some(runmat_accelerate_api::ProviderPrecision::F64))
         }
         "single" => {
             matches!(value, Value::Tensor(t) if t.numeric_dtype() == NumericDType::F32)
                 || matches!(value, Value::ComplexTensor(t) if t.numeric_dtype() == NumericDType::F32)
+                || matches!(value, Value::GpuTensor(handle) if !handle_is_logical(handle) && handle_integer_type(handle).is_none() && runmat_accelerate_api::handle_precision(handle) == Some(runmat_accelerate_api::ProviderPrecision::F32))
         }
-        "gpuarray" => matches!(value, Value::GpuTensor(_)),
+        "gpuarray" => {
+            matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        }
         _ => class_name_for_value(value).eq_ignore_ascii_case(requested),
     }
 }
@@ -915,12 +1584,44 @@ pub fn value_is_member(value: &Value, set: &Value) -> Result<bool, RuntimeError>
     value_is_member_atoms_inner(&values, &allowed)
 }
 
+pub async fn value_is_member_async(value: &Value, set: &Value) -> BuiltinResult<bool> {
+    let value = host_value(value).await?;
+    let set = host_value(set).await?;
+    ensure_member_class_compatibility(&value, &set)?;
+    value_is_member(&value, &set).map_err(Into::into)
+}
+
+fn ensure_member_class_compatibility(value: &Value, set: &Value) -> BuiltinResult<()> {
+    let Some(value_class) = numeric_class_name(value) else {
+        return Ok(());
+    };
+    let Some(set_class) = numeric_class_name(set) else {
+        return Ok(());
+    };
+    if value_class == set_class || value_class == "double" || set_class == "double" {
+        return Ok(());
+    }
+    Err(invalid_argument_error(
+        "mustBeMember",
+        "unlike nondouble numeric inputs must have the same class",
+    )
+    .into())
+}
+
 pub fn value_is_member_atoms(
     value: &Value,
     allowed: &[ValidationAtom],
 ) -> Result<bool, RuntimeError> {
     let values = atoms(value)?;
     value_is_member_atoms_inner(&values, allowed)
+}
+
+pub async fn value_is_member_atoms_async(
+    value: &Value,
+    allowed: &[ValidationAtom],
+) -> BuiltinResult<bool> {
+    let value = host_value(value).await?;
+    value_is_member_atoms(&value, allowed).map_err(Into::into)
 }
 
 fn value_is_member_atoms_inner(
@@ -937,6 +1638,7 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
         Value::Num(v) => Ok(vec![ValidationAtom::Number(*v)]),
         Value::Int(v) => Ok(vec![ValidationAtom::Integer(v.clone())]),
         Value::Bool(v) => Ok(vec![ValidationAtom::Bool(*v)]),
+        Value::Complex(re, im) => Ok(vec![ValidationAtom::ComplexNumber(*re, *im)]),
         Value::String(s) => Ok(vec![ValidationAtom::Text(s.clone())]),
         Value::CharArray(c) if c.rows == 1 => Ok(vec![ValidationAtom::Text(chars_to_string(c))]),
         Value::Tensor(t) => {
@@ -951,6 +1653,28 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
                 .iter()
                 .copied()
                 .map(ValidationAtom::Number)
+                .collect())
+        }
+        Value::ComplexTensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                return Ok((0..storage.len())
+                    .map(|index| {
+                        ValidationAtom::ComplexInteger(
+                            storage
+                                .real
+                                .value_at(index)
+                                .expect("validated real storage"),
+                            storage
+                                .imag
+                                .value_at(index)
+                                .expect("validated imaginary storage"),
+                        )
+                    })
+                    .collect());
+            }
+            Ok(t.materialize_f64()
+                .iter()
+                .map(|(re, im)| ValidationAtom::ComplexNumber(*re, *im))
                 .collect())
         }
         Value::SparseTensor(t) => sparse_atoms(t),
@@ -1009,9 +1733,67 @@ fn atom_eq(left: &ValidationAtom, right: &ValidationAtom) -> bool {
         | (ValidationAtom::Number(b), ValidationAtom::Integer(a)) => {
             integer_f64_order(a.clone(), *b) == Some(Ordering::Equal)
         }
+        (ValidationAtom::ComplexNumber(ar, ai), ValidationAtom::ComplexNumber(br, bi)) => {
+            ar == br && ai == bi
+        }
+        (ValidationAtom::ComplexInteger(ar, ai), ValidationAtom::ComplexInteger(br, bi)) => {
+            ar == br && ai == bi
+        }
+        (ValidationAtom::ComplexInteger(ar, ai), ValidationAtom::ComplexNumber(br, bi))
+        | (ValidationAtom::ComplexNumber(br, bi), ValidationAtom::ComplexInteger(ar, ai)) => {
+            integer_f64_order(ar.clone(), *br) == Some(Ordering::Equal)
+                && integer_f64_order(ai.clone(), *bi) == Some(Ordering::Equal)
+        }
+        (ValidationAtom::ComplexNumber(re, im), ValidationAtom::Number(value))
+        | (ValidationAtom::Number(value), ValidationAtom::ComplexNumber(re, im)) => {
+            *im == 0.0 && re == value
+        }
+        (ValidationAtom::ComplexInteger(re, im), ValidationAtom::Integer(value))
+        | (ValidationAtom::Integer(value), ValidationAtom::ComplexInteger(re, im)) => {
+            im.is_zero() && re == value
+        }
+        (ValidationAtom::ComplexInteger(re, im), ValidationAtom::Number(value))
+        | (ValidationAtom::Number(value), ValidationAtom::ComplexInteger(re, im)) => {
+            im.is_zero() && integer_f64_order(re.clone(), *value) == Some(Ordering::Equal)
+        }
+        (ValidationAtom::ComplexNumber(re, im), ValidationAtom::Integer(value))
+        | (ValidationAtom::Integer(value), ValidationAtom::ComplexNumber(re, im)) => {
+            *im == 0.0 && integer_f64_order(value.clone(), *re) == Some(Ordering::Equal)
+        }
         (ValidationAtom::Text(a), ValidationAtom::Text(b)) => a == b,
         (ValidationAtom::Bool(a), ValidationAtom::Bool(b)) => a == b,
+        (ValidationAtom::Bool(value), ValidationAtom::Number(number))
+        | (ValidationAtom::Number(number), ValidationAtom::Bool(value)) => {
+            *number == f64::from(*value)
+        }
+        (ValidationAtom::Bool(value), ValidationAtom::Integer(integer))
+        | (ValidationAtom::Integer(integer), ValidationAtom::Bool(value)) => {
+            integer_f64_order(integer.clone(), f64::from(*value)) == Some(Ordering::Equal)
+        }
         _ => false,
+    }
+}
+
+fn complex_real_values_all(
+    value: &Value,
+    float_pred: impl Fn(f64) -> bool + Copy,
+    integer_pred: impl Fn(&IntValue) -> bool + Copy,
+) -> Option<bool> {
+    match value {
+        Value::Complex(real, _) => Some(float_pred(*real)),
+        Value::ComplexTensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                Some(integer_storage_all(&storage.real, integer_pred))
+            } else {
+                Some(
+                    tensor
+                        .materialize_f64()
+                        .iter()
+                        .all(|(real, _)| float_pred(*real)),
+                )
+            }
+        }
+        _ => None,
     }
 }
 
@@ -1143,25 +1925,6 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
             .iter()
             .all(|(re, im)| *im == 0.0 && pred(*re)),
         _ => false,
-    }
-}
-
-fn numeric_arg(args: &[Value], index: usize) -> Result<f64, RuntimeError> {
-    match args.get(index) {
-        Some(Value::Num(v)) => Ok(*v),
-        Some(Value::Int(v)) => Ok(v.to_f64()),
-        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
-        Some(other) => Err(invalid_argument_error(
-            "argumentValidation",
-            format!(
-                "expected numeric scalar argument, got {}",
-                class_name_for_value(other)
-            ),
-        )),
-        None => Err(invalid_argument_error(
-            "argumentValidation",
-            "missing numeric scalar argument",
-        )),
     }
 }
 
@@ -1326,6 +2089,52 @@ fn namedargs2cell_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 macro_rules! validator_builtin {
+    ($func:ident, $name:literal, capabilities = $capabilities:path) => {
+        #[runtime_builtin(
+            name = $name,
+            category = "argument-validation",
+            summary = "Validate an input argument and throw if the constraint is not satisfied.",
+            sink = true,
+            suppress_auto_output = true,
+            descriptor(self::VALIDATOR_DESCRIPTOR),
+            integer_capabilities($capabilities),
+            builtin_path = "crate::builtins::common::validation"
+        )]
+        async fn $func(args: Vec<Value>) -> BuiltinResult<Value> {
+            dispatch_validator_async($name, args).await
+        }
+    };
+    ($func:ident, $name:literal, capabilities = $capabilities:path, extensions = $extensions:path) => {
+        #[runtime_builtin(
+            name = $name,
+            category = "argument-validation",
+            summary = "Validate an input argument and throw if the constraint is not satisfied.",
+            sink = true,
+            suppress_auto_output = true,
+            descriptor(self::VALIDATOR_DESCRIPTOR),
+            extensions($extensions),
+            integer_capabilities($capabilities),
+            builtin_path = "crate::builtins::common::validation"
+        )]
+        async fn $func(args: Vec<Value>) -> BuiltinResult<Value> {
+            dispatch_validator_async($name, args).await
+        }
+    };
+    ($func:ident, $name:literal, audit = $audit:path) => {
+        #[runtime_builtin(
+            name = $name,
+            category = "argument-validation",
+            summary = "Validate an input argument and throw if the constraint is not satisfied.",
+            sink = true,
+            suppress_auto_output = true,
+            descriptor(self::VALIDATOR_DESCRIPTOR),
+            integer_audit($audit),
+            builtin_path = "crate::builtins::common::validation"
+        )]
+        async fn $func(args: Vec<Value>) -> BuiltinResult<Value> {
+            dispatch_validator_async($name, args).await
+        }
+    };
     ($func:ident, $name:literal) => {
         #[runtime_builtin(
             name = $name,
@@ -1342,37 +2151,135 @@ macro_rules! validator_builtin {
     };
 }
 
-validator_builtin!(must_be_a_builtin, "mustBeA");
-validator_builtin!(must_be_column_builtin, "mustBeColumn");
-validator_builtin!(must_be_file_builtin, "mustBeFile");
-validator_builtin!(must_be_finite_builtin, "mustBeFinite");
-validator_builtin!(must_be_float_builtin, "mustBeFloat");
-validator_builtin!(must_be_folder_builtin, "mustBeFolder");
-validator_builtin!(must_be_greater_than_builtin, "mustBeGreaterThan");
+validator_builtin!(
+    must_be_a_builtin,
+    "mustBeA",
+    capabilities = self::MUST_BE_A_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_column_builtin,
+    "mustBeColumn",
+    capabilities = self::MUST_BE_COLUMN_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_file_builtin,
+    "mustBeFile",
+    audit = self::MUST_BE_FILE_INTEGER_AUDIT
+);
+validator_builtin!(
+    must_be_finite_builtin,
+    "mustBeFinite",
+    capabilities = self::MUST_BE_FINITE_INTEGER_CAPABILITIES,
+    extensions = self::MUST_BE_FINITE_EXTENSIONS
+);
+validator_builtin!(
+    must_be_float_builtin,
+    "mustBeFloat",
+    capabilities = self::MUST_BE_FLOAT_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_folder_builtin,
+    "mustBeFolder",
+    audit = self::MUST_BE_FOLDER_INTEGER_AUDIT
+);
+validator_builtin!(
+    must_be_greater_than_builtin,
+    "mustBeGreaterThan",
+    capabilities = self::MUST_BE_GREATER_THAN_INTEGER_CAPABILITIES
+);
 validator_builtin!(
     must_be_greater_than_or_equal_builtin,
-    "mustBeGreaterThanOrEqual"
+    "mustBeGreaterThanOrEqual",
+    capabilities = self::MUST_BE_GREATER_THAN_OR_EQUAL_INTEGER_CAPABILITIES
 );
-validator_builtin!(must_be_in_range_builtin, "mustBeInRange");
-validator_builtin!(must_be_integer_builtin, "mustBeInteger");
-validator_builtin!(must_be_less_than_builtin, "mustBeLessThan");
-validator_builtin!(must_be_less_than_or_equal_builtin, "mustBeLessThanOrEqual");
-validator_builtin!(must_be_member_builtin, "mustBeMember");
-validator_builtin!(must_be_negative_builtin, "mustBeNegative");
-validator_builtin!(must_be_nonempty_builtin, "mustBeNonempty");
-validator_builtin!(must_be_nonmissing_builtin, "mustBeNonmissing");
-validator_builtin!(must_be_non_nan_builtin, "mustBeNonNan");
-validator_builtin!(must_be_nonnegative_builtin, "mustBeNonnegative");
-validator_builtin!(must_be_nonpositive_builtin, "mustBeNonpositive");
-validator_builtin!(must_be_nonsparse_builtin, "mustBeNonsparse");
-validator_builtin!(must_be_nonzero_builtin, "mustBeNonzero");
+validator_builtin!(
+    must_be_in_range_builtin,
+    "mustBeInRange",
+    capabilities = self::MUST_BE_IN_RANGE_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_integer_builtin,
+    "mustBeInteger",
+    capabilities = self::MUST_BE_INTEGER_INTEGER_CAPABILITIES,
+    extensions = self::MUST_BE_INTEGER_EXTENSIONS
+);
+validator_builtin!(
+    must_be_less_than_builtin,
+    "mustBeLessThan",
+    capabilities = self::MUST_BE_LESS_THAN_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_less_than_or_equal_builtin,
+    "mustBeLessThanOrEqual",
+    capabilities = self::MUST_BE_LESS_THAN_OR_EQUAL_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_member_builtin,
+    "mustBeMember",
+    capabilities = self::MUST_BE_MEMBER_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_negative_builtin,
+    "mustBeNegative",
+    capabilities = self::MUST_BE_NEGATIVE_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_nonempty_builtin,
+    "mustBeNonempty",
+    capabilities = self::MUST_BE_NONEMPTY_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_nonmissing_builtin,
+    "mustBeNonmissing",
+    capabilities = self::MUST_BE_NONMISSING_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_non_nan_builtin,
+    "mustBeNonNan",
+    capabilities = self::MUST_BE_NON_NAN_INTEGER_CAPABILITIES,
+    extensions = self::MUST_BE_NON_NAN_EXTENSIONS
+);
+validator_builtin!(
+    must_be_nonnegative_builtin,
+    "mustBeNonnegative",
+    capabilities = self::MUST_BE_NONNEGATIVE_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_nonpositive_builtin,
+    "mustBeNonpositive",
+    capabilities = self::MUST_BE_NONPOSITIVE_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_nonsparse_builtin,
+    "mustBeNonsparse",
+    capabilities = self::MUST_BE_NONSPARSE_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_nonzero_builtin,
+    "mustBeNonzero",
+    capabilities = self::MUST_BE_NONZERO_INTEGER_CAPABILITIES,
+    extensions = self::MUST_BE_NONZERO_EXTENSIONS
+);
 validator_builtin!(
     must_be_nonzero_length_text_builtin,
-    "mustBeNonzeroLengthText"
+    "mustBeNonzeroLengthText",
+    audit = self::MUST_BE_NONZERO_LENGTH_TEXT_INTEGER_AUDIT
 );
-validator_builtin!(must_be_numeric_builtin, "mustBeNumeric");
-validator_builtin!(must_be_numeric_or_logical_builtin, "mustBeNumericOrLogical");
-validator_builtin!(must_be_positive_builtin, "mustBePositive");
+validator_builtin!(
+    must_be_numeric_builtin,
+    "mustBeNumeric",
+    capabilities = self::MUST_BE_NUMERIC_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_numeric_or_logical_builtin,
+    "mustBeNumericOrLogical",
+    capabilities = self::MUST_BE_NUMERIC_OR_LOGICAL_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_positive_builtin,
+    "mustBePositive",
+    capabilities = self::MUST_BE_POSITIVE_INTEGER_CAPABILITIES
+);
 validator_builtin!(must_be_real_builtin, "mustBeReal");
 validator_builtin!(must_be_scalar_or_empty_builtin, "mustBeScalarOrEmpty");
 validator_builtin!(must_be_sparse_builtin, "mustBeSparse");
@@ -1618,7 +2525,88 @@ mod tests {
         .unwrap();
         let value = Value::ComplexTensor(nonreal_complex);
         assert!(!value_is_real(&value));
-        assert!(!value_is_integer(&value));
+        assert!(value_is_integer(&value));
+        ok("mustBeInteger", vec![value]);
+    }
+
+    #[test]
+    fn complex_validators_use_component_integrality_real_ordering_and_exact_membership() {
+        ok("mustBeInteger", vec![Value::Complex(1.0, 2.0)]);
+        err("mustBeInteger", vec![Value::Complex(1.0, 2.5)]);
+        ok("mustBeNegative", vec![Value::Complex(-1.0, 9.0)]);
+        ok("mustBePositive", vec![Value::Complex(1.0, -9.0)]);
+        ok(
+            "mustBeMember",
+            vec![Value::Complex(1.0, 2.0), Value::Complex(1.0, 2.0)],
+        );
+
+        let wide = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                    IntegerStorage::U64(vec![7]),
+                )
+                .expect("integer components"),
+                vec![1, 1],
+            )
+            .expect("complex integer tensor"),
+        );
+        ok("mustBeMember", vec![wide.clone(), wide]);
+        ok("mustBeMember", vec![Value::Bool(true), Value::Num(1.0)]);
+        ok("mustBeMember", vec![Value::Num(0.0), Value::Bool(false)]);
+        ok(
+            "mustBeInteger",
+            vec![Value::CharArray(
+                CharArray::new(vec!['a', 'b'], 1, 2).expect("character row"),
+            )],
+        );
+        ok("mustBeNonzero", vec![Value::Num(f64::INFINITY)]);
+        ok("mustBeNonzero", vec![Value::Num(f64::NAN)]);
+        ok("mustBePositive", vec![Value::Num(f64::INFINITY)]);
+        ok("mustBeNegative", vec![Value::Num(f64::NEG_INFINITY)]);
+        ok(
+            "mustBeNonnegative",
+            vec![Value::Complex(f64::INFINITY, 7.0)],
+        );
+        ok(
+            "mustBeNonpositive",
+            vec![Value::Complex(f64::NEG_INFINITY, 7.0)],
+        );
+    }
+
+    #[test]
+    fn resident_secondary_validator_operands_require_coherent_metadata() {
+        use runmat_accelerate_api::ProviderPrecision;
+
+        test_support::with_test_provider(|provider| {
+            let value =
+                Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).expect("value");
+            let lower =
+                Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("lower");
+            let value_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &value)
+                    .expect("upload value");
+            let lower_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &lower)
+                    .expect("upload lower");
+            runmat_accelerate_api::set_handle_precision(&lower_handle, ProviderPrecision::F64);
+            let error = dispatch_validator(
+                "mustBeGreaterThan",
+                vec![
+                    Value::GpuTensor(value_handle.clone()),
+                    Value::GpuTensor(lower_handle.clone()),
+                ],
+            )
+            .expect_err("contradictory bound metadata must reject");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:validators:ProviderPayloadMismatch")
+            );
+            provider.free(&value_handle).ok();
+            provider.free(&lower_handle).ok();
+            runmat_accelerate_api::clear_handle_metadata(&value_handle);
+            runmat_accelerate_api::clear_handle_metadata(&lower_handle);
+        });
     }
 
     #[test]
@@ -1725,6 +2713,54 @@ mod tests {
             ok("mustBeInteger", vec![gpu.clone()]);
             err("mustBeFloat", vec![gpu.clone()]);
             err("mustBeA", vec![gpu, Value::String("double".into())]);
+        });
+    }
+
+    #[test]
+    fn must_be_a_distinguishes_explicit_gpuarray_from_automatic_residency() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+                .expect("integer source");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer source");
+            runmat_accelerate_api::set_handle_provenance(
+                &handle,
+                runmat_accelerate_api::GpuHandleProvenance::Automatic,
+            );
+            ok(
+                "mustBeA",
+                vec![
+                    Value::GpuTensor(handle.clone()),
+                    Value::String("uint16".into()),
+                ],
+            );
+            err(
+                "mustBeA",
+                vec![
+                    Value::GpuTensor(handle.clone()),
+                    Value::String("gpuArray".into()),
+                ],
+            );
+            runmat_accelerate_api::set_handle_provenance(
+                &handle,
+                runmat_accelerate_api::GpuHandleProvenance::Explicit,
+            );
+            ok(
+                "mustBeA",
+                vec![
+                    Value::GpuTensor(handle.clone()),
+                    Value::String("gpuArray".into()),
+                ],
+            );
+            err(
+                "mustBeA",
+                vec![
+                    Value::GpuTensor(handle.clone()),
+                    Value::String("uint16".into()),
+                ],
+            );
+            provider.free(&handle).expect("free resident source");
+            runmat_accelerate_api::clear_handle_metadata(&handle);
         });
     }
 
@@ -2024,7 +3060,10 @@ mod tests {
         ok(
             "mustBeInRange",
             vec![
-                Value::Num(2.0),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+                        .expect("range value"),
+                ),
                 Value::Tensor(range_lower),
                 Value::Tensor(range_upper),
             ],
@@ -2049,8 +3088,14 @@ mod tests {
             "mustBeInRange",
             vec![
                 Value::Tensor(wide_value.clone()),
-                Value::Num(0.0),
-                Value::Num(rounded),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
+                        .expect("wide lower"),
+                ),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![adjacent]), vec![1, 1])
+                        .expect("wide upper"),
+                ),
             ],
         );
 
@@ -2078,7 +3123,29 @@ mod tests {
         );
         err(
             "mustBeInRange",
-            vec![sparse_value, Value::Num(0.0), Value::Num(rounded)],
+            vec![
+                sparse_value,
+                Value::SparseTensor(
+                    SparseTensor::new_integer(
+                        1,
+                        1,
+                        vec![0, 0],
+                        vec![],
+                        IntegerStorage::U64(vec![]),
+                    )
+                    .expect("sparse lower"),
+                ),
+                Value::SparseTensor(
+                    SparseTensor::new_integer(
+                        1,
+                        1,
+                        vec![0, 1],
+                        vec![0],
+                        IntegerStorage::U64(vec![adjacent]),
+                    )
+                    .expect("sparse upper"),
+                ),
+            ],
         );
     }
 
@@ -2165,6 +3232,185 @@ mod tests {
                 Value::String("extra".into()),
             ],
         );
+    }
+
+    #[test]
+    fn ordered_validators_support_exact_compatible_integer_bounds() {
+        let value = integer_tensor(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 4]),
+            vec![2, 1],
+        );
+        let bounds = integer_tensor(
+            IntegerStorage::U64(vec![9_007_199_254_740_992, 3]),
+            vec![2, 1],
+        );
+        ok("mustBeGreaterThan", vec![value.clone(), bounds]);
+        err(
+            "mustBeLessThanOrEqual",
+            vec![value, Value::Num(9_007_199_254_740_992.0)],
+        );
+
+        let matrix = integer_tensor(IntegerStorage::I16(vec![1, 2]), vec![2, 1]);
+        let row_bounds = integer_tensor(IntegerStorage::I16(vec![0, 0]), vec![1, 2]);
+        ok("mustBeGreaterThan", vec![matrix, row_bounds]);
+
+        let huge_sparse = SparseTensor::new_integer(
+            1_000_000,
+            1_000_000,
+            {
+                let mut pointers = vec![0; 1_000_001];
+                pointers[1..].fill(1);
+                pointers
+            },
+            vec![0],
+            IntegerStorage::I64(vec![1]),
+        )
+        .expect("huge sparse sentinel");
+        ok("mustBeNonnegative", vec![Value::SparseTensor(huge_sparse)]);
+    }
+
+    #[test]
+    fn must_be_in_range_requires_same_class_and_compares_wide_integers_exactly() {
+        let value = integer_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]);
+        let lower = integer_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]);
+        let upper = integer_tensor(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]);
+        ok("mustBeInRange", vec![value.clone(), lower, upper]);
+        err(
+            "mustBeInRange",
+            vec![value, Value::Num(0.0), Value::Num(f64::INFINITY)],
+        );
+    }
+
+    #[test]
+    fn must_be_member_enforces_nondouble_class_compatibility_without_rounding() {
+        let wide = integer_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]);
+        let rounded_double = tensor(vec![9_007_199_254_740_992.0], 1, 1);
+        err("mustBeMember", vec![wide.clone(), rounded_double]);
+        let exact = integer_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]);
+        ok("mustBeMember", vec![wide.clone(), exact]);
+        let unlike = integer_tensor(IntegerStorage::I64(vec![9]), vec![1, 1]);
+        err("mustBeMember", vec![wide, unlike]);
+    }
+
+    #[test]
+    fn resident_content_validators_download_exactly_and_preserve_source() {
+        use futures::executor::block_on;
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::I64(vec![-1, 2]), vec![2, 1])
+                .expect("resident integer");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload resident integer");
+            runmat_accelerate_api::set_handle_provenance(
+                &handle,
+                runmat_accelerate_api::GpuHandleProvenance::Automatic,
+            );
+            let value = Value::GpuTensor(handle.clone());
+            assert!(block_on(dispatch_validator_async(
+                "mustBeNonzero",
+                vec![value.clone()],
+            ))
+            .is_ok());
+            assert!(block_on(dispatch_validator_async("mustBePositive", vec![value],)).is_err());
+            assert!(
+                crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle).is_some()
+            );
+            let gathered = block_on(provider.download_integer(&handle)).expect("source survives");
+            assert_eq!(
+                gathered.data,
+                runmat_accelerate_api::HostIntegerDataOwned::I64(vec![-1, 2])
+            );
+            provider.free(&handle).expect("free resident source");
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wgpu_resident_integer_validators_preserve_exact_source_and_provenance() {
+        use futures::executor::block_on;
+        use runmat_accelerate_api::AccelProvider;
+
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("wide integer source");
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+            .expect("upload wide integer source");
+        runmat_accelerate_api::set_handle_provenance(
+            &handle,
+            runmat_accelerate_api::GpuHandleProvenance::Automatic,
+        );
+        let value = Value::GpuTensor(handle.clone());
+
+        for name in [
+            "mustBeFinite",
+            "mustBeInteger",
+            "mustBeNonNan",
+            "mustBeNonzero",
+            "mustBePositive",
+        ] {
+            block_on(dispatch_validator_async(name, vec![value.clone()]))
+                .unwrap_or_else(|error| panic!("{name} unexpectedly failed: {error}"));
+        }
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&handle),
+            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        );
+        let gathered = block_on(provider.download_integer(&handle)).expect("source survives");
+        assert_eq!(
+            gathered.data,
+            runmat_accelerate_api::HostIntegerDataOwned::U64(
+                vec![9_007_199_254_740_993, u64::MAX,]
+            )
+        );
+        provider.free(&handle).expect("free source");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+    }
+
+    #[test]
+    fn undocumented_explicit_resident_validators_are_mode_gated() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1])
+                .expect("resident integer");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload resident integer");
+            runmat_accelerate_api::set_handle_provenance(
+                &handle,
+                runmat_accelerate_api::GpuHandleProvenance::Explicit,
+            );
+            let value = Value::GpuTensor(handle.clone());
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            for name in [
+                "mustBeFinite",
+                "mustBeInteger",
+                "mustBeNonNan",
+                "mustBeNonzero",
+            ] {
+                let error = dispatch_validator(name, vec![value.clone()])
+                    .expect_err("explicit resident extension must reject in compatibility mode");
+                assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+            }
+            drop(_strict);
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            for name in [
+                "mustBeFinite",
+                "mustBeInteger",
+                "mustBeNonNan",
+                "mustBeNonzero",
+            ] {
+                ok(name, vec![value.clone()]);
+            }
+            provider.free(&handle).expect("free resident source");
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+        });
     }
 
     #[test]

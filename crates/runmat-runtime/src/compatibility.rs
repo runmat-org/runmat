@@ -984,6 +984,10 @@ mod tests {
             ("movsum", "movsum-gpu-sample-points"),
             ("movvar", "movvar-gpu-sample-points"),
             ("movvar", "movvar-typed-integer-control"),
+            ("mustBeFinite", "mustBeFinite.resident-input"),
+            ("mustBeInteger", "mustBeInteger.resident-input"),
+            ("mustBeNonNan", "mustBeNonNan.resident-input"),
+            ("mustBeNonzero", "mustBeNonzero.resident-input"),
             ("nanmax", "nanmax-typed-integer-input"),
             ("nanmean", "nanmean-typed-integer-input"),
             ("nanmedian", "nanmedian-typed-integer-input"),
@@ -1531,6 +1535,9 @@ mod tests {
                 "isvalid",
                 "isvarname",
                 "isvector",
+                "mustBeFile",
+                "mustBeFolder",
+                "mustBeNonzeroLengthText",
                 "onCleanup",
             ]
         );

@@ -187,7 +187,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
             }
         }
     }
-    validate_function_arguments(func, &vars, &missing_input_slots)?;
+    validate_function_arguments(func, &vars, &missing_input_slots).await?;
     if let Some(slot) = func.varargin_slot {
         let fixed_count = func.input_slots.len();
         let rest = if runtime_arg_count > fixed_count {
@@ -277,7 +277,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     ))
 }
 
-fn validate_function_arguments(
+async fn validate_function_arguments(
     func: &crate::bytecode::program::FunctionBytecode,
     vars: &[Value],
     missing_input_slots: &HashSet<usize>,
@@ -296,6 +296,7 @@ fn validate_function_arguments(
         let value = vars
             .get(validation.input_slot)
             .ok_or_else(|| mex("InvalidInputSlot", "function argument slot out of bounds"))?;
+        arg_validation::validate_resident_metadata(value)?;
 
         if let Some(size) = &validation.size {
             let (rows, cols) = arg_validation::value_shape_2d(value);
@@ -351,7 +352,8 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Finite => {
-                    if !arg_validation::value_is_finite(value) {
+                    arg_validation::ensure_resident_extension(value, "mustBeFinite")?;
+                    if !arg_validation::value_is_finite_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -375,7 +377,8 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Folder => {
-                    if arg_validation::dispatch_validator("mustBeFolder", vec![value.clone()])
+                    if arg_validation::dispatch_validator_async("mustBeFolder", vec![value.clone()])
+                        .await
                         .is_err()
                     {
                         return Err(mex(
@@ -389,7 +392,8 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::File => {
-                    if arg_validation::dispatch_validator("mustBeFile", vec![value.clone()])
+                    if arg_validation::dispatch_validator_async("mustBeFile", vec![value.clone()])
+                        .await
                         .is_err()
                     {
                         return Err(mex(
@@ -499,7 +503,8 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Integer => {
-                    if !arg_validation::value_is_integer(value) {
+                    arg_validation::ensure_resident_extension(value, "mustBeInteger")?;
+                    if !arg_validation::value_is_integer_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -523,7 +528,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Positive => {
-                    if !arg_validation::value_is_positive(value) {
+                    if !arg_validation::value_is_positive_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -535,7 +540,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Negative => {
-                    if !arg_validation::value_is_negative(value) {
+                    if !arg_validation::value_is_negative_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -547,7 +552,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Nonnegative => {
-                    if !arg_validation::value_is_nonnegative(value) {
+                    if !arg_validation::value_is_nonnegative_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -559,7 +564,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Nonmissing => {
-                    if !arg_validation::value_is_nonmissing(value) {
+                    if !arg_validation::value_is_nonmissing_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -571,7 +576,8 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::NonNan => {
-                    if !arg_validation::value_is_non_nan(value) {
+                    arg_validation::ensure_resident_extension(value, "mustBeNonNan")?;
+                    if !arg_validation::value_is_non_nan_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -583,7 +589,8 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Nonzero => {
-                    if !arg_validation::value_is_nonzero(value) {
+                    arg_validation::ensure_resident_extension(value, "mustBeNonzero")?;
+                    if !arg_validation::value_is_nonzero_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -595,7 +602,7 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Nonpositive => {
-                    if !arg_validation::value_is_nonpositive(value) {
+                    if !arg_validation::value_is_nonpositive_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -656,7 +663,7 @@ fn validate_function_arguments(
                 }
                 crate::bytecode::program::FunctionArgValidator::Member(literals) => {
                     let allowed: Vec<_> = literals.iter().map(validation_literal_to_atom).collect();
-                    if !arg_validation::value_is_member_atoms(value, &allowed)? {
+                    if !arg_validation::value_is_member_atoms_async(value, &allowed).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -672,15 +679,17 @@ fn validate_function_arguments(
                     upper,
                     inclusivity,
                 ) => {
-                    if !arg_validation::value_is_in_range(
+                    if !arg_validation::value_is_in_range_documented_async(
                         value,
-                        *lower,
-                        *upper,
+                        &Value::Num(*lower),
+                        &Value::Num(*upper),
                         arg_validation::RangeInclusivity {
                             lower: inclusivity.lower,
                             upper: inclusivity.upper,
                         },
-                    ) {
+                    )
+                    .await?
+                    {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -692,7 +701,12 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::GreaterThanOrEqual(threshold) => {
-                    if !arg_validation::value_is_greater_than_or_equal(value, *threshold) {
+                    if !arg_validation::value_is_greater_than_or_equal_values_async(
+                        value,
+                        &Value::Num(*threshold),
+                    )
+                    .await?
+                    {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -704,7 +718,12 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::LessThanOrEqual(threshold) => {
-                    if !arg_validation::value_is_less_than_or_equal(value, *threshold) {
+                    if !arg_validation::value_is_less_than_or_equal_values_async(
+                        value,
+                        &Value::Num(*threshold),
+                    )
+                    .await?
+                    {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -716,7 +735,12 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::GreaterThan(threshold) => {
-                    if !arg_validation::value_is_greater_than(value, *threshold) {
+                    if !arg_validation::value_is_greater_than_values_async(
+                        value,
+                        &Value::Num(*threshold),
+                    )
+                    .await?
+                    {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -728,7 +752,12 @@ fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::LessThan(threshold) => {
-                    if !arg_validation::value_is_less_than(value, *threshold) {
+                    if !arg_validation::value_is_less_than_values_async(
+                        value,
+                        &Value::Num(*threshold),
+                    )
+                    .await?
+                    {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
