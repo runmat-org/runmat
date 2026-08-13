@@ -1,7 +1,11 @@
 //! MATLAB-compatible `int2str` builtin with GPU-aware host formatting.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, IntValue, IntegerStorage, Tensor, Value,
 };
@@ -75,6 +79,34 @@ pub const INT2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &INT2STR_ERRORS,
 };
 
+const INT2STR_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "int2str-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "int2str with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Int2strLogicalInputExtension"),
+};
+pub const INT2STR_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INT2STR_LOGICAL_EXTENSION];
+
+const INT2STR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is formatted directly from authoritative storage, including wide values above flintmax.",
+    }];
+pub const INT2STR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "chr = int2str(integer_N)",
+        inputs: &INT2STR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer text is exact and the result is a host character array. Documented gpuArray input is downloaded through its owner because int2str does not execute on the GPU.",
+    }];
+
 fn int2str_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     int2str_error_with_message(error.message, error)
 }
@@ -130,6 +162,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     examples = "chr = int2str([5 10 20; 100 200 400]);",
     type_resolver(string_scalar_type),
     descriptor(crate::builtins::strings::core::int2str::INT2STR_DESCRIPTOR),
+    extensions(crate::builtins::strings::core::int2str::INT2STR_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::int2str::INT2STR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::int2str"
 )]
 async fn int2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -140,11 +174,23 @@ async fn int2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         ));
     }
 
+    if value_is_logical(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INT2STR_LOGICAL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_int2str_flow)?;
     let data = extract_numeric_data(gathered).await?;
     Ok(Value::CharArray(format_numeric_data(data)?))
+}
+
+fn value_is_logical(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
 enum NumericData {
@@ -515,8 +561,15 @@ pub(crate) mod tests {
         assert_eq!(char_rows(out), vec!["-12"]);
 
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).expect("logical");
-        let out =
-            int2str_builtin(Value::LogicalArray(logical), Vec::new()).expect("int2str logical");
+        let error = int2str_builtin(Value::LogicalArray(logical.clone()), Vec::new())
+            .expect_err("MATLAB-compatible mode rejects logical input");
+        assert_eq!(
+            error.identifier(),
+            INT2STR_LOGICAL_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let out = int2str_builtin(Value::LogicalArray(logical), Vec::new())
+            .expect("RunMat logical extension");
         assert_eq!(char_rows(out), vec!["1  0  1"]);
     }
 

@@ -758,7 +758,7 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
     }
 }
 
-fn value_has_native_integer_class(value: &Value) -> bool {
+pub fn value_has_native_integer_class(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
@@ -767,6 +767,120 @@ fn value_has_native_integer_class(value: &Value) -> bool {
         Value::GpuTensor(handle) => handle_integer_type(handle).is_some(),
         _ => false,
     }
+}
+
+pub fn value_has_logical_class(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if handle_is_logical(handle))
+}
+
+pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {
+    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    match value {
+        Value::Int(value) => exact(value),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .is_none_or(|storage| storage.exact_values().iter().all(exact)),
+        Value::SparseTensor(tensor) => tensor
+            .integer_storage()
+            .is_none_or(|storage| storage.exact_values().iter().all(exact)),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_none_or(|storage| {
+            storage.real.exact_values().iter().all(exact)
+                && storage.imag.exact_values().iter().all(exact)
+        }),
+        Value::Cell(cell) => cell.data.iter().all(native_integer_value_is_exact_f64),
+        Value::Struct(value) => value.fields.values().all(native_integer_value_is_exact_f64),
+        Value::OutputList(values) => values.iter().all(native_integer_value_is_exact_f64),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle)
+            .is_none_or(|element_type| element_type.element_size() <= 4),
+        _ => true,
+    }
+}
+
+/// Check a native integer value against a binary64 boundary without rejecting a
+/// resident 64-bit value solely because its contents are not visible in handle
+/// metadata. Compatibility admission must run before calling this helper.
+pub async fn native_integer_value_is_exact_f64_async(value: &Value) -> Result<bool, RuntimeError> {
+    if native_integer_value_is_exact_f64(value) {
+        return Ok(true);
+    }
+    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some()) {
+        let Value::GpuTensor(handle) = value else {
+            unreachable!();
+        };
+        let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+            .ok_or_else(|| {
+                build_runtime_error(
+                    "integer exactness check: no acceleration provider owns the input handle",
+                )
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+            })?;
+        let expected_type = handle_integer_type(handle).expect("integer type checked above");
+        if runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+            || handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle).is_some()
+            || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                handle,
+                None,
+                Some(expected_type),
+                false,
+            )
+        {
+            return Err(build_runtime_error(
+                "integer exactness check: input handle has contradictory integer metadata",
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
+        }
+        let snapshot = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(handle);
+        let gathered = provider.download_integer(handle).await.map_err(|error| {
+            build_runtime_error(format!(
+                "integer exactness check: owner-preserving download failed: {error}"
+            ))
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+        });
+        crate::builtins::common::gpu_helpers::restore_handle_metadata(handle, &snapshot);
+        let gathered = gathered?;
+        if gathered.shape != handle.shape || gathered.data.element_type() != expected_type {
+            return Err(build_runtime_error(
+                "integer exactness check: provider returned contradictory integer payload metadata",
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
+        }
+        let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+        let values_exact = match &gathered.data {
+            runmat_accelerate_api::HostIntegerDataOwned::I8(values) => values
+                .iter()
+                .all(|value| exact(&IntValue::I64(i64::from(*value)))),
+            runmat_accelerate_api::HostIntegerDataOwned::I16(values) => values
+                .iter()
+                .all(|value| exact(&IntValue::I64(i64::from(*value)))),
+            runmat_accelerate_api::HostIntegerDataOwned::I32(values) => values
+                .iter()
+                .all(|value| exact(&IntValue::I64(i64::from(*value)))),
+            runmat_accelerate_api::HostIntegerDataOwned::I64(values) => {
+                values.iter().all(|value| exact(&IntValue::I64(*value)))
+            }
+            runmat_accelerate_api::HostIntegerDataOwned::U8(values) => values
+                .iter()
+                .all(|value| exact(&IntValue::U64(u64::from(*value)))),
+            runmat_accelerate_api::HostIntegerDataOwned::U16(values) => values
+                .iter()
+                .all(|value| exact(&IntValue::U64(u64::from(*value)))),
+            runmat_accelerate_api::HostIntegerDataOwned::U32(values) => values
+                .iter()
+                .all(|value| exact(&IntValue::U64(u64::from(*value)))),
+            runmat_accelerate_api::HostIntegerDataOwned::U64(values) => {
+                values.iter().all(|value| exact(&IntValue::U64(*value)))
+            }
+        };
+        return Ok(values_exact);
+    }
+    Ok(false)
 }
 
 pub fn must_be_a(value: &Value, class_names: Vec<String>) -> Result<bool, RuntimeError> {
@@ -1291,6 +1405,83 @@ mod tests {
 
     fn sparse(values: Vec<f64>) -> Value {
         Value::SparseTensor(SparseTensor::new(2, 2, vec![0, 1, 1], vec![0], values).unwrap())
+    }
+
+    #[test]
+    fn resident_integer_exactness_is_class_conservative() {
+        use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 1,
+        };
+        runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U32);
+        assert!(native_integer_value_is_exact_f64(&Value::GpuTensor(
+            handle.clone()
+        )));
+        runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I64);
+        assert!(!native_integer_value_is_exact_f64(&Value::GpuTensor(
+            handle.clone()
+        )));
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+    }
+
+    #[test]
+    fn resident_wide_integer_exactness_is_decided_from_gathered_values() {
+        use crate::builtins::common::test_support;
+        use futures::executor::block_on;
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            for (value, expected) in [
+                (9_007_199_254_740_992_u64, true),
+                (9_007_199_254_740_993_u64, false),
+            ] {
+                let handle = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::U64(std::slice::from_ref(&value)),
+                        shape: &[1, 1],
+                    })
+                    .expect("upload resident uint64");
+                assert_eq!(
+                    block_on(native_integer_value_is_exact_f64_async(&Value::GpuTensor(
+                        handle.clone()
+                    )))
+                    .expect("exactness check"),
+                    expected
+                );
+                provider.free(&handle).expect("free resident uint64");
+                runmat_accelerate_api::clear_handle_metadata(&handle);
+            }
+        });
+    }
+
+    #[test]
+    fn resident_wide_integer_exactness_rejects_contradictory_source_metadata() {
+        use crate::builtins::common::test_support;
+        use futures::executor::block_on;
+        use runmat_accelerate_api::{
+            HostIntegerDataView, HostIntegerTensorView, ProviderPrecision,
+        };
+
+        test_support::with_test_provider(|provider| {
+            let value = 9_007_199_254_740_992_u64;
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(std::slice::from_ref(&value)),
+                    shape: &[1, 1],
+                })
+                .expect("upload resident uint64");
+            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
+            let error = block_on(native_integer_value_is_exact_f64_async(&Value::GpuTensor(
+                handle.clone(),
+            )))
+            .expect_err("contradictory integer metadata must reject");
+            assert!(error.message().contains("contradictory integer metadata"));
+            provider.free(&handle).ok();
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+        });
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {

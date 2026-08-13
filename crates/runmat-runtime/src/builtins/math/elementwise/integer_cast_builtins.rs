@@ -171,19 +171,6 @@ define_integer_cast_builtin!(
     "RM.INT16.INTERNAL"
 );
 define_integer_cast_builtin!(
-    int32,
-    int32_builtin,
-    "int32",
-    IntegerTarget::I32,
-    "Convert scalars and arrays to int32 using MATLAB saturating rounding.",
-    "int32,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::int32::DESCRIPTOR,
-    "crate::builtins::math::elementwise::integer_cast_builtins::int32",
-    "RM.INT32.INVALID_ARGUMENT",
-    "RM.INT32.INVALID_INPUT",
-    "RM.INT32.INTERNAL"
-);
-define_integer_cast_builtin!(
     int64,
     int64_builtin,
     "int64",

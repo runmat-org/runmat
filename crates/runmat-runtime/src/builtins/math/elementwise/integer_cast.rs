@@ -254,13 +254,95 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             cast_tensor_value(target, tensor)
         }
         Value::GpuTensor(handle) => {
-            let provider = runmat_accelerate_api::provider_for_handle(&handle)
-                .ok_or_else(|| CastError::Internal("no acceleration provider registered".into()))?;
-            provider
+            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| {
+                    CastError::Internal("no acceleration provider owns the input handle".into())
+                })?;
+            let source_integer = runmat_accelerate_api::handle_integer_type(&handle);
+            let source_logical = runmat_accelerate_api::handle_is_logical(&handle);
+            let source_precision = runmat_accelerate_api::handle_precision(&handle);
+            let source_storage = runmat_accelerate_api::handle_storage(&handle);
+            let source_metadata_consistent = if source_integer.is_some() {
+                source_storage == runmat_accelerate_api::GpuTensorStorage::Real
+                    && source_precision.is_none()
+                    && !source_logical
+            } else {
+                matches!(
+                    source_storage,
+                    runmat_accelerate_api::GpuTensorStorage::Real
+                        | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                ) && source_precision == Some(provider.precision())
+                    && (!source_logical
+                        || source_storage == runmat_accelerate_api::GpuTensorStorage::Real)
+            };
+            if !source_metadata_consistent
+                || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                    &handle,
+                    source_precision,
+                    source_integer,
+                    source_logical,
+                )
+            {
+                return Err(CastError::Internal(
+                    "input handle has contradictory class metadata".into(),
+                ));
+            }
+            let input_metadata =
+                crate::builtins::common::gpu_helpers::snapshot_handle_metadata(&handle);
+            let provenance = runmat_accelerate_api::handle_provenance(&handle)
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                return Err(CastError::Internal(
+                    "complex gpuArray integer casts require typed complex integer provider storage"
+                        .into(),
+                ));
+            }
+            let output = match provider
                 .cast_to_integer(&handle, target.accelerator_type())
                 .await
-                .map(Value::GpuTensor)
-                .map_err(|error| CastError::Internal(error.to_string()))
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    crate::builtins::common::gpu_helpers::restore_handle_metadata(
+                        &handle,
+                        &input_metadata,
+                    );
+                    return Err(CastError::Internal(error.to_string()));
+                }
+            };
+            crate::builtins::common::gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+            let valid = output.shape == handle.shape
+                && output.device_id == handle.device_id
+                && !crate::builtins::common::gpu_helpers::same_gpu_handle(&handle, &output)
+                && crate::builtins::common::gpu_helpers::exact_provider_for_handle(&output)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && runmat_accelerate_api::handle_storage(&output)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_integer_type(&output)
+                    == Some(target.accelerator_type())
+                && runmat_accelerate_api::handle_precision(&output).is_none()
+                && !runmat_accelerate_api::handle_is_logical(&output)
+                && crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                    &output,
+                    None,
+                    Some(target.accelerator_type()),
+                    false,
+                );
+            if !valid {
+                crate::builtins::common::gpu_helpers::free_unprotected_exact_owner(
+                    &output,
+                    &[&handle],
+                );
+                return Err(CastError::Internal(
+                    "provider returned an invalid integer cast result".into(),
+                ));
+            }
+            runmat_accelerate_api::set_handle_provenance(&output, provenance);
+            Ok(crate::builtins::common::gpu_helpers::resident_gpu_value(
+                output,
+            ))
         }
         value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
             cast_complex_value(value, target)
@@ -417,7 +499,9 @@ pub(crate) fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostIntegerDataOwned;
 
     #[test]
     fn uint64_to_int64_array_saturates_without_f64_rounding() {
@@ -458,6 +542,61 @@ mod tests {
             output.into_numeric_storage().expect("uint8 storage"),
             NumericStorage::U8(vec![0, 2, u8::MAX])
         );
+    }
+
+    #[test]
+    fn integer_cast_rejects_contradictory_resident_source_metadata() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("upload source");
+            runmat_accelerate_api::set_handle_class_name(&handle, "uint64");
+            let error = block_on(cast_value(
+                Value::GpuTensor(handle.clone()),
+                IntegerTarget::I32,
+            ))
+            .expect_err("contradictory source metadata must reject");
+            assert!(matches!(
+                error,
+                CastError::Internal(message) if message.contains("contradictory class metadata")
+            ));
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn integer_cast_accepts_canonical_resident_logical_metadata() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[0.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload source");
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            runmat_accelerate_api::set_handle_class_name(&handle, "logical");
+
+            let output = block_on(cast_value(
+                Value::GpuTensor(handle.clone()),
+                IntegerTarget::I32,
+            ))
+            .expect("canonical resident logical cast");
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident integer output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::I32)
+            );
+            assert!(runmat_accelerate_api::handle_precision(&output).is_none());
+            let downloaded = block_on(provider.download_integer(&output)).expect("download");
+            assert_eq!(downloaded.data, HostIntegerDataOwned::I32(vec![0, 1]));
+            provider.free(&handle).ok();
+            provider.free(&output).ok();
+        });
     }
 
     #[test]

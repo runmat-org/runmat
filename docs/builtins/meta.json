@@ -76439,6 +76439,35 @@
           "when": "The argument grammar does not match int(expr), int(expr,var), int(expr,a,b), or int(expr,var,a,b).",
           "message": "int: invalid number of input arguments"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "F = int(integer_expr_or_bound, ...)",
+          "inputs": [
+            {
+              "name": "expr, a, or b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Scalar numeric constants are admitted only when the current symbolic constant representation can retain them exactly."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "This is symbolic integration of a numeric constant, not the integer datatype conversion surface. Wide constants that cannot enter the current symbolic binary64 constant node exactly reject rather than aliasing."
+        }
       ]
     },
     {
@@ -76628,6 +76657,43 @@
           "when": "Internal char-array assembly failed.",
           "message": "int2str: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "int2str-logical-input",
+          "mode": "RunMatOnly",
+          "description": "int2str with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Int2strLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "chr = int2str(integer_N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer class is formatted directly from authoritative storage, including wide values above flintmax."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer text is exact and the result is a host character array. Documented gpuArray input is downloaded through its owner because int2str does not execute on the GPU."
+        }
       ]
     },
     {
@@ -76675,6 +76741,35 @@
           "identifier": "RunMat:int32:Internal",
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "int32: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = int32(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative int32 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; R2026a complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap."
         }
       ]
     },
@@ -77246,6 +77341,88 @@
           "when": "Bounds/integrand/adaptive solver semantics are invalid.",
           "message": "integral: invalid input"
         }
+      ],
+      "extensions": [
+        {
+          "id": "integral-integer-bound",
+          "mode": "RunMatOnly",
+          "description": "integral with typed-integer bounds is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IntegralIntegerBoundExtension"
+        },
+        {
+          "id": "integral-logical-bound",
+          "mode": "RunMatOnly",
+          "description": "integral with logical bounds is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IntegralLogicalBoundExtension"
+        },
+        {
+          "id": "integral-integer-option",
+          "mode": "RunMatOnly",
+          "description": "integral with typed-integer numeric options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IntegralIntegerOptionExtension"
+        },
+        {
+          "id": "integral-logical-numeric-option",
+          "mode": "RunMatOnly",
+          "description": "integral with logical tolerance or evaluation-count options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IntegralLogicalNumericOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "q = integral(fun, integer_xmin, integer_xmax, ...)",
+          "inputs": [
+            {
+              "name": "xmin or xmax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "A typed-integer bound is accepted only when exactly representable at the binary64 quadrature boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "RunMat-only integer bounds are classified before resident access and converted only after exactness validation; MATLAB-compatible modes retain documented single/double bounds."
+        },
+        {
+          "form": "q = integral(fun, xmin, xmax, integer_option)",
+          "inputs": [
+            {
+              "name": "AbsTol, RelTol, MaxFunEvals, or MaxIntervalCount value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer tolerance values cross a checked binary64 boundary; count controls remain exact through usize validation."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only typed-integer controls are independently gated from bounds and retain exact count parsing."
+        }
       ]
     },
     {
@@ -77581,6 +77758,115 @@
           "when": "Interpolation evaluation fails due to internal tensor construction or solver paths.",
           "message": "interp1: internal interpolation failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "interp1-integer-sample",
+          "mode": "RunMatOnly",
+          "description": "interp1 with typed-integer sample locations or values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1IntegerSampleExtension"
+        },
+        {
+          "id": "interp1-integer-query",
+          "mode": "RunMatOnly",
+          "description": "interp1 with typed-integer query coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1IntegerQueryExtension"
+        },
+        {
+          "id": "interp1-logical-input",
+          "mode": "RunMatOnly",
+          "description": "interp1 with logical numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1LogicalInputExtension"
+        },
+        {
+          "id": "interp1-integer-extrapolation",
+          "mode": "RunMatOnly",
+          "description": "interp1 with a typed-integer extrapolation value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1IntegerExtrapolationExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Vq = interp1(integer_X_or_Y, ..., Xq)",
+          "inputs": [
+            {
+              "name": "X or Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All values must be exactly representable before the binary64 interpolation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat retains typed-integer samples as a checked extension; MATLAB-compatible modes retain the documented floating and temporal surface."
+        },
+        {
+          "form": "Vq = interp1(X, Y, integer_Xq)",
+          "inputs": [
+            {
+              "name": "Xq",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All coordinates must be exactly representable before the binary64 interpolation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer queries are classified before provider dispatch or gather and then cross one checked binary64 boundary."
+        },
+        {
+          "form": "Vq = interp1(..., method, integer_extrapolation_value)",
+          "inputs": [
+            {
+              "name": "extrapolation value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The scalar fill value must be exactly representable before interpolation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat accepts this broader scalar fill form only after compatibility and exactness checks that precede provider access or gather."
+        }
       ]
     },
     {
@@ -77636,6 +77922,88 @@
           "identifier": "RunMat:interp1q:Internal",
           "when": "Interpolation evaluation or output construction fails unexpectedly.",
           "message": "interp1q: internal interpolation failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "interp1q-integer-data",
+          "mode": "RunMatOnly",
+          "description": "interp1q with typed-integer X or V data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1qIntegerDataExtension"
+        },
+        {
+          "id": "interp1q-integer-query",
+          "mode": "RunMatOnly",
+          "description": "interp1q with typed-integer query coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1qIntegerQueryExtension"
+        },
+        {
+          "id": "interp1q-logical-input",
+          "mode": "RunMatOnly",
+          "description": "interp1q with logical numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1qLogicalInputExtension"
+        },
+        {
+          "id": "interp1q-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "interp1q with resident gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp1qGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Vq = interp1q(integer_X_or_V, V_or_X, Xq)",
+          "inputs": [
+            {
+              "name": "X or V",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer samples must be exactly representable before the binary64 interpolation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat retains this useful legacy extension through one checked binary64 boundary; MATLAB-compatible modes accept only documented single/double data."
+        },
+        {
+          "form": "Vq = interp1q(X, V, integer_Xq)",
+          "inputs": [
+            {
+              "name": "Xq",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer query coordinates must be exactly representable before interpolation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer queries are checked before conversion; resident input is independently gated because interp1q has no documented gpuArray surface."
         }
       ]
     },
@@ -78056,6 +78424,115 @@
           "when": "Interpolation output construction fails due to internal tensor assembly paths.",
           "message": "interp2: internal interpolation failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "interp2-integer-sample",
+          "mode": "RunMatOnly",
+          "description": "interp2 with typed-integer sample grids or values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp2IntegerSampleExtension"
+        },
+        {
+          "id": "interp2-integer-query",
+          "mode": "RunMatOnly",
+          "description": "interp2 with typed-integer query coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp2IntegerQueryExtension"
+        },
+        {
+          "id": "interp2-logical-input",
+          "mode": "RunMatOnly",
+          "description": "interp2 with logical numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp2LogicalInputExtension"
+        },
+        {
+          "id": "interp2-integer-extrapolation",
+          "mode": "RunMatOnly",
+          "description": "interp2 with a typed-integer extrapolation value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Interp2IntegerExtrapolationExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Vq = interp2(integer_X_Y_or_V, ...)",
+          "inputs": [
+            {
+              "name": "X, Y, or V",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer grids and values must be exactly representable before interpolation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer samples cross one checked binary64 boundary; MATLAB-compatible modes retain documented single/double grids and values."
+        },
+        {
+          "form": "Vq = interp2(X, Y, V, integer_Xq_or_Yq)",
+          "inputs": [
+            {
+              "name": "Xq or Yq",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer query coordinates must be exactly representable before interpolation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer queries are gated before provider access and converted only after exactness validation."
+        },
+        {
+          "form": "Vq = interp2(..., method, integer_extrapolation_value)",
+          "inputs": [
+            {
+              "name": "extrapolation value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The scalar fill value must be exactly representable before interpolation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat accepts this broader scalar fill form only after compatibility and exactness checks that precede provider access or gather."
+        }
       ]
     },
     {
@@ -78387,167 +78864,225 @@
     },
     {
       "name": "intmax",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = intmax()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value."
+            }
+          ]
+        },
+        {
+          "label": "value = intmax(classname)",
+          "inputs": [
+            {
+              "name": "classname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric class name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value."
+            }
+          ]
+        },
+        {
+          "label": "value = intmax(like=prototype)",
+          "inputs": [
+            {
+              "name": "like",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Like keyword."
+            },
+            {
+              "name": "prototype",
+              "ty": "LikePrototype",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer prototype whose class and complexity are copied."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value."
+            }
+          ]
+        }
+      ],
       "errors": [
         {
           "code": "RM.NUMERIC_LIMITS.INVALID_CLASS",
           "identifier": "RunMat:numericLimits:InvalidClass",
-          "message": "numeric limit: unsupported class",
-          "when": "The requested class is not supported by the limit query."
+          "when": "The requested class is not supported by the limit query.",
+          "message": "numeric limit: unsupported class"
         },
         {
           "code": "RM.NUMERIC_LIMITS.INVALID_SYNTAX",
           "identifier": "RunMat:numericLimits:InvalidSyntax",
-          "message": "numeric limit: invalid syntax",
-          "when": "The arguments do not match a documented class-name or like-prototype form."
+          "when": "The arguments do not match a documented class-name or like-prototype form.",
+          "message": "numeric limit: invalid syntax"
         }
       ],
-      "output_mode": "Fixed",
-      "signatures": [
+      "integer_capabilities": [
         {
-          "inputs": [],
-          "label": "value = intmax()",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value.",
-              "name": "value",
-              "ty": "Any"
-            }
-          ]
-        },
-        {
+          "form": "value = intmax('like', integer_prototype)",
           "inputs": [
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric class name.",
-              "name": "classname",
-              "ty": "StringScalar"
-            }
-          ],
-          "label": "value = intmax(classname)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value.",
-              "name": "value",
-              "ty": "Any"
-            }
-          ]
-        },
-        {
-          "inputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Like keyword.",
-              "name": "like",
-              "ty": "StringScalar"
-            },
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Integer prototype whose class and complexity are copied.",
               "name": "prototype",
-              "ty": "LikePrototype"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The prototype selects one of the eight integer classes and may be real or structurally complex."
             }
           ],
-          "label": "value = intmax(like=prototype)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value.",
-              "name": "value",
-              "ty": "Any"
-            }
-          ]
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Returns the exact maximum of the prototype class as a scalar and preserves prototype complexity and documented gpuArray residency where the provider representation supports it."
         }
       ]
     },
     {
       "name": "intmin",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = intmin()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value."
+            }
+          ]
+        },
+        {
+          "label": "value = intmin(classname)",
+          "inputs": [
+            {
+              "name": "classname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric class name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value."
+            }
+          ]
+        },
+        {
+          "label": "value = intmin(like=prototype)",
+          "inputs": [
+            {
+              "name": "like",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Like keyword."
+            },
+            {
+              "name": "prototype",
+              "ty": "LikePrototype",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer prototype whose class and complexity are copied."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value."
+            }
+          ]
+        }
+      ],
       "errors": [
         {
           "code": "RM.NUMERIC_LIMITS.INVALID_CLASS",
           "identifier": "RunMat:numericLimits:InvalidClass",
-          "message": "numeric limit: unsupported class",
-          "when": "The requested class is not supported by the limit query."
+          "when": "The requested class is not supported by the limit query.",
+          "message": "numeric limit: unsupported class"
         },
         {
           "code": "RM.NUMERIC_LIMITS.INVALID_SYNTAX",
           "identifier": "RunMat:numericLimits:InvalidSyntax",
-          "message": "numeric limit: invalid syntax",
-          "when": "The arguments do not match a documented class-name or like-prototype form."
+          "when": "The arguments do not match a documented class-name or like-prototype form.",
+          "message": "numeric limit: invalid syntax"
         }
       ],
-      "output_mode": "Fixed",
-      "signatures": [
+      "integer_capabilities": [
         {
-          "inputs": [],
-          "label": "value = intmin()",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value.",
-              "name": "value",
-              "ty": "Any"
-            }
-          ]
-        },
-        {
+          "form": "value = intmin('like', integer_prototype)",
           "inputs": [
             {
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric class name.",
-              "name": "classname",
-              "ty": "StringScalar"
-            }
-          ],
-          "label": "value = intmin(classname)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value.",
-              "name": "value",
-              "ty": "Any"
-            }
-          ]
-        },
-        {
-          "inputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Like keyword.",
-              "name": "like",
-              "ty": "StringScalar"
-            },
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Integer prototype whose class and complexity are copied.",
               "name": "prototype",
-              "ty": "LikePrototype"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The prototype selects one of the eight integer classes and may be real or structurally complex."
             }
           ],
-          "label": "value = intmin(like=prototype)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value.",
-              "name": "value",
-              "ty": "Any"
-            }
-          ]
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Returns the exact minimum of the prototype class as a scalar and preserves prototype complexity and documented gpuArray residency where the provider representation supports it."
         }
       ]
     },
@@ -78590,6 +79125,49 @@
           "identifier": "RunMat:inv:Internal",
           "when": "Runtime fails while executing inversion or fallback/upload paths.",
           "message": "inv: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "inv-integer-input",
+          "mode": "RunMatOnly",
+          "description": "inv with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InvIntegerInputExtension"
+        },
+        {
+          "id": "inv-logical-input",
+          "mode": "RunMatOnly",
+          "description": "inv with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InvLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = inv(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Every element must be exactly representable before the binary64 matrix-inversion boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat-only integer matrices cross one checked binary64 boundary. Resident integer input is classified before provider execution and the double result is restored only when the owning provider can represent it truthfully."
         }
       ]
     },

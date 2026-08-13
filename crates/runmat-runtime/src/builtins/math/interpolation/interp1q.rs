@@ -1,7 +1,11 @@
 //! MATLAB-compatible legacy `interp1q` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, ResolveContext, Type, Value,
 };
@@ -83,6 +87,76 @@ pub const INTERP1Q_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTERP1Q_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp1q-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp1q with typed-integer X or V data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp1qIntegerDataExtension"),
+};
+const INTERP1Q_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp1q-integer-query",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp1q with typed-integer query coordinates is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp1qIntegerQueryExtension"),
+};
+const INTERP1Q_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp1q-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp1q with logical numeric input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp1qLogicalInputExtension"),
+};
+const INTERP1Q_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "interp1q-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interp1q with resident gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Interp1qGpuInputExtension"),
+};
+pub const INTERP1Q_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    INTERP1Q_INTEGER_DATA_EXTENSION,
+    INTERP1Q_INTEGER_QUERY_EXTENSION,
+    INTERP1Q_LOGICAL_INPUT_EXTENSION,
+    INTERP1Q_GPU_INPUT_EXTENSION,
+];
+
+const INTERP1Q_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X or V",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer samples must be exactly representable before the binary64 interpolation boundary.",
+    }];
+const INTERP1Q_INTEGER_QUERY_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Xq",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer query coordinates must be exactly representable before interpolation.",
+    }];
+pub const INTERP1Q_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp1q(integer_X_or_V, V_or_X, Xq)",
+        inputs: &INTERP1Q_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat retains this useful legacy extension through one checked binary64 boundary; MATLAB-compatible modes accept only documented single/double data.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = interp1q(X, V, integer_Xq)",
+        inputs: &INTERP1Q_INTEGER_QUERY_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer queries are checked before conversion; resident input is independently gated because interp1q has no documented gpuArray surface.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::interpolation::interp1q")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
@@ -131,9 +205,14 @@ fn interp1q_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     sink = true,
     type_resolver(interp1q_type),
     descriptor(crate::builtins::math::interpolation::interp1q::INTERP1Q_DESCRIPTOR),
+    extensions(crate::builtins::math::interpolation::interp1q::INTERP1Q_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::interpolation::interp1q::INTERP1Q_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::interpolation::interp1q"
 )]
 async fn interp1q_builtin(x: Value, v: Value, xq: Value) -> BuiltinResult<Value> {
+    preflight_interp1q(&x, &v, &xq).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&x, "interp1q")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&v, "interp1q")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&xq, "interp1q")?;
@@ -160,6 +239,62 @@ async fn interp1q_builtin(x: Value, v: Value, xq: Value) -> BuiltinResult<Value>
     )
     .map_err(|err| wrap_error(err, &ERROR_INTERNAL))?;
     reshape_matrix_output(result, &series, &query)
+}
+
+async fn preflight_interp1q(x: &Value, v: &Value, xq: &Value) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    for value in [x, v] {
+        if value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTERP1Q_INTEGER_DATA_EXTENSION,
+                NAME,
+            )?;
+            if !crate::builtins::common::validation::is_typed_complex_integer(value)
+                && !native_integer_value_is_exact_f64_async(value).await?
+            {
+                return Err(error_with_detail(
+                    &ERROR_INVALID_INPUT,
+                    "integer sample data must be exactly representable as double",
+                ));
+            }
+        }
+    }
+    if value_has_native_integer_class(xq) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP1Q_INTEGER_QUERY_EXTENSION,
+            NAME,
+        )?;
+        if !crate::builtins::common::validation::is_typed_complex_integer(xq)
+            && !native_integer_value_is_exact_f64_async(xq).await?
+        {
+            return Err(error_with_detail(
+                &ERROR_INVALID_INPUT,
+                "integer query coordinates must be exactly representable as double",
+            ));
+        }
+    }
+    if [x, v, xq]
+        .into_iter()
+        .any(|value| value_has_logical_class(value))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP1Q_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if [x, v, xq]
+        .into_iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP1Q_GPU_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
 }
 
 fn wrap_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -514,12 +649,23 @@ mod tests {
 
     #[test]
     fn interp1q_reads_typed_integer_x_v_and_query_exactly() {
-        let out = block_on(interp1q_builtin(
-            int_row(IntegerStorage::I16(vec![1, 2, 3])),
-            int_row(IntegerStorage::U16(vec![10, 20, 40])),
-            int_row(IntegerStorage::I16(vec![1, 2])),
-        ))
-        .expect("interp1q");
+        let args = || {
+            (
+                int_row(IntegerStorage::I16(vec![1, 2, 3])),
+                int_row(IntegerStorage::U16(vec![10, 20, 40])),
+                int_row(IntegerStorage::I16(vec![1, 2])),
+            )
+        };
+        let (x, v, xq) = args();
+        let error = block_on(interp1q_builtin(x, v, xq))
+            .expect_err("compatible mode rejects integer samples");
+        assert_eq!(
+            error.identifier(),
+            INTERP1Q_INTEGER_DATA_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let (x, v, xq) = args();
+        let out = block_on(interp1q_builtin(x, v, xq)).expect("RunMat interp1q");
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
@@ -542,11 +688,30 @@ mod tests {
             )
         };
 
-        for (x, v, xq) in [
-            (typed_complex(), row(&[1.0]), row(&[1.0])),
-            (row(&[1.0]), typed_complex(), row(&[1.0])),
-            (row(&[1.0]), row(&[1.0]), typed_complex()),
+        for (x, v, xq, extension) in [
+            (
+                typed_complex(),
+                row(&[1.0]),
+                row(&[1.0]),
+                &INTERP1Q_INTEGER_DATA_EXTENSION,
+            ),
+            (
+                row(&[1.0]),
+                typed_complex(),
+                row(&[1.0]),
+                &INTERP1Q_INTEGER_DATA_EXTENSION,
+            ),
+            (
+                row(&[1.0]),
+                row(&[1.0]),
+                typed_complex(),
+                &INTERP1Q_INTEGER_QUERY_EXTENSION,
+            ),
         ] {
+            let err = block_on(interp1q_builtin(x.clone(), v.clone(), xq.clone()))
+                .expect_err("compatible mode must reject the declared integer extension");
+            assert_eq!(err.identifier(), extension.error_identifier);
+            let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
             let err = block_on(interp1q_builtin(x, v, xq))
                 .expect_err("typed complex integer input must reject");
             assert!(err.message().contains("complex numbers with integer types"));

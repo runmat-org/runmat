@@ -1,8 +1,12 @@
 //! MATLAB-compatible `int32` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -72,6 +76,27 @@ pub const INT32_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &INT32_ERRORS,
 };
 
+const INT32_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every native integer class converts directly to authoritative int32 storage without a floating intermediate.",
+    }];
+
+pub const INT32_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = int32(integer_X)",
+        inputs: &INT32_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; R2026a complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::int32")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "int32",
@@ -132,6 +157,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::int32::INT32_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::int32::INT32_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::int32"
 )]
 async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
