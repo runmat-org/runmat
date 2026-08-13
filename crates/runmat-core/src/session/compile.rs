@@ -961,6 +961,10 @@ impl RunMatSession {
         };
         let (lowering, mir, analysis, mut bytecode) = {
             let _span = info_span!("runtime.lower").entered();
+            // WASM registrations are explicit rather than inventory-backed. Install
+            // them before analysis so the retained catalog revision is identical to
+            // the program environment subsequently bound into the executable.
+            runmat_runtime::builtins::wasm_registry::register_all();
             let function_names = self.function_registry.names.clone();
             let function_output_arities = function_output_arities(&self.function_registry);
             let workspace_bindings = self.lowering_workspace_bindings();

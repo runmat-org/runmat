@@ -35,6 +35,7 @@ runmat-time = { workspace = true }
 runmat-filesystem = { workspace = true }
 sha2 = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.uuid]
 version = "1"
@@ -60,6 +61,7 @@ runmat-runtime = { workspace = true, features = ["plot-web"] }
 futures = "0.3"
 wasm-bindgen-test = "0.3"
 tempfile = "3"
+runmat-execution-artifact = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }

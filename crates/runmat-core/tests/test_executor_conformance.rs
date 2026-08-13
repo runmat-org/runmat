@@ -16,6 +16,41 @@ fn digest(value: &str) -> String {
     runmat_execution::Digest::sha256(value).to_string()
 }
 
+async fn execute_portable_envelope(
+    envelope: &runmat_execution::ExecutableUnitEnvelope,
+) -> runmat_execution_artifact::ProgramExecutionResponse {
+    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+    let recipe = runmat_execution_artifact::ProgramBuildRecipe {
+        schema_version: 1,
+        program_revision: envelope.manifest.identity.program.clone(),
+        entrypoint: function.to_string(),
+        outputs: runmat_execution::OutputContract {
+            requested_outputs: 1,
+        },
+        execution_mode: "interpreter".into(),
+        target_profile: "portable-executable-unit-v3-test".into(),
+        features: Default::default(),
+        compile_options: Default::default(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact = runmat_execution_artifact::ProgramArtifact::materialize(
+        &recipe,
+        runmat_execution_artifact::ExecutableForm::ExecutableUnitV3,
+        envelope.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    runmat_vm::execute_program_request(runmat_execution_artifact::ProgramExecutionRequest {
+        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        recipe,
+        artifact,
+        function,
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    })
+    .await
+}
+
 fn conformance_snapshot() -> FrozenTestRunSnapshot {
     FrozenTestRunSnapshot::freeze(
         digest("conformance-graph"),
@@ -196,6 +231,81 @@ async fn executable_unit_retains_exact_program_point_analysis() {
         .program_revision
         .canonical_identity()
         .is_empty());
+    let envelope = unit.portable_envelope().unwrap();
+    let bytes = envelope.canonical_bytes().unwrap();
+    assert_eq!(
+        runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes).unwrap(),
+        envelope
+    );
+    let response = execute_portable_envelope(&envelope).await;
+    assert!(matches!(
+        response,
+        runmat_execution_artifact::ProgramExecutionResponse::Success { .. }
+    ));
+    let mut duplicate_authority = envelope.clone();
+    let registry: runmat_vm::FunctionRegistry = serde_json::from_slice(
+        &duplicate_authority
+            .component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+            .unwrap()
+            .bytes,
+    )
+    .unwrap();
+    let bytecode = duplicate_authority
+        .payloads
+        .iter_mut()
+        .find(|payload| payload.kind == runmat_execution::ExecutableComponentKind::Bytecode)
+        .unwrap();
+    let mut decoded: runmat_vm::Bytecode = serde_json::from_slice(&bytecode.bytes).unwrap();
+    decoded.function_registry = registry;
+    bytecode.bytes = serde_json::to_vec(&serde_json::to_value(decoded).unwrap()).unwrap();
+    let descriptor = duplicate_authority
+        .manifest
+        .components
+        .iter_mut()
+        .find(|descriptor| descriptor.kind == runmat_execution::ExecutableComponentKind::Bytecode)
+        .unwrap();
+    let kind = descriptor.kind;
+    let schema_version = descriptor.schema_version;
+    *descriptor = runmat_execution::ExecutableComponentDescriptor::from_payload(
+        kind,
+        schema_version,
+        &bytecode.bytes,
+    )
+    .unwrap();
+    assert!(matches!(
+        execute_portable_envelope(&duplicate_authority).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Failure { message }
+            if message.contains("duplicate component authorities")
+    ));
+    let source_map = envelope
+        .payloads
+        .iter()
+        .find(|payload| payload.kind == runmat_execution::ExecutableComponentKind::SourceMap)
+        .unwrap();
+    let source_map = String::from_utf8(source_map.bytes.clone()).unwrap();
+    assert!(!source_map.contains("full_path"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn complete_portable_script_executes_after_component_reconstruction() {
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let unit = session
+        .compile_executable_unit(
+            ExecutableSource::new("path:portable-script", "script.m", "answer = 42;\n"),
+            None,
+        )
+        .await
+        .unwrap();
+    let envelope = unit.portable_envelope().unwrap();
+    assert_eq!(
+        envelope.manifest.identity.entrypoint_kind,
+        runmat_execution::ExecutableEntrypointKind::Script
+    );
+    assert!(matches!(
+        execute_portable_envelope(&envelope).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Success { .. }
+    ));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

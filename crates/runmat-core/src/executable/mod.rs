@@ -2,6 +2,7 @@
 mod backend;
 mod coverage;
 mod invocation;
+mod portable;
 mod revision;
 mod source;
 mod source_map;
@@ -13,4 +14,4 @@ pub use revision::ExecutableRevision;
 pub use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 pub use source::ExecutableSource;
 pub use source_map::{ExecutableSourceMap, SourceMapEntry};
-pub use unit::{ExecutableUnit, PortableExecutable, PortableExecutableKind};
+pub use unit::ExecutableUnit;

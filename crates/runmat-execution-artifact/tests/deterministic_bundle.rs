@@ -1,3 +1,5 @@
+#[path = "support/executable_unit.rs"]
+mod executable_unit_support;
 mod support;
 
 use runmat_execution_artifact::{
@@ -55,4 +57,34 @@ fn source_change_after_freeze_is_rejected() {
         .build()
         .unwrap_err();
     assert!(error.to_string().contains("changed after project freeze"));
+}
+
+#[test]
+fn complete_executable_unit_survives_package_archive_round_trip() {
+    let (_temp, project, revision) = support::frozen_project();
+    let bytes = executable_unit_support::bytes(revision.clone());
+    let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_materialized_program(
+            executable_unit_support::recipe(support::recipe(revision)),
+            ExecutableForm::ExecutableUnitV3,
+            bytes.clone(),
+        )
+        .build()
+        .unwrap();
+    let mut archive = Vec::new();
+    write_bundle(&bundle, &mut archive, ArchiveLimits::default()).unwrap();
+    let decoded = read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap();
+    assert_eq!(decoded, bundle);
+    assert_eq!(decoded.manifest.artifacts[0].executable_bytes, bytes);
+    let envelope = decoded.manifest.artifacts[0]
+        .executable_unit()
+        .unwrap()
+        .unwrap();
+    assert_eq!(envelope.manifest.regions.len(), 2);
+    assert_eq!(envelope.manifest.interop.foreign_types.len(), 1);
+    assert_eq!(envelope.manifest.parallel.parfor_regions.len(), 1);
+    assert_eq!(envelope.manifest.parallel.spmd_regions.len(), 1);
+    assert_eq!(envelope.manifest.parallel.distributed_values.len(), 1);
+    assert_eq!(envelope.manifest.parallel.collectives.len(), 1);
 }

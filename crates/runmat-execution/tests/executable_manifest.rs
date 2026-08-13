@@ -2,9 +2,10 @@ use std::collections::BTreeSet;
 
 use runmat_execution::{
     Digest, ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
-    ExecutableComponentRevisions, ExecutableIdentity, ExecutableOptionalSection,
-    ExecutableSectionSupport, ExecutableUnitEnvelope, ExecutableUnitManifest, ProgramEnvironment,
-    ProgramRevision, SectionRequirement, EXECUTABLE_UNIT_SCHEMA_VERSION,
+    ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
+    ExecutableOptionalSection, ExecutableSectionSupport, ExecutableUnitEnvelope,
+    ExecutableUnitManifest, ProgramEnvironment, ProgramRevision, SectionRequirement,
+    EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_types::{
     CapabilityRequirement, CapabilitySet, ForeignAffinity, ForeignCapability, ForeignLifetime,
@@ -102,6 +103,7 @@ fn manifest() -> ExecutableUnitManifest {
             root_package: "example@1.0.0".into(),
             entrypoint: "main".into(),
             entrypoint_function: ProgramFunctionId(0),
+            entrypoint_kind: ExecutableEntrypointKind::Function,
             source_digest: Digest::sha256(b"main.m"),
         },
         revisions,
@@ -191,7 +193,7 @@ fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:0aaa9aa95253d85576b4d34abf62690b3539a757921c3268bd13db03654c7ecc"
+        "sha256:f19f3e2aab64c58611c48210de564e6b9a2d275a4d4b96c5285ac636efa00c7f"
     );
 }
 

@@ -87,31 +87,34 @@ pub async fn submit(
         )
         .await?;
     let executable = unit
-        .portable_executable(function.as_deref())
+        .portable_envelope_for(function.as_deref())
         .map_err(anyhow::Error::msg)?;
-    if executable.kind == runmat_core::PortableExecutableKind::Script && !args.is_empty() {
+    let identity = &executable.manifest.identity;
+    if identity.entrypoint_kind == runmat_execution::ExecutableEntrypointKind::Script
+        && !args.is_empty()
+    {
         bail!("remote script jobs do not accept positional function arguments");
     }
-    let form = match executable.kind {
-        runmat_core::PortableExecutableKind::Function => ExecutableForm::InterpreterBytecodeV1,
-        runmat_core::PortableExecutableKind::Script => ExecutableForm::InterpreterScriptV1,
-    };
+    let executable_function = usize::try_from(identity.entrypoint_function.0)
+        .context("portable entrypoint identity exceeds this host")?;
+    let executable_bytes = executable.canonical_bytes()?;
+    let form = ExecutableForm::ExecutableUnitV3;
     let recipe = ProgramBuildRecipe {
         schema_version: 1,
         program_revision: revision.clone(),
-        entrypoint: executable.entrypoint,
+        entrypoint: executable_function.to_string(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target_profile: "portable-interpreter-v1".into(),
+        target_profile: "portable-executable-unit-v3".into(),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
     let bundle = ExecutionBundleBuilder::native(frozen, revision.clone())?
-        .with_materialized_program(recipe, form, executable.bytes)
+        .with_materialized_program(recipe, form, executable_bytes)
         .build()?;
     let recipe = bundle
         .manifest
@@ -129,7 +132,7 @@ pub async fn submit(
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe,
         artifact,
-        function: executable.function,
+        function: executable_function,
         requested_outputs: 1,
     })?;
     let inputs = serde_json::to_vec(&ProgramExecutionInputs {

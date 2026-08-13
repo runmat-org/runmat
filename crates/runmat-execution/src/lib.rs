@@ -15,9 +15,10 @@ pub mod value;
 pub use error::ContractError;
 pub use executable::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
-    ExecutableComponentRevisions, ExecutableIdentity, ExecutableOptionalSection,
-    ExecutableSectionSupport, ExecutableUnitEnvelope, ExecutableUnitManifest, SectionRequirement,
-    EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES, EXECUTABLE_UNIT_SCHEMA_VERSION,
+    ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
+    ExecutableOptionalSection, ExecutableSectionSupport, ExecutableUnitEnvelope,
+    ExecutableUnitManifest, SectionRequirement, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
+    EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 pub use handle::{FutureHandle, JobHandle, OutputContract, PoolHandle, TaskHandle};
 pub use identity::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};

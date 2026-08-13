@@ -12,6 +12,7 @@ pub enum ExecutableForm {
     InterpreterBytecodeV1 = 0,
     InterpreterScriptV1 = 1,
     TestAttemptV1 = 2,
+    ExecutableUnitV3 = 3,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -26,6 +27,17 @@ pub struct ProgramArtifact {
 }
 
 impl ProgramArtifact {
+    pub fn executable_unit(
+        &self,
+    ) -> ArtifactResult<Option<runmat_execution::ExecutableUnitEnvelope>> {
+        if self.form != ExecutableForm::ExecutableUnitV3 {
+            return Ok(None);
+        }
+        runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&self.executable_bytes)
+            .map(Some)
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))
+    }
+
     pub fn materialize(
         recipe: &ProgramBuildRecipe,
         form: ExecutableForm,
@@ -68,6 +80,13 @@ impl ProgramArtifact {
             return Err(ArtifactError::Identity(
                 "program artifact does not converge with its exact recipe".into(),
             ));
+        }
+        if let Some(envelope) = self.executable_unit()? {
+            if envelope.manifest.identity.program != recipe.program_revision {
+                return Err(ArtifactError::Identity(
+                    "executable unit does not match its exact program revision".into(),
+                ));
+            }
         }
         Ok(())
     }

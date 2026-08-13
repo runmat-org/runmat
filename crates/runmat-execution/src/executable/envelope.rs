@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{ExecutableComponentPayload, ExecutableUnitManifest};
+use super::{ExecutableComponentKind, ExecutableComponentPayload, ExecutableUnitManifest};
 use crate::{ContractError, Digest};
 
 pub const EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES: usize = 256 * 1024 * 1024;
@@ -89,5 +89,9 @@ impl ExecutableUnitEnvelope {
 
     pub fn cache_key(&self) -> Result<Digest, ContractError> {
         self.canonical_bytes().map(Digest::sha256)
+    }
+
+    pub fn component(&self, kind: ExecutableComponentKind) -> Option<&ExecutableComponentPayload> {
+        self.payloads.iter().find(|payload| payload.kind == kind)
     }
 }

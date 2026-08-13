@@ -106,6 +106,22 @@ impl ProgramExecutionRequest {
                 "program execution request has an inconsistent callable, output contract, or argument count".into(),
             ));
         }
+        if self.artifact.form == ExecutableForm::ExecutableUnitV3 {
+            let envelope = self
+                .artifact
+                .executable_unit()?
+                .expect("executable-unit form returns its validated envelope");
+            if usize::try_from(envelope.manifest.identity.entrypoint_function.0).ok()
+                != Some(self.function)
+                || (envelope.manifest.identity.entrypoint_kind
+                    == runmat_execution::ExecutableEntrypointKind::Script
+                    && !self.arguments.is_empty())
+            {
+                return Err(ArtifactError::Invalid(
+                    "executable unit request does not match its declared entrypoint".into(),
+                ));
+            }
+        }
         for argument in &self.arguments {
             argument
                 .validate(ValueLimits::default())
@@ -120,6 +136,7 @@ fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -
         ExecutableForm::InterpreterBytecodeV1 => function.to_string() == entrypoint,
         ExecutableForm::InterpreterScriptV1 => function == 0 && entrypoint == "script",
         ExecutableForm::TestAttemptV1 => function == 0 && entrypoint == "test_attempt",
+        ExecutableForm::ExecutableUnitV3 => function.to_string() == entrypoint,
     }
 }
 

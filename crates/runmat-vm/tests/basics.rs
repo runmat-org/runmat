@@ -2,8 +2,9 @@
 mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
+use runmat_runtime::indexing::EndExpr;
 use runmat_value::{IntegerStorage, Value};
-use runmat_vm::{EndExpr, Instr};
+use runmat_vm::Instr;
 use std::convert::TryInto;
 use std::path::Path;
 use test_helpers::compile_source;

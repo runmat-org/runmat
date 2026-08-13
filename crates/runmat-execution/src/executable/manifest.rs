@@ -12,7 +12,7 @@ use runmat_types::{
     CapabilityRequirement, CapabilitySet, InteropManifest, ParallelManifest, RegionContract,
 };
 
-pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V2;
+pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V3;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

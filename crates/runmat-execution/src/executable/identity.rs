@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use crate::{ContractError, Digest, ProgramRevision};
 use runmat_types::ProgramFunctionId;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutableEntrypointKind {
+    Function,
+    Script,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutableIdentity {
@@ -10,6 +17,7 @@ pub struct ExecutableIdentity {
     pub root_package: String,
     pub entrypoint: String,
     pub entrypoint_function: ProgramFunctionId,
+    pub entrypoint_kind: ExecutableEntrypointKind,
     pub source_digest: Digest,
 }
 

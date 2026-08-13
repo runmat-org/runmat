@@ -80,6 +80,9 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
             message: "test-attempt programs require a test-capable execution host".into(),
         };
     }
+    if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
+        return execute_unit_request(request).await;
+    }
     let registry: crate::FunctionRegistry =
         match serde_json::from_slice(&request.artifact.executable_bytes) {
             Ok(registry) => registry,
@@ -89,6 +92,93 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
                 }
             }
         };
+    execute_function_request(&request, &registry).await
+}
+
+async fn execute_unit_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
+    let envelope = match request.artifact.executable_unit() {
+        Ok(Some(envelope)) => envelope,
+        Ok(None) => {
+            return ProgramExecutionResponse::Failure {
+                message: "worker received a non-unit artifact on the unit execution path".into(),
+            }
+        }
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected an invalid executable unit: {error}"),
+            }
+        }
+    };
+    let Some(bytecode_payload) =
+        envelope.component(runmat_execution::ExecutableComponentKind::Bytecode)
+    else {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected executable unit without bytecode".into(),
+        };
+    };
+    let mut bytecode: crate::Bytecode = match serde_json::from_slice(&bytecode_payload.bytes) {
+        Ok(bytecode) => bytecode,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid executable bytecode: {error}"),
+            }
+        }
+    };
+    if !bytecode.bound_functions.is_empty()
+        || !bytecode.function_registry.functions.is_empty()
+        || bytecode.layout.is_some()
+    {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected executable bytecode with duplicate component authorities"
+                .into(),
+        };
+    }
+    let Some(registry_payload) =
+        envelope.component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+    else {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected executable unit without a function registry".into(),
+        };
+    };
+    let registry: crate::FunctionRegistry = match serde_json::from_slice(&registry_payload.bytes) {
+        Ok(registry) => registry,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid executable registry: {error}"),
+            }
+        }
+    };
+    let Some(layout_payload) =
+        envelope.component(runmat_execution::ExecutableComponentKind::VmLayout)
+    else {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected executable unit without a VM layout".into(),
+        };
+    };
+    let layout: crate::VmAssemblyLayout = match serde_json::from_slice(&layout_payload.bytes) {
+        Ok(layout) => layout,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid executable VM layout: {error}"),
+            }
+        }
+    };
+    bytecode.bound_functions = registry.functions.clone();
+    bytecode.function_registry = registry.clone();
+    bytecode.layout = Some(layout);
+
+    match envelope.manifest.identity.entrypoint_kind {
+        runmat_execution::ExecutableEntrypointKind::Script => execute_unit_script(bytecode).await,
+        runmat_execution::ExecutableEntrypointKind::Function => {
+            execute_function_request(&request, &registry).await
+        }
+    }
+}
+
+async fn execute_function_request(
+    request: &ProgramExecutionRequest,
+    registry: &crate::FunctionRegistry,
+) -> ProgramExecutionResponse {
     let arguments = match request
         .arguments
         .iter()
@@ -106,7 +196,7 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
         request.function,
         &arguments,
         usize::from(request.requested_outputs),
-        &registry,
+        registry,
     )
     .await
     {
@@ -122,16 +212,7 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
     }
 }
 
-async fn execute_script_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
-    let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
-    {
-        Ok(bytecode) => bytecode,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected an invalid script program: {error}"),
-            }
-        }
-    };
+async fn execute_unit_script(bytecode: crate::Bytecode) -> ProgramExecutionResponse {
     let result_slot = bytecode
         .var_names
         .iter()
@@ -152,6 +233,19 @@ async fn execute_script_request(request: ProgramExecutionRequest) -> ProgramExec
             message: error.to_string(),
         },
     }
+}
+
+async fn execute_script_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
+    let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
+    {
+        Ok(bytecode) => bytecode,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected an invalid script program: {error}"),
+            }
+        }
+    };
+    execute_unit_script(bytecode).await
 }
 
 #[cfg(test)]
