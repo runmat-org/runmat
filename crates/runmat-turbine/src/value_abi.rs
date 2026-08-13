@@ -1,3 +1,9 @@
+//! Legacy ABI private to the existing Turbine bytecode JIT.
+//!
+//! New native code generation uses `runmat_runtime::native`; this tagged value
+//! representation is not a competing extension or artifact contract and is
+//! removed with the legacy Turbine implementation in R29.
+
 use runmat_value::{IntValue, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};

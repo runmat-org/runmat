@@ -682,9 +682,13 @@ fn xml_unescape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use crate::builtins::common::test_support;
     use runmat_time::unix_timestamp_ms;
-    use runmat_value::{CellArray, IntegerStorage, Tensor};
+    #[cfg(not(target_arch = "wasm32"))]
+    use runmat_value::CellArray;
+    use runmat_value::{IntegerStorage, Tensor};
+    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write;
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {

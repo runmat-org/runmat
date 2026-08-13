@@ -14,9 +14,10 @@ pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = 1;
 pub fn program_environment(compatibility_mode: CompatMode) -> ProgramEnvironment {
     runmat_runtime::builtins::wasm_registry::register_all();
     let runtime_fingerprint = Digest::sha256(format!(
-        "runmat-runtime-compatibility-v1\0{}\0{}",
+        "runmat-runtime-compatibility-v2\0{}\0{}\0{}",
         env!("CARGO_PKG_VERSION"),
-        PROGRAM_RUNTIME_ABI_SCHEMA
+        PROGRAM_RUNTIME_ABI_SCHEMA,
+        runmat_runtime::native::native_abi_contract_fingerprint()
     ));
     let catalog_fingerprint = Digest::from_bytes(runmat_builtins::builtin_catalog_fingerprint());
     ProgramEnvironment::new(

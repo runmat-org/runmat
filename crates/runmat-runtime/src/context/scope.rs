@@ -135,36 +135,30 @@ mod tests {
 
     #[test]
     fn interleaved_futures_isolate_source_output_and_cancellation_state() {
-        fn session_future(
-            source_id: SourceId,
-            source: &'static str,
-            outputs: usize,
-        ) -> impl Future<Output = ()> {
-            async move {
-                let _catalog = crate::source_context::replace_source_catalog(vec![(
-                    source_id,
-                    format!("session-{}.m", source_id.0),
-                    source.to_string(),
-                )]);
-                let _source = crate::source_context::replace_current_source_id(Some(source_id));
-                let _outputs = crate::output_count::push_output_count(Some(outputs));
-                let mut yielded = false;
-                std::future::poll_fn(move |_| {
-                    if yielded {
-                        Poll::Ready(())
-                    } else {
-                        yielded = true;
-                        Poll::Pending
-                    }
-                })
-                .await;
-                assert_eq!(
-                    crate::source_context::current_source().as_deref(),
-                    Some(source)
-                );
-                assert_eq!(crate::output_count::current_output_count(), Some(outputs));
-                assert!(!crate::interrupt::is_cancelled());
-            }
+        async fn session_future(source_id: SourceId, source: &'static str, outputs: usize) {
+            let _catalog = crate::source_context::replace_source_catalog(vec![(
+                source_id,
+                format!("session-{}.m", source_id.0),
+                source.to_string(),
+            )]);
+            let _source = crate::source_context::replace_current_source_id(Some(source_id));
+            let _outputs = crate::output_count::push_output_count(Some(outputs));
+            let mut yielded = false;
+            std::future::poll_fn(move |_| {
+                if yielded {
+                    Poll::Ready(())
+                } else {
+                    yielded = true;
+                    Poll::Pending
+                }
+            })
+            .await;
+            assert_eq!(
+                crate::source_context::current_source().as_deref(),
+                Some(source)
+            );
+            assert_eq!(crate::output_count::current_output_count(), Some(outputs));
+            assert!(!crate::interrupt::is_cancelled());
         }
 
         let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
@@ -190,34 +184,31 @@ mod tests {
 
     #[test]
     fn interleaved_futures_isolate_host_interaction_handlers() {
-        fn session_future(label: &'static str) -> impl Future<Output = ()> {
-            async move {
-                let handler: Arc<crate::interaction::AsyncInteractionHandler> =
-                    Arc::new(move |_| {
-                        Box::pin(async move {
-                            Ok(crate::interaction::InteractionResponse::Line(
-                                label.to_string(),
-                            ))
-                        })
-                    });
-                let _handler = crate::interaction::replace_async_handler(Some(handler));
-                let mut yielded = false;
-                std::future::poll_fn(move |_| {
-                    if yielded {
-                        Poll::Ready(())
-                    } else {
-                        yielded = true;
-                        Poll::Pending
-                    }
+        async fn session_future(label: &'static str) {
+            let handler: Arc<crate::interaction::AsyncInteractionHandler> = Arc::new(move |_| {
+                Box::pin(async move {
+                    Ok(crate::interaction::InteractionResponse::Line(
+                        label.to_string(),
+                    ))
                 })
-                .await;
-                assert_eq!(
-                    crate::interaction::request_line_async("", false)
-                        .await
-                        .unwrap(),
-                    label
-                );
-            }
+            });
+            let _handler = crate::interaction::replace_async_handler(Some(handler));
+            let mut yielded = false;
+            std::future::poll_fn(move |_| {
+                if yielded {
+                    Poll::Ready(())
+                } else {
+                    yielded = true;
+                    Poll::Pending
+                }
+            })
+            .await;
+            assert_eq!(
+                crate::interaction::request_line_async("", false)
+                    .await
+                    .unwrap(),
+                label
+            );
         }
 
         let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));

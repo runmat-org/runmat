@@ -1659,6 +1659,7 @@ mod tests {
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::Arc;
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
