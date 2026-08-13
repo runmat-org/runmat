@@ -4,7 +4,11 @@ use std::collections::BTreeMap;
 use std::fmt::Write as FmtWrite;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ObjectInstance,
     StringArray, StructValue, Tensor, Value,
@@ -19,6 +23,111 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "jsonencode";
+
+const JSONENCODE_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "jsonencode-resident-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "jsonencode with explicit gpuArray input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:JsonencodeResidentInputExtension"),
+    };
+const JSONENCODE_TYPED_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "jsonencode-typed-integer-option",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "jsonencode with a typed-integer boolean option is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:JsonencodeTypedIntegerOptionExtension"),
+    };
+const JSONENCODE_NUMERIC_OPTION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "jsonencode-numeric-option",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "jsonencode with a floating numeric boolean option is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:JsonencodeNumericOptionExtension"),
+    };
+const JSONENCODE_TEXT_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "jsonencode-text-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "jsonencode with a textual boolean option is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:JsonencodeTextOptionExtension"),
+};
+const JSONENCODE_COMPLEX_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "jsonencode-complex-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "jsonencode complex-number object encoding is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:JsonencodeComplexInputExtension"),
+};
+const JSONENCODE_SPARSE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "jsonencode-sparse-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "jsonencode sparse-array densification is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:JsonencodeSparseInputExtension"),
+};
+pub const JSONENCODE_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    JSONENCODE_RESIDENT_INPUT_EXTENSION,
+    JSONENCODE_TYPED_INTEGER_OPTION_EXTENSION,
+    JSONENCODE_NUMERIC_OPTION_EXTENSION,
+    JSONENCODE_TEXT_OPTION_EXTENSION,
+    JSONENCODE_COMPLEX_INPUT_EXTENSION,
+    JSONENCODE_SPARSE_INPUT_EXTENSION,
+];
+
+const JSONENCODE_REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes serialize from authoritative storage to exact signed or unsigned JSON decimal literals.",
+    }];
+const JSONENCODE_INTEGER_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "PrettyPrint_or_ConvertInfAndNaN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB-compatible mode requires logical option values; RunMat mode treats exact integer zero as false and every nonzero integer as true.",
+    }];
+const JSONENCODE_COMPLEX_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public jsonencode contract rejects complex numeric data. RunMat mode retains its exact {real,imag} object encoding for paired integer storage.",
+    }];
+pub const JSONENCODE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "jsonText = jsonencode(full_real_integer_value)",
+        inputs: &JSONENCODE_REAL_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host and automatically resident integer values serialize exactly. Explicit gpuArray input is independently compatibility-gated before owner access; accepted resident values gather through their owner at the serialization sink.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "jsonText = jsonencode(value, option, integer_flag)",
+        inputs: &JSONENCODE_INTEGER_OPTION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Typed numeric option coercion is a RunMat convenience and is gated before resident access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "jsonText = jsonencode(complex_integer_value)",
+        inputs: &JSONENCODE_COMPLEX_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Complex JSON encoding is outside the public compatibility surface and requires the complex-input extension; integer components remain exact in RunMat mode.",
+    },
+];
 
 const JSONENCODE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "jsonText",
@@ -276,9 +385,13 @@ enum JsonNumber {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::jsonencode_type),
     descriptor(crate::builtins::io::json::jsonencode::JSONENCODE_DESCRIPTOR),
+    extensions(crate::builtins::io::json::jsonencode::JSONENCODE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::json::jsonencode::JSONENCODE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    validate_option_layout(&rest)?;
+    preflight_jsonencode_extensions(&value, &rest)?;
     let host_value = gather_if_needed_async(&value)
         .await
         .map_err(jsonencode_flow_with_context)?;
@@ -291,11 +404,194 @@ async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRes
         );
     }
 
+    preflight_option_extensions(&gathered_args)?;
     let options = parse_options(&gathered_args)?;
     let json_value = value_to_json(&host_value, &options)?;
     let json_string = render_json(&json_value, &options);
 
     Ok(Value::CharArray(CharArray::new_row(&json_string)))
+}
+
+fn preflight_jsonencode_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if value_contains_complex(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &JSONENCODE_COMPLEX_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if value_contains_sparse(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &JSONENCODE_SPARSE_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    preflight_option_extensions(rest)?;
+    if value_contains_explicit_gpu(value) || rest.iter().any(value_contains_explicit_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &JSONENCODE_RESIDENT_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_option_layout(rest: &[Value]) -> BuiltinResult<()> {
+    if rest.is_empty() {
+        return Ok(());
+    }
+    if rest.len() == 1 {
+        return match &rest[0] {
+            Value::Struct(options) => {
+                for name in options.fields.keys() {
+                    ensure_known_option(name)?;
+                }
+                Ok(())
+            }
+            _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTIONS_CONFIG)),
+        };
+    }
+    if !rest.len().is_multiple_of(2) {
+        return Err(jsonencode_error(&JSONENCODE_ERROR_NAME_VALUE_PAIRS));
+    }
+    for pair in rest.chunks_exact(2) {
+        let name = option_name(&pair[0])?;
+        ensure_known_option(&name)?;
+    }
+    Ok(())
+}
+
+fn ensure_known_option(name: &str) -> BuiltinResult<()> {
+    if name.eq_ignore_ascii_case("PrettyPrint") || name.eq_ignore_ascii_case("ConvertInfAndNaN") {
+        Ok(())
+    } else {
+        Err(jsonencode_error_with(
+            &JSONENCODE_ERROR_UNKNOWN_OPTION,
+            format!("{} ('{}')", JSONENCODE_ERROR_UNKNOWN_OPTION.message, name),
+        ))
+    }
+}
+
+fn preflight_option_extensions(rest: &[Value]) -> BuiltinResult<()> {
+    for (name, option_value) in raw_options(rest)? {
+        if !option_value_is_scalar(option_value) {
+            return Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE));
+        }
+        if is_typed_integer_option(option_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &JSONENCODE_TYPED_INTEGER_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        } else if is_floating_numeric_option(option_value)
+            && !(name.eq_ignore_ascii_case("ConvertInfAndNaN")
+                && is_documented_numeric_bool(option_value))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &JSONENCODE_NUMERIC_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        } else if is_text_option(option_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &JSONENCODE_TEXT_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn raw_options(rest: &[Value]) -> BuiltinResult<Vec<(String, &Value)>> {
+    if let [Value::Struct(options)] = rest {
+        return Ok(options
+            .fields
+            .iter()
+            .map(|(name, value)| (name.clone(), value))
+            .collect());
+    }
+    rest.chunks_exact(2)
+        .map(|pair| option_name(&pair[0]).map(|name| (name, &pair[1])))
+        .collect()
+}
+
+fn option_value_is_scalar(value: &Value) -> bool {
+    match value {
+        Value::Bool(_) | Value::Int(_) | Value::Num(_) | Value::String(_) => true,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::LogicalArray(logical) => logical.data.len() == 1,
+        Value::CharArray(chars) => chars.rows == 1,
+        Value::StringArray(strings) => strings.data.len() == 1,
+        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>() == 1,
+        _ => false,
+    }
+}
+
+fn is_documented_numeric_bool(value: &Value) -> bool {
+    let number = match value {
+        Value::Num(number) => Some(*number),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
+        _ => None,
+    };
+    matches!(number, Some(0.0 | 1.0))
+}
+
+fn is_typed_integer_option(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
+}
+
+fn is_floating_numeric_option(value: &Value) -> bool {
+    match value {
+        Value::Num(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_none(),
+        Value::GpuTensor(_) => false,
+        _ => false,
+    }
+}
+
+fn is_text_option(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
+}
+
+fn value_contains_complex(value: &Value) -> bool {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => true,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+        }
+        Value::Cell(cell) => cell.data.iter().any(value_contains_complex),
+        Value::Struct(struct_value) => struct_value.fields.values().any(value_contains_complex),
+        Value::Object(object) => object.properties.values().any(value_contains_complex),
+        _ => false,
+    }
+}
+
+fn value_contains_sparse(value: &Value) -> bool {
+    match value {
+        Value::SparseTensor(_) => true,
+        Value::Cell(cell) => cell.data.iter().any(value_contains_sparse),
+        Value::Struct(value) => value.fields.values().any(value_contains_sparse),
+        Value::Object(value) => value.properties.values().any(value_contains_sparse),
+        _ => false,
+    }
+}
+
+fn value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        _ => false,
+    }
 }
 
 fn parse_options(args: &[Value]) -> BuiltinResult<JsonEncodeOptions> {
@@ -1101,6 +1397,46 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn jsonencode_integer_tensor_serializes_all_eight_classes_exactly() {
+        let cases = [
+            (IntegerStorage::I8(vec![i8::MIN]), "-128"),
+            (IntegerStorage::I16(vec![i16::MIN]), "-32768"),
+            (IntegerStorage::I32(vec![i32::MIN]), "-2147483648"),
+            (IntegerStorage::I64(vec![i64::MIN]), "-9223372036854775808"),
+            (IntegerStorage::U8(vec![u8::MAX]), "255"),
+            (IntegerStorage::U16(vec![u16::MAX]), "65535"),
+            (IntegerStorage::U32(vec![u32::MAX]), "4294967295"),
+            (IntegerStorage::U64(vec![u64::MAX]), "18446744073709551615"),
+        ];
+        for (storage, expected) in cases {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+            let encoded = block_on(jsonencode_builtin(Value::Tensor(tensor), Vec::new()))
+                .expect("jsonencode integer tensor");
+            assert_eq!(as_string(encoded), expected);
+        }
+    }
+
+    #[test]
+    fn jsonencode_real_integer_payload_remains_public_and_exact_in_strict_mode() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cases = [
+            (Value::Int(IntValue::I8(i8::MIN)), "-128"),
+            (Value::Int(IntValue::I16(i16::MIN)), "-32768"),
+            (Value::Int(IntValue::I32(i32::MIN)), "-2147483648"),
+            (Value::Int(IntValue::I64(i64::MIN)), "-9223372036854775808"),
+            (Value::Int(IntValue::U8(u8::MAX)), "255"),
+            (Value::Int(IntValue::U16(u16::MAX)), "65535"),
+            (Value::Int(IntValue::U32(u32::MAX)), "4294967295"),
+            (Value::Int(IntValue::U64(u64::MAX)), "18446744073709551615"),
+        ];
+        for (value, expected) in cases {
+            let encoded = block_on(jsonencode_builtin(value, Vec::new()))
+                .expect("documented real integer payload");
+            assert_eq!(as_string(encoded), expected);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_struct_round_trip() {
@@ -1135,6 +1471,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_accept_scalar_tensor_bool() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor_value = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
         let args = vec![Value::from("PrettyPrint"), Value::Tensor(tensor_value)];
         let encoded = block_on(jsonencode_builtin(Value::Num(42.0), args)).expect("jsonencode");
@@ -1144,6 +1481,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_read_wide_uint64_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let false_option =
             Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("integer tensor");
         let compact = block_on(jsonencode_builtin(
@@ -1161,6 +1499,72 @@ pub(crate) mod tests {
         ))
         .expect("jsonencode");
         assert_eq!(as_string(pretty), "[\n    [1,2],\n    [3,4]\n]");
+    }
+
+    #[test]
+    fn jsonencode_option_coercions_are_independently_gated() {
+        let cases = [
+            (
+                Value::Int(IntValue::U64(u64::MAX)),
+                JSONENCODE_TYPED_INTEGER_OPTION_EXTENSION.error_identifier,
+            ),
+            (
+                Value::Num(1.0),
+                JSONENCODE_NUMERIC_OPTION_EXTENSION.error_identifier,
+            ),
+            (
+                Value::from("true"),
+                JSONENCODE_TEXT_OPTION_EXTENSION.error_identifier,
+            ),
+        ];
+        for (option, expected_identifier) in cases {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(jsonencode_builtin(
+                Value::Num(1.0),
+                vec![Value::from("PrettyPrint"), option],
+            ))
+            .expect_err("option coercion must be gated");
+            assert_eq!(error.identifier(), expected_identifier);
+        }
+    }
+
+    #[test]
+    fn jsonencode_documented_convert_inf_numeric_bool_remains_public() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let encoded = block_on(jsonencode_builtin(
+            Value::Num(1.0),
+            vec![Value::from("ConvertInfAndNaN"), Value::Num(1.0)],
+        ))
+        .expect("documented numeric one");
+        assert_eq!(as_string(encoded), "1");
+
+        let error = block_on(jsonencode_builtin(
+            Value::Num(f64::NAN),
+            vec![Value::from("ConvertInfAndNaN"), Value::Num(0.0)],
+        ))
+        .expect_err("documented numeric zero disables conversion");
+        assert_eq!(error.message(), JSONENCODE_ERROR_INF_NAN.message);
+    }
+
+    #[test]
+    fn jsonencode_option_errors_precede_irrelevant_extension_gates() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let unknown = block_on(jsonencode_builtin(
+            Value::Num(1.0),
+            vec![Value::from("Unknown"), Value::Num(1.0)],
+        ))
+        .expect_err("unknown name must reject before numeric coercion gate");
+        assert!(unknown
+            .message()
+            .starts_with(JSONENCODE_ERROR_UNKNOWN_OPTION.message));
+
+        let nonscalar = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
+        let invalid = block_on(jsonencode_builtin(
+            Value::Num(1.0),
+            vec![Value::from("PrettyPrint"), Value::Tensor(nonscalar)],
+        ))
+        .expect_err("nonscalar value must reject before numeric coercion gate");
+        assert_eq!(invalid.message(), JSONENCODE_ERROR_OPTION_VALUE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1245,6 +1649,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_complex_tensor_outputs_objects() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let ct = ComplexTensor::new(vec![(1.0, 2.0), (3.5, -4.0)], vec![2, 1]).expect("complex");
         let encoded =
             block_on(jsonencode_builtin(Value::ComplexTensor(ct), Vec::new())).expect("jsonencode");
@@ -1256,6 +1661,7 @@ pub(crate) mod tests {
 
     #[test]
     fn jsonencode_typed_complex_integers_preserves_every_class_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cases = [
             (
                 "int8",
@@ -1317,10 +1723,86 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn jsonencode_complex_input_is_rejected_by_compatibility_gate() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(jsonencode_builtin(Value::Complex(1.0, 2.0), Vec::new()))
+            .expect_err("complex encoding is a RunMat extension");
+        assert_eq!(
+            error.identifier(),
+            JSONENCODE_COMPLEX_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn jsonencode_nested_complex_and_sparse_inputs_are_compatibility_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let complex_cell = CellArray::new(vec![Value::Complex(1.0, 2.0)], 1, 1).expect("cell");
+        let complex_error = block_on(jsonencode_builtin(Value::Cell(complex_cell), Vec::new()))
+            .expect_err("nested complex input is an extension");
+        assert_eq!(
+            complex_error.identifier(),
+            JSONENCODE_COMPLEX_INPUT_EXTENSION.error_identifier
+        );
+
+        let sparse = runmat_builtins::SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![1.0])
+            .expect("sparse");
+        let mut fields = StructValue::new();
+        fields
+            .fields
+            .insert("value".to_string(), Value::SparseTensor(sparse));
+        let sparse_error = block_on(jsonencode_builtin(Value::Struct(fields), Vec::new()))
+            .expect_err("nested sparse input is an extension");
+        assert_eq!(
+            sparse_error.identifier(),
+            JSONENCODE_SPARSE_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn jsonencode_resident_gate_precedes_provider_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let error = block_on(jsonencode_builtin(
+            Value::GpuTensor(handle.clone()),
+            Vec::new(),
+        ))
+        .expect_err("resident extension must gate before owner lookup");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+        assert_eq!(
+            error.identifier(),
+            JSONENCODE_RESIDENT_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn jsonencode_integer_metadata_distinguishes_public_real_and_extended_complex() {
+        assert_eq!(JSONENCODE_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(
+            JSONENCODE_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            JSONENCODE_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            JSONENCODE_INTEGER_CAPABILITIES[2].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(JSONENCODE_EXTENSIONS.len(), 6);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_gpu_tensor_gathers_host_data() {
         test_support::with_test_provider(|provider| {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),

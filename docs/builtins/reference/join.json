@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Executes on the CPU; GPU-resident inputs and delimiters are gathered before joining to ensure MATLAB-compatible behaviour."
+    "notes": "Executes on the CPU. Automatic internal residency gathers transparently; typed-integer dimensions and reversed `join(str,dim,delimiter)` syntax are mode-gated RunMat extensions."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,8 @@
     "The default delimiter is a single space character. You can pass a scalar delimiter (string or character vector) or supply a string/cell array whose shape matches the input, with the join dimension reduced by one, to customise delimiters for each gap.",
     "Inputs may be string scalars, string arrays (including N-D), character arrays, or cell arrays of character vectors. Cell inputs return cell arrays; all other inputs return string scalars or string arrays.",
     "If any element participating in a join is the string `<missing>`, the result for that slice is also `<missing>`, matching MATLAB’s missing propagation rules.",
-    "Joining along a dimension greater than `ndims(str)` leaves the input unchanged."
+    "Joining along a dimension greater than `ndims(str)` leaves the input unchanged.",
+    "The documented dimension is a positive integer-valued double scalar. Native typed-integer dimensions and the reversed `join(str,dim,delimiter)` argument order are accepted only in RunMat compatibility mode."
   ],
   "examples": [
     {
@@ -88,7 +89,7 @@
     },
     {
       "question": "Can I pass GPU-resident text or delimiters?",
-      "answer": "You can; RunMat gathers them to host memory automatically before performing the join."
+      "answer": "Values placed on the device by RunMat's internal planner gather transparently. Explicit resident numeric handles are not text; typed resident dimension controls are accepted only through the corresponding RunMat extension."
     },
     {
       "question": "What if I request a dimension larger than `ndims(str)`?",
@@ -169,7 +170,7 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/transform/join.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/join.rs"
   },
-  "gpu_residency": "No. Text manipulation currently runs on the CPU. If your text or delimiters were produced on the GPU, RunMat gathers them automatically so that you can call `join` without extra steps.",
+  "gpu_residency": "Text manipulation runs on the CPU. Automatic internal residency gathers transparently. Explicit resident typed-integer dimension controls are subject to the same RunMat-only compatibility gate as host typed dimensions.",
   "gpu_behavior": [
     "`join` executes on the CPU. When text or delimiters reside on the GPU, RunMat gathers them to host memory before performing the concatenation, ensuring identical results to MATLAB. Providers do not need to implement custom kernels for this builtin today."
   ]

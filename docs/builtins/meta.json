@@ -63249,7 +63249,11 @@
           "when": "The inspection result cannot be converted to a RunMat value.",
           "message": "geometry.inspect: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "geometry.listRegions accepts only a geometry.Asset object and returns imported-region metadata; it has no direct integer data or control argument."
+      }
     },
     {
       "name": "geometry.load",
@@ -63345,7 +63349,11 @@
           "when": "The inspection result cannot be converted to a RunMat value.",
           "message": "geometry.inspect: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "geometry.meshes accepts only a geometry.Asset object and returns host mesh structs; vertices, 1-based faces/triangles, and region ranges are deliberate double-valued API outputs rather than a typed-integer input surface."
+      }
     },
     {
       "name": "get",
@@ -83527,41 +83535,6 @@
               "description": "Joined text preserving join output container semantics."
             }
           ]
-        },
-        {
-          "label": "out = join(str, dim, delimiter)",
-          "inputs": [
-            {
-              "name": "str",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input text (string/char/cell)."
-            },
-            {
-              "name": "dim",
-              "ty": "IntegerScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Positive dimension index to join along."
-            },
-            {
-              "name": "delimiter",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Delimiter scalar or delimiter array matching join shape constraints."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Joined text preserving join output container semantics."
-            }
-          ]
         }
       ],
       "errors": [
@@ -83600,6 +83573,55 @@
           "identifier": "RunMat:join:InternalError",
           "when": "Internal output container construction failed.",
           "message": "join: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "join-typed-integer-dimension",
+          "mode": "RunMatOnly",
+          "description": "join with a typed-integer dimension is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JoinTypedIntegerDimensionExtension"
+        },
+        {
+          "id": "join-dimension-before-delimiter",
+          "mode": "RunMatOnly",
+          "description": "join(str, dim, delimiter) is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JoinDimensionBeforeDelimiterExtension"
+        },
+        {
+          "id": "join-resident-input",
+          "mode": "RunMatOnly",
+          "description": "join with an explicitly resident gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JoinResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = join(str, delimiter?, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented dimension is a positive integer-valued double scalar. RunMat mode additionally accepts every native typed-integer scalar exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Typed dimensions are compatibility-gated before resident access, parsed from authoritative integer storage, and never converted through floating point."
         }
       ]
     },
@@ -83655,7 +83677,11 @@
           "when": "Internal conversion from parsed JSON to RunMat values fails.",
           "message": "jsondecode: internal conversion failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "jsondecode accepts JSON text only. Integer and resident numeric inputs reject before conversion or provider access; JSON numeric literals decode to double values by the documented contract."
+      }
     },
     {
       "name": "jsonencode",
@@ -83829,6 +83855,127 @@
           "identifier": null,
           "when": "Internal JSON conversion or container materialization fails.",
           "message": "jsonencode: internal conversion failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "jsonencode-resident-input",
+          "mode": "RunMatOnly",
+          "description": "jsonencode with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JsonencodeResidentInputExtension"
+        },
+        {
+          "id": "jsonencode-typed-integer-option",
+          "mode": "RunMatOnly",
+          "description": "jsonencode with a typed-integer boolean option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JsonencodeTypedIntegerOptionExtension"
+        },
+        {
+          "id": "jsonencode-numeric-option",
+          "mode": "RunMatOnly",
+          "description": "jsonencode with a floating numeric boolean option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JsonencodeNumericOptionExtension"
+        },
+        {
+          "id": "jsonencode-text-option",
+          "mode": "RunMatOnly",
+          "description": "jsonencode with a textual boolean option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JsonencodeTextOptionExtension"
+        },
+        {
+          "id": "jsonencode-complex-input",
+          "mode": "RunMatOnly",
+          "description": "jsonencode complex-number object encoding is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JsonencodeComplexInputExtension"
+        },
+        {
+          "id": "jsonencode-sparse-input",
+          "mode": "RunMatOnly",
+          "description": "jsonencode sparse-array densification is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:JsonencodeSparseInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "jsonText = jsonencode(full_real_integer_value)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes serialize from authoritative storage to exact signed or unsigned JSON decimal literals."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host and automatically resident integer values serialize exactly. Explicit gpuArray input is independently compatibility-gated before owner access; accepted resident values gather through their owner at the serialization sink."
+        },
+        {
+          "form": "jsonText = jsonencode(value, option, integer_flag)",
+          "inputs": [
+            {
+              "name": "PrettyPrint_or_ConvertInfAndNaN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB-compatible mode requires logical option values; RunMat mode treats exact integer zero as false and every nonzero integer as true."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Typed numeric option coercion is a RunMat convenience and is gated before resident access."
+        },
+        {
+          "form": "jsonText = jsonencode(complex_integer_value)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public jsonencode contract rejects complex numeric data. RunMat mode retains its exact {real,imag} object encoding for paired integer storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Complex JSON encoding is outside the public compatibility surface and requires the complex-input extension; integer components remain exact in RunMat mode."
         }
       ]
     },
@@ -84434,6 +84581,82 @@
           "when": "RunMat cannot construct kstest outputs.",
           "message": "kstest: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "kstest-integer-sample",
+          "mode": "RunMatOnly",
+          "description": "kstest with a native-class integer sample is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KstestIntegerSampleExtension"
+        },
+        {
+          "id": "kstest-integer-cdf",
+          "mode": "RunMatOnly",
+          "description": "kstest with a native-class integer CDF table is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KstestIntegerCdfExtension"
+        },
+        {
+          "id": "kstest-resident-input",
+          "mode": "RunMatOnly",
+          "description": "kstest host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KstestResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = kstest(integer_x, ___)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer samples are gated before gather and checked for exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "h is logical; p, ksstat, and cv are double. Lossy integer conversion rejects."
+        },
+        {
+          "form": "h = kstest(x, CDF=integer_table)",
+          "inputs": [
+            {
+              "name": "CDF table",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer CDF tables are gated and checked before interpolation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer CDF tables are a checked RunMat extension; automatic residency gathers transparently, while explicit gpuArray fallback remains separately gated."
+        }
       ]
     },
     {
@@ -84837,6 +85060,148 @@
           "when": "RunMat cannot construct lasso outputs.",
           "message": "lasso: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "lasso-integer-data",
+          "mode": "RunMatOnly",
+          "description": "lasso with native-class integer predictor or response data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoIntegerDataExtension"
+        },
+        {
+          "id": "lasso-integer-parameter",
+          "mode": "RunMatOnly",
+          "description": "lasso with native-class integer floating parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoIntegerParameterExtension"
+        },
+        {
+          "id": "lasso-integer-control",
+          "mode": "RunMatOnly",
+          "description": "lasso with native-class integer structural controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoIntegerControlExtension"
+        },
+        {
+          "id": "lasso-integer-boolean",
+          "mode": "RunMatOnly",
+          "description": "lasso with native-class integer logical controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoIntegerBooleanExtension"
+        },
+        {
+          "id": "lasso-resident-input",
+          "mode": "RunMatOnly",
+          "description": "lasso host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = lasso(integer_X, integer_y, ___)",
+          "inputs": [
+            {
+              "name": "X or y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer data is gated before gather and must be exactly representable at the binary64 solver boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer data crosses a checked binary64 solver boundary."
+        },
+        {
+          "form": "B = lasso(X, y, Name, integer_value)",
+          "inputs": [
+            {
+              "name": "Alpha, Lambda, LambdaRatio, Weights, or RelTol",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer floating parameters are gated and checked for exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Floating parameters reject lossy integer conversion."
+        },
+        {
+          "form": "B = lasso(X, y, Name, integer_control)",
+          "inputs": [
+            {
+              "name": "CV, DFmax, MaxIter, MCReps, or NumLambda",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Native integer structural controls are gated and decoded exactly without a floating round trip."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Structural controls are parsed exactly; ordinary integer-valued doubles remain documented."
+        },
+        {
+          "form": "B = lasso(X, y, Name, integer_boolean)",
+          "inputs": [
+            {
+              "name": "Intercept, Standardize, or UseCovariance",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Native integer logical controls accept only scalar zero or one, including scalar integer tensors."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Logical controls accept native integer scalar zero or one as a RunMat extension."
+        }
       ]
     },
     {
@@ -85031,6 +85396,148 @@
           "identifier": "RunMat:lassoglm:Internal",
           "when": "RunMat cannot construct lassoglm outputs.",
           "message": "lassoglm: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "lassoglm-integer-data",
+          "mode": "RunMatOnly",
+          "description": "lassoglm with native-class integer predictor or response data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoglmIntegerDataExtension"
+        },
+        {
+          "id": "lassoglm-integer-parameter",
+          "mode": "RunMatOnly",
+          "description": "lassoglm with native-class integer floating parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoglmIntegerParameterExtension"
+        },
+        {
+          "id": "lassoglm-integer-control",
+          "mode": "RunMatOnly",
+          "description": "lassoglm with native-class integer structural controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoglmIntegerControlExtension"
+        },
+        {
+          "id": "lassoglm-integer-boolean",
+          "mode": "RunMatOnly",
+          "description": "lassoglm with native-class integer logical controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoglmIntegerBooleanExtension"
+        },
+        {
+          "id": "lassoglm-resident-input",
+          "mode": "RunMatOnly",
+          "description": "lassoglm host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LassoglmResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = lassoglm(integer_X, integer_Y, distr, ___)",
+          "inputs": [
+            {
+              "name": "X or Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer predictor or response data is gated before gather and checked at the binary64 solver boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer data crosses a checked binary64 solver boundary."
+        },
+        {
+          "form": "B = lassoglm(X, Y, distr, Name, integer_value)",
+          "inputs": [
+            {
+              "name": "Alpha, BinomialSize, Lambda, LambdaRatio, Offset, RelTol/TolX/TolFun, Weights, or Options.TolX/TolFun",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer floating parameters are gated and require exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Floating parameters reject lossy integer conversion."
+        },
+        {
+          "form": "B = lassoglm(X, Y, distr, Name, integer_control)",
+          "inputs": [
+            {
+              "name": "CV, MaxIter, MCReps, NumLambda, or Options.MaxIter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Native integer structural controls are gated and decoded exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Structural controls are parsed exactly; ordinary integer-valued doubles remain documented."
+        },
+        {
+          "form": "B = lassoglm(X, Y, distr, Name, integer_boolean)",
+          "inputs": [
+            {
+              "name": "Constant/Intercept, Standardize, or Options.UseParallel",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Native integer logical controls accept only scalar zero or one, including scalar integer tensors."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Logical controls accept native integer scalar zero or one as a RunMat extension."
         }
       ]
     },

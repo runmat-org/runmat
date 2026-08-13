@@ -1,9 +1,10 @@
 //! MATLAB-compatible `jsondecode` builtin for deserialising JSON text into RunMat values.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
+    LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use serde_json::Value as JsonValue;
@@ -72,6 +73,13 @@ pub const JSONDECODE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &JSONDECODE_ERRORS,
 };
 
+pub const JSONDECODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "jsondecode accepts JSON text only. Integer and resident numeric inputs reject before conversion or provider access; JSON numeric literals decode to double values by the documented contract.",
+    };
+
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsondecode")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -86,7 +94,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "No GPU kernels: jsondecode gathers gpuArray input to host memory before parsing the JSON text.",
+    notes: "No GPU kernels: jsondecode accepts host character vectors or string scalars only; numeric resident handles reject before provider access.",
 };
 
 fn jsondecode_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -148,9 +156,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::jsondecode_type),
     descriptor(crate::builtins::io::json::jsondecode::JSONDECODE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::json::jsondecode::JSONDECODE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::json::jsondecode"
 )]
 async fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&text) {
+        return Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE));
+    }
     let gathered = gather_if_needed_async(&text)
         .await
         .map_err(jsondecode_flow_with_context)?;
@@ -867,5 +879,31 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn jsondecode_integer_audit_is_explicitly_inapplicable() {
+        assert_eq!(
+            JSONDECODE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(JSONDECODE_INTEGER_AUDIT.canonical_builtin.is_none());
+        assert!(JSONDECODE_INTEGER_AUDIT.notes.contains("text only"));
+    }
+
+    #[test]
+    fn jsondecode_rejects_integer_and_resident_numeric_before_provider_access() {
+        let integer = block_on(jsondecode_builtin(Value::Int(IntValue::U64(u64::MAX))))
+            .expect_err("integer input must reject");
+        assert_eq!(integer.message(), JSONDECODE_ERROR_INPUT_TYPE.message);
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = block_on(jsondecode_builtin(resident))
+            .expect_err("resident numeric input must reject before owner lookup");
+        assert_eq!(error.message(), JSONDECODE_ERROR_INPUT_TYPE.message);
     }
 }

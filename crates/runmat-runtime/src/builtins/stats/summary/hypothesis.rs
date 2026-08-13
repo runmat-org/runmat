@@ -1,7 +1,11 @@
 //! Hypothesis-test compatibility helpers.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     LogicalArray, ResolveContext, StructValue, Tensor, Type, Value,
 };
@@ -17,6 +21,44 @@ const BUILTIN_NAME: &str = "ttest2";
 const KSTEST_NAME: &str = "kstest";
 const MAX_SUPPORTED_DIM: usize = 1024;
 const SQRT_2: f64 = std::f64::consts::SQRT_2;
+
+const KSTEST_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kstest-integer-sample",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kstest with a native-class integer sample is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KstestIntegerSampleExtension"),
+};
+const KSTEST_INTEGER_CDF_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kstest-integer-cdf",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kstest with a native-class integer CDF table is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KstestIntegerCdfExtension"),
+};
+const KSTEST_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kstest-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kstest host fallback for explicit gpuArray inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KstestResidentInputExtension"),
+};
+pub const KSTEST_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    KSTEST_INTEGER_SAMPLE_EXTENSION,
+    KSTEST_INTEGER_CDF_EXTENSION,
+    KSTEST_RESIDENT_INPUT_EXTENSION,
+];
+
+const KSTEST_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "x", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer samples are gated before gather and checked for exact binary64 representation." }];
+const KSTEST_INTEGER_CDF_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "CDF table",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer CDF tables are gated and checked before interpolation.",
+    }];
+pub const KSTEST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = kstest(integer_x, ___)", inputs: &KSTEST_INTEGER_SAMPLE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "h is logical; p, ksstat, and cv are double. Lossy integer conversion rejects." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = kstest(x, CDF=integer_table)", inputs: &KSTEST_INTEGER_CDF_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer CDF tables are a checked RunMat extension; automatic residency gathers transparently, while explicit gpuArray fallback remains separately gated." },
+];
 
 const OUTPUT_H: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "h",
@@ -374,13 +416,17 @@ pub(crate) async fn ttest2_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     keywords = "kstest,kolmogorov-smirnov,hypothesis test,cdf,statistics",
     type_resolver(kstest_type),
     descriptor(crate::builtins::stats::summary::hypothesis::KSTEST_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::hypothesis::KSTEST_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::hypothesis::KSTEST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::hypothesis"
 )]
 pub(crate) async fn kstest_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_kstest_extensions(&x, &rest)?;
     let x = gather_if_needed_async(&x)
         .await
         .map_err(|err| kstest_invalid_argument(format!("kstest: {err}")))?;
     let x = tensor::value_into_tensor_for(KSTEST_NAME, x).map_err(kstest_invalid_argument)?;
+    ensure_exact_kstest_integer_tensor(&x, "sample")?;
     let rest = kstest_gather_values(rest).await?;
     let options = parse_kstest_options(rest)?;
     let eval = evaluate_kstest(&x, &options)?;
@@ -388,6 +434,136 @@ pub(crate) async fn kstest_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<
         Some(out_count) => kstest_outputs_for_count(out_count, eval),
         None => Ok(eval.h),
     }
+}
+
+fn is_kstest_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn kstest_cdf_contains_typed_integer(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) if cell.data.len() == 1 => {
+            kstest_cdf_contains_typed_integer(&cell.data[0])
+        }
+        _ => is_kstest_typed_integer(value),
+    }
+}
+
+fn kstest_value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(kstest_value_contains_explicit_gpu),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .any(kstest_value_contains_explicit_gpu),
+        Value::Object(value) => value
+            .properties
+            .values()
+            .any(kstest_value_contains_explicit_gpu),
+        Value::Closure(value) => value
+            .captures
+            .iter()
+            .any(kstest_value_contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(kstest_value_contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn validate_kstest_cdf_role(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Tensor(_)
+        | Value::GpuTensor(_)
+        | Value::String(_)
+        | Value::CharArray(_)
+        | Value::FunctionHandle(_) => Ok(()),
+        Value::Cell(cell) if cell.data.len() == 1 => validate_kstest_cdf_role(&cell.data[0]),
+        other => Err(kstest_invalid_argument(format!(
+            "kstest: CDF must be a two-column numeric matrix or normcdf handle; probability distribution objects are not supported yet, got {other:?}"
+        ))),
+    }
+}
+
+fn validate_kstest_alpha_role(value: &Value) -> BuiltinResult<()> {
+    let valid = match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::LogicalArray(array) => array.data.len() == 1,
+        Value::GpuTensor(handle) => {
+            handle
+                .shape
+                .iter()
+                .try_fold(1usize, |len, dim| len.checked_mul(*dim))
+                == Some(1)
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(kstest_invalid_argument("kstest: Alpha must be numeric"))
+    }
+}
+
+fn ensure_kstest_extensions(x: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if !rest.len().is_multiple_of(2) {
+        return Err(kstest_invalid_argument(
+            "kstest: name-value options must be supplied in pairs",
+        ));
+    }
+    for pair in rest.chunks_exact(2) {
+        let name = kstest_scalar_text(&pair[0], "option name")?;
+        match name.to_ascii_lowercase().as_str() {
+            "alpha" => validate_kstest_alpha_role(&pair[1])?,
+            "tail" => {
+                kstest_scalar_text(&pair[1], "Tail")?;
+            }
+            "cdf" => validate_kstest_cdf_role(&pair[1])?,
+            other => {
+                return Err(kstest_invalid_argument(format!(
+                    "kstest: unsupported option '{other}'"
+                )))
+            }
+        }
+    }
+    if is_kstest_typed_integer(x) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &KSTEST_INTEGER_SAMPLE_EXTENSION,
+            KSTEST_NAME,
+        )?;
+    }
+    for pair in rest.chunks_exact(2) {
+        let name = kstest_scalar_text(&pair[0], "option name")?;
+        if name.eq_ignore_ascii_case("cdf") && kstest_cdf_contains_typed_integer(&pair[1]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &KSTEST_INTEGER_CDF_EXTENSION,
+                KSTEST_NAME,
+            )?;
+        }
+    }
+    if kstest_value_contains_explicit_gpu(x) || rest.iter().any(kstest_value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &KSTEST_RESIDENT_INPUT_EXTENSION,
+            KSTEST_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_exact_kstest_integer_tensor(value: &Tensor, role: &str) -> BuiltinResult<()> {
+    if let Some(storage) = value.integer_storage() {
+        for integer in storage.exact_values() {
+            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+                return Err(kstest_invalid_argument(format!(
+                    "kstest: integer {role} values must be exactly representable as double"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn kstest_outputs_for_count(out_count: usize, eval: KstestEvaluation) -> BuiltinResult<Value> {
@@ -505,6 +681,7 @@ fn is_normal_cdf_name(text: &str) -> bool {
 }
 
 fn parse_kstest_cdf_table(tensor: &Tensor) -> BuiltinResult<CdfSpec> {
+    ensure_exact_kstest_integer_tensor(tensor, "CDF table")?;
     if tensor.shape.len() != 2 || tensor.shape[1] != 2 || tensor.shape[0] < 2 {
         return Err(kstest_invalid_argument(
             "kstest: CDF table must be an n-by-2 numeric matrix",
@@ -1523,8 +1700,12 @@ mod tests {
 
     #[test]
     fn kstest_reads_typed_integer_sample_and_cdf_table_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sample = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1]), vec![2, 1]);
         let cdf = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1, 0, 1]), vec![2, 2]);
+        let cdf = Value::Cell(
+            runmat_builtins::CellArray::new(vec![cdf], 1, 1).expect("singleton CDF cell"),
+        );
         let _guard = crate::output_count::push_output_count(Some(4));
         let outputs =
             output_list(block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap());
@@ -1533,6 +1714,122 @@ mod tests {
             Value::Num(stat) => assert!(stat.is_finite()),
             ref other => panic!("expected statistic, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn kstest_gates_integer_roles_before_gather_and_rejects_lossy_values() {
+        let sample = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1]), vec![2, 1]);
+        let cdf = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1, 0, 1]), vec![2, 2]);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = ensure_kstest_extensions(&sample, &[])
+            .expect_err("strict mode must reject integer samples before gather");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:KstestIntegerSampleExtension")
+        );
+        let err = ensure_kstest_extensions(&Value::Num(0.0), &[Value::from("CDF"), cdf])
+            .expect_err("strict mode must reject integer CDF before gather");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:KstestIntegerCdfExtension")
+        );
+        drop(_strict);
+
+        let wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap();
+        let err = ensure_exact_kstest_integer_tensor(&wide, "sample")
+            .expect_err("lossy integer sample must reject");
+        assert!(err.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn kstest_residency_gate_distinguishes_automatic_and_explicit_handles() {
+        let automatic = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: 0,
+            buffer_id: 9_421_001,
+        };
+        runmat_accelerate_api::mark_handle_automatic(&automatic);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        ensure_kstest_extensions(&Value::GpuTensor(automatic.clone()), &[])
+            .expect("automatic residency must retain transparent gather fallback");
+        runmat_accelerate_api::clear_handle_metadata(&automatic);
+
+        let explicit = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: 0,
+            buffer_id: 9_421_002,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&explicit);
+        let err = ensure_kstest_extensions(&Value::GpuTensor(explicit.clone()), &[])
+            .expect_err("explicit gpuArray input must retain its compatibility gate");
+        runmat_accelerate_api::clear_handle_metadata(&explicit);
+        assert_eq!(
+            err.identifier(),
+            KSTEST_RESIDENT_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn kstest_recursively_classifies_singleton_cell_cdf_inputs() {
+        let integer_cdf = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1, 0, 1]), vec![2, 2]);
+        let integer_cdf = Value::Cell(
+            runmat_builtins::CellArray::new(vec![integer_cdf], 1, 1).expect("singleton cell"),
+        );
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = ensure_kstest_extensions(&Value::Num(0.0), &[Value::from("CDF"), integer_cdf])
+            .expect_err("nested integer CDF must gate");
+        assert_eq!(
+            err.identifier(),
+            KSTEST_INTEGER_CDF_EXTENSION.error_identifier
+        );
+
+        let explicit = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 2],
+            device_id: 0,
+            buffer_id: 9_421_003,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&explicit);
+        let resident_cdf = Value::Cell(
+            runmat_builtins::CellArray::new(vec![Value::GpuTensor(explicit.clone())], 1, 1)
+                .expect("singleton cell"),
+        );
+        let err = ensure_kstest_extensions(&Value::Num(0.0), &[Value::from("CDF"), resident_cdf])
+            .expect_err("nested explicit CDF must gate");
+        runmat_accelerate_api::clear_handle_metadata(&explicit);
+        assert_eq!(
+            err.identifier(),
+            KSTEST_RESIDENT_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn kstest_rejects_malformed_or_text_only_roles_before_resident_access() {
+        let poison = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 9_421,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&poison);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let err = block_on(kstest_builtin(
+            Value::GpuTensor(poison.clone()),
+            vec![Value::from("CDF")],
+        ))
+        .expect_err("arity must reject before resident sample access");
+        assert_eq!(err.identifier(), Some("RunMat:kstest:InvalidArgument"));
+        assert!(err.message.contains("supplied in pairs"));
+
+        let sample = Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap());
+        let err = block_on(kstest_builtin(
+            sample,
+            vec![Value::from("Tail"), Value::GpuTensor(poison.clone())],
+        ))
+        .expect_err("text-only Tail must reject before resident access");
+        runmat_accelerate_api::clear_handle_metadata(&poison);
+        assert_eq!(err.identifier(), Some("RunMat:kstest:InvalidArgument"));
+        assert!(err.message.contains("Tail must be a string scalar"));
     }
 
     #[test]
@@ -1623,7 +1920,7 @@ mod tests {
     }
 
     #[test]
-    fn kstest_alpha_reads_typed_integer_storage_exactly() {
+    fn kstest_integer_alpha_follows_the_ordinary_open_interval_rule() {
         let sample = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap());
         let err = block_on(kstest_builtin(
             sample,
@@ -1633,6 +1930,6 @@ mod tests {
             ],
         ))
         .unwrap_err();
-        assert!(err.message.contains("Alpha"));
+        assert!(err.message.contains("open interval"));
     }
 }
