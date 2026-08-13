@@ -295,3 +295,31 @@ fn gather_contract_maps_corresponding_outputs_to_host_and_checks_output_count() 
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-GATHER-OUTPUTS"));
 }
+
+#[test]
+fn struct_contract_tracks_literal_field_names_and_value_facts() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+        ValueFact, ValueKindFact,
+    };
+    let field_name = ValueFact::scalar(ValueKindFact::String);
+    let value = ValueFact::scalar(ValueKindFact::Logical);
+    let request = CallRequest {
+        arguments: vec![field_name, value.clone()],
+        literals: LiteralContext::new(vec![
+            LiteralValue::String("Flag".into()),
+            LiteralValue::Unknown,
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let inference = infer_catalog_call(
+        builtin_catalog_entry_by_name("struct").expect("struct entry"),
+        &request,
+    );
+    assert!(inference.diagnostics.is_empty());
+    let ValueKindFact::Struct(fact) = &inference.outputs[0].kind else {
+        panic!("expected struct fact")
+    };
+    assert!(fact.fields_complete);
+    assert_eq!(fact.fields.get("Flag"), Some(&value));
+}
