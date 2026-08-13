@@ -107,6 +107,10 @@ struct PanelLayout {
     title_rect: Rect,
     x_label_rect: Rect,
     y_label_rect: Rect,
+    /// Font scale the label bands were sized for. Equal to the input scale for a
+    /// roomy cell, reduced when the cell is too short to hold the bands and a
+    /// readable plot. Drawing uses this so the text fits the bands it was given.
+    content_scale: f32,
 }
 
 impl Default for OverlayConfig {
@@ -161,7 +165,11 @@ impl Default for PlotOverlay {
 }
 
 impl PlotOverlay {
-    const SUBPLOT_GAP_POINTS: f32 = 6.0;
+    /// Horizontal gap between subplot columns, in egui points.
+    const SUBPLOT_COL_GAP_POINTS: f32 = 6.0;
+    /// Vertical gap between subplot rows, in egui points. Wider than the column
+    /// gap so a row's x tick band and the next row's title band stay apart.
+    const SUBPLOT_ROW_GAP_POINTS: f32 = 14.0;
 
     fn style_color(style: &TextStyle, fallback: Color32) -> Color32 {
         style
@@ -486,6 +494,43 @@ impl PlotOverlay {
         (label_width * 0.5 + 3.0 * scale).max(6.0 * scale)
     }
 
+    /// Heights of the title and x-axis label bands for a cell, sized to hold
+    /// their text at font scale `ts`. Returns `(title_h, title_gap, x_h, x_gap)`.
+    /// The bands follow the font size, so shrinking `ts` shrinks the bands with
+    /// the text they must contain rather than clipping fixed-size text.
+    fn vertical_band_heights(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        has_title_band: bool,
+        has_title: bool,
+        has_subtitle: bool,
+        has_x_label: bool,
+        ts: f32,
+    ) -> (f32, f32, f32, f32) {
+        let title_gap = if has_title_band { 4.0 * ts } else { 1.5 * ts };
+        let x_gap = 4.0 * ts;
+        let title_h = if has_title_band {
+            let base = if has_title && has_subtitle {
+                44.0
+            } else {
+                28.0
+            };
+            base * ts
+        } else {
+            0.0
+        };
+        let x_angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
+        let x_tick_label_width =
+            self.estimate_x_axis_max_tick_label_width(plot_renderer, axes_index, ts);
+        let tick_font_size = Self::axes_tick_font_size(plot_renderer, Some(axes_index), ts);
+        let (_, x_tick_label_height) =
+            Self::rotated_text_extent(x_tick_label_width, tick_font_size, x_angle);
+        let x_tick_band = (15.0 * ts + x_tick_label_height + 4.0 * ts).max(24.0 * ts);
+        let x_h = x_tick_band + if has_x_label { 14.0 * ts } else { 0.0 };
+        (title_h, title_gap, x_h, x_gap)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn layout_2d_panel(
         &self,
@@ -506,33 +551,18 @@ impl PlotOverlay {
         let outer_w = outer.width().max(1.0);
         let outer_h = outer.height().max(1.0);
         let has_title_band = has_title || has_subtitle;
-        let title_gap = if has_title_band {
-            4.0 * scale
-        } else {
-            1.5 * scale
-        };
-        let x_gap = 4.0 * scale;
         let x_edge_pad = self.estimate_x_axis_edge_padding(plot_renderer, axes_index, scale);
         let mut right_pad = (3.0 * scale).max(x_edge_pad + 1.0 * scale);
 
-        let mut title_h = if has_title_band {
-            let base = if has_title && has_subtitle {
-                44.0
-            } else {
-                28.0
-            };
-            (base * scale).min(outer_h * 0.22)
-        } else {
-            0.0
-        };
-        let x_angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
-        let x_tick_label_width =
-            self.estimate_x_axis_max_tick_label_width(plot_renderer, axes_index, scale);
-        let (_, x_tick_label_height) =
-            Self::rotated_text_extent(x_tick_label_width, 13.0 * scale, x_angle);
-        let x_tick_band = (15.0 * scale + x_tick_label_height + 4.0 * scale).max(24.0 * scale);
-        let mut x_h =
-            (x_tick_band + if has_x_label { 14.0 * scale } else { 0.0 }).min(outer_h * 0.28);
+        let (mut title_h, mut title_gap, mut x_h, mut x_gap) = self.vertical_band_heights(
+            plot_renderer,
+            axes_index,
+            has_title_band,
+            has_title,
+            has_subtitle,
+            has_x_label,
+            scale,
+        );
         let y_band_estimate =
             self.estimate_y_axis_band_width(plot_renderer, axes_index, has_y_label, scale);
         let mut y_w = y_band_estimate.min(outer_w * 0.30);
@@ -547,15 +577,42 @@ impl PlotOverlay {
             right_pad = (outer_w - y_w - min_plot_w).max(0.0);
         }
 
-        let available_h = outer_h - title_h - title_gap - x_h - x_gap;
-        if available_h < min_plot_h {
-            let deficit = min_plot_h - available_h;
-            let reducible = title_h + x_h;
-            if reducible > 0.0 {
-                let keep = ((reducible - deficit).max(0.0)) / reducible;
-                title_h *= keep;
-                x_h *= keep;
-            }
+        // Protect the plot area by shrinking the label text, not just the bands.
+        // When the bands plus a readable plot do not fit, drop the font scale so
+        // the bands recomputed at that scale still contain their text, instead of
+        // squeezing the bands under fixed-size text that then spills into the
+        // neighbouring cell.
+        let mut content_scale = scale;
+        let bands_h = title_h + title_gap + x_h + x_gap;
+        let available_for_bands = (outer_h - min_plot_h).max(0.0);
+        if bands_h > available_for_bands && bands_h > f32::EPSILON {
+            content_scale = (scale * available_for_bands / bands_h).clamp(0.75, scale);
+            let (t_h, t_gap, xx_h, xx_gap) = self.vertical_band_heights(
+                plot_renderer,
+                axes_index,
+                has_title_band,
+                has_title,
+                has_subtitle,
+                has_x_label,
+                content_scale,
+            );
+            title_h = t_h;
+            title_gap = t_gap;
+            x_h = xx_h;
+            x_gap = xx_gap;
+        }
+
+        // Safety net for a cell too short even at the minimum font scale: keep a
+        // sliver of plot so the rect never inverts. The per-cell clip then stops
+        // any residual overflow from reaching a neighbour.
+        let bands_total = title_h + title_gap + x_h + x_gap;
+        let max_bands = (outer_h - 8.0 * scale).max(0.0);
+        if bands_total > max_bands && bands_total > f32::EPSILON {
+            let shrink = max_bands / bands_total;
+            title_h *= shrink;
+            title_gap *= shrink;
+            x_h *= shrink;
+            x_gap *= shrink;
         }
 
         let plot_rect = Rect::from_min_max(
@@ -584,6 +641,7 @@ impl PlotOverlay {
             title_rect,
             x_label_rect,
             y_label_rect,
+            content_scale,
         }
     }
 
@@ -616,6 +674,7 @@ impl PlotOverlay {
             title_rect,
             x_label_rect: plot_rect,
             y_label_rect: plot_rect,
+            content_scale: scale,
         }
     }
 
@@ -757,8 +816,8 @@ impl PlotOverlay {
                 plot_area,
                 rows,
                 cols,
-                Self::SUBPLOT_GAP_POINTS,
-                Self::SUBPLOT_GAP_POINTS,
+                Self::SUBPLOT_COL_GAP_POINTS,
+                Self::SUBPLOT_ROW_GAP_POINTS,
             );
             rects
                 .into_iter()
@@ -1238,19 +1297,24 @@ impl PlotOverlay {
                     plot_area_rect,
                     rows,
                     cols,
-                    Self::SUBPLOT_GAP_POINTS,
-                    Self::SUBPLOT_GAP_POINTS,
+                    Self::SUBPLOT_COL_GAP_POINTS,
+                    Self::SUBPLOT_ROW_GAP_POINTS,
                 )
             } else {
                 vec![plot_area_rect; axes_count]
             };
+            let outer_clip = ui.clip_rect();
             for (i, cell_rect) in rects.iter().enumerate() {
                 let cell_rect = Self::positioned_axes_outer_rect(*cell_rect, plot_renderer, i);
+                // Clip each cell to its own rect so no title or label can bleed
+                // across the inter-cell gap into a neighbour.
+                ui.set_clip_rect(cell_rect.intersect(outer_clip));
                 let cam = plot_renderer
                     .axes_camera(i)
                     .unwrap_or_else(|| plot_renderer.camera());
                 let panel_layout =
                     self.panel_layout_for_axes(cell_rect, plot_renderer, i, config.font_scale);
+                let content_scale = panel_layout.content_scale;
                 let r =
                     Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
                 let frame_rect =
@@ -1290,7 +1354,7 @@ impl PlotOverlay {
                                 .overlay_subtitle_for_axes(i)
                                 .map(String::as_str),
                             plot_renderer.overlay_subtitle_style_for_axes(i),
-                            config.font_scale,
+                            content_scale,
                         );
                     }
                     self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
@@ -1326,14 +1390,14 @@ impl PlotOverlay {
                 // Axes (2D)
                 if config.show_axes {
                     let b = plot_renderer.view_bounds_for_axes(i);
-                    self.draw_axes(ui, r, plot_renderer, config, b, Some(i));
+                    self.draw_axes(ui, r, plot_renderer, content_scale, b, Some(i));
                     for overlay_axes in 0..plot_renderer.figure_axes_count() {
                         if plot_renderer.overlay_parent_for_axes(overlay_axes) == Some(i) {
                             self.draw_axes(
                                 ui,
                                 r,
                                 plot_renderer,
-                                config,
+                                content_scale,
                                 plot_renderer.view_bounds_for_axes(overlay_axes),
                                 Some(overlay_axes),
                             );
@@ -1351,7 +1415,7 @@ impl PlotOverlay {
                             .overlay_subtitle_for_axes(i)
                             .map(String::as_str),
                         plot_renderer.overlay_subtitle_style_for_axes(i),
-                        config.font_scale,
+                        content_scale,
                     );
                 }
                 if !matches!(
@@ -1363,7 +1427,7 @@ impl PlotOverlay {
                             ui,
                             panel_layout.x_label_rect,
                             x_label,
-                            config.font_scale,
+                            content_scale,
                         );
                     }
                 }
@@ -1376,7 +1440,7 @@ impl PlotOverlay {
                             ui,
                             panel_layout.y_label_rect,
                             y_label,
-                            config.font_scale,
+                            content_scale,
                         );
                     }
                 }
@@ -1389,10 +1453,12 @@ impl PlotOverlay {
                     self.draw_legend(ui, r, &entries, config.font_scale);
                 }
             }
+            ui.set_clip_rect(outer_clip);
         } else {
             let cam = plot_renderer.camera();
             let panel_layout =
                 self.panel_layout_for_axes(plot_area_rect, plot_renderer, 0, config.font_scale);
+            let content_scale = panel_layout.content_scale;
             let centered_plot_rect =
                 Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
             let centered_frame_rect =
@@ -1430,7 +1496,7 @@ impl PlotOverlay {
                         .overlay_subtitle_for_axes(0)
                         .map(String::as_str),
                     plot_renderer.overlay_subtitle_style_for_axes(0),
-                    config.font_scale,
+                    content_scale,
                 );
             }
             if matches!(
@@ -1478,14 +1544,21 @@ impl PlotOverlay {
 
                 // Draw axes if enabled
                 if config.show_axes {
-                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None, Some(0));
+                    self.draw_axes(
+                        ui,
+                        centered_plot_rect,
+                        plot_renderer,
+                        content_scale,
+                        None,
+                        Some(0),
+                    );
                     for overlay_axes in 1..plot_renderer.figure_axes_count() {
                         if plot_renderer.overlay_parent_for_axes(overlay_axes) == Some(0) {
                             self.draw_axes(
                                 ui,
                                 centered_plot_rect,
                                 plot_renderer,
-                                config,
+                                content_scale,
                                 plot_renderer.view_bounds_for_axes(overlay_axes),
                                 Some(overlay_axes),
                             );
@@ -1532,7 +1605,7 @@ impl PlotOverlay {
                         ui,
                         panel_layout.x_label_rect,
                         x_label,
-                        config.font_scale,
+                        content_scale,
                     );
                 }
                 if let Some(y_label) = plot_renderer
@@ -1543,7 +1616,7 @@ impl PlotOverlay {
                         ui,
                         panel_layout.y_label_rect,
                         y_label,
-                        config.font_scale,
+                        content_scale,
                     );
                 }
                 self.draw_projected_world_texts(
@@ -1958,7 +2031,7 @@ impl PlotOverlay {
         ui: &mut egui::Ui,
         plot_rect: Rect,
         plot_renderer: &PlotRenderer,
-        config: &OverlayConfig,
+        scale: f32,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
         axes_index: Option<usize>,
     ) {
@@ -1970,7 +2043,7 @@ impl PlotOverlay {
             let (x_min, x_max, y_min, y_max) = data_bounds;
             let x_range = x_max - x_min;
             let y_range = y_max - y_min;
-            let scale = config.font_scale.max(0.75);
+            let scale = scale.max(0.75);
             let tick_length = 6.0 * scale;
             let label_offset = 15.0 * scale;
             let tick_font_size = Self::axes_tick_font_size(plot_renderer, axes_index, scale);
