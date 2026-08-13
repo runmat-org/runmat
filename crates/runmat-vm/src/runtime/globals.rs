@@ -1,59 +1,19 @@
 use crate::bytecode::instr::Instr;
 use crate::bytecode::program::Bytecode;
 use crate::runtime::workspace::refresh_workspace_state;
-use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
-use std::cell::RefCell;
 use std::collections::HashMap;
 
-runmat_thread_local! {
-    static GLOBALS: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
-}
-
-runmat_thread_local! {
-    static PERSISTENTS: RefCell<HashMap<(String, usize), Value>> = RefCell::new(HashMap::new());
-}
-
-runmat_thread_local! {
-    static PERSISTENTS_BY_NAME: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
-}
-
 pub fn workspace_global_names() -> Vec<String> {
-    let mut names = Vec::new();
-    GLOBALS.with(|globals| {
-        let map = globals.borrow();
-        for key in map.keys() {
-            if !key.starts_with("var_") {
-                names.push(key.clone());
-            }
-        }
-    });
-    names.sort();
-    names
+    runmat_runtime::workspace::session::global_names()
 }
 
 pub fn get_global_value(name: &str) -> Option<Value> {
-    GLOBALS.with(|globals| globals.borrow().get(name).cloned())
+    runmat_runtime::workspace::session::global_value(name)
 }
 
 pub fn collect_thread_roots() -> Vec<Value> {
-    let mut thread_roots = Vec::new();
-    GLOBALS.with(|g| {
-        for v in g.borrow().values() {
-            thread_roots.push(v.clone());
-        }
-    });
-    PERSISTENTS.with(|p| {
-        for v in p.borrow().values() {
-            thread_roots.push(v.clone());
-        }
-    });
-    PERSISTENTS_BY_NAME.with(|p| {
-        for v in p.borrow().values() {
-            thread_roots.push(v.clone());
-        }
-    });
-    thread_roots
+    runmat_runtime::workspace::session::roots()
 }
 
 pub fn update_global_store(
@@ -61,34 +21,24 @@ pub fn update_global_store(
     stored_value: &Value,
     global_aliases: &HashMap<usize, String>,
 ) {
-    let key = format!("var_{stored_index}");
-    GLOBALS.with(|g| {
-        let mut m = g.borrow_mut();
-        if m.contains_key(&key) {
-            m.insert(key, stored_value.clone());
-        }
-    });
-    if let Some(name) = global_aliases.get(&stored_index) {
-        GLOBALS.with(|g| {
-            g.borrow_mut().insert(name.clone(), stored_value.clone());
-        });
-    }
+    runmat_runtime::workspace::session::update_global_slot(
+        stored_index,
+        global_aliases.get(&stored_index).map(String::as_str),
+        stored_value,
+    );
 }
 
 pub fn update_persistent_local_store(func_name: &str, stored_offset: usize, stored_value: &Value) {
-    let key = (func_name.to_string(), stored_offset);
-    PERSISTENTS.with(|p| {
-        let mut m = p.borrow_mut();
-        if m.contains_key(&key) {
-            m.insert(key, stored_value.clone());
-        }
-    });
+    runmat_runtime::workspace::session::update_persistent_slot(
+        func_name,
+        stored_offset,
+        stored_value,
+    );
 }
 
 pub fn declare_global(indices: Vec<usize>, vars: &mut Vec<Value>) {
     for i in indices {
-        let key = format!("var_{i}");
-        let val_opt = GLOBALS.with(|g| g.borrow().get(&key).cloned());
+        let val_opt = runmat_runtime::workspace::session::global_slot_value(i);
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
@@ -111,7 +61,7 @@ pub fn declare_global_named(
             .get(pos)
             .cloned()
             .unwrap_or_else(|| format!("var_{i}"));
-        let val_opt = GLOBALS.with(|g| g.borrow().get(&name).cloned());
+        let val_opt = runmat_runtime::workspace::session::global_value(&name);
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
@@ -120,20 +70,14 @@ pub fn declare_global_named(
             vars[i] = v;
             refresh_workspace_state(vars);
         }
-        GLOBALS.with(|g| {
-            let mut m = g.borrow_mut();
-            if let Some(v) = m.get(&name).cloned() {
-                m.insert(format!("var_{i}"), v);
-            }
-        });
+        runmat_runtime::workspace::session::bind_global_slot(i, &name);
         global_aliases.insert(i, name);
     }
 }
 
 pub fn declare_persistent(func_name: &str, indices: Vec<usize>, vars: &mut Vec<Value>) {
     for i in indices {
-        let key = (func_name.to_string(), i);
-        let val_opt = PERSISTENTS.with(|p| p.borrow().get(&key).cloned());
+        let val_opt = runmat_runtime::workspace::session::persistent_slot_value(func_name, i);
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
@@ -157,14 +101,8 @@ pub fn declare_persistent_named(
             .get(pos)
             .cloned()
             .unwrap_or_else(|| format!("var_{i}"));
-        let key = (func_name.to_string(), i);
-        let val_opt = PERSISTENTS_BY_NAME
-            .with(|p| {
-                p.borrow()
-                    .get(&(func_name.to_string(), name.clone()))
-                    .cloned()
-            })
-            .or_else(|| PERSISTENTS.with(|p| p.borrow().get(&key).cloned()));
+        let val_opt = runmat_runtime::workspace::session::persistent_named_value(func_name, &name)
+            .or_else(|| runmat_runtime::workspace::session::persistent_slot_value(func_name, i));
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
@@ -183,31 +121,30 @@ pub fn persist_declared_for_bytecode(bytecode: &Bytecode, func_name: &str, vars:
             Instr::DeclarePersistent(indices) => {
                 for &i in indices {
                     if i < vars.len() {
-                        let key = (func_name.to_string(), i);
-                        PERSISTENTS.with(|p| {
-                            p.borrow_mut().insert(key, vars[i].clone());
-                        });
+                        runmat_runtime::workspace::session::store_persistent_slot(
+                            func_name,
+                            i,
+                            vars[i].clone(),
+                        );
                     }
                 }
             }
             Instr::DeclarePersistentNamed(indices, names) => {
                 for (pos, &i) in indices.iter().enumerate() {
                     if i < vars.len() {
-                        let key = (func_name.to_string(), i);
-                        let name_key = (
-                            func_name.to_string(),
-                            names
-                                .get(pos)
-                                .cloned()
-                                .unwrap_or_else(|| format!("var_{i}")),
-                        );
+                        let name = names
+                            .get(pos)
+                            .cloned()
+                            .unwrap_or_else(|| format!("var_{i}"));
                         let val = vars[i].clone();
-                        PERSISTENTS.with(|p| {
-                            p.borrow_mut().insert(key, val.clone());
-                        });
-                        PERSISTENTS_BY_NAME.with(|p| {
-                            p.borrow_mut().insert(name_key, val);
-                        });
+                        runmat_runtime::workspace::session::store_persistent_slot(
+                            func_name,
+                            i,
+                            val.clone(),
+                        );
+                        runmat_runtime::workspace::session::store_persistent_named(
+                            func_name, &name, val,
+                        );
                     }
                 }
             }
@@ -217,7 +154,5 @@ pub fn persist_declared_for_bytecode(bytecode: &Bytecode, func_name: &str, vars:
 }
 
 pub(crate) fn reset_thread_state_for_tests() {
-    GLOBALS.with(|globals| globals.borrow_mut().clear());
-    PERSISTENTS.with(|persistents| persistents.borrow_mut().clear());
-    PERSISTENTS_BY_NAME.with(|persistents| persistents.borrow_mut().clear());
+    runmat_runtime::workspace::session::reset_legacy_state_for_tests();
 }

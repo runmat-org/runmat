@@ -1,5 +1,7 @@
 use runmat_value::Value;
 
+pub mod session;
+
 #[cfg(test)]
 use once_cell::sync::Lazy;
 #[cfg(test)]

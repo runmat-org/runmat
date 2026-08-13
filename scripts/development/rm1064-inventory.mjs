@@ -104,7 +104,7 @@ const runtimeAmbientAuthorities = [
   ["crates/runmat-runtime/src/lib.rs", "CONSTRUCTOR_RECEIVER_STACK|EVENT_REGISTRY", "R10/R29"],
   ["crates/runmat-runtime/src/context/scope.rs", "ACTIVE_CONTEXTS", "R29"],
   ["crates/runmat-vm/src/runtime/workspace.rs", "WORKSPACE_STACK|PENDING_WORKSPACE|LAST_WORKSPACE_STATE|LAST_WORKSPACE_ASSIGNED_REPORT", "R10"],
-  ["crates/runmat-vm/src/runtime/globals.rs", "GLOBALS|PERSISTENTS|PERSISTENTS_BY_NAME", "R10"],
+  ["crates/runmat-runtime/src/workspace/session.rs", "LEGACY_SESSION_VARIABLES", "R29"],
   ["crates/runmat-vm/src/runtime/call_stack.rs", "CALL_STACK|CALL_STACK_LIMIT|ERROR_NAMESPACE", "R10/R29"],
   ["crates/runmat-vm/src/interpreter/runner.rs", "CALL_COUNTS", "R10"],
   ["crates/runmat-vm/src/interpreter/errors.rs", "CURRENT_PC", "R10"],
@@ -187,6 +187,18 @@ for (const legacySemanticOwner of [
   if (declaration.test(vmClosureAdapterText)) {
     throw new Error(`legacy VM closure/object semantic owner ${legacySemanticOwner} remains at ${relative(vmClosureAdapter)}`);
   }
+}
+
+const vmGlobalAdapter = path.join(repo, "crates/runmat-vm/src/runtime/globals.rs");
+const vmGlobalAdapterText = fs.readFileSync(vmGlobalAdapter, "utf8");
+for (const legacyStore of ["GLOBALS", "PERSISTENTS", "PERSISTENTS_BY_NAME"]) {
+  if (new RegExp(`(?:static|thread_local!)\\s+${legacyStore}\\b`).test(vmGlobalAdapterText)) {
+    throw new Error(`legacy VM session-variable store ${legacyStore} remains at ${relative(vmGlobalAdapter)}`);
+  }
+}
+const runtimeSessionOwner = path.join(repo, "crates/runmat-runtime/src/workspace/session.rs");
+if (!fs.existsSync(runtimeSessionOwner)) {
+  throw new Error(`missing R10 runtime session-variable owner ${relative(runtimeSessionOwner)}`);
 }
 
 for (const [source, identities, targetSlice] of runtimeAmbientAuthorities) {

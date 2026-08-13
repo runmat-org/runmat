@@ -24,6 +24,7 @@ pub struct RuntimeContextState {
     pub(crate) output: RefCell<OutputState>,
     pub(crate) debug: RefCell<Vec<DebugFrame>>,
     pub(crate) workspace: RefCell<Option<crate::workspace::WorkspaceResolver>>,
+    pub(crate) session_variables: RefCell<crate::workspace::session::SessionVariableState>,
     pub(crate) warnings: RefCell<Vec<crate::warning_store::RuntimeWarning>>,
     pub(crate) console: RefCell<crate::console::ConsoleState>,
     pub(crate) classes: RefCell<crate::class_registry::RuntimeClassState>,
@@ -49,6 +50,9 @@ impl RuntimeContextState {
             output: RefCell::new(OutputState::default()),
             debug: RefCell::new(Vec::new()),
             workspace: RefCell::new(None),
+            session_variables: RefCell::new(
+                crate::workspace::session::SessionVariableState::default(),
+            ),
             warnings: RefCell::new(Vec::new()),
             console: RefCell::new(crate::console::ConsoleState::default()),
             classes: RefCell::new(crate::class_registry::RuntimeClassState::default()),
