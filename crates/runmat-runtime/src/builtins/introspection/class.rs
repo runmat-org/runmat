@@ -146,6 +146,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::Task(_) => "parallel.Task".to_string(),
         Value::Pool(_) => "parallel.Pool".to_string(),
         Value::Job(_) => "parallel.Job".to_string(),
+        Value::Foreign(reference) => reference.type_identity.name.clone(),
     }
 }
 

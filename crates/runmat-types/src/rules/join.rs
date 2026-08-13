@@ -177,6 +177,7 @@ impl FactJoin for ValueKindFact {
                 Foreign(ForeignFact {
                     family: left.family.clone(),
                     type_name: exact_or(&left.type_name, &right.type_name, None),
+                    type_version: exact_or(&left.type_version, &right.type_version, None),
                     ownership: exact_or(
                         &left.ownership,
                         &right.ownership,
@@ -186,6 +187,11 @@ impl FactJoin for ValueKindFact {
                         &left.affinity,
                         &right.affinity,
                         ForeignAffinityFact::Unknown,
+                    ),
+                    lifetime: exact_or(
+                        &left.lifetime,
+                        &right.lifetime,
+                        ForeignLifetimeFact::Unknown,
                     ),
                 })
             }

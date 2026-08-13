@@ -10,13 +10,14 @@ pub use error::ValueCodecError;
 mod tests {
     use crate::execution::RuntimeExecutionServices;
     use runmat_value::{
-        CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        CellArray, CharArray, ComplexTensor, ForeignAffinity, ForeignLifetime, ForeignOwnership,
+        ForeignRef, ForeignTypeIdentity, IntValue, IntegerComplexStorage, IntegerStorage,
         MException, StringArray, StructValue, Tensor, Value,
     };
 
     use runmat_execution::value::{InlineValue, ValuePayload};
 
-    use super::{decode_inline_value, encode_inline_value};
+    use super::{decode_inline_value, encode_inline_value, ValueCodecError};
 
     #[test]
     fn portable_value_roundtrip_is_centralized_and_bit_exact() {
@@ -197,5 +198,28 @@ mod tests {
             },
         };
         assert!(encode_inline_value(&Value::Future(future)).is_err());
+    }
+
+    #[test]
+    fn live_foreign_references_require_a_manifest_adapter() {
+        let reference = ForeignRef {
+            host_identity: "host-a".into(),
+            handle: 17,
+            generation: 2,
+            type_identity: ForeignTypeIdentity {
+                family: "java".into(),
+                name: "java.lang.Object".into(),
+                version: 1,
+            },
+            ownership: ForeignOwnership::Shared,
+            affinity: ForeignAffinity::OriginProcess,
+            lifetime: ForeignLifetime::Session,
+        };
+        let error = encode_inline_value(&Value::Foreign(reference)).unwrap_err();
+        assert!(matches!(
+            error,
+            ValueCodecError::Unsupported { ref path, rule }
+                if path == "$" && rule.contains("interop-manifest adapter")
+        ));
     }
 }

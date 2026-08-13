@@ -175,6 +175,7 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(cellstr_error_with_message(
             CELLSTR_INPUT_NOT_TEXT_TEXT,
             &CELLSTR_ERROR_INVALID_INPUT,

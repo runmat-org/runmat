@@ -475,6 +475,7 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(jsonencode_error(&JSONENCODE_ERROR_UNSUPPORTED_TYPE)),
     }
 }

@@ -390,7 +390,11 @@ impl Type {
             },
             Value::ClassRef(_) => Type::Unknown,
             Value::MException(_) => Type::Unknown,
-            Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => Type::Unknown,
+            Value::Future(_)
+            | Value::Task(_)
+            | Value::Pool(_)
+            | Value::Job(_)
+            | Value::Foreign(_) => Type::Unknown,
             Value::CharArray(ca) => {
                 // Treat as cell of char for type purposes; or a 2-D char matrix conceptually
                 Type::Cell {

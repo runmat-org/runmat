@@ -1317,6 +1317,7 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(max_invalid_input(format!("{name}: unsupported input type"))),
     }
 }

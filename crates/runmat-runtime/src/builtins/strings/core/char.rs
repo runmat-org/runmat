@@ -322,6 +322,7 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(char_error_with_message(
             format!("char: unsupported input type {:?}", value),
             &CHAR_ERROR_INVALID_INPUT,

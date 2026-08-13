@@ -262,6 +262,7 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(tril_error(&TRIL_ERROR_UNSUPPORTED_INPUT)),

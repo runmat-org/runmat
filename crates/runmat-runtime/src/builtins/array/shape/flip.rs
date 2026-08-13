@@ -336,6 +336,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(flip_error(&FLIP_ERROR_UNSUPPORTED_INPUT)),

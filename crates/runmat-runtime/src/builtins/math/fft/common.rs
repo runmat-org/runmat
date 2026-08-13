@@ -142,6 +142,7 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(builtin_error(
             builtin,
             format!("{builtin}: length must be numeric"),
@@ -1384,6 +1385,7 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(builtin_error(
             builtin,
             format!("{builtin}: dimension indices must be numeric"),

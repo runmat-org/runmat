@@ -321,6 +321,11 @@ impl fmt::Display for Value {
             Value::Task(handle) => write!(f, "<task {}>", handle.id),
             Value::Pool(handle) => write!(f, "<pool {}>", handle.id),
             Value::Job(handle) => write!(f, "<job {}>", handle.id),
+            Value::Foreign(reference) => write!(
+                f,
+                "<foreign {}:{}@{}>",
+                reference.type_identity.family, reference.type_identity.name, reference.generation
+            ),
         }
     }
 }

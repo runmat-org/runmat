@@ -52,6 +52,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::Task(_) => "Task",
         Value::Pool(_) => "Pool",
         Value::Job(_) => "Job",
+        Value::Foreign(_) => "Foreign",
     }
 }
 

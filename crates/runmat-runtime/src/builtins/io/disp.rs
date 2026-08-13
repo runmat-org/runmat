@@ -317,6 +317,7 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => {
             vec![value.to_string()]
         }
@@ -736,6 +737,7 @@ fn summarize_for_cell(value: &Value) -> String {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => value.to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
     }

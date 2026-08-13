@@ -142,7 +142,8 @@ fn clear_handles_in_value_excluding_with_visited(
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => {}
+        | Value::Job(_)
+        | Value::Foreign(_) => {}
     }
     Ok(())
 }
@@ -236,7 +237,8 @@ fn collect_gpu_handle_identities_with_visited(
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => {}
+        | Value::Job(_)
+        | Value::Foreign(_) => {}
     }
     Ok(())
 }

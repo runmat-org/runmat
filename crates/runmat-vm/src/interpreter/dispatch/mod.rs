@@ -233,7 +233,8 @@ fn for_each_gpu_handle_in_value_with_visited(
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => Ok(()),
+        | Value::Job(_)
+        | Value::Foreign(_) => Ok(()),
     }
 }
 

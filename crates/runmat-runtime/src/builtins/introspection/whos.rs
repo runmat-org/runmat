@@ -709,6 +709,10 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             total
         }
         Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => 0,
+        Value::Foreign(reference) => std::mem::size_of_val(reference)
+            .saturating_add(reference.host_identity.len())
+            .saturating_add(reference.type_identity.family.len())
+            .saturating_add(reference.type_identity.name.len()),
     };
     Ok(bytes)
 }

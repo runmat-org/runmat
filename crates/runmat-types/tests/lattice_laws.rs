@@ -1,9 +1,10 @@
 use runmat_types::{
     AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
     DimensionFact, DynamicReason, ExecutionFact, FactJoin, FactWiden, ForeignAffinityFact,
-    ForeignFact, ForeignOwnershipFact, InvalidationCause, InvalidationVector, LayoutFact,
-    MutationFact, NumericClass, NumericDomain, NumericFact, OutputListFact, ResidencyFact,
-    ShapeFact, StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact, ViewFact,
+    ForeignFact, ForeignLifetimeFact, ForeignOwnershipFact, InvalidationCause, InvalidationVector,
+    LayoutFact, MutationFact, NumericClass, NumericDomain, NumericFact, OutputListFact,
+    ResidencyFact, ShapeFact, StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact,
+    ViewFact,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -101,8 +102,10 @@ fn representative_facts() -> Vec<ValueFact> {
     foreign.kind = ValueKindFact::Foreign(ForeignFact {
         family: "c".into(),
         type_name: Some("widget".into()),
+        type_version: Some(1),
         ownership: ForeignOwnershipFact::Owned,
         affinity: ForeignAffinityFact::OriginThread,
+        lifetime: ForeignLifetimeFact::Session,
     });
     let mut outputs = numeric(NumericClass::Double);
     outputs.kind = ValueKindFact::OutputList(OutputListFact {

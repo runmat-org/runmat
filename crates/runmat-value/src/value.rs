@@ -61,4 +61,6 @@ pub enum Value {
     Pool(runmat_execution::PoolHandle),
     /// Durable batch execution capability.
     Job(runmat_execution::JobHandle),
+    /// Opaque resource owned by a foreign runtime host and fenced by generation.
+    Foreign(ForeignRef),
 }

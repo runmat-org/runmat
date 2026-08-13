@@ -415,6 +415,7 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(nchoosek_error(&ERROR_INVALID_INPUT)),
     }
 }

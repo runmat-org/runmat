@@ -692,6 +692,7 @@ fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> 
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(builtin_error("meshgrid: prototypes must be numeric arrays")),
     }
 }

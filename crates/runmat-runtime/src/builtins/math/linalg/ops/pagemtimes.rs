@@ -846,6 +846,7 @@ fn type_name(value: &Value) -> &'static str {
         Value::Task(_) => "task",
         Value::Pool(_) => "pool",
         Value::Job(_) => "job",
+        Value::Foreign(_) => "foreign reference",
     }
 }
 

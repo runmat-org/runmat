@@ -1149,6 +1149,7 @@ impl TypeName for Value {
             Value::Task(_) => "task",
             Value::Pool(_) => "pool",
             Value::Job(_) => "job",
+            Value::Foreign(_) => "foreign",
         }
     }
 }

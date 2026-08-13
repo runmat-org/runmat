@@ -705,6 +705,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::Task(_) => "task".to_string(),
         Value::Pool(_) => "pool".to_string(),
         Value::Job(_) => "job".to_string(),
+        Value::Foreign(_) => "foreign reference".to_string(),
     }
 }
 

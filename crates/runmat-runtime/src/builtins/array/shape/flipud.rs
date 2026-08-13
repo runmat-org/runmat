@@ -253,6 +253,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(flipud_error_descriptor(&FLIPUD_ERROR_UNSUPPORTED_INPUT)),

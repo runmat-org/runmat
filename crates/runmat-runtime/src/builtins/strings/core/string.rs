@@ -679,7 +679,8 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => Err(string_flow("string: unsupported format argument type")),
+        | Value::Job(_)
+        | Value::Foreign(_) => Err(string_flow("string: unsupported format argument type")),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -751,6 +752,7 @@ async fn convert_to_string_array(
             | Value::Task(_)
             | Value::Pool(_)
             | Value::Job(_)
+            | Value::Foreign(_)
         | Value::OutputList(_) => Err(
             string_flow("string: unsupported conversion for function or exception handles"),
         ),

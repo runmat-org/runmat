@@ -291,6 +291,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_) => Err(CastError::Unsupported("MException".to_string())),
+        Value::Foreign(_) => Err(CastError::Unsupported("foreign".to_string())),
         Value::OutputList(_) => Err(CastError::Unsupported("OutputList".to_string())),
     }
 }

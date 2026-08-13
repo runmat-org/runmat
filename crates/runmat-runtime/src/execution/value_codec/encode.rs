@@ -139,6 +139,10 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
                 "execution handles are capabilities, not transferable values",
             ))
         }
+        Value::Foreign(_) => return Err(ValueCodecError::unsupported(
+            path,
+            "foreign references require an interop-manifest adapter and cannot be encoded inline",
+        )),
     };
     Ok(ValuePayload::Inline(Box::new(inline)))
 }

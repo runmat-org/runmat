@@ -338,6 +338,7 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(ifftshift_error(&IFFTSHIFT_ERROR_UNSUPPORTED_INPUT)),
     }
 }

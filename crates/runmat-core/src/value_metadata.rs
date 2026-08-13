@@ -49,6 +49,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::Task(_) => "parallel.Task".to_string(),
         Value::Pool(_) => "parallel.Pool".to_string(),
         Value::Job(_) => "parallel.Job".to_string(),
+        Value::Foreign(reference) => reference.type_identity.name.clone(),
     }
 }
 
@@ -59,7 +60,8 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         | Value::Int(_)
         | Value::Bool(_)
         | Value::Complex(_, _)
-        | Value::Symbolic(_) => Some(vec![1, 1]),
+        | Value::Symbolic(_)
+        | Value::Foreign(_) => Some(vec![1, 1]),
         Value::SymbolicArray(arr) => Some(arr.shape.clone()),
         Value::LogicalArray(arr) => Some(arr.shape.clone()),
         Value::StringArray(sa) => Some(sa.shape.clone()),
@@ -177,6 +179,7 @@ pub fn preview_numeric_values(
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::GpuTensor(_) => None,
     }
 }
@@ -235,7 +238,10 @@ fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<NumericPrevie
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{ComplexTensor, IntegerStorage, NumericDType, ObjectInstance, Tensor};
+    use runmat_value::{
+        ComplexTensor, ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRef,
+        ForeignTypeIdentity, IntegerStorage, NumericDType, ObjectInstance, Tensor,
+    };
 
     #[test]
     fn approximate_size_bytes_uses_authoritative_native_storage() {
@@ -309,6 +315,26 @@ mod tests {
         );
 
         assert_eq!(value_shape(&Value::Object(object)), Some(vec![2, 1]));
+    }
+
+    #[test]
+    fn foreign_reference_metadata_uses_declared_type_and_scalar_shape() {
+        let value = Value::Foreign(ForeignRef {
+            host_identity: "browser-main".into(),
+            handle: 5,
+            generation: 1,
+            type_identity: ForeignTypeIdentity {
+                family: "web".into(),
+                name: "dom.Element".into(),
+                version: 1,
+            },
+            ownership: ForeignOwnership::Borrowed,
+            affinity: ForeignAffinity::OriginThread,
+            lifetime: ForeignLifetime::External,
+        });
+        assert_eq!(matlab_class_name(&value), "dom.Element");
+        assert_eq!(value_shape(&value), Some(vec![1, 1]));
+        assert_eq!(preview_numeric_values(&value, 8), None);
     }
 
     #[test]

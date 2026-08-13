@@ -430,6 +430,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(times_error_with_detail(
             &TIMES_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",

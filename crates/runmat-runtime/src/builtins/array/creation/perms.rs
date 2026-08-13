@@ -179,6 +179,7 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(perms_error(&ERROR_INVALID_INPUT)),
     }
 }

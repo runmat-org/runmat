@@ -91,7 +91,8 @@ impl Trace for Value {
             | Value::Future(_)
             | Value::Task(_)
             | Value::Pool(_)
-            | Value::Job(_) => {}
+            | Value::Job(_)
+            | Value::Foreign(_) => {}
         }
     }
 }

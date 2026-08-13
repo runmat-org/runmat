@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 
 use runmat_types::{
     AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
-    DimensionFact, DynamicReason, ExceptionFact, ExecutionFact, InvalidationVector, LayoutFact,
-    MutationFact, NumericClass, NumericDomain, NumericFact, ObjectFact, OutputListFact,
-    QualifiedName, ResidencyFact, ShapeFact, StorageFact, StructFact, SymbolName, ValueFact,
-    ValueKindFact, ViewFact,
+    DimensionFact, DynamicReason, ExceptionFact, ExecutionFact, ForeignAffinity,
+    ForeignAffinityFact, ForeignFact, ForeignLifetime, ForeignLifetimeFact, ForeignOwnership,
+    ForeignOwnershipFact, InvalidationVector, LayoutFact, MutationFact, NumericClass,
+    NumericDomain, NumericFact, ObjectFact, OutputListFact, QualifiedName, ResidencyFact,
+    ShapeFact, StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact, ViewFact,
 };
 use runmat_value::{IntValue, NumericDType, Value};
 
@@ -167,6 +168,37 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::Job(_) => execution(ExecutionFact::Job {
             output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
         }),
+        Value::Foreign(reference) => {
+            let mut fact = fact(
+                ValueKindFact::Foreign(ForeignFact {
+                    family: reference.type_identity.family.clone(),
+                    type_name: Some(reference.type_identity.name.clone()),
+                    type_version: Some(reference.type_identity.version),
+                    ownership: match reference.ownership {
+                        ForeignOwnership::Borrowed => ForeignOwnershipFact::Borrowed,
+                        ForeignOwnership::Owned => ForeignOwnershipFact::Owned,
+                        ForeignOwnership::Shared => ForeignOwnershipFact::Shared,
+                    },
+                    affinity: match reference.affinity {
+                        ForeignAffinity::AnyThread => ForeignAffinityFact::AnyThread,
+                        ForeignAffinity::OriginThread => ForeignAffinityFact::OriginThread,
+                        ForeignAffinity::OriginProcess => ForeignAffinityFact::OriginProcess,
+                        ForeignAffinity::RemoteHost => ForeignAffinityFact::RemoteHost,
+                    },
+                    lifetime: match reference.lifetime {
+                        ForeignLifetime::Call => ForeignLifetimeFact::Call,
+                        ForeignLifetime::Session => ForeignLifetimeFact::Session,
+                        ForeignLifetime::Persistent => ForeignLifetimeFact::Persistent,
+                        ForeignLifetime::External => ForeignLifetimeFact::External,
+                    },
+                }),
+                ShapeFact::Scalar,
+                StorageFact::Opaque,
+            );
+            fact.alias = AliasFact::Identity;
+            fact.mutation = MutationFact::HandleSemantics;
+            fact
+        }
     }
 }
 
@@ -342,7 +374,7 @@ mod tests {
         clear_handle_metadata, set_handle_integer_type, set_handle_storage, GpuTensorHandle,
         GpuTensorStorage, IntegerElementType,
     };
-    use runmat_value::{CellArray, Tensor};
+    use runmat_value::{CellArray, ForeignRef, Tensor};
 
     #[test]
     fn preserves_recursive_numeric_class_and_shape() {
@@ -414,5 +446,39 @@ mod tests {
             fact.certainty,
             CertaintyFact::Dynamic(DynamicReason::UnsupportedRepresentation)
         );
+    }
+
+    #[test]
+    fn foreign_reference_preserves_static_type_and_lifecycle_without_live_identity() {
+        let value = Value::Foreign(ForeignRef {
+            host_identity: "worker-7".into(),
+            handle: 91,
+            generation: 4,
+            type_identity: runmat_types::ForeignTypeIdentity {
+                family: "java".into(),
+                name: "java.lang.StringBuilder".into(),
+                version: 2,
+            },
+            ownership: ForeignOwnership::Shared,
+            affinity: ForeignAffinity::OriginProcess,
+            lifetime: ForeignLifetime::Session,
+        });
+
+        let fact = value_fact(&value);
+        assert_eq!(
+            fact.kind,
+            ValueKindFact::Foreign(ForeignFact {
+                family: "java".into(),
+                type_name: Some("java.lang.StringBuilder".into()),
+                type_version: Some(2),
+                ownership: ForeignOwnershipFact::Shared,
+                affinity: ForeignAffinityFact::OriginProcess,
+                lifetime: ForeignLifetimeFact::Session,
+            })
+        );
+        assert_eq!(fact.shape, ShapeFact::Scalar);
+        assert_eq!(fact.storage, StorageFact::Opaque);
+        assert_eq!(fact.alias, AliasFact::Identity);
+        assert_eq!(fact.mutation, MutationFact::HandleSemantics);
     }
 }

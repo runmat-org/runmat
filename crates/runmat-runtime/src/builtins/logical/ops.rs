@@ -189,6 +189,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_) => Err(conversion_error("MException")),
+        Value::Foreign(_) => Err(conversion_error("foreign")),
         Value::OutputList(_) => Err(conversion_error("OutputList")),
     }
 }

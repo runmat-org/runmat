@@ -545,6 +545,7 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             | Value::Task(_)
             | Value::Pool(_)
             | Value::Job(_)
+            | Value::Foreign(_)
             | Value::OutputList(_) => default_empty_double(),
         },
         None => default_empty_double(),
