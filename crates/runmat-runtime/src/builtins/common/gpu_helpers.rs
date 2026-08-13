@@ -19,6 +19,43 @@ pub fn exact_provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dy
         .filter(|provider| provider.device_id() == handle.device_id)
 }
 
+/// Select one owning provider for a set of resident inputs, with explicit
+/// gpuArray provenance taking precedence over automatic residency.
+pub fn select_resident_output_source(
+    handles: impl IntoIterator<Item = GpuTensorHandle>,
+    builtin: &str,
+) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
+    let mut selected: Option<(GpuTensorHandle, &'static dyn AccelProvider)> = None;
+    for handle in handles {
+        let owner = exact_provider_for_handle(&handle).ok_or_else(|| {
+            build_runtime_error(format!(
+                "{builtin}: no acceleration provider owns a resident input"
+            ))
+            .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+        })?;
+        if let Some((current, current_owner)) = &selected {
+            if current.device_id != handle.device_id || !std::ptr::eq(*current_owner, owner) {
+                return Err(build_runtime_error(format!(
+                    "{builtin}: resident inputs must share one owning provider"
+                ))
+                .with_identifier("RunMat:gpu:MixedProviders")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build());
+            }
+            if !runmat_accelerate_api::handle_is_explicit(current)
+                && runmat_accelerate_api::handle_is_explicit(&handle)
+            {
+                selected = Some((handle, owner));
+            }
+        } else {
+            selected = Some((handle, owner));
+        }
+    }
+    Ok(selected.map(|(handle, _)| handle))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GpuHandleMetadataSnapshot {
     storage: GpuTensorStorage,
@@ -639,6 +676,47 @@ mod preserving_download_tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[test]
+    fn resident_output_source_prefers_explicit_intent_independent_of_order() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let automatic = upload_tensor(provider, &tensor).unwrap();
+            let explicit = upload_tensor(provider, &tensor).unwrap();
+            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            for handles in [
+                vec![automatic.clone(), explicit.clone()],
+                vec![explicit.clone(), automatic.clone()],
+            ] {
+                let selected = select_resident_output_source(handles, "test")
+                    .unwrap()
+                    .expect("resident source");
+                assert!(same_gpu_handle(&selected, &explicit));
+                assert!(runmat_accelerate_api::handle_is_explicit(&selected));
+            }
+            runmat_accelerate_api::clear_handle_metadata(&automatic);
+            runmat_accelerate_api::clear_handle_metadata(&explicit);
+        });
+    }
+
+    #[test]
+    fn resident_output_source_rejects_a_stale_or_wrong_owner() {
+        test_support::with_test_provider(|_| {
+            let stale = GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX - 426,
+            };
+            let error = select_resident_output_source([stale], "test")
+                .expect_err("unowned handle must reject");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:gpu:ProviderOwnershipMismatch")
+            );
+            assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        });
+    }
 
     struct MalformedDownloadProvider;
 

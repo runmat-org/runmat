@@ -3,7 +3,11 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, ResolveContext, Tensor, Type, Value,
 };
@@ -224,6 +228,194 @@ pub const KNNSEARCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DISTANCE_ERRORS,
 };
 
+const KNN_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-integer-observation-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "knnsearch with typed-integer X or Y data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchIntegerObservationDataExtension"),
+};
+const KNN_INTEGER_STRUCTURAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-integer-structural-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "knnsearch with typed-integer K or BucketSize is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchIntegerStructuralControlExtension"),
+};
+const KNN_INTEGER_FLOATING_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "knnsearch-integer-floating-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "knnsearch with typed-integer P, Cov, Scale, or CacheSize is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:KnnsearchIntegerFloatingControlExtension"),
+    };
+const KNN_INTEGER_LOGICAL_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "knnsearch-integer-logical-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "knnsearch with typed-integer IncludeTies or SortIndices is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:KnnsearchIntegerLogicalControlExtension"),
+    };
+const KNN_GPU_NSMETHOD_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-nonexhaustive-search",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "an explicit GPU knnsearch call without NSMethod='exhaustive' is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuNonexhaustiveSearchExtension"),
+};
+const KNN_GPU_INCLUDE_TIES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-include-ties",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "an explicit GPU knnsearch call with nondefault IncludeTies is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuIncludeTiesExtension"),
+};
+const KNN_GPU_SORT_INDICES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-sort-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "an explicit GPU knnsearch call with nondefault SortIndices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuSortIndicesExtension"),
+};
+const KNN_GPU_FAST_DISTANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "knnsearch-gpu-fast-distance",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "an explicit GPU knnsearch call with a fast distance variant is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KnnsearchGpuFastDistanceExtension"),
+};
+
+pub const KNNSEARCH_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
+    KNN_INTEGER_DATA_EXTENSION,
+    KNN_INTEGER_STRUCTURAL_EXTENSION,
+    KNN_INTEGER_FLOATING_CONTROL_EXTENSION,
+    KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
+    KNN_GPU_NSMETHOD_EXTENSION,
+    KNN_GPU_INCLUDE_TIES_EXTENSION,
+    KNN_GPU_SORT_INDICES_EXTENSION,
+    KNN_GPU_FAST_DISTANCE_EXTENSION,
+];
+
+const KNN_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary.",
+    },
+];
+const KNN_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "K",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat decodes K exactly as a positive output-shape count.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "BucketSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat decodes BucketSize exactly as a positive search-structure count.",
+    },
+];
+const KNN_INTEGER_FLOATING_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "P",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The Minkowski exponent crosses a checked binary64 numerical boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Cov",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The covariance matrix crosses a checked binary64 numerical boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Scale",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The scale vector crosses a checked binary64 numerical boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "CacheSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric storage class is double; RunMat requires an exact binary64 value.",
+    },
+];
+const KNN_INTEGER_LOGICAL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "IncludeTies",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public documentation specifies false or true; typed numeric toggles remain conservatively RunMat-only.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "SortIndices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented class is logical; typed numeric toggles remain RunMat-only.",
+    },
+];
+
+pub const KNNSEARCH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[Idx, D] = knnsearch(integer_X, integer_Y, ...)",
+        inputs: &KNN_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Idx is a MATLAB-compatible double index output. The current host fallback may restore numeric outputs to the source provider when supported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "knnsearch(X, Y, K/BucketSize=integer_control)",
+        inputs: &KNN_INTEGER_STRUCTURAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "These controls are decoded directly from exact storage even though their public MATLAB storage classes are single and double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "knnsearch(X, Y, P/Cov/Scale/CacheSize=integer_value)",
+        inputs: &KNN_INTEGER_FLOATING_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Each independently gated typed control must be exactly representable before conversion to the floating search domain.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "knnsearch(X, Y, IncludeTies/SortIndices=integer_toggle)",
+        inputs: &KNN_INTEGER_LOGICAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only exact zero and one are accepted after this typed-logical extension is admitted.",
+    },
+];
+
 pub const SQUAREFORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SQUAREFORM_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -357,9 +549,17 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
     keywords = "knnsearch,nearest neighbor,k nearest,statistics,machine learning,distance",
     type_resolver(matrix_type),
     descriptor(crate::builtins::stats::ml::distance::KNNSEARCH_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::KNNSEARCH_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::KNNSEARCH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_knnsearch_extensions(&x, &y, &rest)?;
+    ensure_knnsearch_exact_boundaries(&x, &y, &rest).await?;
+    let output_source = crate::builtins::common::gpu_helpers::select_resident_output_source(
+        [&x, &y].into_iter().filter_map(knn_gpu_source),
+        KNNSEARCH_NAME,
+    )?;
     let x = value_to_matrix(KNNSEARCH_NAME, x).await?;
     let y = value_to_matrix(KNNSEARCH_NAME, y).await?;
     if x.cols != y.cols {
@@ -376,7 +576,193 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
         ));
     }
     let metric = parse_metric(KNNSEARCH_NAME, &x, Some(&y), metric_args).await?;
-    knnsearch_outputs(&x, &y, &metric, options)
+    let value = knnsearch_outputs(&x, &y, &metric, options)?;
+    restore_knnsearch_value(value, output_source.as_ref())
+}
+
+fn knn_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {
+    let Value::GpuTensor(handle) = value else {
+        return None;
+    };
+    Some(handle.clone())
+}
+
+fn restore_knnsearch_value(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let Some(source) = source else {
+        return Ok(value);
+    };
+    match value {
+        Value::Tensor(tensor) => {
+            let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+                source,
+                Value::Tensor(tensor),
+                KNNSEARCH_NAME,
+            )?;
+            if runmat_accelerate_api::handle_is_explicit(source)
+                && !matches!(restored, Value::GpuTensor(_))
+            {
+                return Err(distance_error(
+                    KNNSEARCH_NAME,
+                    "knnsearch: provider cannot preserve explicit gpuArray output residency",
+                ));
+            }
+            Ok(restored)
+        }
+        Value::Cell(cell) => {
+            let shape = cell.shape.clone();
+            let values = cell
+                .data
+                .into_iter()
+                .map(|value| restore_knnsearch_value(value, Some(source)))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            CellArray::new_with_shape(values, shape)
+                .map(Value::Cell)
+                .map_err(|error| distance_error(KNNSEARCH_NAME, error))
+        }
+        Value::OutputList(values) => values
+            .into_iter()
+            .map(|value| restore_knnsearch_value(value, Some(source)))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(Value::OutputList),
+        other => Ok(other),
+    }
+}
+
+fn knn_typed_integer(value: &Value) -> bool {
+    crate::builtins::common::validation::value_has_native_integer_class(value)
+}
+
+fn explicit_knn_gpu(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+}
+
+fn ensure_knnsearch_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if knn_typed_integer(x) || knn_typed_integer(y) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &KNN_INTEGER_DATA_EXTENSION,
+            KNNSEARCH_NAME,
+        )?;
+    }
+    let explicit_gpu =
+        explicit_knn_gpu(x) || explicit_knn_gpu(y) || rest.iter().any(explicit_knn_gpu);
+    let mut explicit_exhaustive = false;
+    let mut idx = 0;
+    while idx + 1 < rest.len() {
+        let Some(name) = keyword_of(&rest[idx]) else {
+            idx += 1;
+            continue;
+        };
+        let value = &rest[idx + 1];
+        if explicit_gpu {
+            match name.as_str() {
+                "includeties" if logical_scalar_is(value, true) => {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &KNN_GPU_INCLUDE_TIES_EXTENSION,
+                        KNNSEARCH_NAME,
+                    )?;
+                }
+                "sortindices" if logical_scalar_is(value, false) => {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &KNN_GPU_SORT_INDICES_EXTENSION,
+                        KNNSEARCH_NAME,
+                    )?;
+                }
+                "distance"
+                    if keyword_of(value).is_some_and(|distance| {
+                        matches!(distance.as_str(), "fasteuclidean" | "fastseuclidean")
+                    }) =>
+                {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &KNN_GPU_FAST_DISTANCE_EXTENSION,
+                        KNNSEARCH_NAME,
+                    )?;
+                }
+                _ => {}
+            }
+        }
+        match name.as_str() {
+            "k" | "bucketsize" if knn_typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &KNN_INTEGER_STRUCTURAL_EXTENSION,
+                    KNNSEARCH_NAME,
+                )?;
+            }
+            "p" | "cov" | "scale" | "cachesize" if knn_typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &KNN_INTEGER_FLOATING_CONTROL_EXTENSION,
+                    KNNSEARCH_NAME,
+                )?;
+            }
+            "includeties" | "sortindices" if knn_typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &KNN_INTEGER_LOGICAL_CONTROL_EXTENSION,
+                    KNNSEARCH_NAME,
+                )?;
+            }
+            "nsmethod" => {
+                explicit_exhaustive = keyword_of(value).as_deref() == Some("exhaustive");
+            }
+            _ => {}
+        }
+        idx += 2;
+    }
+    if explicit_gpu && !explicit_exhaustive {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &KNN_GPU_NSMETHOD_EXTENSION,
+            KNNSEARCH_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn logical_scalar_is(value: &Value, expected: bool) -> bool {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .is_some_and(|value| matches!(value, 0 | 1) && (value != 0) == expected);
+    }
+    match value {
+        Value::Bool(value) => *value == expected,
+        Value::LogicalArray(value) if value.data.len() == 1 => (value.data[0] != 0) == expected,
+        Value::Num(value) => (*value != 0.0) == expected,
+        _ => false,
+    }
+}
+
+async fn ensure_knnsearch_exact_boundaries(
+    x: &Value,
+    y: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    for (value, role) in [(x, "X"), (y, "Y")] {
+        ensure_knn_exact_f64(value, role).await?;
+    }
+    let mut idx = 0;
+    while idx + 1 < rest.len() {
+        if keyword_of(&rest[idx])
+            .is_some_and(|name| matches!(name.as_str(), "p" | "cov" | "scale" | "cachesize"))
+        {
+            ensure_knn_exact_f64(&rest[idx + 1], "floating option").await?;
+        }
+        idx += 2;
+    }
+    Ok(())
+}
+
+async fn ensure_knn_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
+    if knn_typed_integer(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(distance_error(
+            KNNSEARCH_NAME,
+            format!("knnsearch: typed-integer {role} must be exactly representable as double"),
+        ));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -1651,6 +2037,63 @@ mod tests {
     }
 
     #[test]
+    fn knnsearch_documented_floating_gpu_fallback_preserves_explicit_residency() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
+                .expect("upload observations");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let output = block_on(knnsearch_builtin(
+                Value::GpuTensor(handle),
+                tensor(vec![1.0, 4.0], 2, 1),
+                vec![Value::from("NSMethod"), Value::from("exhaustive")],
+            ))
+            .expect("documented resident knnsearch");
+            assert!(matches!(output, Value::GpuTensor(_)));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn knnsearch_wgpu_fallback_enforces_explicit_residency_contract() {
+        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("actual WGPU provider");
+        let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
+            .expect("upload observations");
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let result = block_on(knnsearch_builtin(
+            Value::GpuTensor(handle.clone()),
+            tensor(vec![1.0, 4.0], 2, 1),
+            vec![Value::from("NSMethod"), Value::from("exhaustive")],
+        ));
+        match runmat_accelerate_api::AccelProvider::precision(provider) {
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                let Value::GpuTensor(output) = result.expect("documented WGPU knnsearch") else {
+                    panic!("expected resident output");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(&output));
+                assert_eq!(
+                    output.device_id,
+                    runmat_accelerate_api::AccelProvider::device_id(provider)
+                );
+                assert_eq!(output.shape, vec![2, 1]);
+            }
+            runmat_accelerate_api::ProviderPrecision::F32 => {
+                let error = result.expect_err("double indices cannot use an f32-only provider");
+                assert!(error
+                    .message()
+                    .contains("cannot preserve explicit gpuArray output residency"));
+                assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+            }
+        }
+    }
+
+    #[test]
     fn pdist_default_and_cityblock_use_condensed_order() {
         let x = tensor(vec![0.0, 3.0, 4.0, 0.0, 0.0, 4.0, 0.0, 2.0], 4, 2);
         let out = block_on(pdist_builtin(x.clone(), Vec::new())).unwrap();
@@ -1868,6 +2311,7 @@ mod tests {
 
     #[test]
     fn knnsearch_options_read_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(knnsearch_builtin(
             poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 5, 0, 0, 0]), 3, 2),
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 4, 0, 0]), 2, 2),
@@ -1888,6 +2332,40 @@ mod tests {
         let idx = tensor_out(out);
         assert_eq!(idx.shape, vec![2, 2]);
         assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn knnsearch_integer_data_and_controls_are_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(knnsearch_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1),
+            tensor(vec![0.0], 1, 1),
+            Vec::new(),
+        ))
+        .expect_err("strict mode rejects typed observation data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:KnnsearchIntegerObservationDataExtension")
+        );
+        assert_eq!(KNNSEARCH_EXTENSIONS.len(), 8);
+        assert_eq!(KNNSEARCH_INTEGER_CAPABILITIES.len(), 4);
+    }
+
+    #[test]
+    fn knnsearch_runmat_floating_integer_controls_require_exact_double_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(knnsearch_builtin(
+            tensor(vec![0.0, 1.0], 2, 1),
+            tensor(vec![0.0], 1, 1),
+            vec![
+                Value::from("Distance"),
+                Value::from("minkowski"),
+                Value::from("P"),
+                poisoned_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), 1, 1),
+            ],
+        ))
+        .expect_err("wide integer P cannot cross the floating boundary");
+        assert!(error.message().contains("exactly representable as double"));
     }
 
     #[test]

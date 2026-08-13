@@ -95,10 +95,12 @@ fn gather_if_needed_async_impl<'a>(
                     );
                     }
                 }
-                let provider =
-                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                let provider = runmat_accelerate_api::provider_for_handle(handle)
+                    .filter(|provider| provider.device_id() == handle.device_id)
+                    .ok_or_else(|| {
                         build_runtime_error("gather: no acceleration provider registered")
                             .with_identifier("RunMat:gather:ProviderUnavailable")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
                 let is_logical = runmat_accelerate_api::handle_is_logical(handle);

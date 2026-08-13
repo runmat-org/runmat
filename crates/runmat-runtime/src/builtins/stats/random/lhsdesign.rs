@@ -1,20 +1,118 @@
 //! Latin hypercube experimental designs.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    NumericScalar, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "lhsdesign";
 const DEFAULT_ITERATIONS: usize = 5;
 const MAX_SCORE_TERMS: usize = 200_000_000;
+
+const INTEGER_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lhsdesign-integer-dimension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lhsdesign with typed-integer n or p dimensions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LhsdesignIntegerDimensionExtension"),
+};
+
+const INTEGER_ITERATIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lhsdesign-integer-iterations",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lhsdesign with a typed-integer Iterations control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LhsdesignIntegerIterationsExtension"),
+};
+
+const INTEGER_SMOOTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lhsdesign-integer-smooth",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lhsdesign with a typed-integer Smooth boolean alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LhsdesignIntegerSmoothExtension"),
+};
+
+const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lhsdesign-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lhsdesign host fallback for explicit gpuArray inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LhsdesignExplicitGpuInputExtension"),
+};
+
+pub const LHSDESIGN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    INTEGER_DIMENSION_EXTENSION,
+    INTEGER_ITERATIONS_EXTENSION,
+    INTEGER_SMOOTH_EXTENSION,
+    RESIDENT_INPUT_EXTENSION,
+];
+
+const INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n or p",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer design dimensions are gated before gather and decoded exactly into bounded positive host counts.",
+    }];
+
+const INTEGER_ITERATIONS_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Iterations",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer iteration counts are gated before gather and decoded exactly without a floating round trip.",
+    }];
+
+const INTEGER_SMOOTH_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "Smooth",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "The RunMat-only integer alias accepts only exact scalar zero or one.",
+}];
+
+pub const LHSDESIGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = lhsdesign(integer_n, integer_p, ___)",
+        inputs: &INTEGER_DIMENSION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "n and p are exact structural counts. Current public documentation does not declare lhsdesign output class, so this metadata does not infer single propagation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = lhsdesign(n, p, Iterations=integer_iterations)",
+        inputs: &INTEGER_ITERATIONS_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Iterations is a positive structural work bound and does not select output class or residency.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = lhsdesign(n, p, Smooth=integer_boolean)",
+        inputs: &INTEGER_SMOOTH_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer Smooth aliases are a separately gated RunMat convenience; documented text values remain the compatibility surface.",
+    },
+];
 
 const OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
@@ -137,14 +235,71 @@ fn lhs_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "lhsdesign,latin hypercube,design of experiments,random,statistics",
     type_resolver(lhs_type),
     descriptor(crate::builtins::stats::random::lhsdesign::LHSDESIGN_DESCRIPTOR),
+    extensions(crate::builtins::stats::random::lhsdesign::LHSDESIGN_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::random::lhsdesign::LHSDESIGN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::random::lhsdesign"
 )]
 pub(crate) async fn lhsdesign_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_extensions(&args)?;
+    let args = gather_args(args).await?;
     let options = parse_args(args)?;
     let design = compute_lhsdesign(options)?;
     Tensor::new(design, vec![options.n, options.p])
         .map(tensor::tensor_into_value)
         .map_err(|err| internal(format!("lhsdesign: {err}")))
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
+    if args.iter().take(2).any(is_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DIMENSION_EXTENSION, NAME)?;
+    }
+    for pair in args.get(2..).unwrap_or_default().chunks_exact(2) {
+        if !is_typed_integer(&pair[1]) {
+            continue;
+        }
+        let extension = match keyword_of(&pair[0]).as_deref() {
+            Some("iterations") => &INTEGER_ITERATIONS_EXTENSION,
+            Some("smooth") => &INTEGER_SMOOTH_EXTENSION,
+            _ => continue,
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)?;
+    }
+    if args.iter().any(contains_explicit_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
+async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+    let mut gathered = Vec::with_capacity(args.len());
+    for value in args {
+        gathered.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(|err| invalid(format!("lhsdesign: {err}")))?,
+        );
+    }
+    Ok(gathered)
 }
 
 fn parse_args(args: Vec<Value>) -> BuiltinResult<LhsOptions> {
@@ -191,11 +346,51 @@ fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
                 ))
             });
     }
-    let number = scalar_f64(value).ok_or_else(|| {
+    if let Value::Tensor(tensor) = value {
+        if !tensor::is_scalar_tensor(tensor) {
+            return Err(invalid(format!(
+                "lhsdesign: {label} must be a positive integer scalar"
+            )));
+        }
+        return positive_usize_scalar(
+            tensor
+                .numeric_value_at(0)
+                .expect("validated scalar tensor has one numeric value"),
+            label,
+        );
+    }
+    let number = match value {
+        Value::Num(number) => *number,
+        _ => {
+            return Err(invalid(format!(
+                "lhsdesign: {label} must be a positive integer scalar"
+            )))
+        }
+    };
+    positive_floating_usize(number, label)
+}
+
+fn positive_usize_scalar(value: NumericScalar, label: &str) -> BuiltinResult<usize> {
+    let parsed = match value {
+        NumericScalar::I8(value) => usize::try_from(value).ok(),
+        NumericScalar::I16(value) => usize::try_from(value).ok(),
+        NumericScalar::I32(value) => usize::try_from(value).ok(),
+        NumericScalar::I64(value) => usize::try_from(value).ok(),
+        NumericScalar::U8(value) => Some(usize::from(value)),
+        NumericScalar::U16(value) => Some(usize::from(value)),
+        NumericScalar::U32(value) => usize::try_from(value).ok(),
+        NumericScalar::U64(value) => usize::try_from(value).ok(),
+        NumericScalar::F32(value) => return positive_floating_usize(f64::from(value), label),
+        NumericScalar::F64(value) => return positive_floating_usize(value, label),
+    };
+    parsed.filter(|value| *value > 0).ok_or_else(|| {
         invalid(format!(
             "lhsdesign: {label} must be a positive integer scalar"
         ))
-    })?;
+    })
+}
+
+fn positive_floating_usize(number: f64, label: &str) -> BuiltinResult<usize> {
     if !(number.is_finite() && number >= 1.0 && number.fract() == 0.0) {
         return Err(invalid(format!(
             "lhsdesign: {label} must be a positive integer scalar"
@@ -434,7 +629,9 @@ mod tests {
     }
 
     fn reset_rng() -> std::sync::MutexGuard<'static, ()> {
-        let guard = random::test_lock().lock().unwrap();
+        let guard = random::test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         random::reset_rng();
         guard
     }
@@ -505,6 +702,7 @@ mod tests {
     #[test]
     fn typed_integer_scalar_arguments_are_exact() {
         let _guard = reset_rng();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(lhsdesign_builtin(vec![
             poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
             poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
@@ -586,5 +784,96 @@ mod tests {
         assert!(positive_usize(&Value::Int(runmat_builtins::IntValue::I8(-1)), "n").is_err());
         assert!(positive_usize(&Value::Num(1.5), "n").is_err());
         assert!(positive_usize(&Value::Num(usize::MAX as f64 + 1.0), "n").is_err());
+    }
+
+    #[test]
+    fn typed_integer_roles_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cases = [
+            (
+                vec![
+                    Value::Int(runmat_builtins::IntValue::U16(4)),
+                    Value::Num(2.0),
+                ],
+                "RunMat:compatibility:LhsdesignIntegerDimensionExtension",
+            ),
+            (
+                vec![
+                    Value::Num(4.0),
+                    Value::Num(2.0),
+                    Value::from("Iterations"),
+                    Value::Int(runmat_builtins::IntValue::U8(2)),
+                ],
+                "RunMat:compatibility:LhsdesignIntegerIterationsExtension",
+            ),
+            (
+                vec![
+                    Value::Num(4.0),
+                    Value::Num(2.0),
+                    Value::from("Smooth"),
+                    Value::Int(runmat_builtins::IntValue::U8(1)),
+                ],
+                "RunMat:compatibility:LhsdesignIntegerSmoothExtension",
+            ),
+        ];
+        for (args, identifier) in cases {
+            let error = block_on(lhsdesign_builtin(args)).unwrap_err();
+            assert_eq!(error.identifier(), Some(identifier));
+        }
+    }
+
+    #[test]
+    fn typed_integer_counts_use_authoritative_storage_and_platform_bounds() {
+        assert_eq!(
+            positive_usize(
+                &poisoned_int_tensor(IntegerStorage::U64(vec![7]), vec![1, 1]),
+                "n",
+            )
+            .unwrap(),
+            7
+        );
+        let platform_limit = positive_usize(
+            &poisoned_int_tensor(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]),
+            "n",
+        );
+        if usize::BITS == 64 {
+            assert_eq!(platform_limit.unwrap(), usize::MAX);
+        } else {
+            assert!(platform_limit.is_err());
+        }
+    }
+
+    #[test]
+    fn explicit_gpu_fallback_is_gated_but_automatic_residency_is_transparent() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        let _guard = reset_rng();
+        test_support::with_test_provider(|provider| {
+            let count = Tensor::new(vec![4.0], vec![1, 1]).unwrap();
+            let explicit = gpu_helpers::upload_tensor(provider, &count).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(lhsdesign_builtin(vec![
+                Value::GpuTensor(explicit),
+                Value::Num(2.0),
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:LhsdesignExplicitGpuInputExtension")
+            );
+
+            let automatic = gpu_helpers::upload_tensor(provider, &count).expect("upload");
+            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let output = block_on(lhsdesign_builtin(vec![
+                Value::GpuTensor(automatic),
+                Value::Num(2.0),
+            ]))
+            .expect("automatic residency may gather transparently");
+            let Value::Tensor(output) = output else {
+                panic!("lhsdesign remains a host implementation");
+            };
+            assert_eq!(output.shape, vec![4, 2]);
+        });
     }
 }

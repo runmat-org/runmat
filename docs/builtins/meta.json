@@ -61994,6 +61994,109 @@
           "when": "Internal tensor conversion, allocation, or RNG state access fails.",
           "message": "distribution random: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "gamrnd-integer-shape-parameter",
+          "mode": "RunMatOnly",
+          "description": "gamrnd with a typed-integer shape parameter is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GamrndIntegerShapeParameterExtension"
+        },
+        {
+          "id": "gamrnd-integer-scale-parameter",
+          "mode": "RunMatOnly",
+          "description": "gamrnd with a typed-integer scale parameter is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GamrndIntegerScaleParameterExtension"
+        },
+        {
+          "id": "gamrnd-integer-size",
+          "mode": "RunMatOnly",
+          "description": "gamrnd with typed-integer size arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GamrndIntegerSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = gamrnd(integer_a, b, ___)",
+          "inputs": [
+            {
+              "name": "a",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer shape parameters are gated before gather and must be exactly representable at the binary64 sampling boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer shape parameters cross a checked binary64 boundary. Current public documentation does not resolve gamrnd single/double output-class propagation, so this capability does not claim one."
+        },
+        {
+          "form": "r = gamrnd(a, integer_b, ___)",
+          "inputs": [
+            {
+              "name": "b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer scale parameters are gated before gather and must be exactly representable at the binary64 sampling boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer scale parameters cross a checked binary64 boundary. Documented floating gpuArray inputs remain ungated and restore output residency."
+        },
+        {
+          "form": "r = gamrnd(a, b, integer_sz)",
+          "inputs": [
+            {
+              "name": "sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer size values are decoded exactly from authoritative storage into bounded structural dimensions."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only integer sizes are exact structural controls; they do not select output class or GPU execution residency."
+        }
       ]
     },
     {
@@ -65370,6 +65473,12 @@
           "mode": "RunMatOnly",
           "description": "groupcounts on interactive resident GPU data is a RunMat extension",
           "error_identifier": "RunMat:compatibility:GroupcountsResidentInputExtension"
+        },
+        {
+          "id": "groupcounts-integer-control",
+          "mode": "RunMatOnly",
+          "description": "groupcounts with a native-class integer bin-count or boolean control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GroupcountsIntegerControlExtension"
         }
       ],
       "integer_capabilities": [
@@ -65398,7 +65507,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "Unbinned grouping and BG are exact and BG preserves A's class; B and BP are double count and percentage outputs. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue."
+          "notes": "[integer-audit-open] Unbinned grouping and BG are exact and BG preserves A's class; the implemented one-group numeric-edge form preserves wide-integer comparisons without a floating conversion. Multi-group bin specifications, time bins, and full scalar-count discretize edge/label parity remain open; B and BP remain double pending stronger public class evidence."
         },
         {
           "form": "G = groupcounts(T,groupvars) with integer grouping variables",
@@ -65425,13 +65534,40 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "For the unbinned form, output grouping variables preserve exact integer class while GroupCount and Percent are double. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue."
+          "notes": "[integer-audit-open] Unbinned output grouping variables preserve exact integer class; the implemented one-group numeric-edge form compares integer variables exactly. Multi-group bin specifications, time bins, and full scalar-count discretize edge/label parity remain open; GroupCount and Percent remain double pending stronger public class evidence."
+        },
+        {
+          "form": "groupcounts(A,integer_numbins,___) or integer boolean controls",
+          "inputs": [
+            {
+              "name": "native-class integer bin count or boolean name-value control",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented control is a positive numeric scalar or logical value; a native integer scalar is accepted only in RunMat extension mode."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "This is an explicitly gated input-form extension; equivalent scalar-double and logical controls remain available in strict compatibility mode."
         }
       ]
     },
     {
       "name": "groupsummary",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -65473,6 +65609,167 @@
               "arity": "Required",
               "default": null,
               "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "G = groupsummary(T, groupvars, groupbins, method, datavars)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table."
+            },
+            {
+              "name": "groupvars",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping variable name or names."
+            },
+            {
+              "name": "groupbins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping bin specification."
+            },
+            {
+              "name": "method",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Summary method name or names."
+            },
+            {
+              "name": "datavars",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Data variable name or names, optionally followed by name-value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "B = groupsummary(A, groupvars, method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric array or cell array of numeric arrays."
+            },
+            {
+              "name": "groupvars",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping array or cell array of grouping arrays."
+            },
+            {
+              "name": "method",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Summary method name or names."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Summary values."
+            },
+            {
+              "name": "BG",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Grouping values."
+            },
+            {
+              "name": "BC",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Group counts."
+            }
+          ]
+        },
+        {
+          "label": "[B, BG, BC] = groupsummary(A, groupvars, groupbins, method)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric array or cell array of numeric arrays."
+            },
+            {
+              "name": "groupvars",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping array or cell array of grouping arrays."
+            },
+            {
+              "name": "groupbins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping bin specification."
+            },
+            {
+              "name": "method",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Summary method name or names."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Grouping options such as IncludedEdge and IncludeEmptyGroups."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Summary values."
+            },
+            {
+              "name": "BG",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Grouping values."
+            },
+            {
+              "name": "BC",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Group counts."
             }
           ]
         }
@@ -65525,7 +65822,7 @@
       ],
       "integer_capabilities": [
         {
-          "form": "G = groupsummary(T,groupvars,method,___) with integer grouping variables",
+          "form": "groupsummary(T_or_A,integer_groupvars,method,___)",
           "inputs": [
             {
               "name": "integer grouping variables",
@@ -65549,10 +65846,10 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "Grouping is exact; output grouping columns preserve class while GroupCount and summaries are function-specific."
+          "notes": "Table and array grouping is exact. Table grouping columns and array BG preserve class, while GroupCount/BC and summaries are function-specific."
         },
         {
-          "form": "G = groupsummary(T,groupvars,method,integer_datavars) for implemented methods",
+          "form": "groupsummary(integer_A,groupvars,method) or table integer data variables",
           "inputs": [
             {
               "name": "integer data variables",
@@ -65576,7 +65873,34 @@
           "overflow": "FunctionSpecific",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "Documented integer table data uses exact native-class min/max and explicit floating computation for mean, sum, median, and counts. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue; empty-group expansion, additional named methods, and function handles are general coverage gaps."
+          "notes": "[integer-audit-open] Documented integer array and table data uses exact native-class min/max and explicit floating computation for mean, sum, median, and counts. The implemented one-group numeric-edge form compares integer values exactly; multi-group bin specifications, time bins, full scalar-count discretize edge/label parity, additional named methods, and function handles remain open."
+        },
+        {
+          "form": "groupsummary(T,groupvars,integer_numbins,method,___) or integer boolean controls",
+          "inputs": [
+            {
+              "name": "native-class integer bin count or boolean name-value control",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Native integer scalars in these structurally ambiguous control positions are accepted only in RunMat extension mode."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "This is an explicitly gated input-form extension; equivalent scalar-double and logical controls remain available in strict compatibility mode."
         }
       ]
     },
@@ -81978,6 +82302,165 @@
           "when": "More outputs are requested than the builtin can return.",
           "message": "outlier builtin: too many outputs"
         }
+      ],
+      "extensions": [
+        {
+          "id": "isoutlier-integer-data",
+          "mode": "RunMatOnly",
+          "description": "isoutlier with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsoutlierIntegerDataExtension"
+        },
+        {
+          "id": "isoutlier-integer-dimension",
+          "mode": "RunMatOnly",
+          "description": "isoutlier with a typed-integer dimension is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsoutlierIntegerDimensionExtension"
+        },
+        {
+          "id": "isoutlier-integer-window",
+          "mode": "RunMatOnly",
+          "description": "isoutlier with a typed-integer moving window is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsoutlierIntegerWindowExtension"
+        },
+        {
+          "id": "isoutlier-integer-threshold",
+          "mode": "RunMatOnly",
+          "description": "isoutlier with typed-integer percentile or ThresholdFactor values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsoutlierIntegerThresholdExtension"
+        },
+        {
+          "id": "isoutlier-gpu-movmedian",
+          "mode": "RunMatOnly",
+          "description": "an explicit GPU isoutlier call using movmedian is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsoutlierGpuMovmedianExtension"
+        },
+        {
+          "id": "isoutlier-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "an explicit GPU isoutlier call using SamplePoints is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsoutlierGpuSamplePointsExtension"
+        },
+        {
+          "id": "isoutlier-gpu-data-variables",
+          "mode": "RunMatOnly",
+          "description": "an explicit GPU isoutlier call using DataVariables is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsoutlierGpuDataVariablesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[TF, L, U, C] = isoutlier(integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric data classes are single and double. Each RunMat-only typed value must be exactly representable at the binary64 statistics boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "TF is logical; threshold outputs are floating. Compatibility and exactness are checked before provider access, and the current CPU fallback may restore supported outputs to the source provider."
+        },
+        {
+          "form": "isoutlier(A, ..., integer_dim/window)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public documentation specifies a positive integer value domain but does not enumerate native integer storage classes, so typed storage remains conservatively RunMat-only."
+            },
+            {
+              "name": "window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Count-form moving windows are decoded exactly; duration windows are a separate, currently unsupported surface."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "These ambiguous public storage-class forms stay independently RunMat-gated rather than being overclaimed as documented native-integer support."
+        },
+        {
+          "form": "isoutlier(A, percentiles, integer_threshold / ThresholdFactor=integer_factor)",
+          "inputs": [
+            {
+              "name": "threshold",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed percentile bounds are not publicly class-enumerated and must be exactly representable at the floating percentile boundary."
+            },
+            {
+              "name": "ThresholdFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed threshold factors are not publicly class-enumerated and must be exactly representable at the floating statistics boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Ambiguous typed storage is admitted only in RunMat mode and only when every value is exact in binary64."
+        }
       ]
     },
     {
@@ -84221,6 +84704,207 @@
           "when": "RunMat cannot allocate or construct kmeans outputs.",
           "message": "kmeans: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "kmeans-integer-observation-data",
+          "mode": "RunMatOnly",
+          "description": "kmeans with typed-integer observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KmeansIntegerObservationDataExtension"
+        },
+        {
+          "id": "kmeans-integer-cluster-count",
+          "mode": "RunMatOnly",
+          "description": "kmeans with a typed-integer cluster count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KmeansIntegerClusterCountExtension"
+        },
+        {
+          "id": "kmeans-integer-iteration-control",
+          "mode": "RunMatOnly",
+          "description": "kmeans with typed-integer MaxIter or Replicates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KmeansIntegerIterationControlExtension"
+        },
+        {
+          "id": "kmeans-integer-start-centroids",
+          "mode": "RunMatOnly",
+          "description": "kmeans with typed-integer numeric start centroids is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KmeansIntegerStartCentroidsExtension"
+        },
+        {
+          "id": "kmeans-integer-parallel-toggle",
+          "mode": "RunMatOnly",
+          "description": "kmeans with typed-integer UseParallel or UseSubstreams is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KmeansIntegerParallelToggleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[idx, C, sumd, D] = kmeans(integer_X, k, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented observation classes are single and double. RunMat admits typed integers only when every value is exactly representable at the binary64 clustering boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Compatibility is decided before provider access; admitted integer data crosses one checked binary64 boundary. The current CPU fallback can return numeric outputs to the source provider when it supports them."
+        },
+        {
+          "form": "kmeans(X, integer_k, ...)",
+          "inputs": [
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive-integer control is stored as single or double; RunMat decodes a typed integer exactly as a bounded host cluster count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "No floating conversion is used to decode the RunMat-only typed cluster count."
+        },
+        {
+          "form": "kmeans(X, k, MaxIter/Replicates=integer_control)",
+          "inputs": [
+            {
+              "name": "MaxIter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat decodes the positive iteration count directly from authoritative integer storage."
+            },
+            {
+              "name": "Replicates",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat decodes the positive replicate count directly from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Direct name-value and statset MaxIter forms share the same independently declared typed-integer control extension."
+        },
+        {
+          "form": "kmeans(X, k, Start=integer_centroids)",
+          "inputs": [
+            {
+              "name": "Start",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric Start is documented as single or double. Typed start centroids must be individually exact in binary64 before clustering."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The centroid array remains a numerical solver input, not a structural index, and therefore uses the checked binary64 boundary."
+        },
+        {
+          "form": "kmeans(X, k, Options.UseParallel/UseSubstreams=integer_toggle)",
+          "inputs": [
+            {
+              "name": "Options.UseParallel",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented field is logical; a typed numeric toggle is conservatively RunMat-only."
+            },
+            {
+              "name": "Options.UseSubstreams",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented field is logical; a typed numeric toggle is conservatively RunMat-only."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The current CPU implementation accepts only false for these unsupported parallel controls; typed zero is separately mode-gated."
+        }
       ]
     },
     {
@@ -84318,6 +85002,262 @@
           "identifier": "RunMat:distance:Internal",
           "when": "RunMat cannot allocate or construct a distance output.",
           "message": "distance helper: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "knnsearch-integer-observation-data",
+          "mode": "RunMatOnly",
+          "description": "knnsearch with typed-integer X or Y data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchIntegerObservationDataExtension"
+        },
+        {
+          "id": "knnsearch-integer-structural-control",
+          "mode": "RunMatOnly",
+          "description": "knnsearch with typed-integer K or BucketSize is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchIntegerStructuralControlExtension"
+        },
+        {
+          "id": "knnsearch-integer-floating-control",
+          "mode": "RunMatOnly",
+          "description": "knnsearch with typed-integer P, Cov, Scale, or CacheSize is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchIntegerFloatingControlExtension"
+        },
+        {
+          "id": "knnsearch-integer-logical-control",
+          "mode": "RunMatOnly",
+          "description": "knnsearch with typed-integer IncludeTies or SortIndices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchIntegerLogicalControlExtension"
+        },
+        {
+          "id": "knnsearch-gpu-nonexhaustive-search",
+          "mode": "RunMatOnly",
+          "description": "an explicit GPU knnsearch call without NSMethod='exhaustive' is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchGpuNonexhaustiveSearchExtension"
+        },
+        {
+          "id": "knnsearch-gpu-include-ties",
+          "mode": "RunMatOnly",
+          "description": "an explicit GPU knnsearch call with nondefault IncludeTies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchGpuIncludeTiesExtension"
+        },
+        {
+          "id": "knnsearch-gpu-sort-indices",
+          "mode": "RunMatOnly",
+          "description": "an explicit GPU knnsearch call with nondefault SortIndices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchGpuSortIndicesExtension"
+        },
+        {
+          "id": "knnsearch-gpu-fast-distance",
+          "mode": "RunMatOnly",
+          "description": "an explicit GPU knnsearch call with a fast distance variant is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KnnsearchGpuFastDistanceExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[Idx, D] = knnsearch(integer_X, integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented class is single or double; every admitted typed value must be exact at the binary64 distance boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Idx is a MATLAB-compatible double index output. The current host fallback may restore numeric outputs to the source provider when supported."
+        },
+        {
+          "form": "knnsearch(X, Y, K/BucketSize=integer_control)",
+          "inputs": [
+            {
+              "name": "K",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat decodes K exactly as a positive output-shape count."
+            },
+            {
+              "name": "BucketSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat decodes BucketSize exactly as a positive search-structure count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "These controls are decoded directly from exact storage even though their public MATLAB storage classes are single and double."
+        },
+        {
+          "form": "knnsearch(X, Y, P/Cov/Scale/CacheSize=integer_value)",
+          "inputs": [
+            {
+              "name": "P",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The Minkowski exponent crosses a checked binary64 numerical boundary."
+            },
+            {
+              "name": "Cov",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The covariance matrix crosses a checked binary64 numerical boundary."
+            },
+            {
+              "name": "Scale",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The scale vector crosses a checked binary64 numerical boundary."
+            },
+            {
+              "name": "CacheSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric storage class is double; RunMat requires an exact binary64 value."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Each independently gated typed control must be exactly representable before conversion to the floating search domain."
+        },
+        {
+          "form": "knnsearch(X, Y, IncludeTies/SortIndices=integer_toggle)",
+          "inputs": [
+            {
+              "name": "IncludeTies",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public documentation specifies false or true; typed numeric toggles remain conservatively RunMat-only."
+            },
+            {
+              "name": "SortIndices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented class is logical; typed numeric toggles remain RunMat-only."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Only exact zero and one are accepted after this typed-logical extension is admitted."
         }
       ]
     },
@@ -86239,6 +87179,115 @@
           "when": "Internal random generation or tensor allocation fails.",
           "message": "lhsdesign: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "lhsdesign-integer-dimension",
+          "mode": "RunMatOnly",
+          "description": "lhsdesign with typed-integer n or p dimensions is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LhsdesignIntegerDimensionExtension"
+        },
+        {
+          "id": "lhsdesign-integer-iterations",
+          "mode": "RunMatOnly",
+          "description": "lhsdesign with a typed-integer Iterations control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LhsdesignIntegerIterationsExtension"
+        },
+        {
+          "id": "lhsdesign-integer-smooth",
+          "mode": "RunMatOnly",
+          "description": "lhsdesign with a typed-integer Smooth boolean alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LhsdesignIntegerSmoothExtension"
+        },
+        {
+          "id": "lhsdesign-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "lhsdesign host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LhsdesignExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = lhsdesign(integer_n, integer_p, ___)",
+          "inputs": [
+            {
+              "name": "n or p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer design dimensions are gated before gather and decoded exactly into bounded positive host counts."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "n and p are exact structural counts. Current public documentation does not declare lhsdesign output class, so this metadata does not infer single propagation."
+        },
+        {
+          "form": "X = lhsdesign(n, p, Iterations=integer_iterations)",
+          "inputs": [
+            {
+              "name": "Iterations",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer iteration counts are gated before gather and decoded exactly without a floating round trip."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Iterations is a positive structural work bound and does not select output class or residency."
+        },
+        {
+          "form": "X = lhsdesign(n, p, Smooth=integer_boolean)",
+          "inputs": [
+            {
+              "name": "Smooth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The RunMat-only integer alias accepts only exact scalar zero or one."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Integer Smooth aliases are a separately gated RunMat convenience; documented text values remain the compatibility surface."
+        }
       ]
     },
     {
@@ -86633,6 +87682,82 @@
           "identifier": "RunMat:linkage:Internal",
           "when": "RunMat cannot allocate or construct the linkage output.",
           "message": "linkage: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "linkage-integer-data",
+          "mode": "RunMatOnly",
+          "description": "linkage with typed-integer observation or distance data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinkageIntegerDataExtension"
+        },
+        {
+          "id": "linkage-integer-distance-parameter",
+          "mode": "RunMatOnly",
+          "description": "linkage with typed-integer pdist distance parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinkageIntegerDistanceParameterExtension"
+        },
+        {
+          "id": "linkage-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "linkage host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LinkageExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Z = linkage(integer_X_or_y, ___)",
+          "inputs": [
+            {
+              "name": "X or y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer observations or condensed distances are gated before gather and checked for exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer data crosses a checked binary64 distance boundary. Z remains a homogeneous floating matrix: columns 1 and 2 are integer-valued cluster labels and column 3 is distance. Public documentation does not resolve single/double propagation."
+        },
+        {
+          "form": "Z = linkage(X, method, {metric, integer_DistParameter})",
+          "inputs": [
+            {
+              "name": "pdist DistParameter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer Minkowski exponents, standardized scales, and covariance entries are checked before entering floating distance arithmetic."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Distance parameters are numeric algorithm inputs, not structural integer controls; lossy integer-to-double conversion rejects."
         }
       ]
     },

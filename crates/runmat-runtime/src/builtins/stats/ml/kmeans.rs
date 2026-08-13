@@ -3,7 +3,11 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, StructValue, Tensor, Type, Value,
 };
@@ -133,6 +137,155 @@ pub const KMEANS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kmeans-integer-observation-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kmeans with typed-integer observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KmeansIntegerObservationDataExtension"),
+};
+const INTEGER_CLUSTER_COUNT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kmeans-integer-cluster-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kmeans with a typed-integer cluster count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KmeansIntegerClusterCountExtension"),
+};
+const INTEGER_ITERATION_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "kmeans-integer-iteration-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "kmeans with typed-integer MaxIter or Replicates is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:KmeansIntegerIterationControlExtension"),
+    };
+const INTEGER_START_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kmeans-integer-start-centroids",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kmeans with typed-integer numeric start centroids is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KmeansIntegerStartCentroidsExtension"),
+};
+const INTEGER_PARALLEL_TOGGLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kmeans-integer-parallel-toggle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kmeans with typed-integer UseParallel or UseSubstreams is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KmeansIntegerParallelToggleExtension"),
+};
+
+pub const KMEANS_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    INTEGER_DATA_EXTENSION,
+    INTEGER_CLUSTER_COUNT_EXTENSION,
+    INTEGER_ITERATION_CONTROL_EXTENSION,
+    INTEGER_START_EXTENSION,
+    INTEGER_PARALLEL_TOGGLE_EXTENSION,
+];
+
+const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The documented observation classes are single and double. RunMat admits typed integers only when every value is exactly representable at the binary64 clustering boundary.",
+}];
+const INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "k",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "The documented positive-integer control is stored as single or double; RunMat decodes a typed integer exactly as a bounded host cluster count.",
+}];
+const INTEGER_ITERATION_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "MaxIter",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat decodes the positive iteration count directly from authoritative integer storage.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Replicates",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat decodes the positive replicate count directly from authoritative integer storage.",
+    },
+];
+const INTEGER_START_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "Start",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Numeric Start is documented as single or double. Typed start centroids must be individually exact in binary64 before clustering.",
+}];
+const INTEGER_PARALLEL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "Options.UseParallel",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "The documented field is logical; a typed numeric toggle is conservatively RunMat-only.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Options.UseSubstreams",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "The documented field is logical; a typed numeric toggle is conservatively RunMat-only.",
+    },
+];
+
+pub const KMEANS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[idx, C, sumd, D] = kmeans(integer_X, k, ...)",
+        inputs: &INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Compatibility is decided before provider access; admitted integer data crosses one checked binary64 boundary. The current CPU fallback can return numeric outputs to the source provider when it supports them.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "kmeans(X, integer_k, ...)",
+        inputs: &INTEGER_K_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "No floating conversion is used to decode the RunMat-only typed cluster count.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "kmeans(X, k, MaxIter/Replicates=integer_control)",
+        inputs: &INTEGER_ITERATION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Direct name-value and statset MaxIter forms share the same independently declared typed-integer control extension.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "kmeans(X, k, Start=integer_centroids)",
+        inputs: &INTEGER_START_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The centroid array remains a numerical solver input, not a structural index, and therefore uses the checked binary64 boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "kmeans(X, k, Options.UseParallel/UseSubstreams=integer_toggle)",
+        inputs: &INTEGER_PARALLEL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The current CPU implementation accepts only false for these unsupported parallel controls; typed zero is separately mode-gated.",
+    },
+];
+
 fn kmeans_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -229,9 +382,15 @@ struct ReplicateResult {
     keywords = "kmeans,k-means,clustering,statistics,machine learning",
     type_resolver(kmeans_type),
     descriptor(crate::builtins::stats::ml::kmeans::KMEANS_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::kmeans::KMEANS_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::kmeans::KMEANS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::kmeans"
 )]
 async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_kmeans_extensions(&x, &k, &rest)?;
+    ensure_exact_integer_boundary(&x, "observation data").await?;
+    ensure_exact_start_boundary(&rest).await?;
+    let output_source = value_gpu_source(&x);
     let x = gather(x).await?;
     let k = gather(k).await?;
     let rest = gather_all(rest).await?;
@@ -240,7 +399,133 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     let k = parse_k(&k, &options.start)?;
     validate_options(&mut options, k, &data)?;
     let result = run_kmeans(&data, k, &options)?;
-    outputs_for_count(result, &data)
+    let value = outputs_for_count(result, &data)?;
+    restore_kmeans_value(value, output_source.as_ref())
+}
+
+fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {
+    let Value::GpuTensor(handle) = value else {
+        return None;
+    };
+    Some(handle.clone())
+}
+
+fn restore_kmeans_value(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let Some(source) = source else {
+        return Ok(value);
+    };
+    match value {
+        Value::Tensor(tensor) => {
+            let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+                source,
+                Value::Tensor(tensor),
+                NAME,
+            )?;
+            if runmat_accelerate_api::handle_is_explicit(source)
+                && !matches!(restored, Value::GpuTensor(_))
+            {
+                return Err(internal(
+                    "kmeans: provider cannot preserve explicit gpuArray output residency",
+                ));
+            }
+            Ok(restored)
+        }
+        Value::OutputList(values) => values
+            .into_iter()
+            .map(|value| restore_kmeans_value(value, Some(source)))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(Value::OutputList),
+        other => Ok(other),
+    }
+}
+
+fn typed_integer(value: &Value) -> bool {
+    crate::builtins::common::validation::value_has_native_integer_class(value)
+}
+
+fn ensure_kmeans_extensions(x: &Value, k: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if typed_integer(x) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DATA_EXTENSION, NAME)?;
+    }
+    if typed_integer(k) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_CLUSTER_COUNT_EXTENSION,
+            NAME,
+        )?;
+    }
+    let mut idx = 0;
+    while idx + 1 < rest.len() {
+        let Some(name) = keyword_of(&rest[idx]) else {
+            idx += 1;
+            continue;
+        };
+        let value = &rest[idx + 1];
+        match name.trim().to_ascii_lowercase().as_str() {
+            "start" if typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_START_EXTENSION,
+                    NAME,
+                )?;
+            }
+            "maxiter" | "replicates" if typed_integer(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_ITERATION_CONTROL_EXTENSION,
+                    NAME,
+                )?;
+            }
+            "options" => {
+                if let Value::Struct(options) = value {
+                    for (field, value) in &options.fields {
+                        if field.eq_ignore_ascii_case("maxiter") && typed_integer(value) {
+                            crate::compatibility::ensure_builtin_extension_enabled(
+                                &INTEGER_ITERATION_CONTROL_EXTENSION,
+                                NAME,
+                            )?;
+                        }
+                        if matches!(
+                            field.to_ascii_lowercase().as_str(),
+                            "useparallel" | "usesubstreams"
+                        ) && typed_integer(value)
+                        {
+                            crate::compatibility::ensure_builtin_extension_enabled(
+                                &INTEGER_PARALLEL_TOGGLE_EXTENSION,
+                                NAME,
+                            )?;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        idx += 2;
+    }
+    Ok(())
+}
+
+async fn ensure_exact_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
+    if typed_integer(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(invalid(format!(
+            "kmeans: typed-integer {role} must be exactly representable as double"
+        )));
+    }
+    Ok(())
+}
+
+async fn ensure_exact_start_boundary(rest: &[Value]) -> BuiltinResult<()> {
+    let mut idx = 0;
+    while idx + 1 < rest.len() {
+        if keyword_of(&rest[idx]).is_some_and(|name| name.eq_ignore_ascii_case("start")) {
+            ensure_exact_integer_boundary(&rest[idx + 1], "Start values").await?;
+        }
+        idx += 2;
+    }
+    Ok(())
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
@@ -384,6 +669,12 @@ fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
 }
 
 fn parse_positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| invalid(format!("kmeans: {label} must be a positive integer scalar")));
+    }
     let raw = scalar_number(value)
         .ok_or_else(|| invalid(format!("kmeans: {label} must be a positive integer scalar")))?;
     if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > EPS {
@@ -1203,6 +1494,71 @@ mod tests {
     }
 
     #[test]
+    fn kmeans_documented_floating_gpu_fallback_preserves_explicit_residency() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            random::reset_rng();
+            let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
+                .expect("upload observations");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let output = block_on(kmeans_builtin(
+                Value::GpuTensor(handle),
+                Value::Num(2.0),
+                vec![
+                    Value::from("Start"),
+                    Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
+                ],
+            ))
+            .expect("documented resident kmeans");
+            assert!(matches!(output, Value::GpuTensor(_)));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn kmeans_wgpu_fallback_enforces_explicit_residency_contract() {
+        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("actual WGPU provider");
+        random::reset_rng();
+        let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
+            .expect("upload observations");
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let result = block_on(kmeans_builtin(
+            Value::GpuTensor(handle.clone()),
+            Value::Num(2.0),
+            vec![
+                Value::from("Start"),
+                Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
+            ],
+        ));
+        match runmat_accelerate_api::AccelProvider::precision(provider) {
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                let Value::GpuTensor(output) = result.expect("documented WGPU kmeans") else {
+                    panic!("expected resident output");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(&output));
+                assert_eq!(
+                    output.device_id,
+                    runmat_accelerate_api::AccelProvider::device_id(provider)
+                );
+                assert_eq!(output.shape, vec![4, 1]);
+            }
+            runmat_accelerate_api::ProviderPrecision::F32 => {
+                let error = result.expect_err("double indices cannot use an f32-only provider");
+                assert!(error
+                    .message()
+                    .contains("cannot preserve explicit gpuArray output residency"));
+                assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+            }
+        }
+    }
+
+    #[test]
     fn kmeans_clusters_numeric_matrix_with_outputs() {
         random::reset_rng();
         let x = tensor(vec![0.0, 0.2, 9.8, 10.0, 0.0, 0.1, 9.9, 10.1], 4, 2);
@@ -1248,6 +1604,7 @@ mod tests {
 
     #[test]
     fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut statset = StructValue::new();
         statset.insert(
             "MaxIter",
@@ -1367,6 +1724,7 @@ mod tests {
 
     #[test]
     fn kmeans_accepts_3d_numeric_starts_as_replicates() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = tensor(vec![0.0, 0.2, 10.0, 10.2], 4, 1);
         let starts =
             poisoned_int_tensor_shape(IntegerStorage::I16(vec![0, 10, 0, 10]), vec![2, 1, 2]);
@@ -1382,6 +1740,29 @@ mod tests {
             Value::Tensor(sumd) => assert_eq!(sumd.shape, vec![2, 1]),
             other => panic!("sumd {other:?}"),
         }
+    }
+
+    #[test]
+    fn kmeans_integer_roles_are_independently_gated_and_declared() {
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 10]), 2, 1);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(kmeans_builtin(x, Value::Num(1.0), Vec::new()))
+            .expect_err("strict mode rejects typed observation data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:KmeansIntegerObservationDataExtension")
+        );
+        assert_eq!(KMEANS_EXTENSIONS.len(), 5);
+        assert_eq!(KMEANS_INTEGER_CAPABILITIES.len(), 5);
+    }
+
+    #[test]
+    fn kmeans_runmat_integer_data_still_requires_exact_double_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = poisoned_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), 1, 1);
+        let error = block_on(kmeans_builtin(x, Value::Num(1.0), Vec::new()))
+            .expect_err("wide integer data cannot cross the floating boundary");
+        assert!(error.message().contains("exactly representable as double"));
     }
 
     #[test]
