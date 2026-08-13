@@ -4,6 +4,8 @@ use runmat_hir::{
 };
 use runmat_mir::{MirAssembly, MirLocalId};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -371,7 +373,7 @@ mod tests {
             ..HirAssembly::default()
         };
         let mir = MirAssembly {
-            bodies: HashMap::from([(
+            bodies: BTreeMap::from([(
                 function,
                 MirBody {
                     function,
@@ -385,6 +387,7 @@ mod tests {
                     blocks: vec![],
                 },
             )]),
+            ..MirAssembly::default()
         };
 
         let layout = derive_layout(&assembly, &mir).expect("layout");
@@ -463,7 +466,7 @@ mod tests {
             ..HirAssembly::default()
         };
         let mir = MirAssembly {
-            bodies: HashMap::from([(
+            bodies: BTreeMap::from([(
                 function,
                 MirBody {
                     function,
@@ -485,6 +488,7 @@ mod tests {
                     blocks: vec![],
                 },
             )]),
+            ..MirAssembly::default()
         };
 
         let layout = derive_layout(&assembly, &mir).expect("layout");

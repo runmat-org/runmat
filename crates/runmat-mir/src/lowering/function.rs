@@ -1,11 +1,28 @@
-use crate::{MirAssembly, MirBody, MirOperand, MirTerminator, MirTerminatorKind};
+use crate::{
+    MirAssembly, MirBody, MirFunctionMetadata, MirOperand, MirTerminator, MirTerminatorKind,
+};
 use runmat_hir::{HirAssembly, HirError, HirFunction};
 use std::collections::HashSet;
 
 use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
 
 pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
-    let mut assembly = MirAssembly::default();
+    let mut assembly = MirAssembly {
+        classes: hir
+            .classes
+            .iter()
+            .map(|class| class.declaration.clone())
+            .collect(),
+        ..MirAssembly::default()
+    };
+    assembly.classes.sort_by_key(|class| class.id);
+    assembly.entrypoints = hir
+        .entrypoints
+        .iter()
+        .map(|entrypoint| entrypoint.target)
+        .collect();
+    assembly.entrypoints.sort();
+    assembly.entrypoints.dedup();
     let async_functions: HashSet<_> = hir
         .functions
         .iter()
@@ -13,6 +30,19 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         .map(|function| function.id)
         .collect();
     for function in &hir.functions {
+        assembly.functions.insert(
+            function.id,
+            MirFunctionMetadata {
+                name: function.name.clone(),
+                parent: function.parent,
+                enclosing_class: function.enclosing_class,
+                kind: function.kind.clone(),
+                argument_validations: function.argument_validations.clone(),
+                captures: function.captures.clone(),
+                modifiers: function.modifiers.clone(),
+                span: function.span,
+            },
+        );
         assembly.bodies.insert(
             function.id,
             lower_function_with_context(

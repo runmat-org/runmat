@@ -90,5 +90,6 @@ pub enum ValueKindFact {
     OutputList(OutputListFact),
     Exception(ExceptionFact),
     Execution(ExecutionFact),
+    Distributed(DistributedFact),
     Foreign(ForeignFact),
 }

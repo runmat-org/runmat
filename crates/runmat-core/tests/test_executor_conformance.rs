@@ -171,6 +171,27 @@ async fn executable_invocation_observes_cancellation_and_deadlines() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn executable_unit_retains_exact_program_point_analysis() {
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let unit = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:analysis-store",
+                "analyzed.m",
+                "function y = analyzed(); y = zeros(2, 3); end\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert!(!unit.analysis().program_points.is_empty());
+    assert_eq!(unit.analysis().functions.len(), 1);
+    assert!(!unit.analysis().dependencies.is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
 async fn coverage_sites_are_source_stable_and_record_missed_statements() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let unit = session

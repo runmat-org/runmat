@@ -844,6 +844,7 @@ impl RunMatSession {
             source,
             revision,
             source_map,
+            prepared.analysis,
             prepared.bytecode,
         ))
     }

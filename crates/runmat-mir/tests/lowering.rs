@@ -3,15 +3,15 @@ use runmat_hir::{
     LoweringContext, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    analysis::{analyze_assembly, AnalysisStore, MirLocalKey},
+    analysis::{analyze_assembly, AnalysisStore, AssignmentFact, MirLocalKey},
     lowering::lower_assembly,
     AsyncBehaviorFact, MirAggregateKind, MirBody, MirCallArg, MirCallee, MirConstant, MirIndexPlan,
     MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind,
     MirTerminatorKind,
 };
 use runmat_types::{
-    DimensionFact, ExecutionFact, NumericClass, NumericDomain, NumericFact, ShapeFact, ValueFact,
-    ValueKindFact,
+    DimensionFact, ExecutionFact, NumericClass, NumericDomain, NumericFact, ProgramFunctionId,
+    ProgramPointId, RegionValueId, ShapeFact, ValueFact, ValueKindFact,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -1190,6 +1190,273 @@ fn global_statement_lowers_to_workspace_effect() {
             ..
         }
     )));
+}
+
+#[test]
+fn analysis_store_publishes_source_position_facts_after_each_statement() {
+    let mir = lower_mir("function y = f(); y = 1; y = \"next\"; end");
+    let body = mir.bodies.values().next().expect("body");
+    let store = analyze_assembly(&mir);
+    let output = first_local_of_kind(body, MirLocalKind::Output);
+    let function = ProgramFunctionId(u32::try_from(body.function.0).expect("portable function"));
+    let value = RegionValueId {
+        function,
+        local: u32::try_from(output.0).expect("portable local"),
+    };
+    let after_first = store
+        .facts_at(ProgramPointId {
+            function,
+            block: 0,
+            position: 1,
+        })
+        .expect("point after first assignment")
+        .local(value)
+        .expect("output fact after first assignment");
+    let after_second = store
+        .facts_at(ProgramPointId {
+            function,
+            block: 0,
+            position: 2,
+        })
+        .expect("point after second assignment")
+        .local(value)
+        .expect("output fact after second assignment");
+
+    assert_eq!(after_first.assignment, AssignmentFact::DefinitelyAssigned);
+    assert!(matches!(
+        after_first.fact.as_ref().map(|fact| &fact.kind),
+        Some(ValueKindFact::Numeric(_))
+    ));
+    assert!(matches!(
+        after_second.fact.as_ref().map(|fact| &fact.kind),
+        Some(ValueKindFact::String)
+    ));
+}
+
+#[test]
+fn analysis_store_uses_migrated_catalog_contracts_for_call_facts() {
+    let (body, store) = analyze_single_body("function y = f(); y = zeros(2, 3); end");
+    let output = output_fact(&body, &store);
+
+    assert!(matches!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    ));
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(2), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
+fn analysis_store_attaches_catalog_contract_diagnostics_to_source() {
+    let mir = lower_mir("function y = f(); y = zeros(2, \"bogus\"); end");
+    let store = analyze_assembly(&mir);
+    let diagnostic = store
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "RM-CATALOG-ZEROS-CLASS")
+        .expect("catalog diagnostic");
+
+    assert_eq!(diagnostic.category.as_deref(), Some("call-contract"));
+    assert!(diagnostic.primary.span.end > diagnostic.primary.span.start);
+}
+
+#[test]
+fn analysis_store_propagates_direct_user_function_summaries() {
+    let mir = lower_mir("function y = f(); y = g(); end function z = g(); z = 7; end");
+    let store = analyze_assembly(&mir);
+
+    assert_eq!(store.functions.len(), 2);
+    assert!(
+        store.functions.iter().all(|function| {
+            matches!(
+                function.outputs.first().map(|fact| &fact.kind),
+                Some(ValueKindFact::Numeric(_))
+            )
+        }),
+        "{:#?}",
+        store.functions
+    );
+}
+
+#[test]
+fn analysis_store_propagates_observed_arguments_into_nested_function_contracts() {
+    let mir = lower_mir("function y = f(); y = g(3); function z = g(x); z = x; end; end");
+    let store = analyze_assembly(&mir);
+    let nested = mir
+        .functions
+        .iter()
+        .find(|(_, metadata)| metadata.parent.is_some())
+        .map(|(function, _)| ProgramFunctionId(u32::try_from(function.0).unwrap()))
+        .expect("nested function");
+    let nested = store.function(nested).expect("nested function analysis");
+
+    assert!(matches!(
+        nested.callable.parameters.first().map(|fact| &fact.kind),
+        Some(ValueKindFact::Numeric(_))
+    ));
+    assert!(matches!(
+        nested.outputs.first().map(|fact| &fact.kind),
+        Some(ValueKindFact::Numeric(_))
+    ));
+}
+
+#[test]
+fn analysis_store_propagates_lexical_capture_facts_into_nested_summaries() {
+    let mir = lower_mir(
+        "function y = outer(); cap = 1; y = inner(); function z = inner(); z = cap; end; end",
+    );
+    let store = analyze_assembly(&mir);
+    let nested = mir
+        .functions
+        .iter()
+        .find(|(_, metadata)| metadata.parent.is_some())
+        .map(|(function, _)| ProgramFunctionId(u32::try_from(function.0).unwrap()))
+        .expect("nested function");
+    let nested = store.function(nested).expect("nested function analysis");
+
+    assert!(matches!(
+        nested.callable.captures.first().map(|fact| &fact.kind),
+        Some(ValueKindFact::Numeric(_))
+    ));
+    assert!(matches!(
+        nested.outputs.first().map(|fact| &fact.kind),
+        Some(ValueKindFact::Numeric(_))
+    ));
+}
+
+#[test]
+fn analysis_store_converges_recursive_function_summaries() {
+    let mir = lower_mir("function y = f(n); if n; y = f(n - 1); else; y = 1; end; end");
+    let store = analyze_assembly(&mir);
+    let function = store.functions.first().expect("recursive summary");
+
+    assert!(matches!(
+        function.outputs.first().map(|fact| &fact.kind),
+        Some(ValueKindFact::Numeric(_))
+    ));
+    assert_eq!(
+        function.convergence,
+        runmat_mir::analysis::FunctionConvergence::Exact
+    );
+}
+
+#[test]
+fn analysis_store_propagates_async_output_through_await() {
+    let mir =
+        lower_mir("async function z = g(); z = 1; end async function y = f(); y = await(g()); end");
+    let store = analyze_assembly(&mir);
+
+    assert!(store.functions.iter().all(|function| {
+        matches!(
+            function.outputs.first().map(|fact| &fact.kind),
+            Some(ValueKindFact::Numeric(_))
+        )
+    }));
+}
+
+#[test]
+fn analysis_store_preserves_class_property_and_method_products() {
+    let mir = lower_mir(
+        "classdef C; properties; p = 1; end; methods; function y = f(obj); y = obj.p; end; end; end",
+    );
+    let store = analyze_assembly(&mir);
+    let class = store.classes.first().expect("class analysis");
+
+    assert_eq!(store.classes.len(), 1);
+    assert_eq!(class.properties.len(), 1);
+    assert!(class.properties[0].has_default);
+    assert_eq!(class.methods.len(), 1);
+}
+
+#[test]
+fn analysis_store_marks_parallel_region_program_points_with_capability() {
+    let mir = lower_mir("parfor i = 1:3; y = i; end;");
+    let store = analyze_assembly(&mir);
+
+    assert!(store.program_points.iter().any(|point| point
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::ParallelRuntime)));
+}
+
+#[test]
+fn analysis_store_seeds_parameter_facts_from_arguments_blocks() {
+    let mir = lower_mir(
+        r#"
+        function y = typed(x)
+            arguments
+                x (2,3) double
+            end
+            y = x;
+        end
+        "#,
+    );
+    let store = analyze_assembly(&mir);
+    let function = store.functions.first().expect("function summary");
+    let parameter = function
+        .callable
+        .parameters
+        .first()
+        .expect("parameter fact");
+
+    assert!(matches!(
+        parameter.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    ));
+    assert_eq!(
+        parameter.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(2), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
+fn analysis_store_diagnoses_proven_arguments_block_mismatch_at_call_site() {
+    let mir = lower_mir(
+        r#"
+        function y = f()
+            y = typed("bad");
+        end
+        function z = typed(x)
+            arguments
+                x (1,1) double
+            end
+            z = x;
+        end
+        "#,
+    );
+    let store = analyze_assembly(&mir);
+
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0012"
+            && diagnostic.category.as_deref() == Some("argument-validation")
+            && diagnostic.primary.span.end > diagnostic.primary.span.start
+    }));
+}
+
+#[test]
+fn analysis_store_serialization_is_deterministic_and_round_trips() {
+    let mir = lower_mir("function y = f(x); if x; y = zeros(2, 2); else; y = 1; end; end");
+    let store = analyze_assembly(&mir);
+    let first = serde_json::to_string(&store).expect("serialize analysis store");
+    let second = serde_json::to_string(&store).expect("serialize analysis store again");
+    let decoded: AnalysisStore = serde_json::from_str(&first).expect("deserialize analysis store");
+
+    assert_eq!(first, second);
+    assert_eq!(decoded, store);
+    assert!(!store.program_points.is_empty());
+    assert!(!store.dependencies.is_empty());
 }
 
 #[test]

@@ -1,10 +1,11 @@
 use runmat_types::{
     AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
-    DimensionFact, DynamicReason, ExecutionFact, FactJoin, FactWiden, ForeignAffinityFact,
-    ForeignFact, ForeignLifetimeFact, ForeignOwnershipFact, InvalidationCause, InvalidationVector,
-    LayoutFact, MutationFact, NumericClass, NumericDomain, NumericFact, OutputListFact,
-    ResidencyFact, ShapeFact, StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact,
-    ViewFact,
+    DimensionFact, DistributedFact, DistributedValueId, DistributionScheme, DynamicReason,
+    ExecutionFact, FactJoin, FactWiden, ForeignAffinityFact, ForeignFact, ForeignLifetimeFact,
+    ForeignOwnershipFact, InvalidationCause, InvalidationVector, LayoutFact, MutationFact,
+    NumericClass, NumericDomain, NumericFact, OutputListFact, ParallelRegionId, ProgramFunctionId,
+    RegionId, ResidencyFact, ShapeFact, StorageFact, StructFact, SymbolName, ValueFact,
+    ValueKindFact, ViewFact,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -107,6 +108,20 @@ fn representative_facts() -> Vec<ValueFact> {
         affinity: ForeignAffinityFact::OriginThread,
         lifetime: ForeignLifetimeFact::Session,
     });
+    let mut distributed = numeric(NumericClass::Double);
+    distributed.kind = ValueKindFact::Distributed(DistributedFact {
+        id: DistributedValueId {
+            function: ProgramFunctionId(0),
+            ordinal: 1,
+        },
+        owner: ParallelRegionId(RegionId {
+            function: ProgramFunctionId(0),
+            ordinal: 2,
+        }),
+        scheme: Some(DistributionScheme::Block { dimension: 1 }),
+        value: Box::new(numeric(NumericClass::Double)),
+        materializable: true,
+    });
     let mut outputs = numeric(NumericClass::Double);
     outputs.kind = ValueKindFact::OutputList(OutputListFact {
         outputs: vec![numeric(NumericClass::Int16), structure.clone()],
@@ -128,6 +143,7 @@ fn representative_facts() -> Vec<ValueFact> {
         structure,
         callable,
         future,
+        distributed,
         foreign,
         outputs,
         invalidated,

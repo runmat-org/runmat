@@ -5,19 +5,18 @@ use crate::{
 };
 use runmat_hir::Span;
 use runmat_types::{
-    infer_binary, infer_call, infer_cell_aggregate, infer_index, infer_index_mutation,
-    infer_literal, infer_member_read, infer_member_write, infer_range, infer_struct,
-    infer_tensor_aggregate, infer_unary, AliasFact, CallContract, CallRequest, CallableFact,
-    CallableIdentity, CertaintyFact, ContiguityFact, DynamicReason, ExecutionFact, FactJoin,
-    FutureStateFact, IndexSelectorFact, InvalidationVector, LayoutFact, LiteralContext,
-    LiteralValue, MutationContract, MutationFact, OutputSelection, RangeStepFact, ResidencyFact,
+    infer_binary, infer_cell_aggregate, infer_index, infer_index_mutation, infer_literal,
+    infer_member_read, infer_member_write, infer_range, infer_struct, infer_tensor_aggregate,
+    infer_unary, AliasFact, CallableFact, CallableIdentity, CertaintyFact, ContiguityFact,
+    DynamicReason, ExecutionFact, FutureStateFact, IndexSelectorFact, InvalidationVector,
+    LayoutFact, LiteralValue, MutationContract, MutationFact, RangeStepFact, ResidencyFact,
     ShapeFact, SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
 use std::collections::{HashMap, VecDeque};
 
 use super::{
     spawn_safety::{analyze_assembly_spawn_boundaries, diagnose_spawn_safety},
-    AnalysisStore, InitFact, MirLocalFact, MirLocalKey,
+    InitFact,
 };
 
 #[derive(Debug, Clone)]
@@ -27,132 +26,7 @@ struct InitDataflowResult {
 
 type SimpleValueFact = ValueFact;
 
-fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
-    let local_facts = compute_simple_local_facts(body);
-
-    for local in &body.locals {
-        store.mir_locals.insert(
-            MirLocalKey {
-                function: body.function,
-                local: local.id,
-            },
-            MirLocalFact {
-                value: local_facts[local.id.0]
-                    .clone()
-                    .unwrap_or_else(dynamic_value),
-            },
-        );
-    }
-}
-
-fn compute_simple_local_facts(body: &MirBody) -> Vec<Option<SimpleValueFact>> {
-    let local_count = body.locals.len();
-    if body.blocks.is_empty() {
-        return Vec::new();
-    }
-
-    let block_index: HashMap<BasicBlockId, usize> = body
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(idx, block)| (block.id, idx))
-        .collect();
-    let mut in_states: Vec<Option<Vec<Option<SimpleValueFact>>>> = vec![None; body.blocks.len()];
-    let mut out_states = vec![vec![None; local_count]; body.blocks.len()];
-    in_states[0] = Some(vec![None; local_count]);
-
-    let mut worklist = VecDeque::from([0usize]);
-    while let Some(block_idx) = worklist.pop_front() {
-        let Some(input) = in_states[block_idx].clone() else {
-            continue;
-        };
-        let block = &body.blocks[block_idx];
-        let output = transfer_fact_block(block, input);
-        out_states[block_idx] = output.clone();
-
-        for successor in successors(&block.terminator.kind) {
-            let Some(&successor_idx) = block_index.get(&successor) else {
-                continue;
-            };
-            let changed = match &mut in_states[successor_idx] {
-                Some(existing) => join_fact_state(existing, &output),
-                slot @ None => {
-                    *slot = Some(output.clone());
-                    true
-                }
-            };
-            if changed {
-                worklist.push_back(successor_idx);
-            }
-        }
-    }
-
-    let mut final_facts = vec![None; local_count];
-    for facts in out_states {
-        join_fact_state(&mut final_facts, &facts);
-    }
-    final_facts
-}
-
-fn transfer_fact_block(
-    block: &BasicBlock,
-    mut facts: Vec<Option<SimpleValueFact>>,
-) -> Vec<Option<SimpleValueFact>> {
-    let mut pending_mutation = None;
-    for stmt in &block.statements {
-        match &stmt.kind {
-            MirStmtKind::Assign { place, value } => {
-                let assigned = simple_rvalue_fact(value, &facts);
-                assign_place_fact(
-                    place,
-                    assigned,
-                    pending_mutation.take().as_ref(),
-                    &mut facts,
-                );
-            }
-            MirStmtKind::MultiAssign { targets, value } => {
-                let outputs = if let MirRvalue::Call(call) = value {
-                    let mut selection = OutputSelection::new(call.requested_outputs);
-                    for (index, target) in targets.targets.iter().enumerate() {
-                        if matches!(target, crate::MirOutputTarget::Discard) {
-                            selection.discarded.insert(index);
-                        }
-                    }
-                    call_outputs(call, &facts, selection)
-                } else {
-                    rvalue_outputs(value, &facts)
-                };
-                for (index, target) in targets.targets.iter().enumerate() {
-                    if let crate::MirOutputTarget::Place(MirPlace::Local(local)) = target {
-                        facts[local.0] =
-                            Some(outputs.get(index).cloned().unwrap_or_else(dynamic_value));
-                    }
-                }
-            }
-            MirStmtKind::PlaceMutation(mutation) => pending_mutation = Some(mutation.clone()),
-            MirStmtKind::Expr(_)
-            | MirStmtKind::WorkspaceEffect { .. }
-            | MirStmtKind::EnvironmentEffect(_) => {}
-        }
-    }
-    match &block.terminator.kind {
-        MirTerminatorKind::Await {
-            result: Some(place),
-            ..
-        } => {
-            if let Some(local) = place_root(place) {
-                facts[local.0] = Some(dynamic_value());
-            }
-        }
-        MirTerminatorKind::For { binding, .. } => {
-            facts[binding.0] = Some(dynamic_value());
-        }
-        _ => {}
-    }
-    facts
-}
-
-fn assign_place_fact(
+pub(crate) fn assign_place_fact(
     place: &MirPlace,
     assigned: ValueFact,
     mutation: Option<&crate::MirPlaceMutation>,
@@ -231,25 +105,10 @@ fn place_fact(place: &MirPlace, facts: &[Option<SimpleValueFact>]) -> ValueFact 
     }
 }
 
-fn join_fact_state(
-    existing: &mut [Option<SimpleValueFact>],
-    incoming: &[Option<SimpleValueFact>],
-) -> bool {
-    let mut changed = false;
-    for (slot, incoming) in existing.iter_mut().zip(incoming) {
-        let mut joined = slot.clone();
-        if let Some(incoming) = incoming.clone() {
-            merge_simple_fact(&mut joined, incoming);
-        }
-        if *slot != joined {
-            *slot = joined;
-            changed = true;
-        }
-    }
-    changed
-}
-
-fn simple_rvalue_fact(value: &MirRvalue, facts: &[Option<SimpleValueFact>]) -> SimpleValueFact {
+pub(crate) fn simple_rvalue_fact(
+    value: &MirRvalue,
+    facts: &[Option<SimpleValueFact>],
+) -> SimpleValueFact {
     match value {
         MirRvalue::Use(operand) => simple_operand_fact(operand, facts),
         MirRvalue::Future { .. } => scalar_fact(ValueKindFact::Execution(ExecutionFact::Future {
@@ -326,16 +185,10 @@ fn simple_rvalue_fact(value: &MirRvalue, facts: &[Option<SimpleValueFact>]) -> S
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End => dynamic_value(),
-        MirRvalue::Call(call) => rvalue_outputs(value, facts)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| {
-                if call.requested_outputs.fixed_count() == 0 {
-                    scalar_fact(ValueKindFact::Void)
-                } else {
-                    dynamic_value()
-                }
-            }),
+        MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0 => {
+            scalar_fact(ValueKindFact::Void)
+        }
+        MirRvalue::Call(_) => dynamic_value(),
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => dynamic_value(),
     }
 }
@@ -405,44 +258,7 @@ fn simple_operand_fact(operand: &MirOperand, facts: &[Option<SimpleValueFact>]) 
     }
 }
 
-fn rvalue_outputs(value: &MirRvalue, facts: &[Option<SimpleValueFact>]) -> Vec<SimpleValueFact> {
-    let MirRvalue::Call(call) = value else {
-        let fact = simple_rvalue_fact(value, facts);
-        return match fact.kind {
-            ValueKindFact::OutputList(list) => list.outputs,
-            _ => vec![fact],
-        };
-    };
-    call_outputs(call, facts, OutputSelection::new(call.requested_outputs))
-}
-
-fn call_outputs(
-    call: &crate::MirCall,
-    facts: &[Option<SimpleValueFact>],
-    output_selection: OutputSelection,
-) -> Vec<SimpleValueFact> {
-    let request = CallRequest {
-        arguments: call
-            .args
-            .iter()
-            .map(|argument| simple_operand_fact(argument.operand(), facts))
-            .collect(),
-        literals: LiteralContext::new(
-            call.args
-                .iter()
-                .map(|argument| literal_operand(argument.operand()))
-                .collect(),
-        ),
-        outputs: output_selection,
-    };
-    infer_call(
-        &CallContract::dynamic(DynamicReason::UnresolvedCallable),
-        &request,
-    )
-    .outputs
-}
-
-fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
+pub(crate) fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
     match constant {
         crate::MirConstant::Number(value) => LiteralValue::Real {
             text: value.clone(),
@@ -458,13 +274,6 @@ fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
         crate::MirConstant::Symbol(value) => LiteralValue::Symbolic(value.0.clone()),
         crate::MirConstant::Bool(value) => LiteralValue::Bool(*value),
         crate::MirConstant::EmptyArray => LiteralValue::Empty,
-    }
-}
-
-fn literal_operand(operand: &MirOperand) -> LiteralValue {
-    match operand {
-        MirOperand::Constant(constant) => literal_value(constant),
-        MirOperand::Local(_) | MirOperand::FunctionHandle(_) => LiteralValue::Unknown,
     }
 }
 
@@ -527,27 +336,17 @@ fn dynamic_value() -> SimpleValueFact {
     ValueFact::unknown(DynamicReason::Unspecified)
 }
 
-fn merge_simple_fact(slot: &mut Option<SimpleValueFact>, incoming: SimpleValueFact) {
-    match slot {
-        Some(existing) => {
-            *existing = existing.join(&incoming);
-        }
-        None => *slot = Some(incoming),
-    }
-}
-
-pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
-    let mut store = AnalysisStore::default();
+pub(crate) fn diagnostics_for_assembly(assembly: &MirAssembly) -> Vec<MirDiagnostic> {
+    let mut diagnostics = Vec::new();
     for body in assembly.bodies.values() {
-        analyze_body(body, &mut store);
-        store.diagnostics.extend(diagnose_uninitialized_reads(body));
-        store.diagnostics.extend(diagnose_semantic_misuse(body));
+        diagnostics.extend(diagnose_uninitialized_reads(body));
+        diagnostics.extend(diagnose_semantic_misuse(body));
     }
     let boundaries = analyze_assembly_spawn_boundaries(assembly);
     for boundaries in boundaries.values() {
-        store.diagnostics.extend(diagnose_spawn_safety(boundaries));
+        diagnostics.extend(diagnose_spawn_safety(boundaries));
     }
-    store
+    diagnostics
 }
 
 pub(super) fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {

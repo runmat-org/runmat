@@ -346,6 +346,16 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "generation": handle.generation,
             "requestedOutputs": handle.outputs.requested_outputs,
         }),
+        Value::Foreign(reference) => json!({
+            "kind": "foreign",
+            "family": reference.type_identity.family,
+            "typeName": reference.type_identity.name,
+            "typeVersion": reference.type_identity.version,
+            "ownership": reference.ownership,
+            "affinity": reference.affinity,
+            "lifetime": reference.lifetime,
+            "opaque": true,
+        }),
     }
 }
 
@@ -562,6 +572,32 @@ mod tests {
         assert_eq!(json["shape"], json!([1, 2]));
         assert_eq!(json["items"].as_array().unwrap().len(), 2);
         assert_eq!(json["truncated"], false);
+    }
+
+    #[test]
+    fn foreign_json_is_opaque_and_does_not_expose_runtime_handle_identity() {
+        let value = Value::Foreign(runmat_value::ForeignRef {
+            host_identity: "private-host".into(),
+            handle: 42,
+            generation: 7,
+            type_identity: runmat_value::ForeignTypeIdentity {
+                family: "java".into(),
+                name: "java.lang.StringBuilder".into(),
+                version: 1,
+            },
+            ownership: runmat_value::ForeignOwnership::Shared,
+            affinity: runmat_value::ForeignAffinity::OriginProcess,
+            lifetime: runmat_value::ForeignLifetime::Session,
+        });
+
+        let json = value_to_json(&value, 0);
+        assert_eq!(json["kind"], "foreign");
+        assert_eq!(json["family"], "java");
+        assert_eq!(json["typeName"], "java.lang.StringBuilder");
+        assert_eq!(json["opaque"], true);
+        assert!(json.get("hostIdentity").is_none());
+        assert!(json.get("handle").is_none());
+        assert!(json.get("generation").is_none());
     }
 
     #[wasm_bindgen_test]

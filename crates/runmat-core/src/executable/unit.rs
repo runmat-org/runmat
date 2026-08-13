@@ -23,6 +23,7 @@ pub struct ExecutableUnit {
     revision: ExecutableRevision,
     source_map: ExecutableSourceMap,
     coverage: CoveragePlan,
+    analysis: Rc<runmat_mir::analysis::AnalysisStore>,
     bytecode: Rc<runmat_vm::Bytecode>,
     functions: Rc<runmat_vm::FunctionRegistry>,
 }
@@ -32,6 +33,7 @@ impl ExecutableUnit {
         source: ExecutableSource,
         revision: ExecutableRevision,
         source_map: ExecutableSourceMap,
+        analysis: runmat_mir::analysis::AnalysisStore,
         mut bytecode: runmat_vm::Bytecode,
     ) -> Self {
         let coverage = CoveragePlan::instrument(&source, &revision, &source_map, &mut bytecode);
@@ -41,6 +43,7 @@ impl ExecutableUnit {
             revision,
             source_map,
             coverage,
+            analysis: Rc::new(analysis),
             bytecode: Rc::new(bytecode),
             functions,
         }
@@ -60,6 +63,11 @@ impl ExecutableUnit {
 
     pub fn coverage_plan(&self) -> &CoveragePlan {
         &self.coverage
+    }
+
+    /// Exact immutable semantic facts produced for this executable revision.
+    pub fn analysis(&self) -> &runmat_mir::analysis::AnalysisStore {
+        &self.analysis
     }
 
     pub fn procedure_names(&self) -> Vec<String> {

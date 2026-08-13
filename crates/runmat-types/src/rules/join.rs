@@ -173,6 +173,17 @@ impl FactJoin for ValueKindFact {
                 identifier: exact_or(&left.identifier, &right.identifier, None),
             }),
             (Execution(left), Execution(right)) => join_execution(left, right),
+            (Distributed(left), Distributed(right))
+                if left.id == right.id && left.owner == right.owner =>
+            {
+                Distributed(DistributedFact {
+                    id: left.id,
+                    owner: left.owner,
+                    scheme: exact_or(&left.scheme, &right.scheme, None),
+                    value: Box::new(left.value.join(&right.value)),
+                    materializable: left.materializable && right.materializable,
+                })
+            }
             (Foreign(left), Foreign(right)) if left.family == right.family => {
                 Foreign(ForeignFact {
                     family: left.family.clone(),
