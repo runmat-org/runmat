@@ -148,3 +148,15 @@ flowchart TD
 - `InitFact`: Tracks if a local is `Unassigned`, `MaybeAssigned`, or `DefinitelyAssigned`. Used for definite assignment validation.
 - `ValueFact`: The canonical, dependency-light semantic fact from `runmat-types`; it combines kind, shape, storage, execution, and certainty information without depending on runtime values.
 - `SpawnSafetyFact`: Analyzes if a closure or function is safe to `spawn` on a background thread based on its captures and effects.
+
+---
+
+## Verified Native IR boundary
+
+The portable executable product retains MIR, its `AnalysisStore`, source identities, region contracts, interop requirements, and parallel requirements together. Native compilation starts from that complete product; it does not reparse source or run a second type-inference pass.
+
+`runmat-native-codegen` lowers the retained program into a target-bound Native IR. The representation uses block parameters and SSA values, preserves shared `ValueFact` analysis when it is available, and leaves values generic when the compiler cannot prove a fact. Runtime slow paths, suspension points, side effects, source locations, region boundaries, and materializable frame state remain explicit so later native compilation can preserve VM behavior.
+
+Before a Native IR product is accepted, its verifier checks it against the executable manifest and canonical MIR. This includes complete construct coverage, target and runtime-ABI compatibility, cache identity, SSA use ordering, control-flow edge arguments, safepoints, effect ordering, source identity, and exact region guard/live-value state. Distributed-value and collective operations currently produce an explicit capability diagnostic at this boundary; they are not silently omitted or treated as local operations.
+
+This boundary is compiler infrastructure rather than a new user-selectable execution mode. The VM remains the semantic baseline, and user-facing native execution behavior is documented with the JIT/AOT feature that exposes it.

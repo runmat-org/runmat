@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum NativeLoweringClass {
     NativeOperation,
     RuntimeSlowPath,
@@ -7,7 +9,9 @@ pub enum NativeLoweringClass {
     ProvenUnreachable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum MirConstructKind {
     Use,
     Unary,
@@ -132,6 +136,120 @@ pub fn terminator_construct_kind(terminator: &crate::MirTerminatorKind) -> MirCo
         T::Await { .. } => K::Await,
         T::Unreachable => K::Unreachable,
     }
+}
+
+/// Declared effects and capabilities carried by a canonical MIR rvalue.
+///
+/// Native backends consume this shared classification instead of rebuilding a
+/// second builtin/type inference table.
+pub fn rvalue_declared_requirements(
+    value: &crate::MirRvalue,
+) -> (runmat_types::EffectSet, runmat_types::CapabilitySet) {
+    use runmat_types::{CapabilityRequirement, CapabilitySet, EffectKind, EffectSet};
+
+    let mut effects = EffectSet::default();
+    let mut capabilities = CapabilitySet::default();
+    match value {
+        crate::MirRvalue::Call(call) => {
+            let declared = call.effects;
+            for (enabled, effect) in [
+                (declared.workspace, EffectKind::WorkspaceWrite),
+                (declared.environment, EffectKind::EnvironmentWrite),
+                (declared.filesystem, EffectKind::FilesystemRead),
+                (declared.network, EffectKind::Network),
+                (declared.ui, EffectKind::UserInterface),
+                (declared.random, EffectKind::Randomness),
+                (declared.time, EffectKind::Clock),
+                (declared.host_callback, EffectKind::HostCallback),
+                (declared.unknown, EffectKind::Unknown),
+            ] {
+                if enabled {
+                    effects.0.insert(effect);
+                }
+            }
+        }
+        crate::MirRvalue::Future { .. } | crate::MirRvalue::Spawn(_) => {
+            effects.0.insert(EffectKind::MaySuspend);
+            capabilities
+                .0
+                .insert(CapabilityRequirement::ParallelRuntime);
+        }
+        crate::MirRvalue::Distributed(_) | crate::MirRvalue::Collective(_) => {
+            capabilities
+                .0
+                .insert(CapabilityRequirement::DistributedRuntime);
+        }
+        crate::MirRvalue::ShortCircuit { right_temps, .. } => {
+            for statement in right_temps {
+                effects
+                    .0
+                    .extend(statement_declared_effects(&statement.kind).0);
+                if let Some(value) = statement_rvalue(&statement.kind) {
+                    let (nested_effects, nested_capabilities) = rvalue_declared_requirements(value);
+                    effects.0.extend(nested_effects.0);
+                    capabilities.0.extend(nested_capabilities.0);
+                }
+            }
+        }
+        _ => {}
+    }
+    (effects, capabilities)
+}
+
+/// Complete canonical construct inventory for one rvalue, including the
+/// conditional statement region embedded by short-circuit MIR.
+pub fn rvalue_construct_inventory(value: &crate::MirRvalue) -> Vec<MirConstructKind> {
+    let mut constructs = vec![rvalue_construct_kind(value)];
+    if let crate::MirRvalue::ShortCircuit { right_temps, .. } = value {
+        for statement in right_temps {
+            if let Some(value) = statement_rvalue(&statement.kind) {
+                constructs.extend(rvalue_construct_inventory(value));
+            }
+            constructs.push(statement_construct_kind(&statement.kind));
+        }
+    }
+    constructs
+}
+
+fn statement_rvalue(statement: &crate::MirStmtKind) -> Option<&crate::MirRvalue> {
+    match statement {
+        crate::MirStmtKind::Assign { value, .. }
+        | crate::MirStmtKind::MultiAssign { value, .. }
+        | crate::MirStmtKind::Expr(value) => Some(value),
+        crate::MirStmtKind::PlaceMutation(_)
+        | crate::MirStmtKind::WorkspaceEffect { .. }
+        | crate::MirStmtKind::EnvironmentEffect(_) => None,
+    }
+}
+
+/// Declared effects carried by a canonical MIR statement.
+pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_types::EffectSet {
+    use runmat_hir::WorkspaceEffect;
+    use runmat_types::{EffectKind, EffectSet};
+
+    let mut effects = EffectSet::default();
+    match statement {
+        crate::MirStmtKind::WorkspaceEffect { effect, .. } => match effect {
+            WorkspaceEffect::None => {}
+            WorkspaceEffect::ReadsWorkspace => {
+                effects.0.insert(EffectKind::WorkspaceRead);
+            }
+            WorkspaceEffect::CreatesBinding
+            | WorkspaceEffect::ClearsBinding
+            | WorkspaceEffect::ClearsFunctionCache
+            | WorkspaceEffect::MutatesGlobal
+            | WorkspaceEffect::MutatesPersistent
+            | WorkspaceEffect::LoadsExternalBindings
+            | WorkspaceEffect::DynamicEval => {
+                effects.0.insert(EffectKind::WorkspaceWrite);
+            }
+        },
+        crate::MirStmtKind::EnvironmentEffect(_) => {
+            effects.0.insert(EffectKind::EnvironmentWrite);
+        }
+        _ => {}
+    }
+    effects
 }
 
 impl MirConstructKind {

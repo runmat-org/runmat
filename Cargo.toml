@@ -5,6 +5,7 @@ members = [
     "crates/runmat-parser",
     "crates/runmat-hir",
     "crates/runmat-mir",
+    "crates/runmat-native-codegen",
     "crates/runmat-vm",
     "crates/runmat-telemetry",
     "crates/runmat-accelerate-api",
@@ -108,6 +109,7 @@ runmat-lexer = { version = "=0.6.1", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.6.1", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.6.1", path = "crates/runmat-hir" }
 runmat-mir = { version = "=0.6.1", path = "crates/runmat-mir" }
+runmat-native-codegen = { version = "=0.6.1", path = "crates/runmat-native-codegen" }
 runmat-vm = { version = "=0.6.1", path = "crates/runmat-vm" }
 runmat-async = { version = "=0.6.1", path = "crates/runmat-async" }
 runmat-telemetry = { version = "=0.6.1", path = "crates/runmat-telemetry" }

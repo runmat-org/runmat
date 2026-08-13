@@ -6761,6 +6761,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-native-codegen"
+version = "0.6.1"
+dependencies = [
+ "runmat-execution",
+ "runmat-hir",
+ "runmat-mir",
+ "runmat-runtime",
+ "runmat-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "runmat-node-agent"
 version = "0.6.1"
 dependencies = [

@@ -30,9 +30,18 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         .map(|function| function.id)
         .collect();
     for function in &hir.functions {
+        let module = hir
+            .modules
+            .iter()
+            .find(|module| module.id == function.module)
+            .ok_or_else(|| HirError::new("function references a missing source module"))?;
+        let source = u32::try_from(module.source_id.0)
+            .map(runmat_types::ProgramSourceId)
+            .map_err(|_| HirError::new("function source identity exceeds the portable schema"))?;
         assembly.functions.insert(
             function.id,
             MirFunctionMetadata {
+                source,
                 name: function.name.clone(),
                 parent: function.parent,
                 enclosing_class: function.enclosing_class,

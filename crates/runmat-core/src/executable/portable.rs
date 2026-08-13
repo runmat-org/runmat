@@ -2,7 +2,6 @@ use serde::Serialize;
 
 use super::ExecutableUnit;
 
-const MIR_SCHEMA_VERSION: u16 = 1;
 const BYTECODE_SCHEMA_VERSION: u16 = 1;
 const VM_LAYOUT_SCHEMA_VERSION: u16 = 1;
 const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 1;
@@ -133,7 +132,7 @@ impl ExecutableUnit {
                 runmat_types::RUNMAT_TYPES_SCHEMA.minor
             )),
             analysis_schema: analysis.schema_version,
-            mir_schema: MIR_SCHEMA_VERSION,
+            mir_schema: runmat_mir::MIR_SCHEMA_VERSION,
             bytecode_schema: BYTECODE_SCHEMA_VERSION,
             vm_layout_schema: VM_LAYOUT_SCHEMA_VERSION,
             function_registry_schema: FUNCTION_REGISTRY_SCHEMA_VERSION,
