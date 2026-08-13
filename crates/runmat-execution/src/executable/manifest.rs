@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use super::{
+    component::validate_component_descriptors, ExecutableComponentDescriptor,
     ExecutableComponentRevisions, ExecutableIdentity, ExecutableOptionalSection,
     ExecutableSectionSupport,
 };
@@ -11,7 +12,7 @@ use runmat_types::{
     CapabilityRequirement, CapabilitySet, InteropManifest, ParallelManifest, RegionContract,
 };
 
-pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V1;
+pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,6 +20,7 @@ pub struct ExecutableUnitManifest {
     pub schema_version: u16,
     pub identity: ExecutableIdentity,
     pub revisions: ExecutableComponentRevisions,
+    pub components: Vec<ExecutableComponentDescriptor>,
     pub capabilities: CapabilitySet,
     pub regions: Vec<RegionContract>,
     pub interop: InteropManifest,
@@ -36,6 +38,7 @@ impl ExecutableUnitManifest {
         }
         self.identity.validate()?;
         self.revisions.validate()?;
+        validate_component_descriptors(&self.components, &self.revisions)?;
         if self.identity.program.catalog_fingerprint() != &self.revisions.catalog_fingerprint {
             return Err(ContractError::invalid(
                 "executable.revisions.catalog_fingerprint",

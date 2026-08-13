@@ -16,6 +16,9 @@ pub struct ExecutableComponentRevisions {
     pub analysis_schema: u16,
     pub mir_schema: u16,
     pub bytecode_schema: u16,
+    pub vm_layout_schema: u16,
+    pub function_registry_schema: u16,
+    pub source_map_schema: u16,
     pub region_schema: u16,
     pub interop_schema: u16,
     pub parallel_schema: u16,
@@ -29,6 +32,18 @@ impl ExecutableComponentRevisions {
             ("executable.revisions.analysis_schema", self.analysis_schema),
             ("executable.revisions.mir_schema", self.mir_schema),
             ("executable.revisions.bytecode_schema", self.bytecode_schema),
+            (
+                "executable.revisions.vm_layout_schema",
+                self.vm_layout_schema,
+            ),
+            (
+                "executable.revisions.function_registry_schema",
+                self.function_registry_schema,
+            ),
+            (
+                "executable.revisions.source_map_schema",
+                self.source_map_schema,
+            ),
         ] {
             if version == 0 {
                 return Err(ContractError::invalid(field, "version must be non-zero"));

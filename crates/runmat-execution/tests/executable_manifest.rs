@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
 use runmat_execution::{
-    Digest, ExecutableComponentRevisions, ExecutableIdentity, ExecutableOptionalSection,
-    ExecutableSectionSupport, ExecutableUnitManifest, ProgramEnvironment, ProgramRevision,
-    SectionRequirement, EXECUTABLE_UNIT_SCHEMA_VERSION,
+    Digest, ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
+    ExecutableComponentRevisions, ExecutableIdentity, ExecutableOptionalSection,
+    ExecutableSectionSupport, ExecutableUnitEnvelope, ExecutableUnitManifest, ProgramEnvironment,
+    ProgramRevision, SectionRequirement, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_types::{
     CapabilityRequirement, CapabilitySet, ForeignAffinity, ForeignCapability, ForeignLifetime,
@@ -73,6 +74,27 @@ fn manifest() -> ExecutableUnitManifest {
         function: ProgramFunctionId(0),
         local: 0,
     };
+    let revisions = ExecutableComponentRevisions {
+        catalog_schema: 1,
+        catalog_fingerprint,
+        contract_schema: 1,
+        contract_fingerprint: Digest::sha256(b"contracts"),
+        analysis_schema: 1,
+        mir_schema: 1,
+        bytecode_schema: 1,
+        vm_layout_schema: 1,
+        function_registry_schema: 1,
+        source_map_schema: 1,
+        region_schema: REGION_CONTRACT_SCHEMA_VERSION,
+        interop_schema: INTEROP_MANIFEST_SCHEMA_VERSION,
+        parallel_schema: PARALLEL_MANIFEST_SCHEMA_VERSION,
+    };
+    let components = component_payloads()
+        .iter()
+        .map(|payload| {
+            ExecutableComponentDescriptor::from_payload(payload.kind, 1, &payload.bytes).unwrap()
+        })
+        .collect();
     ExecutableUnitManifest {
         schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
         identity: ExecutableIdentity {
@@ -82,18 +104,8 @@ fn manifest() -> ExecutableUnitManifest {
             entrypoint_function: ProgramFunctionId(0),
             source_digest: Digest::sha256(b"main.m"),
         },
-        revisions: ExecutableComponentRevisions {
-            catalog_schema: 1,
-            catalog_fingerprint,
-            contract_schema: 1,
-            contract_fingerprint: Digest::sha256(b"contracts"),
-            analysis_schema: 1,
-            mir_schema: 1,
-            bytecode_schema: 1,
-            region_schema: REGION_CONTRACT_SCHEMA_VERSION,
-            interop_schema: INTEROP_MANIFEST_SCHEMA_VERSION,
-            parallel_schema: PARALLEL_MANIFEST_SCHEMA_VERSION,
-        },
+        revisions,
+        components,
         capabilities: CapabilitySet(BTreeSet::from([
             CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::ParallelRuntime,
@@ -154,6 +166,15 @@ fn manifest() -> ExecutableUnitManifest {
     }
 }
 
+fn component_payloads() -> Vec<ExecutableComponentPayload> {
+    ExecutableComponentKind::REQUIRED
+        .into_iter()
+        .map(|kind| {
+            ExecutableComponentPayload::new(kind, format!("{kind:?}-v1").into_bytes()).unwrap()
+        })
+        .collect()
+}
+
 fn round_trip_vector() {
     let manifest = manifest();
     manifest.validate().unwrap();
@@ -170,8 +191,42 @@ fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:4bb3c984c2baf38aa6635a58c43517b5a4e90d3bd476a2b3df864387cedf513b"
+        "sha256:0aaa9aa95253d85576b4d34abf62690b3539a757921c3268bd13db03654c7ecc"
     );
+}
+
+#[test]
+fn complete_envelope_round_trips_and_binds_every_payload() {
+    let envelope = ExecutableUnitEnvelope::new(manifest(), component_payloads()).unwrap();
+    let bytes = envelope.canonical_bytes().unwrap();
+    assert_eq!(
+        ExecutableUnitEnvelope::from_canonical_bytes(&bytes).unwrap(),
+        envelope
+    );
+    assert_eq!(envelope.cache_key().unwrap(), Digest::sha256(bytes));
+
+    let mut tampered = envelope.clone();
+    tampered.payloads[0].bytes.push(0);
+    assert!(tampered.validate().is_err());
+
+    let mut reordered = envelope;
+    reordered.payloads.swap(0, 1);
+    assert!(reordered.validate().is_err());
+}
+
+#[test]
+fn manifest_requires_each_component_once_with_matching_schema() {
+    let mut missing = manifest();
+    missing.components.pop();
+    assert!(missing.validate().is_err());
+
+    let mut reordered = manifest();
+    reordered.components.swap(0, 1);
+    assert!(reordered.validate().is_err());
+
+    let mut wrong_schema = manifest();
+    wrong_schema.components[0].schema_version += 1;
+    assert!(wrong_schema.validate().is_err());
 }
 
 #[test]
