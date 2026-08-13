@@ -1,10 +1,10 @@
-use crate::bytecode::EndExpr;
 use crate::indexing::selectors::{
     index_scalar_from_value, logical_indices_linear, materialize_index_value,
     numeric_tensor_indices, SliceSelector,
 };
-use crate::interpreter::errors::mex;
-use runmat_runtime::{builtins::common::shape::is_scalar_shape, RuntimeError};
+use crate::indexing::EndExpr;
+use crate::runtime_error::semantic_error as mex;
+use crate::{builtins::common::shape::is_scalar_shape, RuntimeError};
 use runmat_value::Value;
 use std::future::Future;
 
@@ -797,8 +797,8 @@ mod tests {
     use super::{
         build_expr_index_plan, build_index_plan, build_sparse_assignment_plan, ExprPlanSpec,
     };
-    use crate::bytecode::EndExpr;
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
+    use crate::indexing::EndExpr;
     use runmat_value::{IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]

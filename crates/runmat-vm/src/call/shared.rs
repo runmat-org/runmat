@@ -1,6 +1,6 @@
 use crate::bytecode::ArgSpec;
-use crate::bytecode::EndExpr;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
+use runmat_runtime::indexing::EndExpr;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::Value;
 use std::future::Future;
@@ -1009,10 +1009,10 @@ mod tests {
         OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
     };
     use crate::bytecode::ArgSpec;
-    use crate::bytecode::EndExpr;
     use futures::executor::block_on;
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
+    use runmat_runtime::indexing::EndExpr;
     use runmat_types::MemberAccess;
     use runmat_value::{HandleRef, IntValue, Value};
     use std::collections::HashMap;

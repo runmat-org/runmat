@@ -1,3 +1,7 @@
+use crate::builtins::common::tensor::{
+    complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor,
+    tensor_element_len, tensor_value_f64,
+};
 use crate::indexing::integer_assignment::{
     self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
 };
@@ -5,23 +9,19 @@ use crate::indexing::write_slice::{
     delete_integer_complex_storage_positions, deleted_vector_shape, download_integer_tensor,
     real_tensor_to_complex, upload_tensor_to_gpu,
 };
-use crate::interpreter::errors::mex;
-use runmat_runtime::builtins::common::tensor::{
-    complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor,
-    tensor_element_len, tensor_value_f64,
-};
-use runmat_runtime::RuntimeError;
+use crate::runtime_error::semantic_error as mex;
+use crate::RuntimeError;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage,
     SparseTensor, Tensor, Value,
 };
 
 fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
-    mex("ShapeMismatch", &format!("assignment: {err}"))
+    mex("ShapeMismatch", format!("assignment: {err}"))
 }
 
 fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("AccelerationOperationFailed", &format!("{context}: {err}"))
+    mex("AccelerationOperationFailed", format!("{context}: {err}"))
 }
 
 fn is_empty_tensor(value: &Value) -> bool {
@@ -402,9 +402,7 @@ pub async fn assign_sparse_scalar(
     delete: bool,
 ) -> Result<Value, RuntimeError> {
     if sparse.integer_storage().is_some() {
-        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled(
-            "indexed assignment",
-        )?;
+        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
     }
     if delete {
         if !is_empty_tensor(rhs) {
@@ -998,7 +996,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_assignment_preserves_exact_uint64_and_elides_zero() {
-        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse = runmat_value::SparseTensor::new_integer(
             2,
             2,
@@ -1078,7 +1076,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_assignment_preserves_every_integer_class() {
-        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cases = vec![
             (IntegerStorage::I8(vec![]), IntValue::I8(i8::MIN)),
             (IntegerStorage::I16(vec![]), IntValue::I16(i16::MIN)),
@@ -1108,7 +1106,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_assignment_rounds_and_saturates_numeric_rhs() {
-        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse = runmat_value::SparseTensor::new_integer(
             1,
             2,
@@ -1206,7 +1204,7 @@ mod tests {
             IntegerStorage::U8(vec![7]),
         )
         .expect("sparse");
-        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(assign_sparse_scalar(
             sparse,
             &[1],

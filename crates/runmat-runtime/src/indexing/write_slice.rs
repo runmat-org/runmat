@@ -1,25 +1,25 @@
+use crate::builtins::common::tensor::{
+    self, complex_tensor_element_len, complex_tensor_values_complex64, is_scalar_tensor,
+    tensor_element_len, tensor_value_f64,
+};
 use crate::indexing::integer_assignment::{
     self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
 };
 use crate::indexing::plan::IndexPlan;
-use crate::interpreter::errors::mex;
+use crate::runtime_error::semantic_error as mex;
+use crate::RuntimeError;
 use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
-use runmat_runtime::builtins::common::tensor::{
-    self, complex_tensor_element_len, complex_tensor_values_complex64, is_scalar_tensor,
-    tensor_element_len, tensor_value_f64,
-};
-use runmat_runtime::RuntimeError;
 use runmat_value::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
     NumericStorage, SparseTensor, StringArray, Tensor, Value,
 };
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("ShapeMismatch", &format!("{context}: {err}"))
+    mex("ShapeMismatch", format!("{context}: {err}"))
 }
 
 fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("AccelerationOperationFailed", &format!("{context}: {err}"))
+    mex("AccelerationOperationFailed", format!("{context}: {err}"))
 }
 
 fn is_empty_delete_rhs(value: &Value) -> bool {
@@ -365,7 +365,7 @@ pub fn build_string_rhs_view(
                 other => {
                     return Err(mex(
                         "InvalidSliceAssignmentRhs",
-                        &format!(
+                        format!(
                             "rhs cell elements must be string scalars or character vectors, got {other:?}"
                         ),
                     ))
@@ -664,9 +664,7 @@ pub async fn assign_sparse_with_plan(
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
     if sparse.integer_storage().is_some() {
-        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled(
-            "indexed assignment",
-        )?;
+        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
     }
     if is_empty_delete_rhs(rhs) {
         return Err(mex(
@@ -805,9 +803,7 @@ pub fn delete_sparse_with_plan(
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
     if sparse.integer_storage().is_some() {
-        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled(
-            "indexed assignment",
-        )?;
+        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
     }
     if !is_empty_delete_rhs(rhs) {
         return Err(mex(
@@ -1205,7 +1201,7 @@ pub async fn materialize_rhs_linear_real(
     rhs: &Value,
     count: usize,
 ) -> Result<Vec<f64>, RuntimeError> {
-    let host_rhs = runmat_runtime::dispatcher::gather_if_needed_async(rhs).await?;
+    let host_rhs = crate::dispatcher::gather_if_needed_async(rhs).await?;
     match host_rhs {
         Value::Num(n) => Ok(vec![n; count]),
         Value::Int(int_val) => Ok(vec![int_val.to_f64(); count]),
@@ -1237,7 +1233,7 @@ pub async fn materialize_rhs_linear_real(
         Value::OutputList(values) => materialize_output_list_real(&values, count),
         other => Err(mex(
             "InvalidSliceAssignmentRhs",
-            &format!("slice assign: unsupported RHS type {:?}", other),
+            format!("slice assign: unsupported RHS type {:?}", other),
         )),
     }
 }
@@ -1246,7 +1242,7 @@ pub async fn materialize_rhs_nd_real(
     rhs: &Value,
     selection_lengths: &[usize],
 ) -> Result<Vec<f64>, RuntimeError> {
-    let rhs_host = runmat_runtime::dispatcher::gather_if_needed_async(rhs).await?;
+    let rhs_host = crate::dispatcher::gather_if_needed_async(rhs).await?;
     enum RhsView {
         Scalar(f64),
         Tensor {
@@ -1334,7 +1330,7 @@ pub async fn materialize_rhs_nd_real(
         other => {
             return Err(mex(
                 "InvalidSliceAssignmentRhs",
-                &format!("slice assign: unsupported RHS type {:?}", other),
+                format!("slice assign: unsupported RHS type {:?}", other),
             ))
         }
     };
@@ -2039,7 +2035,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_plan_assignment_preserves_exact_values_and_last_write_wins() {
-        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse =
             SparseTensor::new_integer(2, 2, vec![0, 0, 0], vec![], IntegerStorage::U64(vec![]))
                 .expect("sparse");
@@ -2066,7 +2062,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_plan_assignment_rejects_nonscalar_singleton_expansion() {
-        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse =
             SparseTensor::new_integer(2, 2, vec![0, 0, 0], vec![], IntegerStorage::I8(vec![]))
                 .expect("sparse");

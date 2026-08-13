@@ -1,24 +1,24 @@
-use crate::bytecode::EndExpr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
     call_object_index_descriptor_method, call_object_index_descriptor_method_with_outputs,
     class_defines_member_subsasgn, class_defines_member_subsref, expand_brace_values,
     ObjectIndexDescriptor, ObjectIndexOp, ObjectParenExprSelectorSpec,
 };
-use crate::indexing::end_expr as idx_end_expr;
-use crate::indexing::plan::{
+use crate::interpreter::dispatch::calls::normalize_requested_outputs;
+use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
+use runmat_runtime::indexing as runtime_indexing;
+use runmat_runtime::indexing::plan::{
     build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
     build_sparse_assignment_plan, ExprPlanSpec, IndexPlan,
 };
-use crate::indexing::read_linear as idx_read_linear;
-use crate::indexing::read_slice as idx_read_slice;
-use crate::indexing::selectors::{
+use runmat_runtime::indexing::read_linear as idx_read_linear;
+use runmat_runtime::indexing::read_slice as idx_read_slice;
+use runmat_runtime::indexing::selectors::{
     build_cell_scalar_selectors, build_slice_selectors, index_scalar_from_value, SliceSelector,
 };
-use crate::indexing::write_linear as idx_write_linear;
-use crate::indexing::write_slice as idx_write_slice;
-use crate::interpreter::dispatch::calls::normalize_requested_outputs;
-use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
+use runmat_runtime::indexing::write_linear as idx_write_linear;
+use runmat_runtime::indexing::write_slice as idx_write_slice;
+use runmat_runtime::indexing::EndExpr;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
 use std::future::Future;
@@ -392,7 +392,7 @@ async fn apply_cell_end_exprs_for_base(
 
 fn gather_cell_with_plan(
     ca: &CellArray,
-    plan: &crate::indexing::plan::IndexPlan,
+    plan: &runmat_runtime::indexing::plan::IndexPlan,
 ) -> Result<Value, RuntimeError> {
     let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
     crate::ops::cells::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
@@ -400,7 +400,7 @@ fn gather_cell_with_plan(
 
 fn gather_object_array_with_plan(
     array: &runmat_value::ObjectArray,
-    plan: &crate::indexing::plan::IndexPlan,
+    plan: &runmat_runtime::indexing::plan::IndexPlan,
 ) -> Result<Value, RuntimeError> {
     if plan.indices.len() == 1 {
         return array
@@ -905,7 +905,7 @@ async fn resolve_end_expr_value(
                     if matches!(value, Value::GpuTensor(_)) {
                         value = runmat_runtime::dispatcher::gather_if_needed_async(&value).await?;
                     }
-                    idx_end_expr::value_to_f64(&value).map_err(|_| {
+                    runtime_indexing::value_to_f64(&value).map_err(|_| {
                         crate::interpreter::errors::mex(
                             "UnsupportedIndexType",
                             "end expression must be numeric",
@@ -933,7 +933,7 @@ async fn resolve_end_expr_value(
                         execute_callable_descriptor(descriptor).await?,
                         1,
                     );
-                    idx_end_expr::value_to_f64(&v).map_err(|_| {
+                    runtime_indexing::value_to_f64(&v).map_err(|_| {
                         crate::interpreter::errors::mex(
                             "UnsupportedIndexType",
                             "end call must return scalar",
@@ -1010,7 +1010,7 @@ async fn resolve_range_end_value(
 async fn build_expr_slice_plan(
     spec: ExprPlanSpec<'_>,
     vars: &[Value],
-) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+) -> Result<runmat_runtime::indexing::plan::IndexPlan, RuntimeError> {
     build_expr_index_plan(spec, |dim_len, expr| {
         let expr = expr.clone();
         async move { resolve_range_end_value(dim_len, &expr, vars).await }
@@ -1761,7 +1761,7 @@ pub async fn dispatch_indexing(
                     let selectors = if delete {
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape).await
                     } else {
-                        crate::indexing::selectors::build_sparse_assignment_selectors(
+                        runmat_runtime::indexing::selectors::build_sparse_assignment_selectors(
                             *dims,
                             *colon_mask,
                             *end_mask,
@@ -2584,9 +2584,9 @@ mod tests {
         map_slice_plan_error, range_selector_scalar_to_f64, symbolic_scalar_from_value,
         validate_expr_range_step_metadata, IndexContext,
     };
-    use crate::bytecode::EndExpr;
-    use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
+    use runmat_runtime::indexing::plan::IndexPlan;
+    use runmat_runtime::indexing::EndExpr;
     use runmat_value::{
         CellArray, IntValue, IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor,
         Value,

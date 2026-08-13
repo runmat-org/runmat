@@ -5,9 +5,8 @@ pub(crate) mod bytecode;
 pub(crate) mod call;
 pub(crate) mod compiler;
 pub mod coverage;
-pub mod indexing;
 pub(crate) mod instr {
-    pub use crate::bytecode::instr::{ArgSpec, EndExpr, Instr};
+    pub use crate::bytecode::instr::{ArgSpec, Instr};
 }
 pub(crate) mod interpreter;
 pub(crate) mod layout;
@@ -18,8 +17,8 @@ pub(crate) mod runtime;
 
 pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
-    ArgSpec, AsyncMetadata, AwaitSite, Bytecode, EmitLabel, EndExpr, FunctionBytecode,
-    FunctionRegistry, Instr, SpawnSite, StackEffect,
+    ArgSpec, AsyncMetadata, AwaitSite, Bytecode, EmitLabel, FunctionBytecode, FunctionRegistry,
+    Instr, SpawnSite, StackEffect,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{

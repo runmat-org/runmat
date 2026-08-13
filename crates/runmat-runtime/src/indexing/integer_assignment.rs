@@ -1,6 +1,6 @@
 use crate::indexing::plan::IndexPlan;
-use crate::interpreter::errors::mex;
-use runmat_runtime::RuntimeError;
+use crate::runtime_error::semantic_error as mex;
+use crate::RuntimeError;
 use runmat_value::{IntValue, IntegerStorage};
 
 #[derive(Clone)]

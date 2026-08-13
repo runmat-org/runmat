@@ -6539,9 +6539,9 @@ y = x^[1 2; 3 4];\n",
                     *pos == 0
                         && matches!(
                             expr,
-                            crate::bytecode::EndExpr::Div(left, right)
-                                if matches!(left.as_ref(), crate::bytecode::EndExpr::End)
-                                    && matches!(right.as_ref(), crate::bytecode::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
+                            runmat_runtime::indexing::EndExpr::Div(left, right)
+                                if matches!(left.as_ref(), runmat_runtime::indexing::EndExpr::End)
+                                    && matches!(right.as_ref(), runmat_runtime::indexing::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
                         )
                 })
             ) || matches!(
@@ -6554,9 +6554,9 @@ y = x^[1 2; 3 4];\n",
                     *pos == 0
                         && matches!(
                             expr,
-                            crate::bytecode::EndExpr::Div(left, right)
-                                if matches!(left.as_ref(), crate::bytecode::EndExpr::End)
-                                    && matches!(right.as_ref(), crate::bytecode::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
+                            runmat_runtime::indexing::EndExpr::Div(left, right)
+                                if matches!(left.as_ref(), runmat_runtime::indexing::EndExpr::End)
+                                    && matches!(right.as_ref(), runmat_runtime::indexing::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
                         )
                 })
             )
@@ -6604,7 +6604,7 @@ y = x^[1 2; 3 4];\n",
                     *pos == 0
                         && matches!(
                             expr,
-                            crate::bytecode::EndExpr::ResolvedCall { args, .. } if args.len() == 1
+                            runmat_runtime::indexing::EndExpr::ResolvedCall { args, .. } if args.len() == 1
                         )
                 })
             )

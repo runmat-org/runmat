@@ -1,7 +1,7 @@
 use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::call::builtins::is_vm_intrinsic_builtin;
 use crate::compiler::CompileError;
-use crate::instr::{ArgSpec, EndExpr, Instr};
+use crate::instr::{ArgSpec, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
@@ -14,6 +14,7 @@ use runmat_mir::{
     MirPlace, MirPlaceMutation, MirRvalue, MirShortCircuitOp, MirStmt, MirStmtKind,
     MirTerminatorKind,
 };
+use runmat_runtime::indexing::EndExpr;
 use std::collections::{HashMap, HashSet};
 
 type ClassRegistration = (

@@ -1,6 +1,6 @@
 use crate::indexing::plan::total_len_from_shape;
-use crate::interpreter::errors::mex;
-use runmat_runtime::{
+use crate::runtime_error::semantic_error as mex;
+use crate::{
     builtins::common::{shape::is_scalar_shape, tensor},
     dispatcher::gather_if_needed_async,
     RuntimeError,
@@ -10,7 +10,7 @@ use runmat_value::{IntValue, LogicalArray, NumericScalar, Tensor, Value};
 pub type VmResult<T> = Result<T, RuntimeError>;
 
 fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
-    if runmat_runtime::builtins::common::shape::is_scalar_shape(shape) {
+    if crate::builtins::common::shape::is_scalar_shape(shape) {
         return Ok(1);
     }
     shape.iter().try_fold(1usize, |acc, &dim| {
@@ -22,7 +22,7 @@ fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
 fn map_index_gather_error(err: impl std::fmt::Display) -> RuntimeError {
     mex(
         "AccelerationOperationFailed",
-        &format!("index gather: {err}"),
+        format!("index gather: {err}"),
     )
 }
 
@@ -56,13 +56,13 @@ fn exact_index_from_f64(value: f64) -> Option<i64> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum IndexScalar {
+pub enum IndexScalar {
     Signed(i64),
     Unsigned(u64),
 }
 
 impl IndexScalar {
-    pub(crate) fn from_int(value: &IntValue) -> Self {
+    pub fn from_int(value: &IntValue) -> Self {
         match value {
             IntValue::I8(value) => Self::Signed(i64::from(*value)),
             IntValue::I16(value) => Self::Signed(i64::from(*value)),
@@ -75,7 +75,7 @@ impl IndexScalar {
         }
     }
 
-    pub(crate) fn positive_usize(self) -> Option<usize> {
+    pub fn positive_usize(self) -> Option<usize> {
         match self {
             Self::Signed(value) if value >= 1 => usize::try_from(value).ok(),
             Self::Unsigned(value) if value >= 1 => usize::try_from(value).ok(),
@@ -83,7 +83,7 @@ impl IndexScalar {
         }
     }
 
-    pub(crate) fn is_below_one(self) -> bool {
+    pub fn is_below_one(self) -> bool {
         match self {
             Self::Signed(value) => value < 1,
             Self::Unsigned(value) => value < 1,
@@ -108,7 +108,7 @@ fn index_scalar_from_host_value(value: &Value) -> Option<IndexScalar> {
     }
 }
 
-pub(crate) async fn index_scalar_from_value(value: &Value) -> VmResult<Option<IndexScalar>> {
+pub async fn index_scalar_from_value(value: &Value) -> VmResult<Option<IndexScalar>> {
     if let Value::GpuTensor(handle) = value {
         let total = total_len_from_shape(&handle.shape);
         if total != 1 {

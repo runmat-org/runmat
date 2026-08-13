@@ -52,8 +52,8 @@ fn run_deep_semantic_test(f: impl FnOnce() + Send + 'static) {
     }
 }
 
-fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool {
-    use runmat_vm::EndExpr;
+fn end_expr_contains_display_name(expr: &runmat_runtime::indexing::EndExpr, name: &str) -> bool {
+    use runmat_runtime::indexing::EndExpr;
     match expr {
         EndExpr::ResolvedCall { identity, args, .. } => {
             identity.display_name().as_deref() == Some(name)
@@ -79,8 +79,8 @@ fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool
     }
 }
 
-fn end_expr_contains_external_function(expr: &runmat_vm::EndExpr) -> bool {
-    use runmat_vm::EndExpr;
+fn end_expr_contains_external_function(expr: &runmat_runtime::indexing::EndExpr) -> bool {
+    use runmat_runtime::indexing::EndExpr;
     match expr {
         EndExpr::ResolvedCall { identity, args, .. } => {
             matches!(

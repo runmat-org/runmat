@@ -1,7 +1,35 @@
-use runmat_runtime::builtins::common::tensor::{
+use crate::builtins::common::tensor::{
     complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor, tensor_value_f64,
 };
+use runmat_types::{CallableFallbackPolicy, CallableIdentity};
 use runmat_value::{IntValue, Value};
+use serde::{Deserialize, Serialize};
+
+/// Executor-neutral representation of `end` arithmetic used by indexing
+/// plans, bytecode, native IR, and semantic call adapters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EndExpr {
+    End,
+    Const(f64),
+    Var(usize),
+    ResolvedCall {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        args: Vec<EndExpr>,
+    },
+    Add(Box<EndExpr>, Box<EndExpr>),
+    Sub(Box<EndExpr>, Box<EndExpr>),
+    Mul(Box<EndExpr>, Box<EndExpr>),
+    Div(Box<EndExpr>, Box<EndExpr>),
+    LeftDiv(Box<EndExpr>, Box<EndExpr>),
+    Pow(Box<EndExpr>, Box<EndExpr>),
+    Neg(Box<EndExpr>),
+    Pos(Box<EndExpr>),
+    Floor(Box<EndExpr>),
+    Ceil(Box<EndExpr>),
+    Round(Box<EndExpr>),
+    Fix(Box<EndExpr>),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ValueToF64Error;

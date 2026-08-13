@@ -1,6 +1,6 @@
-use crate::indexing::selectors::IndexScalar;
 use crate::interpreter::errors::mex;
 use runmat_runtime::builtins::common::tensor::tensor_element_len;
+use runmat_runtime::indexing::selectors::IndexScalar;
 use runmat_runtime::RuntimeError;
 use runmat_value::{CellArray, NumericScalar, StructValue, Tensor, Value};
 

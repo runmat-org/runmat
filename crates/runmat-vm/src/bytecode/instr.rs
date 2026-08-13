@@ -1,4 +1,5 @@
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
+use runmat_runtime::indexing::EndExpr;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,30 +12,6 @@ pub struct StackEffect {
 pub enum EmitLabel {
     Ans,
     Var(usize),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EndExpr {
-    End,
-    Const(f64),
-    Var(usize),
-    ResolvedCall {
-        identity: CallableIdentity,
-        fallback_policy: CallableFallbackPolicy,
-        args: Vec<EndExpr>,
-    },
-    Add(Box<EndExpr>, Box<EndExpr>),
-    Sub(Box<EndExpr>, Box<EndExpr>),
-    Mul(Box<EndExpr>, Box<EndExpr>),
-    Div(Box<EndExpr>, Box<EndExpr>),
-    LeftDiv(Box<EndExpr>, Box<EndExpr>),
-    Pow(Box<EndExpr>, Box<EndExpr>),
-    Neg(Box<EndExpr>),
-    Pos(Box<EndExpr>),
-    Floor(Box<EndExpr>),
-    Ceil(Box<EndExpr>),
-    Round(Box<EndExpr>),
-    Fix(Box<EndExpr>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
-use runmat_runtime::RuntimeError;
+use crate::RuntimeError;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
     SparseTensor, StringArray, Tensor, Value,
@@ -8,14 +8,14 @@ use runmat_value::{
 use std::collections::HashMap;
 
 fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
-    crate::interpreter::errors::mex(
+    crate::runtime_error::semantic_error(
         "ShapeMismatch",
-        &format!("shape mismatch for slice result: {err}"),
+        format!("shape mismatch for slice result: {err}"),
     )
 }
 
 fn map_slice_acceleration_error(err: impl std::fmt::Display) -> RuntimeError {
-    crate::interpreter::errors::mex("AccelerationOperationFailed", &format!("slice: {err}"))
+    crate::runtime_error::semantic_error("AccelerationOperationFailed", format!("slice: {err}"))
 }
 
 fn numeric_selection_value(
@@ -72,7 +72,7 @@ pub fn try_tensor_slice_2d_fast_path(
         (SliceSelector::Colon, SliceSelector::Scalar(j)) => {
             let j0 = *j - 1;
             if j0 >= cols {
-                return Err(crate::interpreter::errors::mex(
+                return Err(crate::runtime_error::semantic_error(
                     "IndexOutOfBounds",
                     "Index out of bounds",
                 ));
@@ -84,7 +84,7 @@ pub fn try_tensor_slice_2d_fast_path(
         (SliceSelector::Scalar(i), SliceSelector::Colon) => {
             let i0 = *i - 1;
             if i0 >= rows {
-                return Err(crate::interpreter::errors::mex(
+                return Err(crate::runtime_error::semantic_error(
                     "IndexOutOfBounds",
                     "Index out of bounds",
                 ));
@@ -97,7 +97,7 @@ pub fn try_tensor_slice_2d_fast_path(
             for &j in js {
                 let j0 = j - 1;
                 if j0 >= cols {
-                    return Err(crate::interpreter::errors::mex(
+                    return Err(crate::runtime_error::semantic_error(
                         "IndexOutOfBounds",
                         "Index out of bounds",
                     ));
@@ -113,7 +113,7 @@ pub fn try_tensor_slice_2d_fast_path(
                 for &i in is {
                     let i0 = i - 1;
                     if i0 >= rows {
-                        return Err(crate::interpreter::errors::mex(
+                        return Err(crate::runtime_error::semantic_error(
                             "IndexOutOfBounds",
                             "Index out of bounds",
                         ));
@@ -156,7 +156,7 @@ fn sparse_output_shape(plan: &IndexPlan) -> Result<(usize, usize), RuntimeError>
     match plan.output_shape.as_slice() {
         [rows, cols] => Ok((*rows, *cols)),
         [len] => Ok((*len, 1)),
-        _ => Err(crate::interpreter::errors::mex(
+        _ => Err(crate::runtime_error::semantic_error(
             "UnsupportedSparseIndexRank",
             "Sparse indexing currently supports two-dimensional outputs",
         )),
@@ -208,7 +208,7 @@ fn sparse_scalar_value(
 
 fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
     sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
-        crate::interpreter::errors::mex("IndexOutOfBounds", "Sparse dimensions overflow")
+        crate::runtime_error::semantic_error("IndexOutOfBounds", "Sparse dimensions overflow")
     })
 }
 
@@ -317,7 +317,7 @@ fn linear_sparse_slice(
         } => (values.clone(), output_shape.clone()),
     };
     if indices.iter().any(|&index| index == 0 || index > total) {
-        return Err(crate::interpreter::errors::mex(
+        return Err(crate::runtime_error::semantic_error(
             "IndexOutOfBounds",
             "Index out of bounds",
         ));
@@ -332,7 +332,7 @@ fn linear_sparse_slice(
         [rows, cols] => (*rows, *cols),
         [len] => (*len, 1),
         _ => {
-            return Err(crate::interpreter::errors::mex(
+            return Err(crate::runtime_error::semantic_error(
                 "UnsupportedSparseIndexRank",
                 "Sparse indexing currently supports two-dimensional outputs",
             ))
@@ -498,7 +498,7 @@ fn matrix_sparse_slice(
     if (!all_rows && rows.iter().any(|&row| row == 0 || row > sparse.rows))
         || cols.iter().any(|&col| col == 0 || col > sparse.cols)
     {
-        return Err(crate::interpreter::errors::mex(
+        return Err(crate::runtime_error::semantic_error(
             "IndexOutOfBounds",
             "Index out of bounds",
         ));
@@ -656,7 +656,7 @@ pub async fn read_sparse_slice(
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
     if sparse.integer_storage().is_some() {
-        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
+        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
     }
     let selectors =
         build_slice_selectors(dims, colon_mask, end_mask, numeric, &sparse.shape()).await?;
@@ -680,12 +680,12 @@ pub fn read_sparse_slice_from_plan(
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
     if sparse.integer_storage().is_some() {
-        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
+        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
     }
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
         if sparse.rows == 0 || lin >= sparse.rows.saturating_mul(sparse.cols) {
-            return Err(crate::interpreter::errors::mex(
+            return Err(crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Index out of bounds",
             ));
@@ -703,7 +703,7 @@ pub fn read_sparse_slice_from_plan(
     }
 
     let total = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
-        crate::interpreter::errors::mex("IndexOutOfBounds", "Sparse dimensions overflow")
+        crate::runtime_error::semantic_error("IndexOutOfBounds", "Sparse dimensions overflow")
     })?;
     let mut col_ptrs = Vec::with_capacity(out_cols.saturating_add(1));
     let mut row_indices = Vec::new();
@@ -715,14 +715,14 @@ pub fn read_sparse_slice_from_plan(
             for out_row in 0..out_rows {
                 let out_lin = out_row + out_col * out_rows;
                 let Some(&base_lin) = plan.indices.get(out_lin) else {
-                    return Err(crate::interpreter::errors::mex(
+                    return Err(crate::runtime_error::semantic_error(
                         "ShapeMismatch",
                         "sparse slice plan output shape does not match selected indices",
                     ));
                 };
                 let base_lin = base_lin as usize;
                 if sparse.rows == 0 || base_lin >= total {
-                    return Err(crate::interpreter::errors::mex(
+                    return Err(crate::runtime_error::semantic_error(
                         "IndexOutOfBounds",
                         "Index out of bounds",
                     ));
@@ -751,14 +751,14 @@ pub fn read_sparse_slice_from_plan(
         for out_row in 0..out_rows {
             let out_lin = out_row + out_col * out_rows;
             let Some(&base_lin) = plan.indices.get(out_lin) else {
-                return Err(crate::interpreter::errors::mex(
+                return Err(crate::runtime_error::semantic_error(
                     "ShapeMismatch",
                     "sparse slice plan output shape does not match selected indices",
                 ));
             };
             let base_lin = base_lin as usize;
             if sparse.rows == 0 || base_lin >= total {
-                return Err(crate::interpreter::errors::mex(
+                return Err(crate::runtime_error::semantic_error(
                     "IndexOutOfBounds",
                     "Index out of bounds",
                 ));
@@ -820,7 +820,7 @@ pub fn read_complex_slice_from_plan(
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
         let (re, im) = tensor.materialize_f64().get(lin).copied().ok_or_else(|| {
-            crate::interpreter::errors::mex(
+            crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
             )
@@ -831,7 +831,7 @@ pub fn read_complex_slice_from_plan(
     for &lin in &plan.indices {
         let idx = lin as usize;
         let value = tensor.materialize_f64().get(idx).copied().ok_or_else(|| {
-            crate::interpreter::errors::mex(
+            crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
             )
@@ -852,13 +852,13 @@ fn read_integer_complex_slice_from_plan(
     for &linear_index in &plan.indices {
         let index = linear_index as usize;
         let real = storage.real.value_at(index).ok_or_else(|| {
-            crate::interpreter::errors::mex(
+            crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
             )
         })?;
         let imag = storage.imag.value_at(index).ok_or_else(|| {
-            crate::interpreter::errors::mex(
+            crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
             )
@@ -901,7 +901,7 @@ pub fn read_gpu_slice_from_plan(
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        crate::interpreter::errors::mex(
+        crate::runtime_error::semantic_error(
             "AccelerationProviderUnavailable",
             "No acceleration provider registered",
         )
@@ -969,7 +969,7 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
         let value = sa.data.get(lin).cloned().ok_or_else(|| {
-            crate::interpreter::errors::mex(
+            crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: string index out of bounds",
             )
@@ -980,7 +980,7 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
     for &lin in &plan.indices {
         let idx = lin as usize;
         let value = sa.data.get(idx).cloned().ok_or_else(|| {
-            crate::interpreter::errors::mex(
+            crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: string index out of bounds",
             )
@@ -1024,7 +1024,7 @@ mod tests {
 
     #[test]
     fn sparse_slice_plan_preserves_exact_uint64_storage_and_empty_class() {
-        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse = SparseTensor::new_integer(
             2,
             2,

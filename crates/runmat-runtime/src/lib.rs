@@ -38,6 +38,7 @@ pub mod console;
 pub mod context;
 pub mod data;
 pub mod execution;
+pub mod indexing;
 pub mod interaction;
 pub mod interrupt;
 pub mod output_context;

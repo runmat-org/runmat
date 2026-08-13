@@ -992,35 +992,38 @@ fn remap_emit_label(label: &mut crate::bytecode::EmitLabel, slot_remap: &HashMap
     }
 }
 
-fn remap_end_expr_slots(expr: &mut crate::bytecode::EndExpr, slot_remap: &HashMap<usize, usize>) {
+fn remap_end_expr_slots(
+    expr: &mut runmat_runtime::indexing::EndExpr,
+    slot_remap: &HashMap<usize, usize>,
+) {
     match expr {
-        crate::bytecode::EndExpr::Var(slot) => remap_slot(slot, slot_remap),
-        crate::bytecode::EndExpr::ResolvedCall { args, .. } => {
+        runmat_runtime::indexing::EndExpr::Var(slot) => remap_slot(slot, slot_remap),
+        runmat_runtime::indexing::EndExpr::ResolvedCall { args, .. } => {
             for arg in args {
                 remap_end_expr_slots(arg, slot_remap);
             }
         }
-        crate::bytecode::EndExpr::Add(left, right)
-        | crate::bytecode::EndExpr::Sub(left, right)
-        | crate::bytecode::EndExpr::Mul(left, right)
-        | crate::bytecode::EndExpr::Div(left, right)
-        | crate::bytecode::EndExpr::LeftDiv(left, right)
-        | crate::bytecode::EndExpr::Pow(left, right) => {
+        runmat_runtime::indexing::EndExpr::Add(left, right)
+        | runmat_runtime::indexing::EndExpr::Sub(left, right)
+        | runmat_runtime::indexing::EndExpr::Mul(left, right)
+        | runmat_runtime::indexing::EndExpr::Div(left, right)
+        | runmat_runtime::indexing::EndExpr::LeftDiv(left, right)
+        | runmat_runtime::indexing::EndExpr::Pow(left, right) => {
             remap_end_expr_slots(left, slot_remap);
             remap_end_expr_slots(right, slot_remap);
         }
-        crate::bytecode::EndExpr::Neg(inner)
-        | crate::bytecode::EndExpr::Pos(inner)
-        | crate::bytecode::EndExpr::Floor(inner)
-        | crate::bytecode::EndExpr::Ceil(inner)
-        | crate::bytecode::EndExpr::Round(inner)
-        | crate::bytecode::EndExpr::Fix(inner) => remap_end_expr_slots(inner, slot_remap),
-        crate::bytecode::EndExpr::End | crate::bytecode::EndExpr::Const(_) => {}
+        runmat_runtime::indexing::EndExpr::Neg(inner)
+        | runmat_runtime::indexing::EndExpr::Pos(inner)
+        | runmat_runtime::indexing::EndExpr::Floor(inner)
+        | runmat_runtime::indexing::EndExpr::Ceil(inner)
+        | runmat_runtime::indexing::EndExpr::Round(inner)
+        | runmat_runtime::indexing::EndExpr::Fix(inner) => remap_end_expr_slots(inner, slot_remap),
+        runmat_runtime::indexing::EndExpr::End | runmat_runtime::indexing::EndExpr::Const(_) => {}
     }
 }
 
 fn remap_optional_end_expr_slots(
-    exprs: &mut [Option<crate::bytecode::EndExpr>],
+    exprs: &mut [Option<runmat_runtime::indexing::EndExpr>],
     slot_remap: &HashMap<usize, usize>,
 ) {
     for expr in exprs.iter_mut().flatten() {
@@ -1029,7 +1032,7 @@ fn remap_optional_end_expr_slots(
 }
 
 fn remap_indexed_end_expr_slots(
-    exprs: &mut [(usize, crate::bytecode::EndExpr)],
+    exprs: &mut [(usize, runmat_runtime::indexing::EndExpr)],
     slot_remap: &HashMap<usize, usize>,
 ) {
     for (_, expr) in exprs {
@@ -1038,7 +1041,7 @@ fn remap_indexed_end_expr_slots(
 }
 
 fn remap_end_expr_vec_slots(
-    exprs: &mut [crate::bytecode::EndExpr],
+    exprs: &mut [runmat_runtime::indexing::EndExpr],
     slot_remap: &HashMap<usize, usize>,
 ) {
     for expr in exprs {
@@ -1265,34 +1268,34 @@ fn remap_eval_local_callable_identity(
 }
 
 fn remap_eval_local_end_expr(
-    expr: &mut crate::bytecode::EndExpr,
+    expr: &mut runmat_runtime::indexing::EndExpr,
     remap: &HashMap<FunctionId, FunctionId>,
 ) {
     match expr {
-        crate::bytecode::EndExpr::ResolvedCall { identity, args, .. } => {
+        runmat_runtime::indexing::EndExpr::ResolvedCall { identity, args, .. } => {
             remap_eval_local_callable_identity(identity, remap);
             for arg in args {
                 remap_eval_local_end_expr(arg, remap);
             }
         }
-        crate::bytecode::EndExpr::Add(lhs, rhs)
-        | crate::bytecode::EndExpr::Sub(lhs, rhs)
-        | crate::bytecode::EndExpr::Mul(lhs, rhs)
-        | crate::bytecode::EndExpr::Div(lhs, rhs)
-        | crate::bytecode::EndExpr::LeftDiv(lhs, rhs)
-        | crate::bytecode::EndExpr::Pow(lhs, rhs) => {
+        runmat_runtime::indexing::EndExpr::Add(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Sub(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Mul(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Div(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::LeftDiv(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Pow(lhs, rhs) => {
             remap_eval_local_end_expr(lhs, remap);
             remap_eval_local_end_expr(rhs, remap);
         }
-        crate::bytecode::EndExpr::Neg(inner)
-        | crate::bytecode::EndExpr::Pos(inner)
-        | crate::bytecode::EndExpr::Floor(inner)
-        | crate::bytecode::EndExpr::Ceil(inner)
-        | crate::bytecode::EndExpr::Round(inner)
-        | crate::bytecode::EndExpr::Fix(inner) => remap_eval_local_end_expr(inner, remap),
-        crate::bytecode::EndExpr::End
-        | crate::bytecode::EndExpr::Const(_)
-        | crate::bytecode::EndExpr::Var(_) => {}
+        runmat_runtime::indexing::EndExpr::Neg(inner)
+        | runmat_runtime::indexing::EndExpr::Pos(inner)
+        | runmat_runtime::indexing::EndExpr::Floor(inner)
+        | runmat_runtime::indexing::EndExpr::Ceil(inner)
+        | runmat_runtime::indexing::EndExpr::Round(inner)
+        | runmat_runtime::indexing::EndExpr::Fix(inner) => remap_eval_local_end_expr(inner, remap),
+        runmat_runtime::indexing::EndExpr::End
+        | runmat_runtime::indexing::EndExpr::Const(_)
+        | runmat_runtime::indexing::EndExpr::Var(_) => {}
     }
 }
 

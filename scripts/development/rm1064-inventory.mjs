@@ -114,6 +114,30 @@ const runtimeAmbientAuthorities = [
 const allowedLegacyContextConsumers = new Set(
   runtimeAmbientAuthorities.map(([source]) => source),
 );
+allowedLegacyContextConsumers.add("crates/runmat-runtime/src/runtime_error.rs");
+
+const runtimeIndexingModules = [
+  "end_expr.rs",
+  "integer_assignment.rs",
+  "plan.rs",
+  "read_linear.rs",
+  "read_slice.rs",
+  "selectors.rs",
+  "write_linear.rs",
+  "write_slice.rs",
+];
+for (const module of runtimeIndexingModules) {
+  const owner = path.join(repo, "crates/runmat-runtime/src/indexing", module);
+  if (!fs.existsSync(owner)) throw new Error(`missing R10 runtime indexing owner ${relative(owner)}`);
+  const legacy = path.join(repo, "crates/runmat-vm/src/indexing", module);
+  if (fs.existsSync(legacy)) throw new Error(`legacy VM indexing authority remains at ${relative(legacy)}`);
+}
+const endExprOwners = files.filter((file) =>
+  /\bpub\s+enum\s+EndExpr\b/.test(fs.readFileSync(file, "utf8")),
+);
+if (endExprOwners.length !== 1 || relative(endExprOwners[0]) !== "crates/runmat-runtime/src/indexing/end_expr.rs") {
+  throw new Error(`EndExpr must have exactly one runtime owner; found ${endExprOwners.map(relative).join(", ")}`);
+}
 
 for (const [source, identities, targetSlice] of runtimeAmbientAuthorities) {
   const file = path.join(repo, source);
@@ -190,7 +214,7 @@ for (const file of files) {
   const source = relative(file);
   const text = fs.readFileSync(file, "utf8");
 
-  const legacyContextAccess = /context::legacy::active\s*\(/g;
+  const legacyContextAccess = /context::legacy::(?:active|error_namespace)\s*\(/g;
   for (let match; (match = legacyContextAccess.exec(text)); ) {
     if (!allowedLegacyContextConsumers.has(source)) {
       throw new Error(

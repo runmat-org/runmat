@@ -9,3 +9,7 @@ use super::{scope::active_runtime_context, RuntimeContext};
 pub fn active() -> Option<RuntimeContext> {
     active_runtime_context()
 }
+
+pub(crate) fn error_namespace() -> Option<String> {
+    active_runtime_context().map(|context| context.error_namespace())
+}
