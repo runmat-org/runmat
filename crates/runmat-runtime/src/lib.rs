@@ -12,7 +12,14 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 use runmat_types::MemberAccess;
 
-use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
+    catalog::definitions::{
+        FEVAL_AT_PREFIXED_TEXT_EXTENSION, FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED,
+        FEVAL_ERROR_HANDLE_NAME_INVALID, FEVAL_ERROR_HANDLE_SHAPE_INVALID,
+        FEVAL_ERROR_SEMANTIC_UNAVAILABLE, FEVAL_OBJECT_RECEIVER_EXTENSION,
+    },
+    BuiltinErrorDescriptor,
+};
 use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -1414,42 +1421,6 @@ pub async fn test_register_classes() {
     let _ = register_test_classes_builtin().await;
 }
 
-// Example method implementation: Point.move(obj, dx, dy) -> updated obj
-const FEVAL_ERROR_HANDLE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.HANDLE_NAME_INVALID",
-    identifier: Some("RunMat:FevalHandleNameInvalid"),
-    when: "A function or method handle name is empty.",
-    message: "feval: function handle name must not be empty",
-};
-
-const FEVAL_ERROR_HANDLE_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.HANDLE_SHAPE_INVALID",
-    identifier: Some("RunMat:FevalHandleShapeInvalid"),
-    when: "Text handle input has invalid char/string array shape.",
-    message: "feval: function handle text input must be scalar row text",
-};
-
-const FEVAL_ERROR_SEMANTIC_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.SEMANTIC_UNAVAILABLE",
-    identifier: Some("RunMat:SemanticFunctionUnavailable"),
-    when: "Semantic function identity cannot be invoked in current runtime state.",
-    message: "feval: semantic function handle is unavailable",
-};
-
-const FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.FUNCTION_VALUE_UNSUPPORTED",
-    identifier: Some("RunMat:FevalFunctionValueUnsupported"),
-    when: "The first argument is not a supported callable value.",
-    message: "feval: unsupported function value",
-};
-
-pub(crate) const FEVAL_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    FEVAL_ERROR_HANDLE_NAME_INVALID,
-    FEVAL_ERROR_HANDLE_SHAPE_INVALID,
-    FEVAL_ERROR_SEMANTIC_UNAVAILABLE,
-    FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED,
-];
-
 pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     fn normalize_feval_handle_name(name: &str) -> Option<String> {
         let trimmed = name.trim();
@@ -1501,13 +1472,13 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
 
     if is_at_prefixed_text_target(&f) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &crate::builtins::introspection::feval::FEVAL_AT_PREFIXED_TEXT_EXTENSION,
+            &FEVAL_AT_PREFIXED_TEXT_EXTENSION,
             "feval",
         )?;
     }
     if matches!(&f, Value::Object(_) | Value::HandleObject(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &crate::builtins::introspection::feval::FEVAL_OBJECT_RECEIVER_EXTENSION,
+            &FEVAL_OBJECT_RECEIVER_EXTENSION,
             "feval",
         )?;
     }

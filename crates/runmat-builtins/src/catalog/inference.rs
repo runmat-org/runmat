@@ -13,8 +13,41 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         "math.abs" => infer_abs(request, entry),
         "acceleration.gather" => infer_gather(request, entry),
         "aggregate.struct" => infer_struct_builtin(request, entry),
+        "introspection.feval" => infer_feval(request, entry),
         _ => unavailable_rule(entry, request),
     }
+}
+
+fn infer_feval(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let mut contract = match request.arguments.first().map(|argument| &argument.kind) {
+        Some(ValueKindFact::Callable(callable)) => CallContract {
+            outputs: callable.outputs.clone(),
+            variadic_output: (callable.variadic_outputs || !callable.outputs_complete)
+                .then(|| Box::new(ValueFact::unknown(DynamicReason::RuntimeValue))),
+            maximum_outputs: (callable.outputs_complete && !callable.variadic_outputs)
+                .then_some(callable.outputs.len()),
+            effects: Default::default(),
+            capabilities: Default::default(),
+            dynamic_reason: (!callable.outputs_complete || callable.variadic_outputs)
+                .then_some(DynamicReason::RuntimeValue),
+        },
+        Some(_) => CallContract::dynamic(DynamicReason::RuntimeValue),
+        None => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-FEVAL-ARITY",
+                "feval requires a function target",
+                0,
+            ));
+            CallContract::dynamic(DynamicReason::RuntimeValue)
+        }
+    };
+    contract.effects = entry.contract.effect_set();
+    contract.capabilities = entry.contract.capability_set();
+    let mut inference = infer_call(&contract, request);
+    diagnostics.append(&mut inference.diagnostics);
+    inference.diagnostics = diagnostics;
+    inference
 }
 
 fn infer_struct_builtin(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

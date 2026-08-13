@@ -323,3 +323,78 @@ fn struct_contract_tracks_literal_field_names_and_value_facts() {
     assert!(fact.fields_complete);
     assert_eq!(fact.fields.get("Flag"), Some(&value));
 }
+
+#[test]
+fn feval_contract_preserves_known_callable_outputs_and_dynamic_effects() {
+    use runmat_types::{
+        CallRequest, CallableFact, EffectKind, LiteralContext, OutputSelection,
+        RequestedOutputCount, ValueFact, ValueKindFact,
+    };
+    let first_output = ValueFact::scalar(ValueKindFact::Logical);
+    let second_output = ValueFact::scalar(ValueKindFact::String);
+    let callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        parameters: Vec::new(),
+        parameters_complete: false,
+        outputs: vec![first_output.clone(), second_output.clone()],
+        outputs_complete: true,
+        variadic_inputs: true,
+        variadic_outputs: false,
+        captures: Vec::new(),
+        captures_complete: true,
+    }));
+    let request = CallRequest {
+        arguments: vec![callable],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+    };
+    let inference = infer_catalog_call(
+        builtin_catalog_entry_by_name("feval").expect("feval entry"),
+        &request,
+    );
+    assert!(inference.diagnostics.is_empty());
+    assert_eq!(inference.outputs, vec![first_output, second_output]);
+    assert!(inference.effects.0.contains(&EffectKind::HostCallback));
+    assert!(inference.effects.0.contains(&EffectKind::MaySuspend));
+    assert!(inference.effects.0.contains(&EffectKind::MayThrow));
+    assert!(inference.effects.0.contains(&EffectKind::Unknown));
+    assert!(inference.capabilities.0.is_empty());
+
+    let partially_known_callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        parameters: Vec::new(),
+        parameters_complete: false,
+        outputs: vec![ValueFact::scalar(ValueKindFact::Character)],
+        outputs_complete: false,
+        variadic_inputs: true,
+        variadic_outputs: false,
+        captures: Vec::new(),
+        captures_complete: false,
+    }));
+    let dynamic = infer_catalog_call(
+        builtin_catalog_entry_by_name("feval").expect("feval entry"),
+        &CallRequest {
+            arguments: vec![partially_known_callable],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(3)),
+        },
+    );
+    assert!(dynamic.diagnostics.is_empty());
+    assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Character);
+    assert!(dynamic.outputs[1..]
+        .iter()
+        .all(|output| output.kind == ValueKindFact::Unknown));
+
+    let missing_target = infer_catalog_call(
+        builtin_catalog_entry_by_name("feval").expect("feval entry"),
+        &CallRequest {
+            arguments: Vec::new(),
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(missing_target
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEVAL-ARITY"));
+}
