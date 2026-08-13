@@ -16,14 +16,6 @@ pub fn arrayfun_type(args: &[Type], _context: &ResolveContext) -> Type {
     arrayfun_output_type(returns)
 }
 
-pub fn gather_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args.len() {
-        0 => Type::Unknown,
-        1 => args[0].clone(),
-        _ => Type::OutputList(args.to_vec()),
-    }
-}
-
 pub fn gpuarray_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Logical { shape }) => logical_type_from_shape(shape.as_ref()),

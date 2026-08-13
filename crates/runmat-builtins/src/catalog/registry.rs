@@ -1,11 +1,14 @@
 use super::{
-    definitions::{ABS_CATALOG_ENTRY, FULL_CATALOG_ENTRY, ZEROS_CATALOG_ENTRY},
+    definitions::{
+        ABS_CATALOG_ENTRY, FULL_CATALOG_ENTRY, GATHER_CATALOG_ENTRY, ZEROS_CATALOG_ENTRY,
+    },
     BuiltinCatalogEntry,
 };
 
-static CATALOG_ENTRIES: [&BuiltinCatalogEntry; 3] = [
+static CATALOG_ENTRIES: [&BuiltinCatalogEntry; 4] = [
     &ABS_CATALOG_ENTRY,
     &FULL_CATALOG_ENTRY,
+    &GATHER_CATALOG_ENTRY,
     &ZEROS_CATALOG_ENTRY,
 ];
 

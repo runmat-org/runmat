@@ -1,19 +1,15 @@
 //! MATLAB-compatible `gather` builtin with provider-aware semantics.
 
-use crate::builtins::acceleration::gpu::type_resolvers::gather_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::catalog::definitions::{
+    GATHER_CONTAINER_EXTENSION, GATHER_ERROR_NOT_ENOUGH_INPUTS, GATHER_ERROR_OUTPUT_COUNT_MISMATCH,
+    GATHER_ERROR_TOO_MANY_OUTPUTS,
 };
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -46,132 +42,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "gather";
 
-const GATHER_CONTAINER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gather-recursive-container",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "recursively gathering gpuArray values nested in containers is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GatherRecursiveContainerExtension"),
-};
-
-pub const GATHER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GATHER_CONTAINER_EXTENSION];
-
-const GATHER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Host integer inputs pass through unchanged; integer gpuArray inputs download exact native storage without changing class or shape.",
-    }];
-
-pub const GATHER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[X1, X2, ...] = gather(integer_A1, integer_A2, ...)",
-        inputs: &GATHER_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each result preserves its corresponding input's exact integer class and shape. Explicit gather creates a host copy and leaves the source gpuArray valid and resident.",
-    }];
-
-const GATHER_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Host-resident value gathered from input.",
-}];
-
-const GATHER_OUTPUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Host-resident outputs matching each gathered input.",
-}];
-
-const GATHER_INPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to gather from GPU to host.",
-}];
-
-const GATHER_INPUT_VARIADIC: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input value to gather.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xn",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional input values to gather.",
-    },
-];
-
-const GATHER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "X = gather(X)",
-        inputs: &GATHER_INPUT_SINGLE,
-        outputs: &GATHER_OUTPUT_SINGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X1, X2, ...] = gather(X1, X2, ...)",
-        inputs: &GATHER_INPUT_VARIADIC,
-        outputs: &GATHER_OUTPUT_VARIADIC,
-    },
-];
-
-const GATHER_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.NOT_ENOUGH_INPUTS",
-    identifier: Some("RunMat:gather:NotEnoughInputs"),
-    when: "No input arguments were provided.",
-    message: "gather: not enough input arguments",
-};
-
-const GATHER_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:gather:TooManyOutputs"),
-    when: "Requested outputs exceed one for single-input gather.",
-    message: "gather: too many output arguments",
-};
-
-const GATHER_ERROR_OUTPUT_COUNT_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.OUTPUT_COUNT_MISMATCH",
-    identifier: Some("RunMat:gather:OutputCountMismatch"),
-    when: "Requested output count does not match number of input arguments.",
-    message: "gather: number of outputs must match number of inputs",
-};
-
-const GATHER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GATHER.INTERNAL",
-    identifier: Some("RunMat:gather:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "gather: internal error",
-};
-
-const GATHER_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    GATHER_ERROR_NOT_ENOUGH_INPUTS,
-    GATHER_ERROR_TOO_MANY_OUTPUTS,
-    GATHER_ERROR_OUTPUT_COUNT_MISMATCH,
-    GATHER_ERROR_INTERNAL,
-];
-
-pub const GATHER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GATHER_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GATHER_ERRORS,
-};
-
 fn gather_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     gather_error_with_message(error.message, error)
 }
@@ -189,14 +59,7 @@ fn gather_error_with_message(
 
 #[runtime_builtin(
     name = "gather",
-    category = "acceleration/gpu",
-    summary = "Gather gpuArray data back to host memory.",
-    keywords = "gather,gpuArray,accelerate,download",
-    accel = "sink",
-    type_resolver(gather_type),
-    descriptor(crate::builtins::acceleration::gpu::gather::GATHER_DESCRIPTOR),
-    extensions(crate::builtins::acceleration::gpu::gather::GATHER_EXTENSIONS),
-    integer_capabilities(crate::builtins::acceleration::gpu::gather::GATHER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
 async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -291,7 +154,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CellArray, StructValue, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -468,14 +330,6 @@ pub(crate) mod tests {
         let err = block_on(gather_builtin(Vec::new())).expect_err("expected error");
         assert_eq!(err.to_string(), GATHER_ERROR_NOT_ENOUGH_INPUTS.message);
         assert_eq!(err.identifier(), GATHER_ERROR_NOT_ENOUGH_INPUTS.identifier);
-    }
-
-    #[test]
-    fn gather_type_resolves_corresponding_multiple_outputs() {
-        assert_eq!(
-            gather_type(&[Type::Num, Type::String], &ResolveContext::new(Vec::new())),
-            Type::OutputList(vec![Type::Num, Type::String])
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

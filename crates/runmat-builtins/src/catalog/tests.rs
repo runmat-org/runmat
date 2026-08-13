@@ -250,3 +250,48 @@ fn abs_contract_preserves_class_shape_storage_and_residency_but_makes_complex_re
     assert_eq!(inference.outputs[0].storage, input.storage);
     assert_eq!(inference.outputs[0].residency, input.residency);
 }
+
+#[test]
+fn gather_contract_maps_corresponding_outputs_to_host_and_checks_output_count() {
+    use runmat_types::{
+        CallRequest, OutputSelection, RequestedOutputCount, ResidencyFact, ValueFact, ValueKindFact,
+    };
+    let mut first = ValueFact::scalar(ValueKindFact::Logical);
+    first.residency = ResidencyFact::Device {
+        provider: Some("gpu-a".into()),
+    };
+    let mut second = ValueFact::scalar(ValueKindFact::String);
+    second.residency = ResidencyFact::Device {
+        provider: Some("gpu-b".into()),
+    };
+    let request = CallRequest {
+        arguments: vec![first.clone(), second.clone()],
+        literals: runmat_types::LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+    };
+    let inference = infer_catalog_call(
+        builtin_catalog_entry_by_name("gather").expect("gather entry"),
+        &request,
+    );
+    assert!(inference.diagnostics.is_empty());
+    assert_eq!(inference.outputs.len(), 2);
+    assert_eq!(inference.outputs[0].kind, first.kind);
+    assert_eq!(inference.outputs[1].kind, second.kind);
+    assert!(inference
+        .outputs
+        .iter()
+        .all(|fact| fact.residency == ResidencyFact::Host));
+
+    let bad_request = CallRequest {
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+        ..request
+    };
+    let bad = infer_catalog_call(
+        builtin_catalog_entry_by_name("gather").expect("gather entry"),
+        &bad_request,
+    );
+    assert!(bad
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-GATHER-OUTPUTS"));
+}

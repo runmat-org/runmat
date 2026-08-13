@@ -10,8 +10,47 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         "array.full" => infer_full(request, entry),
         "array.zeros" => infer_zeros(request, entry),
         "math.abs" => infer_abs(request, entry),
+        "acceleration.gather" => infer_gather(request, entry),
         _ => unavailable_rule(entry, request),
     }
+}
+
+fn infer_gather(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    if request.arguments.is_empty() {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-GATHER-ARITY",
+            "gather requires at least one input",
+            0,
+        ));
+    }
+    let outputs = request
+        .arguments
+        .iter()
+        .cloned()
+        .map(|mut fact| {
+            fact.residency = ResidencyFact::Host;
+            fact
+        })
+        .collect::<Vec<_>>();
+    if let Some(requested) = request.outputs.requested.known_count() {
+        let valid = requested == 0
+            || (request.arguments.len() == 1 && requested == 1)
+            || (request.arguments.len() > 1 && requested == request.arguments.len());
+        if !valid {
+            diagnostics.push(InferenceDiagnostic::error(
+                "RM-CATALOG-GATHER-OUTPUTS",
+                "gather output count must match its input count",
+            ));
+        }
+    }
+    let mut contract = CallContract::fixed(outputs);
+    contract.effects = entry.contract.effect_set();
+    contract.capabilities = entry.contract.capability_set();
+    let mut inference = infer_call(&contract, request);
+    diagnostics.append(&mut inference.diagnostics);
+    inference.diagnostics = diagnostics;
+    inference
 }
 
 fn infer_abs(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
