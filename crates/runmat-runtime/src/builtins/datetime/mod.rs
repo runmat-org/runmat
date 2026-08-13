@@ -1,5 +1,4 @@
 use runmat_types::MemberAccess;
-use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike, Weekday};
@@ -108,10 +107,10 @@ pub const DATETIME_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3]
 
 type Broadcast3 = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<usize>);
 
-thread_local! {
-    static DATETIME_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-    static CALENDAR_DURATION_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static DATETIME_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(DATETIME_CLASS);
+static CALENDAR_DURATION_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(CALENDAR_DURATION_CLASS);
 
 const DATETIME_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DATETIME.INVALID_ARGUMENT",
@@ -590,10 +589,7 @@ fn datetime_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn ensure_datetime_class_registered() {
-    DATETIME_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    DATETIME_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         properties.insert(
             FORMAT_FIELD.to_string(),
@@ -641,16 +637,11 @@ fn ensure_datetime_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 
 fn ensure_calendar_duration_class_registered() {
-    CALENDAR_DURATION_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
-
+    CALENDAR_DURATION_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in [CALENDAR_MONTHS_FIELD, CALENDAR_DAYS_FIELD] {
             properties.insert(
@@ -689,7 +680,6 @@ fn ensure_calendar_duration_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

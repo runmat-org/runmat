@@ -6,7 +6,6 @@
 //! object indexing path.
 
 use runmat_types::MemberAccess;
-use std::cell::Cell as LocalCell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
@@ -45,9 +44,8 @@ const VALUES: &str = "Values";
 const METHOD: &str = "Method";
 const EXTRAPOLATION_METHOD: &str = "ExtrapolationMethod";
 
-thread_local! {
-    static GRIDDED_INTERPOLANT_CLASS_REGISTERED: LocalCell<bool> = const { LocalCell::new(false) };
-}
+static GRIDDED_INTERPOLANT_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(CLASS_NAME);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InterpMethod {
@@ -411,10 +409,7 @@ fn internal(detail: impl AsRef<str>) -> RuntimeError {
 }
 
 fn ensure_gridded_interpolant_class_registered() {
-    GRIDDED_INTERPOLANT_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    GRIDDED_INTERPOLANT_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in [GRID_VECTORS, VALUES, METHOD, EXTRAPOLATION_METHOD] {
             properties.insert(
@@ -449,7 +444,6 @@ fn ensure_gridded_interpolant_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

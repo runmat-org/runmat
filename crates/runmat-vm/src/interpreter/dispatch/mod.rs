@@ -333,8 +333,8 @@ fn create_async_future_value(
 ) -> Result<Value, RuntimeError> {
     enforce_spawn_value_concurrency_policy(&Value::OutputList(arguments.clone()))?;
     let program = context
-        .execution
-        .services()
+        .runtime
+        .execution()
         .requires_program_capture()
         .then(|| {
             serde_json::to_vec(function_registry).map_err(|error| {
@@ -346,13 +346,13 @@ fn create_async_future_value(
         })
         .transpose()?;
     context
-        .execution
-        .services()
+        .runtime
+        .execution()
         .create_future(runmat_runtime::execution::DeferredCall {
             function: function.0,
             arguments,
             requested_outputs,
-            program_revision: context.execution.program_revision().cloned(),
+            program_revision: context.runtime.program_revision().cloned(),
             program,
         })
         .map(Value::Future)
@@ -369,8 +369,8 @@ async fn await_execution_value(
     let mut value = value;
     loop {
         match context
-            .execution
-            .services()
+            .runtime
+            .execution()
             .begin_await(value)
             .map_err(execution_error)?
         {
@@ -396,8 +396,8 @@ async fn await_execution_value(
                     runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
                 });
                 context
-                    .execution
-                    .services()
+                    .runtime
+                    .execution()
                     .complete_future(&handle, stored)
                     .map_err(execution_error)?;
                 let _ = function_registry;
@@ -1224,8 +1224,8 @@ pub async fn dispatch_instruction(
                 ));
             };
             let task = context
-                .execution
-                .services()
+                .runtime
+                .execution()
                 .spawn(&future)
                 .map_err(execution_error)?;
             stack.push(Value::Task(task));
@@ -1341,7 +1341,7 @@ pub async fn dispatch_instruction(
                     &call_args,
                     *out_count,
                     function_registry,
-                    context.execution.clone(),
+                    context.runtime.clone(),
                 )
                 .await?;
             let mut captures_updated = false;
@@ -1384,7 +1384,7 @@ pub async fn dispatch_instruction(
                     &call_args,
                     out_count,
                     function_registry,
-                    context.execution.clone(),
+                    context.runtime.clone(),
                 )
                 .await?;
             let mut captures_updated = false;
@@ -1815,7 +1815,7 @@ pub async fn dispatch_instruction(
                     &call_args,
                     *out_count,
                     function_registry,
-                    context.execution.clone(),
+                    context.runtime.clone(),
                 )
                 .await?;
             let mut captures_updated = false;

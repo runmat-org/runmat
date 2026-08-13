@@ -95,6 +95,16 @@ pub fn set_dynamic_eval_options(
     top_level_await_enabled: bool,
     dynamic_eval_enabled: bool,
 ) {
+    if let Some(runtime) = runmat_runtime::context::legacy::active() {
+        runtime.set_language_mode(match compat_mode {
+            CompatMode::Matlab => runmat_runtime::context::RuntimeLanguageMode::Matlab,
+            CompatMode::RunMat => runmat_runtime::context::RuntimeLanguageMode::RunMat,
+            CompatMode::Strict => runmat_runtime::context::RuntimeLanguageMode::Strict,
+        });
+        runtime.set_runmat_extensions_enabled(runmat_extensions_enabled);
+        runtime.set_top_level_await_enabled(top_level_await_enabled);
+        runtime.set_dynamic_eval_enabled(dynamic_eval_enabled);
+    }
     runmat_runtime::compatibility::set_runmat_extensions_enabled(runmat_extensions_enabled);
     DYNAMIC_EVAL_OPTIONS.with(|slot| {
         *slot.borrow_mut() = DynamicEvalOptions {
@@ -140,6 +150,19 @@ pub fn push_dynamic_eval_options(
 }
 
 fn current_dynamic_eval_options() -> DynamicEvalOptions {
+    if let Some(runtime) = runmat_runtime::context::legacy::active() {
+        let compat_mode = match runtime.language_mode() {
+            runmat_runtime::context::RuntimeLanguageMode::Matlab => CompatMode::Matlab,
+            runmat_runtime::context::RuntimeLanguageMode::RunMat => CompatMode::RunMat,
+            runmat_runtime::context::RuntimeLanguageMode::Strict => CompatMode::Strict,
+        };
+        return DynamicEvalOptions {
+            compat_mode,
+            runmat_extensions_enabled: runtime.runmat_extensions_enabled(),
+            top_level_await_enabled: runtime.top_level_await_enabled(),
+            dynamic_eval_enabled: runtime.dynamic_eval_enabled(),
+        };
+    }
     DYNAMIC_EVAL_OPTIONS.with(|slot| *slot.borrow())
 }
 
@@ -1416,6 +1439,32 @@ mod tests {
             runmat_runtime::compatibility::runmat_extensions_enabled(),
             original_runtime
         );
+    }
+
+    #[test]
+    fn dynamic_eval_guard_updates_and_restores_active_runtime_policy() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        runtime.set_language_mode(runmat_runtime::context::RuntimeLanguageMode::Strict);
+        runtime.set_runmat_extensions_enabled(false);
+        runtime.set_top_level_await_enabled(true);
+        runtime.set_dynamic_eval_enabled(true);
+        futures::executor::block_on(runtime.scope(async {
+            {
+                let _guard = push_dynamic_eval_options(CompatMode::RunMat, true, false, false);
+                let current = current_dynamic_eval_options();
+                assert_eq!(current.compat_mode, CompatMode::RunMat);
+                assert!(current.runmat_extensions_enabled);
+                assert!(!current.top_level_await_enabled);
+                assert!(!current.dynamic_eval_enabled);
+            }
+            let restored = current_dynamic_eval_options();
+            assert_eq!(restored.compat_mode, CompatMode::Strict);
+            assert!(!restored.runmat_extensions_enabled);
+            assert!(restored.top_level_await_enabled);
+            assert!(restored.dynamic_eval_enabled);
+        }));
     }
 
     #[test]

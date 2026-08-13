@@ -460,6 +460,7 @@ mod tests {
     use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
+    #[cfg(target_pointer_width = "64")]
     fn optional_dim_parses_typed_integer_tensor_exactly() {
         let dim = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
             .expect("typed dim");
@@ -468,6 +469,18 @@ mod tests {
             parse_optional_dim("trapz", &Value::Tensor(dim)).expect("typed dim"),
             Some(9_007_199_254_740_993)
         );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn optional_dim_rejects_typed_integer_tensor_outside_platform_range() {
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+            .expect("typed dim");
+
+        let err = parse_optional_dim("trapz", &Value::Tensor(dim))
+            .expect_err("dimension must fit usize")
+            .to_string();
+        assert!(err.contains("platform integers"), "unexpected error: {err}");
     }
 
     #[test]

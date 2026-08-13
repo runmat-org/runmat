@@ -78,6 +78,7 @@ impl RunMatSession {
             .collect::<BTreeMap<_, _>>();
         let catalog = TestSourceCatalog::from_snapshot(snapshot);
         let control = InvocationControl::default().with_cancellation(cancellation.clone());
+        let coverage = runmat_vm::coverage::CoverageSession::start(self.runtime_context());
         let mut executor = CoreTestExecutor::new(self, catalog, parameters, control);
         let lifecycle = LifecycleEngine::new(RedactionPolicy::new(
             Vec::<String>::new(),
@@ -120,7 +121,6 @@ impl RunMatSession {
         };
         let mut events = Vec::new();
         let mut sink = SequencedEventSink::new(plan.run_id.clone(), &mut events);
-        let coverage = runmat_vm::coverage::CoverageSession::start();
         let outcome = lifecycle
             .execute(
                 &case,

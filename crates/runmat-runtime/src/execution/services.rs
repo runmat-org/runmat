@@ -364,9 +364,9 @@ mod tests {
     fn cloned_invocation_context_inherits_exact_service() {
         let service: std::rc::Rc<dyn RuntimeExecutionServices> =
             std::rc::Rc::new(RuntimeExecutionService::new());
-        let parent = crate::execution::InvocationExecutionContext::new(service);
+        let parent = crate::context::RuntimeContext::new(service);
         let nested = parent.clone();
-        assert_eq!(parent.services().scope_id(), nested.services().scope_id());
+        assert_eq!(parent.execution().scope_id(), nested.execution().scope_id());
     }
 
     #[test]

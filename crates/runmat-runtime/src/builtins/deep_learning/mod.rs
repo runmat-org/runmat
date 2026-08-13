@@ -7,7 +7,6 @@ use runmat_builtins::{
     ResolveContext, Type,
 };
 use runmat_value::{ObjectInstance, StringArray, Tensor, Value};
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -32,9 +31,8 @@ const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_UNSUPPORTED];
 
-thread_local! {
-    static DLARRAY_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static DLARRAY_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new("dlarray");
 
 const OUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -267,10 +265,7 @@ fn descriptor_error(
 }
 
 pub(super) fn ensure_dlarray_class_registered() {
-    DLARRAY_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    DLARRAY_CLASS_REGISTERED.ensure(|| {
         let methods = ["plus", "minus", "times", "rdivide", "mtimes", "sum"]
             .into_iter()
             .map(|name| {
@@ -294,7 +289,6 @@ pub(super) fn ensure_dlarray_class_registered() {
             properties: HashMap::new(),
             methods,
         });
-        registered.set(true);
     });
 }
 

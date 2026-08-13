@@ -27,10 +27,16 @@ runmat_thread_local! {
 }
 
 pub fn callstack_limit() -> usize {
+    if let Some(context) = runmat_runtime::context::legacy::active() {
+        return context.callstack_limit();
+    }
     CALL_STACK_LIMIT.with(|limit| limit.get())
 }
 
 pub fn error_namespace() -> String {
+    if let Some(context) = runmat_runtime::context::legacy::active() {
+        return context.error_namespace();
+    }
     let ns = ERROR_NAMESPACE.with(|ns| ns.borrow().clone());
     if ns.trim().is_empty() {
         DEFAULT_ERROR_NAMESPACE.to_string()
@@ -45,12 +51,20 @@ pub fn set_error_namespace(namespace: &str) {
     } else {
         namespace
     };
+    if let Some(context) = runmat_runtime::context::legacy::active() {
+        context.set_error_namespace(namespace);
+        return;
+    }
     ERROR_NAMESPACE.with(|ns| {
         *ns.borrow_mut() = namespace.to_string();
     });
 }
 
 pub fn set_call_stack_limit(limit: usize) {
+    if let Some(context) = runmat_runtime::context::legacy::active() {
+        context.set_callstack_limit(limit);
+        return;
+    }
     CALL_STACK_LIMIT.with(|cell| cell.set(limit));
     CALL_STACK.with(|stack| {
         let mut stack = stack.borrow_mut();

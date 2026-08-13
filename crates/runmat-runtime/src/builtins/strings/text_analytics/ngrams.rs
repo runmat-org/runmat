@@ -1,7 +1,6 @@
 //! Bag-of-n-grams compatibility object for Text Analytics workflows.
 use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 use runmat_builtins::{
@@ -28,9 +27,8 @@ use crate::{build_runtime_error, BuiltinResult};
 
 pub const BAG_OF_NGRAMS_CLASS: &str = "bagOfNgrams";
 
-thread_local! {
-    static BAG_OF_NGRAMS_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static BAG_OF_NGRAMS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(BAG_OF_NGRAMS_CLASS);
 
 const OUT_BAG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bag",
@@ -200,10 +198,7 @@ fn ngrams_error(message: impl Into<String>) -> crate::RuntimeError {
 }
 
 fn ensure_bag_of_ngrams_class_registered() {
-    BAG_OF_NGRAMS_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    BAG_OF_NGRAMS_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in [
             "Counts",
@@ -221,7 +216,6 @@ fn ensure_bag_of_ngrams_class_registered() {
             properties,
             methods: HashMap::new(),
         });
-        registered.set(true);
     });
 }
 

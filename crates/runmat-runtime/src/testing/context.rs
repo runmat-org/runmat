@@ -21,7 +21,7 @@ pub struct RuntimeTeardownInvocation {
 }
 
 #[derive(Debug)]
-struct ContextState {
+pub(crate) struct ContextState {
     active: ActiveTestContext,
     limits: ProtocolLimits,
     commands: Vec<TestCommand>,
@@ -58,6 +58,7 @@ impl TestContextHandle {
 #[derive(Debug)]
 pub struct TestContextGuard {
     state: Rc<RefCell<ContextState>>,
+    context: Option<Rc<crate::context::RuntimeContextState>>,
 }
 
 impl TestContextGuard {
@@ -70,12 +71,19 @@ impl TestContextGuard {
 
 impl Drop for TestContextGuard {
     fn drop(&mut self) {
-        TEST_CONTEXT_STACK.with(|stack| {
-            let popped = stack.borrow_mut().pop();
+        if let Some(context) = &self.context {
+            let popped = context.test_contexts.borrow_mut().pop();
             debug_assert!(popped
                 .as_ref()
                 .is_some_and(|state| Rc::ptr_eq(state, &self.state)));
-        });
+        } else {
+            TEST_CONTEXT_STACK.with(|stack| {
+                let popped = stack.borrow_mut().pop();
+                debug_assert!(popped
+                    .as_ref()
+                    .is_some_and(|state| Rc::ptr_eq(state, &self.state)));
+            });
+        }
     }
 }
 
@@ -91,19 +99,28 @@ pub fn install_test_context(active: ActiveTestContext, limits: ProtocolLimits) -
         commands: Vec::new(),
         runtime_teardowns: Vec::new(),
     }));
-    TEST_CONTEXT_STACK.with(|stack| stack.borrow_mut().push(Rc::clone(&state)));
-    TestContextGuard { state }
+    let context = crate::context::legacy::active().map(|context| Rc::clone(context.state()));
+    if let Some(context) = &context {
+        context.test_contexts.borrow_mut().push(Rc::clone(&state));
+    } else {
+        TEST_CONTEXT_STACK.with(|stack| stack.borrow_mut().push(Rc::clone(&state)));
+    }
+    TestContextGuard { state, context }
+}
+
+fn current_test_context_state() -> Option<Rc<RefCell<ContextState>>> {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.state().test_contexts.borrow().last().cloned();
+    }
+    TEST_CONTEXT_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
 pub fn record_runtime_teardown(
     callback: runmat_value::Value,
     arguments: Vec<runmat_value::Value>,
 ) -> Result<(), &'static str> {
-    TEST_CONTEXT_STACK.with(|stack| {
-        let state = stack
-            .borrow()
-            .last()
-            .cloned()
+    {
+        let state = current_test_context_state()
             .ok_or("addTeardown requires an active test lifecycle context")?;
         let mut state = state.borrow_mut();
         if state.active.phase.is_teardown() {
@@ -165,24 +182,16 @@ pub fn record_runtime_teardown(
             arguments,
         });
         Ok(())
-    })
+    }
 }
 
 pub fn active_test_context() -> Option<ActiveTestContext> {
-    TEST_CONTEXT_STACK.with(|stack| {
-        stack
-            .borrow()
-            .last()
-            .map(|state| state.borrow().active.clone())
-    })
+    current_test_context_state().map(|state| state.borrow().active.clone())
 }
 
 pub fn record_test_command(command: TestCommand) -> Result<(), &'static str> {
-    TEST_CONTEXT_STACK.with(|stack| {
-        let state = stack
-            .borrow()
-            .last()
-            .cloned()
+    {
+        let state = current_test_context_state()
             .ok_or("testing command requires an active test lifecycle context")?;
         let mut state = state.borrow_mut();
         if state.commands.len() >= state.limits.max_commands_per_invocation as usize {
@@ -190,7 +199,7 @@ pub fn record_test_command(command: TestCommand) -> Result<(), &'static str> {
         }
         state.commands.push(command);
         Ok(())
-    })
+    }
 }
 
 #[cfg(test)]

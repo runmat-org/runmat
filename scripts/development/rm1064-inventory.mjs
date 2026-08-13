@@ -79,8 +79,57 @@ const policies = {
   parallel_surface: ["parallel", "R26-R28", "Canonical parallel/distributed schema and runtime own this surface once."],
   package_surface: ["package", "R20/R28", "Retain under the resolved package graph and executable-product contracts with one stable identity."],
   interop_surface: ["interop", "R21-R25A", "Canonical foreign/extension ABI owns this surface; prototypes and duplicates are removed."],
+  runtime_ambient: ["runtime", "R09/R10/R29", "Session semantics route through the explicit RuntimeContext; only the classified fallback adapter remains until its assigned removal slice."],
   relevant_test: ["test", "owning slice", "Retain or replace with parity/conformance coverage against the final authority; no test targets removed legacy behavior."],
 };
+
+const runtimeAmbientAuthorities = [
+  ["crates/runmat-runtime/src/source_context.rs", "CURRENT_SOURCE|SOURCE_CATALOG", "R29"],
+  ["crates/runmat-runtime/src/callsite.rs", "CALLSITE_STACK|FUNCTION_INPUT_CALLSITE_STACK", "R29"],
+  ["crates/runmat-runtime/src/debug_context.rs", "DEBUG_STACK", "R29"],
+  ["crates/runmat-runtime/src/output_context.rs", "REQUESTED_OUTPUTS", "R29"],
+  ["crates/runmat-runtime/src/output_count.rs", "OUTPUT_COUNT_STACK", "R29"],
+  ["crates/runmat-runtime/src/interrupt.rs", "INTERRUPT_HANDLE", "R29"],
+  ["crates/runmat-runtime/src/warning_store.rs", "WARNINGS", "R29"],
+  ["crates/runmat-runtime/src/compatibility.rs", "RUNMAT_EXTENSIONS_ENABLED", "R29"],
+  ["crates/runmat-runtime/src/console.rs", "FALLBACK_STATE|FORWARDER", "R29"],
+  ["crates/runmat-runtime/src/interaction.rs", "QUEUED_RESPONSE|ASYNC_HANDLER|EVAL_HOOK", "R29"],
+  ["crates/runmat-runtime/src/workspace.rs", "RESOLVER", "R10/R29"],
+  ["crates/runmat-runtime/src/class_registry.rs", "FALLBACK_STATE|CONTEXT_STATES", "R29"],
+  ["crates/runmat-runtime/src/builtins/common/path_state.rs", "PATH_STATE", "R29"],
+  ["crates/runmat-runtime/src/user_functions.rs", "SEMANTIC_FUNCTION_INVOKER|SEMANTIC_FUNCTION_RESOLVER|SOURCE_FUNCTION_CATALOG|ACTIVE_SEMANTIC_FUNCTION_STACK", "R10/R29"],
+  ["crates/runmat-runtime/src/testing/context.rs", "TEST_CONTEXT_STACK", "R29"],
+  ["crates/runmat-runtime/src/testing/services.rs", "TEST_SERVICES_STACK", "R29"],
+  ["crates/runmat-runtime/src/dispatcher.rs", "CLASS_ACCESS_CONTEXT", "R10/R29"],
+  ["crates/runmat-runtime/src/lib.rs", "CONSTRUCTOR_RECEIVER_STACK|EVENT_REGISTRY", "R10/R29"],
+  ["crates/runmat-runtime/src/context/scope.rs", "ACTIVE_CONTEXTS", "R29"],
+  ["crates/runmat-vm/src/runtime/workspace.rs", "WORKSPACE_STACK|PENDING_WORKSPACE|LAST_WORKSPACE_STATE|LAST_WORKSPACE_ASSIGNED_REPORT", "R10"],
+  ["crates/runmat-vm/src/runtime/globals.rs", "GLOBALS|PERSISTENTS|PERSISTENTS_BY_NAME", "R10"],
+  ["crates/runmat-vm/src/runtime/call_stack.rs", "CALL_STACK|CALL_STACK_LIMIT|ERROR_NAMESPACE", "R10/R29"],
+  ["crates/runmat-vm/src/interpreter/runner.rs", "CALL_COUNTS", "R10"],
+  ["crates/runmat-vm/src/interpreter/errors.rs", "CURRENT_PC", "R10"],
+  ["crates/runmat-vm/src/call/builtins.rs", "DYNAMIC_EVAL_OPTIONS", "R10/R29"],
+  ["crates/runmat-vm/src/coverage.rs", "ACTIVE", "R29"],
+];
+const allowedLegacyContextConsumers = new Set(
+  runtimeAmbientAuthorities.map(([source]) => source),
+);
+
+for (const [source, identities, targetSlice] of runtimeAmbientAuthorities) {
+  const file = path.join(repo, source);
+  const text = fs.readFileSync(file, "utf8");
+  for (const identity of identities.split("|")) {
+    const marker = new RegExp(`\\bstatic\\s+${identity}\\b`);
+    const match = marker.exec(text);
+    if (!match) throw new Error(`missing classified runtime ambient authority ${identity} in ${source}`);
+    add("runtime_ambient", identity, file, text, match.index, {
+      migration: {
+        target_slice: targetSlice,
+        zero_state: `Explicit RuntimeContext state/services own ${identity}; the fallback declaration and every direct consumer are removed by ${targetSlice}.`,
+      },
+    });
+  }
+}
 
 function add(kind, identity, file, text, offset, detail = {}) {
   const [owner, targetSlice, zeroState] = policies[kind];
@@ -140,6 +189,21 @@ function stringField(body, name) {
 for (const file of files) {
   const source = relative(file);
   const text = fs.readFileSync(file, "utf8");
+
+  const legacyContextAccess = /context::legacy::active\s*\(/g;
+  for (let match; (match = legacyContextAccess.exec(text)); ) {
+    if (!allowedLegacyContextConsumers.has(source)) {
+      throw new Error(
+        `unapproved direct runtime-context bridge consumer in ${source}:${lineAt(text, match.index)}`,
+      );
+    }
+    add("runtime_ambient", `legacy-adapter/${enclosingFunction(text, match.index)}`, file, text, match.index, {
+      migration: {
+        target_slice: source.startsWith("crates/runmat-vm/") ? "R10/R29" : "R29",
+        zero_state: "The legacy active-context adapter has no direct semantic consumers and is deleted in R29.",
+      },
+    });
+  }
 
   if (source.startsWith("crates/runmat-runtime/src/")) {
     const marker = /#\[runtime_builtin\s*\(/g;

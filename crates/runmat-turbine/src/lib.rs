@@ -70,18 +70,18 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
     })
 }
 
-struct RuntimeContext {
+struct JitFunctionRegistryContext {
     function_registry: FunctionRegistry,
 }
 
-impl RuntimeContext {
+impl JitFunctionRegistryContext {
     fn new(function_registry: FunctionRegistry) -> Self {
         Self { function_registry }
     }
 }
 
 thread_local! {
-    static RUNTIME_CONTEXT: Cell<*const RuntimeContext> = Cell::new(std::ptr::null());
+    static JIT_FUNCTION_REGISTRY_CONTEXT: Cell<*const JitFunctionRegistryContext> = Cell::new(std::ptr::null());
     static LAST_JIT_RUNTIME_ERROR: RefCell<Option<RuntimeError>> = const { RefCell::new(None) };
 }
 
@@ -97,36 +97,40 @@ fn take_jit_runtime_error() -> Option<RuntimeError> {
     LAST_JIT_RUNTIME_ERROR.with(|slot| slot.borrow_mut().take())
 }
 
-struct RuntimeContextGuard {
-    previous: *const RuntimeContext,
-    _context: Box<RuntimeContext>,
+struct JitFunctionRegistryContextGuard {
+    previous: *const JitFunctionRegistryContext,
+    _context: Box<JitFunctionRegistryContext>,
 }
 
-impl Drop for RuntimeContextGuard {
+impl Drop for JitFunctionRegistryContextGuard {
     fn drop(&mut self) {
-        RUNTIME_CONTEXT.with(|cell| cell.set(self.previous));
+        JIT_FUNCTION_REGISTRY_CONTEXT.with(|cell| cell.set(self.previous));
     }
 }
 
-fn enter_runtime_context(context: RuntimeContext) -> RuntimeContextGuard {
+fn enter_jit_function_registry_context(
+    context: JitFunctionRegistryContext,
+) -> JitFunctionRegistryContextGuard {
     let context = Box::new(context);
-    let ptr = context.as_ref() as *const RuntimeContext;
-    let previous = RUNTIME_CONTEXT.with(|cell| cell.replace(ptr));
-    RuntimeContextGuard {
+    let ptr = context.as_ref() as *const JitFunctionRegistryContext;
+    let previous = JIT_FUNCTION_REGISTRY_CONTEXT.with(|cell| cell.replace(ptr));
+    JitFunctionRegistryContextGuard {
         previous,
         _context: context,
     }
 }
 
-fn with_runtime_context<R>(f: impl FnOnce(&RuntimeContext) -> R) -> Option<R> {
-    RUNTIME_CONTEXT.with(|cell| {
+fn with_jit_function_registry_context<R>(
+    f: impl FnOnce(&JitFunctionRegistryContext) -> R,
+) -> Option<R> {
+    JIT_FUNCTION_REGISTRY_CONTEXT.with(|cell| {
         let ptr = cell.get();
         (!ptr.is_null()).then(|| f(unsafe { &*ptr }))
     })
 }
 
 fn runtime_function_registry() -> Option<FunctionRegistry> {
-    with_runtime_context(|context| context.function_registry.clone())
+    with_jit_function_registry_context(|context| context.function_registry.clone())
 }
 
 fn declare_host_semantic_call_outputs_in_module(module: &mut JITModule) -> FuncId {
@@ -649,8 +653,9 @@ impl TurbineEngine {
         }
 
         // Execute the JIT compiled function
-        let _runtime_context =
-            enter_runtime_context(RuntimeContext::new(function_registry.clone()));
+        let _runtime_context = enter_jit_function_registry_context(
+            JitFunctionRegistryContext::new(function_registry.clone()),
+        );
         let _ = take_jit_runtime_error();
         let result = unsafe {
             // Cast function pointer to correct signature: fn(*mut TurbineValue, usize) -> i32
@@ -1829,13 +1834,15 @@ mod tests {
     use runmat_vm::FunctionBytecode;
     use std::collections::HashMap;
 
-    fn install_semantic_context(functions: Vec<FunctionBytecode>) -> RuntimeContextGuard {
+    fn install_semantic_context(
+        functions: Vec<FunctionBytecode>,
+    ) -> JitFunctionRegistryContextGuard {
         let mut bound_functions = HashMap::new();
         for function in functions {
             bound_functions.insert(function.function, function);
         }
         let registry = FunctionRegistry::new(bound_functions);
-        enter_runtime_context(RuntimeContext::new(registry))
+        enter_jit_function_registry_context(JitFunctionRegistryContext::new(registry))
     }
 
     fn bound_function(

@@ -1,7 +1,6 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
 use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use nalgebra::DMatrix;
@@ -17,9 +16,8 @@ pub const DEFAULT_CONTINUOUS_VARIABLE: &str = "s";
 pub const DEFAULT_DISCRETE_VARIABLE: &str = "z";
 pub const EPS: f64 = 1.0e-12;
 
-thread_local! {
-    static TF_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static TF_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(TF_CLASS);
 
 #[derive(Clone, Debug)]
 pub struct TfModel {
@@ -67,10 +65,7 @@ pub fn control_error(
 }
 
 pub fn ensure_tf_class_registered() {
-    TF_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    TF_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in [
             "Numerator",
@@ -119,7 +114,6 @@ pub fn ensure_tf_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

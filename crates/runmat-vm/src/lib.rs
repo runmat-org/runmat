@@ -33,6 +33,7 @@ pub use interpreter::api::{
 pub use interpreter::runner::{
     interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
     interpret_with_vars_in_context, invoke_semantic_function_value,
+    invoke_semantic_function_value_in_context,
 };
 pub use interpreter::state::{InterpreterOutcome, InterpreterState};
 pub use layout::{

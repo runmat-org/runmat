@@ -45,6 +45,14 @@ use crate::{
     value_shape, CompatMode, RunError,
 };
 
+fn runtime_language_mode(mode: CompatMode) -> runmat_runtime::context::RuntimeLanguageMode {
+    match mode {
+        CompatMode::Matlab => runmat_runtime::context::RuntimeLanguageMode::Matlab,
+        CompatMode::RunMat => runmat_runtime::context::RuntimeLanguageMode::RunMat,
+        CompatMode::Strict => runmat_runtime::context::RuntimeLanguageMode::Strict,
+    }
+}
+
 mod compile;
 mod config;
 mod executable;
@@ -75,8 +83,6 @@ pub struct RunMatSession {
     /// Semantic function registry persisted across interactive inputs.
     function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,
-    /// MATLAB-compatible search path persisted by this session.
-    search_path: Arc<runmat_runtime::builtins::common::path_state::SearchPath>,
     /// Canonically compiled functions discovered through the runtime search path.
     dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
     /// Optional host-frozen project snapshot used by every compilation in this session.
@@ -86,7 +92,7 @@ pub struct RunMatSession {
     /// Cooperative cancellation flag shared with the runtime.
     interrupt_flag: Arc<AtomicBool>,
     /// Root-scoped execution authority inherited by every invocation.
-    execution_context: runmat_runtime::execution::InvocationExecutionContext,
+    runtime_context: runmat_runtime::context::RuntimeContext,
     /// Tracks whether an execution is currently active.
     is_executing: bool,
     /// Optional async input handler (Phase 2). When set, stdin interactions are awaited
@@ -189,8 +195,8 @@ impl Drop for ActiveExecutionGuard {
 
 impl Drop for RunMatSession {
     fn drop(&mut self) {
-        self.execution_context
-            .services()
+        self.runtime_context
+            .execution()
             .drain_scope(runmat_execution::CancellationReason::Shutdown);
     }
 }

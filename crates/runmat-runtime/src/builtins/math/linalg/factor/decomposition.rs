@@ -2,7 +2,6 @@
 use runmat_types::MemberAccess;
 
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use num_complex::Complex64;
@@ -322,9 +321,8 @@ const IS_SPARSE_FIELD: &str = "IsSparse";
 const SCALE_FACTOR_FIELD: &str = "ScaleFactor";
 const RANK_TOLERANCE_FIELD: &str = "RankTolerance";
 
-thread_local! {
-    static DECOMPOSITION_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static DECOMPOSITION_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(CLASS_NAME);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DecompositionType {
@@ -538,11 +536,7 @@ fn internal(message: impl Into<String>) -> RuntimeError {
 }
 
 fn ensure_decomposition_class_registered() {
-    DECOMPOSITION_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
-
+    DECOMPOSITION_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in [
             MATRIX_SIZE_FIELD,
@@ -612,7 +606,6 @@ fn ensure_decomposition_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

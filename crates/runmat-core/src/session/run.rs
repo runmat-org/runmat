@@ -287,6 +287,15 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        self.configure_runtime_context();
+        let runtime = self.runtime_context.clone();
+        runtime.scope(self.run_in_context(input)).await
+    }
+
+    async fn run_in_context(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
@@ -311,12 +320,8 @@ impl RunMatSession {
                     project_handoff,
                 ))
             });
-        let runtime_context = Arc::new(
-            runmat_runtime::user_functions::RuntimeContext::new(Arc::clone(&self.search_path))
-                .with_dynamic_function_loader(loader),
-        );
-        let _runtime_context =
-            runmat_runtime::user_functions::install_runtime_context(runtime_context);
+        self.runtime_context
+            .set_dynamic_function_loader(Some(loader));
         let source_lookup_name = self
             .current_source_fullpath_name()
             .unwrap_or_else(|| self.current_source_name());
@@ -1448,7 +1453,7 @@ impl RunMatSession {
             bytecode,
             &mut self.variable_array,
             Some(source_name.as_str()),
-            self.execution_context.clone(),
+            self.runtime_context.clone(),
         )
         .await
     }

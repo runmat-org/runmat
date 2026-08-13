@@ -1,16 +1,28 @@
 use super::*;
 
 impl RunMatSession {
+    pub(crate) fn runtime_context(&self) -> &runmat_runtime::context::RuntimeContext {
+        &self.runtime_context
+    }
+
+    pub(crate) fn configure_runtime_context(&self) {
+        self.runtime_context
+            .set_language_mode(runtime_language_mode(self.compat_mode));
+        self.runtime_context
+            .set_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions());
+        self.runtime_context
+            .set_top_level_await_enabled(self.top_level_await_enabled);
+        self.runtime_context
+            .set_dynamic_eval_enabled(self.dynamic_eval_enabled);
+    }
+
     /// Replace the root execution service used by this session and every
     /// nested invocation compiled from it.
     pub fn install_execution_services(
         &mut self,
         services: std::rc::Rc<dyn runmat_runtime::execution::RuntimeExecutionServices>,
     ) {
-        let revision = self.execution_context.program_revision().cloned();
-        self.execution_context =
-            runmat_runtime::execution::InvocationExecutionContext::new(services)
-                .with_program_revision(revision);
+        self.runtime_context = self.runtime_context.clone().with_execution(services);
     }
 
     /// Install an async stdin handler (Phase 2). This is the preferred input path for
@@ -52,8 +64,8 @@ impl RunMatSession {
     /// Request cooperative cancellation for the currently running execution.
     pub fn cancel_execution(&self) {
         self.interrupt_flag.store(true, Ordering::Relaxed);
-        self.execution_context
-            .services()
+        self.runtime_context
+            .execution()
             .drain_scope(runmat_execution::CancellationReason::User);
     }
 
@@ -85,10 +97,15 @@ impl RunMatSession {
     /// Set the language compatibility mode (`matlab` or `strict`).
     pub fn set_compat_mode(&mut self, mode: CompatMode) {
         self.compat_mode = mode;
+        self.runtime_context
+            .set_language_mode(runtime_language_mode(mode));
+        self.runtime_context
+            .set_runmat_extensions_enabled(mode.allows_runmat_extensions());
     }
 
     pub fn set_callstack_limit(&mut self, limit: usize) {
         self.callstack_limit = limit;
+        self.runtime_context.set_callstack_limit(limit);
         runmat_vm::set_call_stack_limit(limit);
     }
 
@@ -100,6 +117,7 @@ impl RunMatSession {
             namespace
         };
         self.error_namespace = namespace.clone();
+        self.runtime_context.set_error_namespace(namespace.clone());
         runmat_vm::set_error_namespace(&namespace);
         runmat_hir::set_error_namespace(&namespace);
     }

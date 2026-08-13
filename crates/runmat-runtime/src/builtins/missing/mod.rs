@@ -2770,6 +2770,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_pointer_width = "64")]
     fn missing_parses_typed_integer_scalar_tensors_exactly() {
         let scalar = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
@@ -2780,6 +2781,18 @@ mod tests {
             scalar_usize(&scalar, "missing size").unwrap(),
             9_007_199_254_740_993
         );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn missing_rejects_typed_integer_scalar_tensors_outside_platform_range() {
+        let scalar = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        );
+
+        let err = scalar_usize(&scalar, "missing size").expect_err("dimension must fit usize");
+        assert!(err.message.contains("platform integer"), "{}", err.message);
     }
 
     #[test]

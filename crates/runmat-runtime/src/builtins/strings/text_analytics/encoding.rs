@@ -1,7 +1,6 @@
 //! Word encoding compatibility objects and word/index lookup helpers.
 use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
@@ -24,9 +23,8 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 pub const WORD_ENCODING_CLASS: &str = "wordEncoding";
 
-thread_local! {
-    static WORD_ENCODING_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static WORD_ENCODING_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(WORD_ENCODING_CLASS);
 
 const OUT_ENCODING: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "enc",
@@ -488,10 +486,7 @@ fn word_encoding_object(model: WordEncodingModel) -> BuiltinResult<Value> {
 }
 
 fn ensure_word_encoding_class_registered() {
-    WORD_ENCODING_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    WORD_ENCODING_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["NumWords", "Vocabulary"] {
             properties.insert(name.to_string(), property_def(name));
@@ -502,7 +497,6 @@ fn ensure_word_encoding_class_registered() {
             properties,
             methods: HashMap::new(),
         });
-        registered.set(true);
     });
 }
 

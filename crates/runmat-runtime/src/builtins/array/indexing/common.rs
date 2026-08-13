@@ -245,6 +245,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_pointer_width = "64")]
     fn parse_dims_preserves_typed_cell_dimensions_exactly() {
         let dims = block_on(parse_dims(
             &Value::Cell(
@@ -268,6 +269,25 @@ mod tests {
             "zeros",
         ))
         .is_err());
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn parse_dims_rejects_typed_cell_dimensions_outside_platform_range() {
+        let value = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::Int(IntValue::U8(2)),
+                    Value::Int(IntValue::U64(9_007_199_254_740_993)),
+                ],
+                1,
+                2,
+            )
+            .expect("cell"),
+        );
+
+        let err = block_on(parse_dims(&value, "zeros")).expect_err("dimension must fit usize");
+        assert!(err.to_string().contains("supported range"));
     }
 
     #[test]

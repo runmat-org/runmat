@@ -40,6 +40,24 @@ runmat_thread_local! {
         const { RefCell::new(None) };
 }
 
+#[derive(Default)]
+pub(crate) struct InteractionState {
+    async_handler: Option<Arc<AsyncInteractionHandler>>,
+    queued_response: Option<Result<InteractionResponse, String>>,
+    eval_hook: Option<Arc<EvalHookFn>>,
+}
+
+impl std::fmt::Debug for InteractionState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("InteractionState")
+            .field("async_handler", &self.async_handler.is_some())
+            .field("queued_response", &self.queued_response.is_some())
+            .field("eval_hook", &self.eval_hook.is_some())
+            .finish()
+    }
+}
+
 #[cfg(all(feature = "interaction-test-hooks", not(target_arch = "wasm32")))]
 static FORCE_INTERACTIVE_STDIN: AtomicBool = AtomicBool::new(false);
 
@@ -72,27 +90,43 @@ fn interaction_error(identifier: &str, message: impl Into<String>) -> RuntimeErr
 
 pub struct AsyncHandlerGuard {
     previous: Option<Arc<AsyncInteractionHandler>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for AsyncHandlerGuard {
     fn drop(&mut self) {
-        let mut slot = async_handler_slot()
-            .write()
-            .unwrap_or_else(|_| panic!("interaction async handler lock poisoned"));
-        *slot = self.previous.take();
+        if let Some(state) = &self.state {
+            state.interaction.borrow_mut().async_handler = self.previous.take();
+        } else {
+            let mut slot = async_handler_slot()
+                .write()
+                .unwrap_or_else(|_| panic!("interaction async handler lock poisoned"));
+            *slot = self.previous.take();
+        }
     }
 }
 
 pub fn replace_async_handler(handler: Option<Arc<AsyncInteractionHandler>>) -> AsyncHandlerGuard {
+    if let Some(state) = active_state() {
+        let previous =
+            std::mem::replace(&mut state.interaction.borrow_mut().async_handler, handler);
+        return AsyncHandlerGuard {
+            previous,
+            state: Some(state),
+        };
+    }
     let mut slot = async_handler_slot()
         .write()
         .unwrap_or_else(|_| panic!("interaction async handler lock poisoned"));
     let previous = std::mem::replace(&mut *slot, handler);
-    AsyncHandlerGuard { previous }
+    AsyncHandlerGuard {
+        previous,
+        state: None,
+    }
 }
 
 pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
-    if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
+    if let Some(response) = take_queued_response() {
         return match response
             .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
         {
@@ -104,11 +138,25 @@ pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, Runt
         };
     }
 
-    if let Some(handler) = async_handler_slot()
-        .read()
-        .ok()
-        .and_then(|slot| slot.clone())
-    {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(host) = context.service_ports().host() {
+            return match host
+                .interact(crate::context::HostInteraction::Line {
+                    prompt: prompt.to_string(),
+                    echo,
+                })
+                .await?
+            {
+                InteractionResponse::Line(line) => Ok(line),
+                InteractionResponse::KeyPress => Err(interaction_error(
+                    "RunMat:interaction:UnexpectedAsyncKeypress",
+                    "runtime host returned keypress for line request",
+                )),
+            };
+        }
+    }
+
+    if let Some(handler) = current_async_handler() {
         let owned = InteractionPromptOwned {
             prompt: prompt.to_string(),
             kind: InteractionKind::Line { echo },
@@ -130,7 +178,7 @@ pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, Runt
 }
 
 pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
-    if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
+    if let Some(response) = take_queued_response() {
         return match response
             .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
         {
@@ -142,11 +190,24 @@ pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
         };
     }
 
-    if let Some(handler) = async_handler_slot()
-        .read()
-        .ok()
-        .and_then(|slot| slot.clone())
-    {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(host) = context.service_ports().host() {
+            return match host
+                .interact(crate::context::HostInteraction::KeyPress {
+                    prompt: prompt.to_string(),
+                })
+                .await?
+            {
+                InteractionResponse::Line(_) => Err(interaction_error(
+                    "RunMat:interaction:UnexpectedAsyncLine",
+                    "runtime host returned line value for keypress request",
+                )),
+                InteractionResponse::KeyPress => Ok(()),
+            };
+        }
+    }
+
+    if let Some(handler) = current_async_handler() {
         let owned = InteractionPromptOwned {
             prompt: prompt.to_string(),
             kind: InteractionKind::KeyPress,
@@ -233,6 +294,10 @@ pub fn default_wait_for_key(prompt: &str) -> Result<(), String> {
 }
 
 pub fn push_queued_response(response: Result<InteractionResponse, String>) {
+    if let Some(state) = active_state() {
+        state.interaction.borrow_mut().queued_response = Some(response);
+        return;
+    }
     QUEUED_RESPONSE.with(|slot| {
         *slot.borrow_mut() = Some(response);
     });
@@ -262,30 +327,69 @@ fn eval_hook_slot() -> &'static RwLock<Option<Arc<EvalHookFn>>> {
 /// RAII guard that restores the previous eval hook on drop.
 pub struct EvalHookGuard {
     previous: Option<Arc<EvalHookFn>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for EvalHookGuard {
     fn drop(&mut self) {
-        let mut slot = eval_hook_slot()
-            .write()
-            .unwrap_or_else(|_| panic!("interaction eval hook lock poisoned"));
-        *slot = self.previous.take();
+        if let Some(state) = &self.state {
+            state.interaction.borrow_mut().eval_hook = self.previous.take();
+        } else {
+            let mut slot = eval_hook_slot()
+                .write()
+                .unwrap_or_else(|_| panic!("interaction eval hook lock poisoned"));
+            *slot = self.previous.take();
+        }
     }
 }
 
 /// Replace the global eval hook for the duration of the returned guard's
 /// lifetime. Mirrors the pattern used by `replace_async_handler`.
 pub fn replace_eval_hook(hook: Option<Arc<EvalHookFn>>) -> EvalHookGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(&mut state.interaction.borrow_mut().eval_hook, hook);
+        return EvalHookGuard {
+            previous,
+            state: Some(state),
+        };
+    }
     let mut slot = eval_hook_slot()
         .write()
         .unwrap_or_else(|_| panic!("interaction eval hook lock poisoned"));
     let previous = std::mem::replace(&mut *slot, hook);
-    EvalHookGuard { previous }
+    EvalHookGuard {
+        previous,
+        state: None,
+    }
 }
 
 /// Return the currently installed eval hook, if any.
 pub fn current_eval_hook() -> Option<Arc<EvalHookFn>> {
+    if let Some(state) = active_state() {
+        return state.interaction.borrow().eval_hook.clone();
+    }
     eval_hook_slot().read().ok().and_then(|slot| slot.clone())
+}
+
+fn current_async_handler() -> Option<Arc<AsyncInteractionHandler>> {
+    if let Some(state) = active_state() {
+        return state.interaction.borrow().async_handler.clone();
+    }
+    async_handler_slot()
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+}
+
+fn take_queued_response() -> Option<Result<InteractionResponse, String>> {
+    if let Some(state) = active_state() {
+        return state.interaction.borrow_mut().queued_response.take();
+    }
+    QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take())
+}
+
+fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
+    crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

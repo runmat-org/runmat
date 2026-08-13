@@ -11,6 +11,7 @@ type AssignFn = fn(&str, Value) -> Result<(), String>;
 type ClearFn = fn() -> Result<(), String>;
 type RemoveFn = fn(&str) -> Result<(), String>;
 
+#[derive(Clone, Copy, Debug)]
 pub struct WorkspaceResolver {
     pub lookup: fn(&str) -> Option<Value>,
     pub snapshot: fn() -> Vec<(String, Value)>,
@@ -86,26 +87,77 @@ static TEST_WORKSPACE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 /// Register the workspace resolver. The VM installs this once during
 /// initialization so that language builtins can query variables lazily.
 pub fn register_workspace_resolver(resolver: WorkspaceResolver) {
+    if let Some(context) = crate::context::legacy::active() {
+        context.state().workspace.replace(Some(resolver));
+        return;
+    }
     resolver_storage::set(resolver);
 }
 
 /// Lookup a variable by name in the active workspace.
 pub fn lookup(name: &str) -> Option<Value> {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return service.lookup(name);
+        }
+        return context
+            .state()
+            .workspace
+            .borrow()
+            .as_ref()
+            .and_then(|resolver| (resolver.lookup)(name));
+    }
     resolver_storage::with(|resolver| resolver.and_then(|r| (r.lookup)(name)))
 }
 
 /// Snapshot the active workspace into a vector of `(name, value)` pairs.
 /// Returns `None` when no resolver/workspace is active.
 pub fn snapshot() -> Option<Vec<(String, Value)>> {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return Some(service.snapshot());
+        }
+        return context
+            .state()
+            .workspace
+            .borrow()
+            .as_ref()
+            .map(|resolver| (resolver.snapshot)());
+    }
     resolver_storage::with(|resolver| resolver.map(|r| (r.snapshot)()))
 }
 
 /// Return the list of global variable names visible to the active workspace.
 pub fn global_names() -> Vec<String> {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return service.global_names();
+        }
+        return context
+            .state()
+            .workspace
+            .borrow()
+            .as_ref()
+            .map(|resolver| (resolver.globals)())
+            .unwrap_or_default();
+    }
     resolver_storage::with(|resolver| resolver.map(|r| (r.globals)()).unwrap_or_default())
 }
 
 pub fn assign(name: &str, value: Value) -> Result<(), String> {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return service
+                .assign(name, value)
+                .map_err(|error| error.to_string());
+        }
+        return with_context_resolver(&context, |resolver| {
+            let assign = resolver
+                .assign
+                .ok_or_else(|| "workspace assignment unavailable".to_string())?;
+            assign(name, value)
+        });
+    }
     resolver_storage::with(|resolver| {
         let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
         let assign = resolver
@@ -116,6 +168,17 @@ pub fn assign(name: &str, value: Value) -> Result<(), String> {
 }
 
 pub fn clear() -> Result<(), String> {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return service.clear().map_err(|error| error.to_string());
+        }
+        return with_context_resolver(&context, |resolver| {
+            let clear = resolver
+                .clear
+                .ok_or_else(|| "workspace clearing unavailable".to_string())?;
+            clear()
+        });
+    }
     resolver_storage::with(|resolver| {
         let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
         let clear = resolver
@@ -126,6 +189,17 @@ pub fn clear() -> Result<(), String> {
 }
 
 pub fn remove(name: &str) -> Result<(), String> {
+    if let Some(context) = crate::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return service.remove(name).map_err(|error| error.to_string());
+        }
+        return with_context_resolver(&context, |resolver| {
+            let remove = resolver
+                .remove
+                .ok_or_else(|| "workspace removal unavailable".to_string())?;
+            remove(name)
+        });
+    }
     resolver_storage::with(|resolver| {
         let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
         let remove = resolver
@@ -137,7 +211,23 @@ pub fn remove(name: &str) -> Result<(), String> {
 
 /// Returns true when a resolver has been registered.
 pub fn is_available() -> bool {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.service_ports().workspace().is_some()
+            || context.state().workspace.borrow().is_some();
+    }
     resolver_storage::with(|resolver| resolver.is_some())
+}
+
+fn with_context_resolver<R>(
+    context: &crate::context::RuntimeContext,
+    callback: impl FnOnce(&WorkspaceResolver) -> Result<R, String>,
+) -> Result<R, String> {
+    let resolver = context.state().workspace.borrow();
+    callback(
+        resolver
+            .as_ref()
+            .ok_or_else(|| "workspace state unavailable".to_string())?,
+    )
 }
 
 #[cfg(test)]

@@ -36,6 +36,12 @@ impl RunMatSession {
             );
         }
 
+        let interrupt_flag = Arc::new(AtomicBool::new(false));
+        let search_path = Arc::new(
+            runmat_runtime::builtins::common::path_state::SearchPath::new(
+                runmat_runtime::builtins::common::path_state::current_path_string(),
+            ),
+        );
         let session = Self {
             #[cfg(feature = "jit")]
             jit_engine,
@@ -48,18 +54,15 @@ impl RunMatSession {
             active_source_identity: None,
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
-            search_path: Arc::new(
-                runmat_runtime::builtins::common::path_state::SearchPath::new(
-                    runmat_runtime::builtins::common::path_state::current_path_string(),
-                ),
-            ),
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
             project_handoff: None,
             source_pool: SourcePool::default(),
-            interrupt_flag: Arc::new(AtomicBool::new(false)),
-            execution_context: runmat_runtime::execution::InvocationExecutionContext::new(
+            interrupt_flag: Arc::clone(&interrupt_flag),
+            runtime_context: runmat_runtime::context::RuntimeContext::with_cancellation(
                 std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
-            ),
+                Arc::clone(&interrupt_flag),
+            )
+            .with_search_path(search_path),
             is_executing: false,
             async_input_handler: None,
             callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,

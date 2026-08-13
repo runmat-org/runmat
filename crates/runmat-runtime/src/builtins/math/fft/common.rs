@@ -1546,6 +1546,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_pointer_width = "64")]
     fn nd_sizes_preserve_typed_integer_values_and_bounds() {
         let sizes = Tensor::new_integer(
             IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
@@ -1574,6 +1575,21 @@ mod tests {
             err.contains("maximum supported size"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn nd_sizes_reject_typed_integer_values_outside_platform_range() {
+        let sizes = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let err = parse_nd_sizes_value(&Value::Tensor(sizes), "fftn")
+            .expect_err("dimension must fit usize")
+            .to_string();
+        assert!(err.contains("platform integers"), "unexpected error: {err}");
     }
 
     #[test]

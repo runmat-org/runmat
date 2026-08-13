@@ -1,7 +1,6 @@
 //! MATLAB-compatible `matfile` compatibility object.
 use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -34,9 +33,8 @@ const WRITABLE_FIELD: &str = "Writable";
 const PATH_FIELD: &str = "__runmat_matfile_path";
 const WRITABLE_STATE_FIELD: &str = "__runmat_matfile_writable";
 
-thread_local! {
-    static MATFILE_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static MATFILE_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(MATFILE_CLASS);
 
 const MATFILE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "m",
@@ -359,11 +357,7 @@ pub async fn matfile_subsasgn(
 }
 
 pub fn ensure_matfile_class_registered() {
-    MATFILE_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
-
+    MATFILE_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         properties.insert(
             PROPERTIES_FIELD.to_string(),
@@ -410,7 +404,6 @@ pub fn ensure_matfile_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

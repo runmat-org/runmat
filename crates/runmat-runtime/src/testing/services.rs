@@ -50,24 +50,43 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
-pub struct TestServicesGuard;
+pub struct TestServicesGuard {
+    context: Option<Rc<crate::context::RuntimeContextState>>,
+}
 
 impl Drop for TestServicesGuard {
     fn drop(&mut self) {
-        TEST_SERVICES_STACK.with(|stack| {
-            let popped = stack.borrow_mut().pop();
+        if let Some(context) = &self.context {
+            let popped = context.test_services.borrow_mut().pop();
             debug_assert!(popped.is_some());
-        });
+        } else {
+            TEST_SERVICES_STACK.with(|stack| {
+                let popped = stack.borrow_mut().pop();
+                debug_assert!(popped.is_some());
+            });
+        }
     }
 }
 
 pub fn install_test_services(services: RuntimeTestServices) -> TestServicesGuard {
-    TEST_SERVICES_STACK.with(|stack| stack.borrow_mut().push(services));
-    TestServicesGuard
+    let context = crate::context::legacy::active().map(|context| Rc::clone(context.state()));
+    if let Some(context) = &context {
+        context.test_services.borrow_mut().push(services);
+    } else {
+        TEST_SERVICES_STACK.with(|stack| stack.borrow_mut().push(services));
+    }
+    TestServicesGuard { context }
+}
+
+fn current_test_services() -> Option<RuntimeTestServices> {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.state().test_services.borrow().last().cloned();
+    }
+    TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
 pub async fn run_test_suite(suite: Value, plugins: Vec<Value>) -> BuiltinResult<Value> {
-    let service = TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned());
+    let service = current_test_services();
     let Some(service) = service else {
         return Err(crate::build_runtime_error(
             "TestRunner.run requires an active Core test executor",
@@ -80,7 +99,7 @@ pub async fn run_test_suite(suite: Value, plugins: Vec<Value>) -> BuiltinResult<
 }
 
 pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
-    let service = TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned());
+    let service = current_test_services();
     let Some(service) = service else {
         return Err(
             crate::build_runtime_error("runtests requires an active Core test executor")
@@ -93,7 +112,7 @@ pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 pub async fn discover_tests(args: Vec<Value>) -> BuiltinResult<Value> {
-    let service = TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned());
+    let service = current_test_services();
     let Some(service) = service else {
         return Err(
             crate::build_runtime_error("testsuite requires an active Core test executor")

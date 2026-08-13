@@ -1,5 +1,4 @@
 use runmat_types::MemberAccess;
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use crate::class_registry::{RuntimeClass, RuntimeMethod, RuntimeProperty};
@@ -9,15 +8,11 @@ use super::objects::{
     FUNCTION_TEST_CASE_CLASS, TEST_CASE_CLASS, TEST_RESULT_CLASS, TEST_SUITE_CLASS,
 };
 
-thread_local! {
-    static REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(TEST_CASE_CLASS);
 
 pub fn ensure_testing_classes() {
-    REGISTERED.with(|registered| {
-        if registered.replace(true) {
-            return;
-        }
+    REGISTERED.ensure(|| {
         register_test_case();
         register_plain_class(
             TEST_SUITE_CLASS,

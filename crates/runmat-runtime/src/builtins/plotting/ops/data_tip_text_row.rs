@@ -1,7 +1,6 @@
 //! MATLAB-compatible `dataTipTextRow` data-tip row constructor.
 use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
@@ -25,9 +24,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "dataTipTextRow";
 const CLASS_NAME: &str = "matlab.graphics.datatip.DataTipTextRow";
 
-thread_local! {
-    static DATA_TIP_TEXT_ROW_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static DATA_TIP_TEXT_ROW_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(CLASS_NAME);
 
 const DATA_TIP_OUTPUT_ROW: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "row",
@@ -209,11 +207,7 @@ fn error(descriptor: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -
 }
 
 fn ensure_class_registered() {
-    DATA_TIP_TEXT_ROW_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
-
+    DATA_TIP_TEXT_ROW_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Label", "Value", "Format"] {
             properties.insert(
@@ -237,7 +231,6 @@ fn ensure_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

@@ -1,7 +1,6 @@
 //! Core Text Analytics document and bag-of-words compatibility objects.
 use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use once_cell::sync::Lazy;
@@ -33,10 +32,10 @@ pub const TOKENIZED_DOCUMENT_CLASS: &str = "tokenizedDocument";
 pub const BAG_OF_WORDS_CLASS: &str = "bagOfWords";
 const MAX_DENSE_BAG_COUNT_CELLS: usize = 50_000_000;
 
-thread_local! {
-    static TOKENIZED_DOCUMENT_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-    static BAG_OF_WORDS_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static TOKENIZED_DOCUMENT_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(TOKENIZED_DOCUMENT_CLASS);
+static BAG_OF_WORDS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(BAG_OF_WORDS_CLASS);
 
 const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "documents",
@@ -462,10 +461,7 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
 }
 
 fn ensure_tokenized_document_class_registered() {
-    TOKENIZED_DOCUMENT_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    TOKENIZED_DOCUMENT_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in [
             "Documents",
@@ -494,15 +490,11 @@ fn ensure_tokenized_document_class_registered() {
             properties,
             methods: HashMap::new(),
         });
-        registered.set(true);
     });
 }
 
 fn ensure_bag_of_words_class_registered() {
-    BAG_OF_WORDS_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    BAG_OF_WORDS_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Counts", "Vocabulary", "NumWords", "NumDocuments"] {
             properties.insert(name.to_string(), property_def(name));
@@ -513,7 +505,6 @@ fn ensure_bag_of_words_class_registered() {
             properties,
             methods: HashMap::new(),
         });
-        registered.set(true);
     });
 }
 

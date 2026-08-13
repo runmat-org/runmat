@@ -4,6 +4,7 @@ mod objects;
 mod services;
 
 pub use class_registry::ensure_testing_classes;
+pub(crate) use context::ContextState;
 pub use context::{
     active_test_context, install_test_context, record_runtime_teardown, record_test_command,
     ActiveTestContext, RuntimeTeardownInvocation, TestContextGuard, TestContextHandle,

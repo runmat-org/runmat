@@ -45,16 +45,78 @@ pub struct RuntimeClass {
     pub methods: HashMap<String, RuntimeMethod>,
 }
 
+/// Session-aware registration check for lazily installed builtin classes.
+///
+/// Unlike a thread-local boolean, this consults the active runtime context's
+/// class registry, so two interleaved sessions on one native or WASM thread
+/// cannot cause one another to skip registration.
+pub struct ClassRegistration {
+    class_name: &'static str,
+}
+
+impl ClassRegistration {
+    pub const fn new(class_name: &'static str) -> Self {
+        Self { class_name }
+    }
+
+    fn get(&self) -> bool {
+        with_state(|state| state.registrations.contains(self.class_name))
+    }
+
+    pub fn ensure(&self, register: impl FnOnce()) {
+        if self.get() {
+            return;
+        }
+        register();
+        with_state_mut(|state| {
+            state.registrations.insert(self.class_name);
+        });
+    }
+}
+
 thread_local! {
-    static CLASS_REGISTRY: RefCell<HashMap<String, RuntimeClass>> =
-        RefCell::new(primitive_class_registry());
-    static SEALED_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
-    static ABSTRACT_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
-    static STATIC_VALUES: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
+    static FALLBACK_STATE: RefCell<RuntimeClassState> = RefCell::new(RuntimeClassState::default());
+    static CONTEXT_STATES: RefCell<Vec<std::rc::Weak<crate::context::RuntimeContextState>>> =
+        const { RefCell::new(Vec::new()) };
     static STATIC_VALUE_THREAD_REGISTRATION: StaticValueThreadRegistration =
         const { StaticValueThreadRegistration };
-    static ENUMERATION_REGISTRY: RefCell<HashMap<String, HashSet<String>>> =
-        RefCell::new(HashMap::new());
+}
+
+#[derive(Debug)]
+pub(crate) struct RuntimeClassState {
+    classes: HashMap<String, RuntimeClass>,
+    sealed: HashSet<String>,
+    abstract_classes: HashSet<String>,
+    static_values: HashMap<(String, String), Value>,
+    enumerations: HashMap<String, HashSet<String>>,
+    registrations: HashSet<&'static str>,
+}
+
+impl Default for RuntimeClassState {
+    fn default() -> Self {
+        Self {
+            classes: primitive_class_registry(),
+            sealed: HashSet::new(),
+            abstract_classes: HashSet::new(),
+            static_values: HashMap::new(),
+            enumerations: HashMap::new(),
+            registrations: HashSet::new(),
+        }
+    }
+}
+
+pub(crate) fn register_context_state(state: &std::rc::Rc<crate::context::RuntimeContextState>) {
+    CONTEXT_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        states.retain(|state| state.strong_count() > 0);
+        if !states
+            .iter()
+            .filter_map(std::rc::Weak::upgrade)
+            .any(|existing| std::rc::Rc::ptr_eq(&existing, state))
+        {
+            states.push(std::rc::Rc::downgrade(state));
+        }
+    });
 }
 
 static STATIC_VALUE_THREADS: once_cell::sync::Lazy<Mutex<HashSet<ThreadId>>> =
@@ -103,13 +165,22 @@ pub fn static_property_gc_roots() -> Vec<GcHandle> {
             self.0.push(handle);
         }
     }
-    STATIC_VALUES.with(|values| {
-        let mut collector = RootCollector(Vec::new());
-        for value in values.borrow().values() {
+    let mut collector = RootCollector(Vec::new());
+    FALLBACK_STATE.with(|state| {
+        for value in state.borrow().static_values.values() {
             value.trace(&mut collector);
         }
-        collector.0
-    })
+    });
+    CONTEXT_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        states.retain(|state| state.strong_count() > 0);
+        for state in states.iter().filter_map(std::rc::Weak::upgrade) {
+            for value in state.classes.borrow().static_values.values() {
+                value.trace(&mut collector);
+            }
+        }
+    });
+    collector.0
 }
 
 fn primitive_class_registry() -> HashMap<String, RuntimeClass> {
@@ -180,18 +251,15 @@ pub fn register_class_with_sealed(def: RuntimeClass, is_sealed: bool) {
 
 pub fn register_class_with_modifiers(def: RuntimeClass, is_sealed: bool, is_abstract: bool) {
     let class_name = def.name.clone();
-    CLASS_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(class_name.clone(), def);
-    });
-    SEALED_CLASS_REGISTRY.with(|registry| set_membership(registry, &class_name, is_sealed));
-    ABSTRACT_CLASS_REGISTRY.with(|registry| set_membership(registry, &class_name, is_abstract));
-    ENUMERATION_REGISTRY.with(|registry| {
-        registry.borrow_mut().entry(class_name).or_default();
+    with_state_mut(|state| {
+        state.classes.insert(class_name.clone(), def);
+        set_membership(&mut state.sealed, &class_name, is_sealed);
+        set_membership(&mut state.abstract_classes, &class_name, is_abstract);
+        state.enumerations.entry(class_name).or_default();
     });
 }
 
-fn set_membership(registry: &RefCell<HashSet<String>>, name: &str, present: bool) {
-    let mut registry = registry.borrow_mut();
+fn set_membership(registry: &mut HashSet<String>, name: &str, present: bool) {
     if present {
         registry.insert(name.to_owned());
     } else {
@@ -200,45 +268,44 @@ fn set_membership(registry: &RefCell<HashSet<String>>, name: &str, present: bool
 }
 
 pub fn register_class_enumerations(class_name: &str, members: impl IntoIterator<Item = String>) {
-    ENUMERATION_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        let entry = registry.entry(class_name.to_owned()).or_default();
+    with_state_mut(|state| {
+        let entry = state.enumerations.entry(class_name.to_owned()).or_default();
         entry.clear();
         entry.extend(members);
     });
 }
 
 pub fn class_has_enumeration_member(class_name: &str, member: &str) -> bool {
-    ENUMERATION_REGISTRY.with(|registry| {
-        registry
-            .borrow()
+    with_state(|state| {
+        state
+            .enumerations
             .get(class_name)
             .is_some_and(|members| members.contains(member))
     })
 }
 
 pub fn get_class(name: &str) -> Option<RuntimeClass> {
-    CLASS_REGISTRY.with(|registry| registry.borrow().get(name).cloned())
+    with_state(|state| state.classes.get(name).cloned())
 }
 
 pub fn class_names() -> Vec<String> {
-    CLASS_REGISTRY.with(|registry| registry.borrow().keys().cloned().collect())
+    with_state(|state| state.classes.keys().cloned().collect())
 }
 
 pub fn is_class_sealed(name: &str) -> bool {
-    SEALED_CLASS_REGISTRY.with(|registry| registry.borrow().contains(name))
+    with_state(|state| state.sealed.contains(name))
 }
 
 pub fn is_class_abstract(name: &str) -> bool {
-    ABSTRACT_CLASS_REGISTRY.with(|registry| registry.borrow().contains(name))
+    with_state(|state| state.abstract_classes.contains(name))
 }
 
 pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
     if class_name == ancestor_name {
         return true;
     }
-    CLASS_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
+    with_state(|state| {
+        let registry = &state.classes;
         let mut current = Some(class_name.to_owned());
         let mut visited = HashSet::new();
         while let Some(name) = current {
@@ -255,8 +322,8 @@ pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
 }
 
 pub fn superclass_chain(class_name: &str) -> Option<Vec<String>> {
-    CLASS_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
+    with_state(|state| {
+        let registry = &state.classes;
         if !registry.contains_key(class_name) {
             return None;
         }
@@ -288,8 +355,8 @@ fn lookup_member<T>(
     class_name: &str,
     mut member: impl FnMut(&RuntimeClass) -> Option<T>,
 ) -> Option<(T, String)> {
-    CLASS_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
+    with_state(|state| {
+        let registry = &state.classes;
         let mut current = Some(class_name.to_owned());
         let mut visited = HashSet::new();
         while let Some(name) = current {
@@ -307,9 +374,9 @@ fn lookup_member<T>(
 }
 
 pub fn get_static_property_value(class_name: &str, property: &str) -> Option<Value> {
-    STATIC_VALUES.with(|values| {
-        values
-            .borrow()
+    with_state(|state| {
+        state
+            .static_values
             .get(&(class_name.to_owned(), property.to_owned()))
             .cloned()
     })
@@ -318,11 +385,27 @@ pub fn get_static_property_value(class_name: &str, property: &str) -> Option<Val
 pub fn set_static_property_value(class_name: &str, property: &str, value: Value) {
     ensure_gc_root_provider();
     mark_static_values_thread_active();
-    STATIC_VALUES.with(|values| {
-        values
-            .borrow_mut()
+    with_state_mut(|state| {
+        state
+            .static_values
             .insert((class_name.to_owned(), property.to_owned()), value);
     });
+}
+
+fn with_state<R>(callback: impl FnOnce(&RuntimeClassState) -> R) -> R {
+    if let Some(context) = crate::context::legacy::active() {
+        callback(&context.state().classes.borrow())
+    } else {
+        FALLBACK_STATE.with(|state| callback(&state.borrow()))
+    }
+}
+
+fn with_state_mut<R>(callback: impl FnOnce(&mut RuntimeClassState) -> R) -> R {
+    if let Some(context) = crate::context::legacy::active() {
+        callback(&mut context.state().classes.borrow_mut())
+    } else {
+        FALLBACK_STATE.with(|state| callback(&mut state.borrow_mut()))
+    }
 }
 
 pub fn set_static_property_value_in_owner(

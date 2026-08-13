@@ -28,7 +28,7 @@ pub struct ExecutionContext {
     pub call_stack: Vec<CallFrame>,
     pub locals: Vec<Value>,
     pub instruction_pointer: usize,
-    pub execution: runmat_runtime::execution::InvocationExecutionContext,
+    pub runtime: runmat_runtime::context::RuntimeContext,
 }
 
 impl Default for ExecutionContext {
@@ -37,9 +37,9 @@ impl Default for ExecutionContext {
             call_stack: Vec::new(),
             locals: Vec::new(),
             instruction_pointer: 0,
-            execution: runmat_runtime::execution::InvocationExecutionContext::new(
-                std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
-            ),
+            runtime: runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
         }
     }
 }

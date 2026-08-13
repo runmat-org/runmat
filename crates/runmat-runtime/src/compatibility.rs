@@ -15,11 +15,18 @@ runmat_thread_local! {
 /// Returns whether the current execution may use deliberately classified
 /// RunMat-only builtin forms.
 pub fn runmat_extensions_enabled() -> bool {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.state().runmat_extensions_enabled.get();
+    }
     RUNMAT_EXTENSIONS_ENABLED.with(Cell::get)
 }
 
 /// Set the extension policy for subsequent builtin dispatch on this thread.
 pub fn set_runmat_extensions_enabled(enabled: bool) {
+    if let Some(context) = crate::context::legacy::active() {
+        context.state().runmat_extensions_enabled.set(enabled);
+        return;
+    }
     RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(enabled));
 }
 
@@ -99,17 +106,25 @@ fn value_contains_sparse_integer(
 pub fn push_runmat_extensions_enabled(enabled: bool) -> RunMatExtensionsGuard {
     let previous = runmat_extensions_enabled();
     set_runmat_extensions_enabled(enabled);
-    RunMatExtensionsGuard { previous }
+    RunMatExtensionsGuard {
+        previous,
+        state: crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state())),
+    }
 }
 
 #[must_use]
 pub struct RunMatExtensionsGuard {
     previous: bool,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for RunMatExtensionsGuard {
     fn drop(&mut self) {
-        set_runmat_extensions_enabled(self.previous);
+        if let Some(state) = &self.state {
+            state.runmat_extensions_enabled.set(self.previous);
+        } else {
+            RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(self.previous));
+        }
     }
 }
 

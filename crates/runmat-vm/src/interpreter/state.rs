@@ -47,7 +47,7 @@ impl InterpreterState {
             initial_vars,
             current_function_name,
             call_counts,
-            runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
+            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             )),
         )
@@ -58,7 +58,7 @@ impl InterpreterState {
         initial_vars: &mut [Value],
         current_function_name: Option<&str>,
         call_counts: Vec<(usize, usize)>,
-        execution: runmat_runtime::execution::InvocationExecutionContext,
+        runtime: runmat_runtime::context::RuntimeContext,
     ) -> Self {
         let initial_assigned_var_count = initial_vars.len();
         let mut vars = initial_vars.to_vec();
@@ -99,7 +99,7 @@ impl InterpreterState {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
-                execution,
+                runtime,
             },
             try_stack: Vec::new(),
             last_exception: None,

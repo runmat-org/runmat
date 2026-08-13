@@ -1,6 +1,5 @@
 use runmat_types::MemberAccess;
 use runmat_value::Value;
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use crate::{OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD};
@@ -12,15 +11,11 @@ use super::{
     TIMETABLE_CLASS, UITABLE_CLASS, VARTYPE_CLASS,
 };
 
-thread_local! {
-    static TABLE_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static TABLE_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(TABLE_CLASS);
 
 pub fn ensure_table_class_registered() {
-    TABLE_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    TABLE_CLASS_REGISTERED.ensure(|| {
         register_tabular_class(TABLE_CLASS);
         register_tabular_class(TIMETABLE_CLASS);
         register_plain_object_class(CATEGORICAL_CLASS, &["Codes", "Categories", "Ordinal"]);
@@ -44,7 +39,6 @@ pub fn ensure_table_class_registered() {
         );
         register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files"]);
         register_plain_object_class(UITABLE_CLASS, &["Data", "ColumnName", "RowName"]);
-        registered.set(true);
     });
 }
 

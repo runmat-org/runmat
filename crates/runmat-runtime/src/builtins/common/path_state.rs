@@ -169,7 +169,7 @@ pub fn set_path_string(new_path: &str) {
 }
 
 fn active_search_path() -> Option<Arc<SearchPath>> {
-    crate::user_functions::active_runtime_context().map(|context| Arc::clone(context.search_path()))
+    crate::context::legacy::active().and_then(|context| context.search_path().map(Arc::clone))
 }
 
 /// Split the current MATLAB path string into individual entries, omitting
@@ -203,9 +203,11 @@ pub(crate) mod tests {
     #[test]
     fn active_runtime_context_owns_path_and_generation() {
         let first = Arc::new(SearchPath::new("first".to_string()));
-        let _first_context = crate::user_functions::install_runtime_context(Arc::new(
-            crate::user_functions::RuntimeContext::new(Arc::clone(&first)),
-        ));
+        let first_context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_search_path(Arc::clone(&first));
+        let _first_context = crate::context::RuntimeContextGuard::enter(first_context);
         assert_eq!(current_path_string(), "first");
         set_path_string("first");
         assert_eq!(first.generation(), 0, "no-op replacement is not a mutation");
@@ -216,9 +218,11 @@ pub(crate) mod tests {
 
         let second = Arc::new(SearchPath::new("second".to_string()));
         {
-            let _second_context = crate::user_functions::install_runtime_context(Arc::new(
-                crate::user_functions::RuntimeContext::new(second),
-            ));
+            let second_context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+                crate::execution::RuntimeExecutionService::new(),
+            ))
+            .with_search_path(second);
+            let _second_context = crate::context::RuntimeContextGuard::enter(second_context);
             assert_eq!(current_path_string(), "second");
         }
         assert_eq!(current_path_string(), updated);

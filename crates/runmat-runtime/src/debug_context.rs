@@ -23,6 +23,7 @@ runmat_thread_local! {
 
 pub struct DebugFrameGuard {
     did_push: bool,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for DebugFrameGuard {
@@ -30,10 +31,14 @@ impl Drop for DebugFrameGuard {
         if !self.did_push {
             return;
         }
-        DEBUG_STACK.with(|stack| {
-            let mut stack = stack.borrow_mut();
-            let _ = stack.pop();
-        });
+        if let Some(state) = &self.state {
+            state.debug.borrow_mut().pop();
+        } else {
+            DEBUG_STACK.with(|stack| {
+                let mut stack = stack.borrow_mut();
+                let _ = stack.pop();
+            });
+        }
     }
 }
 
@@ -42,17 +47,30 @@ pub fn push_frame(
     source_id: Option<SourceId>,
     span: Option<(usize, usize)>,
 ) -> DebugFrameGuard {
-    DEBUG_STACK.with(|stack| {
-        stack.borrow_mut().push(DebugFrame {
-            function: function.into(),
-            source_id,
-            span,
-        });
-    });
-    DebugFrameGuard { did_push: true }
+    let frame = DebugFrame {
+        function: function.into(),
+        source_id,
+        span,
+    };
+    if let Some(state) = active_state() {
+        state.debug.borrow_mut().push(frame);
+        DebugFrameGuard {
+            did_push: true,
+            state: Some(state),
+        }
+    } else {
+        DEBUG_STACK.with(|stack| stack.borrow_mut().push(frame));
+        DebugFrameGuard {
+            did_push: true,
+            state: None,
+        }
+    }
 }
 
 pub fn current_frames() -> Vec<DebugFrameInfo> {
+    if let Some(state) = active_state() {
+        return state.debug.borrow().iter().rev().map(frame_info).collect();
+    }
     DEBUG_STACK.with(|stack| {
         stack
             .borrow()
@@ -64,11 +82,26 @@ pub fn current_frames() -> Vec<DebugFrameInfo> {
 }
 
 pub fn current_function_name() -> Option<String> {
+    if let Some(state) = active_state() {
+        return state
+            .debug
+            .borrow()
+            .last()
+            .map(|frame| frame.function.clone());
+    }
     DEBUG_STACK.with(|stack| stack.borrow().last().map(|frame| frame.function.clone()))
 }
 
 pub fn reset_for_tests() {
+    if let Some(state) = active_state() {
+        state.debug.borrow_mut().clear();
+        return;
+    }
     DEBUG_STACK.with(|stack| stack.borrow_mut().clear());
+}
+
+fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
+    crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
 
 fn frame_info(frame: &DebugFrame) -> DebugFrameInfo {

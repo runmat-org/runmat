@@ -9,7 +9,7 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<(Value, crate::CoverageFragment), RunError> {
-        let coverage = runmat_vm::coverage::CoverageSession::start();
+        let coverage = runmat_vm::coverage::CoverageSession::start(&self.runtime_context);
         let value = self.invoke_executable(unit, invocation, control).await?;
         let program_revision = unit
             .revision()
@@ -30,6 +30,22 @@ impl RunMatSession {
     /// procedure calls pass through the same tiering policy as ordinary
     /// session execution.
     pub async fn invoke_executable(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        invocation: crate::ProcedureInvocation,
+        control: &crate::InvocationControl,
+    ) -> std::result::Result<Value, RunError> {
+        self.configure_runtime_context();
+        let runtime = self
+            .runtime_context
+            .clone()
+            .with_program_revision(unit.revision().program_revision.clone());
+        runtime
+            .scope(self.invoke_executable_in_context(unit, invocation, control))
+            .await
+    }
+
+    async fn invoke_executable_in_context(
         &mut self,
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
@@ -131,7 +147,7 @@ impl RunMatSession {
             unit.bytecode(),
             &mut variables,
             Some(&unit.source().relative_path),
-            self.execution_context
+            self.runtime_context
                 .clone()
                 .with_program_revision(unit.revision().program_revision.clone()),
         )
@@ -167,11 +183,14 @@ impl RunMatSession {
                     .unwrap_or(Value::OutputList(Vec::new())));
             }
         }
-        runmat_vm::invoke_semantic_function_value(
+        runmat_vm::invoke_semantic_function_value_in_context(
             function.0,
             &arguments,
             requested_outputs,
             unit.functions(),
+            self.runtime_context
+                .clone()
+                .with_program_revision(unit.revision().program_revision.clone()),
         )
         .await
     }

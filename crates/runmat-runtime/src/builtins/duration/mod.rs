@@ -1,5 +1,4 @@
 use runmat_types::MemberAccess;
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
@@ -103,9 +102,8 @@ pub const DURATION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
     },
 ];
 
-thread_local! {
-    static DURATION_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static DURATION_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(DURATION_CLASS);
 
 const DURATION_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DURATION.INVALID_ARGUMENT",
@@ -376,10 +374,7 @@ fn duration_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn ensure_duration_class_registered() {
-    DURATION_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    DURATION_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         properties.insert(
             FORMAT_FIELD.to_string(),
@@ -427,7 +422,6 @@ fn ensure_duration_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

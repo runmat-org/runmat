@@ -84,22 +84,47 @@ fn clear_residency(value: &Value) {
     }
 }
 
+fn active_or_standalone_runtime_context() -> runmat_runtime::context::RuntimeContext {
+    runmat_runtime::context::legacy::active().unwrap_or_else(|| {
+        runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+    })
+}
+
 pub async fn invoke_semantic_function_value(
     function: usize,
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
-    let execution = runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ));
+    let runtime = active_or_standalone_runtime_context();
     let (value, _) = invoke_semantic_function_value_with_input_residency(
         function,
         args,
         requested_outputs,
         function_registry,
         InputResidency::Transferred,
-        execution,
+        runtime,
+    )
+    .await?;
+    Ok(value)
+}
+
+pub async fn invoke_semantic_function_value_in_context(
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<Value, RuntimeError> {
+    let (value, _) = invoke_semantic_function_value_with_input_residency(
+        function,
+        args,
+        requested_outputs,
+        function_registry,
+        InputResidency::Transferred,
+        runtime,
     )
     .await?;
     Ok(value)
@@ -110,7 +135,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-    execution: runmat_runtime::execution::InvocationExecutionContext,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
     invoke_semantic_function_value_with_input_residency(
         function,
@@ -118,7 +143,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
         requested_outputs,
         function_registry,
         InputResidency::Borrowed,
-        execution,
+        runtime,
     )
     .await
 }
@@ -138,7 +163,27 @@ async fn invoke_semantic_function_value_with_input_residency(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     input_residency: InputResidency,
-    execution: runmat_runtime::execution::InvocationExecutionContext,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<(Value, Vec<Value>), RuntimeError> {
+    runtime
+        .scope(invoke_semantic_function_value_with_input_residency_inner(
+            function,
+            args,
+            requested_outputs,
+            function_registry,
+            input_residency,
+            runtime.clone(),
+        ))
+        .await
+}
+
+async fn invoke_semantic_function_value_with_input_residency_inner(
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    input_residency: InputResidency,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
@@ -300,7 +345,7 @@ async fn invoke_semantic_function_value_with_input_residency(
             requested_outputs,
             runtime_arg_count,
             missing_input_slots,
-            execution,
+            runtime,
         );
         #[cfg(target_arch = "wasm32")]
         {
@@ -913,32 +958,33 @@ pub async fn interpret_with_vars(
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
-    let execution = runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ));
-    interpret_with_vars_in_context(bytecode, initial_vars, current_function_name, execution).await
+    let runtime = active_or_standalone_runtime_context();
+    interpret_with_vars_in_context(bytecode, initial_vars, current_function_name, runtime).await
 }
 
 pub async fn interpret_with_vars_in_context(
     bytecode: &Bytecode,
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
-    execution: runmat_runtime::execution::InvocationExecutionContext,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
-    runmat_runtime::data::with_tx_registry_scope(interpret_with_vars_inner(
-        bytecode,
-        initial_vars,
-        current_function_name,
-        execution,
-    ))
-    .await
+    runtime
+        .scope(runmat_runtime::data::with_tx_registry_scope(
+            interpret_with_vars_inner(
+                bytecode,
+                initial_vars,
+                current_function_name,
+                runtime.clone(),
+            ),
+        ))
+        .await
 }
 
 async fn interpret_with_vars_inner(
     bytecode: &Bytecode,
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
-    execution: runmat_runtime::execution::InvocationExecutionContext,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         current_function_name.unwrap_or("<main>"),
@@ -951,7 +997,7 @@ async fn interpret_with_vars_inner(
         initial_vars,
         current_function_name,
         call_counts,
-        execution,
+        runtime,
     ));
     match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
@@ -1024,7 +1070,7 @@ async fn run_interpreter_inner(
             call_counts.clone(),
         );
     let function_registry = Arc::new(bytecode.function_registry());
-    let nested_execution = context.execution.clone();
+    let nested_runtime = context.runtime.clone();
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     let registry_for_function_invoker = Arc::clone(&function_registry);
     let _semantic_function_guard =
@@ -1033,7 +1079,7 @@ async fn run_interpreter_inner(
                 let args = args.to_vec();
                 let previous_invoker = previous_semantic_invoker.clone();
                 let function_registry = Arc::clone(&registry_for_function_invoker);
-                let execution = nested_execution.clone();
+                let runtime = nested_runtime.clone();
                 Box::pin(async move {
                     let local_function = function_registry
                         .get(runmat_hir::FunctionId(function))
@@ -1048,7 +1094,7 @@ async fn run_interpreter_inner(
                         &args,
                         requested_outputs,
                         &function_registry,
-                        execution,
+                        runtime,
                     )
                     .await
                     .map(|(value, _)| value)
@@ -1500,9 +1546,7 @@ pub async fn interpret_function_with_counts(
     in_count: usize,
     missing_input_slots: HashSet<usize>,
 ) -> Result<Vec<Value>, RuntimeError> {
-    let execution = runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ));
+    let runtime = active_or_standalone_runtime_context();
     interpret_function_with_counts_in_context(
         bytecode,
         vars,
@@ -1510,7 +1554,7 @@ pub async fn interpret_function_with_counts(
         out_count,
         in_count,
         missing_input_slots,
-        execution,
+        runtime,
     )
     .await
 }
@@ -1522,7 +1566,29 @@ async fn interpret_function_with_counts_in_context(
     out_count: usize,
     in_count: usize,
     missing_input_slots: HashSet<usize>,
-    execution: runmat_runtime::execution::InvocationExecutionContext,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<Vec<Value>, RuntimeError> {
+    runtime
+        .scope(interpret_function_with_counts_in_context_inner(
+            bytecode,
+            vars,
+            name,
+            out_count,
+            in_count,
+            missing_input_slots,
+            runtime.clone(),
+        ))
+        .await
+}
+
+async fn interpret_function_with_counts_in_context_inner(
+    bytecode: &Bytecode,
+    vars: Vec<Value>,
+    name: &str,
+    out_count: usize,
+    in_count: usize,
+    missing_input_slots: HashSet<usize>,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut vars = vars;
     CALL_COUNTS.with(|cc| {
@@ -1534,7 +1600,7 @@ async fn interpret_function_with_counts_in_context(
         &mut vars,
         Some(name),
         call_counts,
-        execution,
+        runtime,
     );
     state.missing_input_slots = missing_input_slots;
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(

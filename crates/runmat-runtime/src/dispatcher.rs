@@ -22,24 +22,37 @@ fn ensure_wasm_builtins_registered() {}
 
 pub struct ClassAccessContextGuard {
     previous: Option<String>,
+    context: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for ClassAccessContextGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
-        CLASS_ACCESS_CONTEXT.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        if let Some(context) = &self.context {
+            context.call.borrow_mut().class_access = previous;
+        } else {
+            CLASS_ACCESS_CONTEXT.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
     }
 }
 
 pub fn push_class_access_context(class_name: Option<String>) -> ClassAccessContextGuard {
-    let previous =
-        CLASS_ACCESS_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), class_name));
-    ClassAccessContextGuard { previous }
+    let context =
+        crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()));
+    let previous = if let Some(context) = &context {
+        std::mem::replace(&mut context.call.borrow_mut().class_access, class_name)
+    } else {
+        CLASS_ACCESS_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), class_name))
+    };
+    ClassAccessContextGuard { previous, context }
 }
 
 fn current_class_access_context() -> Option<String> {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.state().call.borrow().class_access.clone();
+    }
     CLASS_ACCESS_CONTEXT.with(|slot| slot.borrow().clone())
 }
 

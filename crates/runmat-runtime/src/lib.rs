@@ -35,6 +35,7 @@ pub mod callsite;
 pub mod class_registry;
 pub mod compatibility;
 pub mod console;
+pub mod context;
 pub mod data;
 pub mod execution;
 pub mod interaction;
@@ -118,21 +119,33 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-struct ConstructorReceiverPollGuard;
+struct ConstructorReceiverPollGuard {
+    context: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
 
 impl Drop for ConstructorReceiverPollGuard {
     fn drop(&mut self) {
-        CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
-            stack.borrow_mut().pop();
-        });
+        if let Some(context) = &self.context {
+            context.constructor_receivers.borrow_mut().pop();
+        } else {
+            CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+                stack.borrow_mut().pop();
+            });
+        }
     }
 }
 
 fn push_constructor_receiver_for_poll(receiver: Value) -> ConstructorReceiverPollGuard {
-    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
-        stack.borrow_mut().push(receiver);
-    });
-    ConstructorReceiverPollGuard
+    let context =
+        crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()));
+    if let Some(context) = &context {
+        context.constructor_receivers.borrow_mut().push(receiver);
+    } else {
+        CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+            stack.borrow_mut().push(receiver);
+        });
+    }
+    ConstructorReceiverPollGuard { context }
 }
 
 pub(crate) struct ConstructorReceiverFuture<Fut> {
@@ -171,9 +184,8 @@ fn constructor_receiver_class_name(receiver: &Value) -> Option<&str> {
 }
 
 fn active_constructor_receiver_for(class_name: &str) -> Option<Value> {
-    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+    let find = |stack: &[Value]| {
         stack
-            .borrow()
             .iter()
             .rev()
             .find(|receiver| {
@@ -183,7 +195,11 @@ fn active_constructor_receiver_for(class_name: &str) -> Option<Value> {
                 })
             })
             .cloned()
-    })
+    };
+    if let Some(context) = crate::context::legacy::active() {
+        return find(&context.state().constructor_receivers.borrow());
+    }
+    CONSTRUCTOR_RECEIVER_STACK.with(|stack| find(&stack.borrow()))
 }
 
 fn undefined_callable_error(identity: &runmat_types::CallableIdentity) -> RuntimeError {
@@ -550,10 +566,21 @@ pub(crate) async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
 use std::cell::RefCell;
 
 #[derive(Default)]
-struct EventRegistry {
+pub(crate) struct EventRegistry {
     next_id: u64,
     listeners: std::collections::HashMap<(usize, String), Vec<runmat_value::Listener>>,
     listener_roots: std::collections::HashMap<u64, ListenerRoots>,
+}
+
+impl std::fmt::Debug for EventRegistry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EventRegistry")
+            .field("next_id", &self.next_id)
+            .field("listener_groups", &self.listeners.len())
+            .field("listener_roots", &self.listener_roots.len())
+            .finish()
+    }
 }
 
 struct ListenerRoots {
@@ -565,16 +592,29 @@ thread_local! {
     static EVENT_REGISTRY: RefCell<EventRegistry> = RefCell::new(EventRegistry::default());
 }
 
+fn with_event_registry<R>(operation: impl FnOnce(&EventRegistry) -> R) -> R {
+    if let Some(context) = crate::context::legacy::active() {
+        return operation(&context.state().events.borrow());
+    }
+    EVENT_REGISTRY.with(|registry| operation(&registry.borrow()))
+}
+
+fn with_event_registry_mut<R>(operation: impl FnOnce(&mut EventRegistry) -> R) -> R {
+    if let Some(context) = crate::context::legacy::active() {
+        return operation(&mut context.state().events.borrow_mut());
+    }
+    EVENT_REGISTRY.with(|registry| operation(&mut registry.borrow_mut()))
+}
+
 #[cfg(test)]
 fn reset_event_registry_for_test() {
-    EVENT_REGISTRY.with(|registry| {
-        *registry.borrow_mut() = EventRegistry::default();
+    with_event_registry_mut(|registry| {
+        *registry = EventRegistry::default();
     });
 }
 
 pub(crate) fn invalidate_listener_registration(listener_id: u64) {
-    EVENT_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
+    with_event_registry_mut(|registry| {
         for listeners in registry.listeners.values_mut() {
             for listener in listeners.iter_mut() {
                 if listener.id == listener_id {
@@ -701,8 +741,7 @@ pub(crate) async fn addlistener_builtin(
             )
         }
     };
-    let id = EVENT_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
+    let id = with_event_registry_mut(|registry| {
         registry.next_id += 1;
         registry.next_id
     });
@@ -727,8 +766,7 @@ pub(crate) async fn addlistener_builtin(
         enabled: true,
         valid: true,
     };
-    EVENT_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
+    with_event_registry_mut(|registry| {
         registry
             .listeners
             .entry((key_ptr, event_name))
@@ -778,8 +816,7 @@ pub(crate) async fn notify_builtin(
         }
     };
     let mut to_call: Vec<runmat_value::Listener> = Vec::new();
-    EVENT_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
+    with_event_registry(|registry| {
         if let Some(list) = registry.listeners.get(&(key_ptr, event_name.clone())) {
             for l in list {
                 if l.valid && l.enabled {

@@ -60,8 +60,6 @@ runmat_thread_local! {
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
         const { RefCell::new(None) };
-    static ACTIVE_RUNTIME_CONTEXT: RefCell<Option<Arc<RuntimeContext>>> =
-        const { RefCell::new(None) };
     static SOURCE_FUNCTION_CATALOG: RefCell<Option<Arc<Vec<SourceFunctionInfo>>>> =
         const { RefCell::new(None) };
     static ACTIVE_SEMANTIC_FUNCTION_STACK: RefCell<Vec<usize>> =
@@ -70,154 +68,169 @@ runmat_thread_local! {
 
 pub struct FunctionInvokerGuard {
     previous: Option<Arc<FunctionInvoker>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct FunctionResolverGuard {
     previous: Option<Arc<FunctionResolver>>,
-}
-
-pub struct RuntimeContextGuard {
-    previous: Option<Arc<RuntimeContext>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct SourceFunctionCatalogGuard {
     previous: Option<Arc<Vec<SourceFunctionInfo>>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
-pub struct ActiveSemanticFunctionGuard;
+pub struct ActiveSemanticFunctionGuard {
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
 
 impl Drop for FunctionInvokerGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
-        SEMANTIC_FUNCTION_INVOKER.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().semantic_invoker = previous;
+        } else {
+            SEMANTIC_FUNCTION_INVOKER.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
     }
 }
 
 impl Drop for FunctionResolverGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
-        SEMANTIC_FUNCTION_RESOLVER.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
-    }
-}
-
-impl Drop for RuntimeContextGuard {
-    fn drop(&mut self) {
-        let previous = self.previous.take();
-        ACTIVE_RUNTIME_CONTEXT.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().semantic_resolver = previous;
+        } else {
+            SEMANTIC_FUNCTION_RESOLVER.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
     }
 }
 
 impl Drop for SourceFunctionCatalogGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
-        SOURCE_FUNCTION_CATALOG.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().source_functions = previous;
+        } else {
+            SOURCE_FUNCTION_CATALOG.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
     }
 }
 
 impl Drop for ActiveSemanticFunctionGuard {
     fn drop(&mut self) {
-        ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
-            slot.borrow_mut().pop();
-        });
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().active_functions.pop();
+        } else {
+            ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
+                slot.borrow_mut().pop();
+            });
+        }
     }
 }
 
 pub fn install_semantic_function_invoker(
     invoker: Option<Arc<FunctionInvoker>>,
 ) -> FunctionInvokerGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(&mut state.call.borrow_mut().semantic_invoker, invoker);
+        return FunctionInvokerGuard {
+            previous,
+            state: Some(state),
+        };
+    }
     let previous =
         SEMANTIC_FUNCTION_INVOKER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), invoker));
-    FunctionInvokerGuard { previous }
+    FunctionInvokerGuard {
+        previous,
+        state: None,
+    }
 }
 
 pub fn install_semantic_function_resolver(
     resolver: Option<Arc<FunctionResolver>>,
 ) -> FunctionResolverGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(&mut state.call.borrow_mut().semantic_resolver, resolver);
+        return FunctionResolverGuard {
+            previous,
+            state: Some(state),
+        };
+    }
     let previous = SEMANTIC_FUNCTION_RESOLVER
         .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
-    FunctionResolverGuard { previous }
-}
-
-pub struct RuntimeContext {
-    search_path: Arc<crate::builtins::common::path_state::SearchPath>,
-    dynamic_function_loader: Option<Arc<DynamicFunctionLoader>>,
-}
-
-impl RuntimeContext {
-    pub fn new(search_path: Arc<crate::builtins::common::path_state::SearchPath>) -> Self {
-        Self {
-            search_path,
-            dynamic_function_loader: None,
-        }
+    FunctionResolverGuard {
+        previous,
+        state: None,
     }
-
-    pub fn with_dynamic_function_loader(mut self, loader: Arc<DynamicFunctionLoader>) -> Self {
-        self.dynamic_function_loader = Some(loader);
-        self
-    }
-
-    pub fn search_path(&self) -> &Arc<crate::builtins::common::path_state::SearchPath> {
-        &self.search_path
-    }
-}
-
-pub fn install_runtime_context(context: Arc<RuntimeContext>) -> RuntimeContextGuard {
-    let previous = ACTIVE_RUNTIME_CONTEXT.with(|slot| slot.borrow_mut().replace(context));
-    RuntimeContextGuard { previous }
-}
-
-pub fn active_runtime_context() -> Option<Arc<RuntimeContext>> {
-    ACTIVE_RUNTIME_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
 pub fn install_source_function_catalog(
     catalog: Option<Arc<Vec<SourceFunctionInfo>>>,
 ) -> SourceFunctionCatalogGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(&mut state.call.borrow_mut().source_functions, catalog);
+        return SourceFunctionCatalogGuard {
+            previous,
+            state: Some(state),
+        };
+    }
     let previous =
         SOURCE_FUNCTION_CATALOG.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), catalog));
-    SourceFunctionCatalogGuard { previous }
+    SourceFunctionCatalogGuard {
+        previous,
+        state: None,
+    }
 }
 
 pub fn push_active_semantic_function(function: usize) -> ActiveSemanticFunctionGuard {
+    if let Some(state) = active_state() {
+        state.call.borrow_mut().active_functions.push(function);
+        return ActiveSemanticFunctionGuard { state: Some(state) };
+    }
     ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
         slot.borrow_mut().push(function);
     });
-    ActiveSemanticFunctionGuard
+    ActiveSemanticFunctionGuard { state: None }
 }
 
 pub fn current_semantic_function_invoker() -> Option<Arc<FunctionInvoker>> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().semantic_invoker.clone();
+    }
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().semantic_resolver.clone();
+    }
     SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_active_semantic_function() -> Option<usize> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().active_functions.last().copied();
+    }
     ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().last().copied())
 }
 
 pub fn source_functions_for(source_id: SourceId) -> Vec<SourceFunctionInfo> {
-    SOURCE_FUNCTION_CATALOG.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .map(|catalog| {
-                catalog
-                    .iter()
-                    .filter(|info| info.source_id == source_id)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    })
+    if let Some(state) = active_state() {
+        return source_functions_in_catalog(
+            state.call.borrow().source_functions.as_deref(),
+            source_id,
+        );
+    }
+    SOURCE_FUNCTION_CATALOG
+        .with(|slot| source_functions_in_catalog(slot.borrow().as_deref(), source_id))
 }
 
 pub async fn try_call_semantic_function(
@@ -225,7 +238,7 @@ pub async fn try_call_semantic_function(
     args: &[Value],
     requested_outputs: usize,
 ) -> Option<Result<Value, RuntimeError>> {
-    let invoker = SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
+    let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
     Some(invoker(function, args, requested_outputs).await)
 }
@@ -240,7 +253,7 @@ pub async fn try_call_semantic_function_by_name(
 }
 
 pub fn resolve_semantic_function_by_name(name: &str) -> Option<usize> {
-    let resolver = SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())?;
+    let resolver = current_semantic_function_resolver()?;
     resolver(name)
 }
 
@@ -249,8 +262,32 @@ pub async fn try_load_and_call_dynamic_function(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> Option<Result<Value, RuntimeError>> {
-    let loader = active_runtime_context()?.dynamic_function_loader.clone()?;
+    let loader = crate::context::legacy::active()?
+        .state()
+        .call
+        .borrow()
+        .dynamic_loader
+        .clone()?;
     loader(name, args, requested_outputs).await
+}
+
+fn source_functions_in_catalog(
+    catalog: Option<&Vec<SourceFunctionInfo>>,
+    source_id: SourceId,
+) -> Vec<SourceFunctionInfo> {
+    catalog
+        .map(|catalog| {
+            catalog
+                .iter()
+                .filter(|info| info.source_id == source_id)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
+    crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
 
 pub async fn try_call_semantic_descriptor(

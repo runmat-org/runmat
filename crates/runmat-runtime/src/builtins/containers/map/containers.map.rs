@@ -1,7 +1,7 @@
 //! MATLAB-compatible `containers.Map` constructor and methods for RunMat.
 
 use runmat_types::MemberAccess;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{
@@ -795,9 +795,11 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static MAP_REGISTRY: RefCell<HashMap<u64, MapStore>> = RefCell::new(HashMap::new());
-    static CONTAINERS_MAP_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
     static MAP_ROOT_STATE: RefCell<Option<MapRootState>> = const { RefCell::new(None) };
 }
+
+static CONTAINERS_MAP_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(CLASS_NAME);
 
 struct MapRootState {
     root_id: RootId,
@@ -891,10 +893,7 @@ fn deactivate_map_registry_root_if_empty() {
 }
 
 fn ensure_containers_map_class_registered() {
-    CONTAINERS_MAP_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    CONTAINERS_MAP_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Count", "KeyType", "ValueType"] {
             properties.insert(
@@ -940,7 +939,6 @@ fn ensure_containers_map_class_registered() {
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 

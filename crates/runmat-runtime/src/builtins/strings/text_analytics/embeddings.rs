@@ -1,7 +1,6 @@
 //! Word embedding compatibility objects and lookup helpers.
 use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
@@ -36,9 +35,8 @@ const MAX_ZIP_ENTRIES: usize = 256;
 const MAX_TRAINED_DENSE_VALUES: usize = 20_000_000;
 const MAX_DOC2SEQUENCE_DENSE_VALUES: usize = 50_000_000;
 
-thread_local! {
-    static WORD_EMBEDDING_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static WORD_EMBEDDING_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(WORD_EMBEDDING_CLASS);
 
 const OUT_EMBEDDING: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "emb",
@@ -1389,10 +1387,7 @@ fn stable_word_hash(word: &str) -> u64 {
 }
 
 fn ensure_word_embedding_class_registered() {
-    WORD_EMBEDDING_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    WORD_EMBEDDING_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Dimension", "Vocabulary", VECTOR_PROPERTY] {
             properties.insert(name.to_string(), property_def(name));
@@ -1403,7 +1398,6 @@ fn ensure_word_embedding_class_registered() {
             properties,
             methods: HashMap::new(),
         });
-        registered.set(true);
     });
 }
 
