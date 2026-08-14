@@ -9,6 +9,7 @@ use super::state::HostState;
 pub(super) fn evaluate_rvalue(
     state: &mut HostState,
     value: &MirRvalue,
+    requested_outputs: usize,
 ) -> JitResult<Vec<NativeValueRef>> {
     match value {
         MirRvalue::Use(operand) => evaluate_operand(state, operand).map(|value| vec![value]),
@@ -77,6 +78,56 @@ pub(super) fn evaluate_rvalue(
             super::aggregate::object(state, class_name, fields)
                 .map(|value| vec![state.arena.insert(value)])
         }
+        MirRvalue::Index { base, indexing } => {
+            super::indexing::read(state, base, indexing, requested_outputs).map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect()
+            })
+        }
+        MirRvalue::Member { base, member } => {
+            let base = materialize_operand(state, base)?;
+            let value = futures::executor::block_on(state.runtime.scope(
+                runmat_runtime::object::resolve::load_member(
+                    base,
+                    member.0.clone(),
+                    false,
+                    Some(&state.function.name),
+                ),
+            ))
+            .map_err(JitError::from)?;
+            Ok(vec![state.arena.insert(value)])
+        }
+        MirRvalue::DynamicMember { base, member } => {
+            let base = materialize_operand(state, base)?;
+            let member = materialize_operand(state, member)?;
+            let member = String::try_from(&member).map_err(|error| {
+                JitError::from(runmat_runtime::runtime_error::semantic_error(
+                    "DynamicFieldName",
+                    error,
+                ))
+            })?;
+            let value = futures::executor::block_on(state.runtime.scope(
+                runmat_runtime::object::resolve::load_member_dynamic(
+                    base,
+                    member,
+                    false,
+                    Some(&state.function.name),
+                ),
+            ))
+            .map_err(JitError::from)?;
+            Ok(vec![state.arena.insert(value)])
+        }
+        MirRvalue::MetaClass(name) => Ok(vec![state.arena.insert(Value::String(
+            name.0
+                .iter()
+                .map(|segment| segment.0.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+        ))]),
+        MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
+        MirRvalue::End => Ok(vec![state.arena.insert(Value::Num(-0.0))]),
         other => Err(JitError::UnsupportedSite(format!(
             "rvalue {other:?} is not in the current generic-host cohort"
         ))),
@@ -92,7 +143,7 @@ fn execute_embedded_statement(
             place: runmat_mir::MirPlace::Local(local),
             value,
         } => {
-            let mut values = evaluate_rvalue(state, value)?;
+            let mut values = evaluate_rvalue(state, value, 1)?;
             if values.len() != 1 {
                 return Err(JitError::Host(
                     "embedded short-circuit assignment did not produce one value".into(),
@@ -105,7 +156,7 @@ fn execute_embedded_statement(
             Ok(())
         }
         runmat_mir::MirStmtKind::Expr(value) => {
-            let _ = evaluate_rvalue(state, value)?;
+            let _ = evaluate_rvalue(state, value, 0)?;
             Ok(())
         }
         other => Err(JitError::UnsupportedSite(format!(

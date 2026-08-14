@@ -6,12 +6,12 @@ use crate::call::shared::{build_expanded_args_from_specs, expand_brace_values};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
-use crate::object::resolve as obj_resolve;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_runtime::call::descriptor::{
     execute_callable_descriptor, CallableCallKind, CallableDescriptor,
 };
+use runmat_runtime::object::resolve as obj_resolve;
 use runmat_runtime::RuntimeError;
 use runmat_types::MemberAccess;
 use runmat_value::{MException, Value};

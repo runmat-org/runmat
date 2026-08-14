@@ -6,4 +6,6 @@ The generic host is split by responsibility: compilation retains executable memo
 
 Operators, calls, aggregates, conditions, and MATLAB column iteration stay runtime-owned. The JIT adapters only materialize Native IR operands, preserve requested-output contracts, and select compiled edges. Loop snapshots are invocation-owned: an iterable is evaluated once, retained across compiled backedges, and retired on exhaustion or any edge leaving the natural loop body. Cancellation is checked at every generic semantic site, with exact frame roots, resume points, source spans, and side-effect epochs refreshed around host work.
 
+Index and member adapters likewise consume runtime-owned selector plans, type-preserving reads/writes, object resolution, overload dispatch, and GC barriers. Nested assignments are reconstructed from the changed leaf back to one Native IR root local, and only that updated root is published into the next SSA state. Fixed multi-output indexing preserves discard and comma-list arity; unsupported selector forms fail at their semantic site rather than replaying the function through another executor.
+
 Host-native executable memory is unavailable in a web/WASM process. WASM consumers retain and verify the same portable executable and generic Native IR products; browser execution uses its platform executor rather than embedding a native Cranelift JIT.

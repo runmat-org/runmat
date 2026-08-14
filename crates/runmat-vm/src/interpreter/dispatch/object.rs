@@ -1,5 +1,4 @@
-use crate::object::resolve as obj_resolve;
-use runmat_gc::gc_record_write;
+use runmat_runtime::object::resolve as obj_resolve;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -73,15 +72,12 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value = obj_resolve::store_member(
+            let value = obj_resolve::store_member_traced(
                 base,
                 field.clone(),
                 rhs,
                 false,
                 caller_function_name,
-                |oldv, newv| {
-                    gc_record_write(oldv, newv);
-                },
             )
             .await?;
             stack.push(value);
@@ -96,15 +92,12 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value = obj_resolve::store_member(
+            let value = obj_resolve::store_member_traced(
                 base,
                 field.clone(),
                 rhs,
                 true,
                 caller_function_name,
-                |oldv, newv| {
-                    gc_record_write(oldv, newv);
-                },
             )
             .await?;
             stack.push(value);
@@ -124,15 +117,12 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic(
+            let value = obj_resolve::store_member_dynamic_traced(
                 base,
                 name,
                 rhs,
                 false,
                 caller_function_name,
-                |oldv, newv| {
-                    gc_record_write(oldv, newv);
-                },
             )
             .await?;
             stack.push(value);
@@ -152,15 +142,12 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic(
+            let value = obj_resolve::store_member_dynamic_traced(
                 base,
                 name,
                 rhs,
                 true,
                 caller_function_name,
-                |oldv, newv| {
-                    gc_record_write(oldv, newv);
-                },
             )
             .await?;
             stack.push(value);

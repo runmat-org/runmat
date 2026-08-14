@@ -4,6 +4,8 @@ mod aggregate;
 mod call;
 mod callbacks;
 mod executor;
+mod indexing;
+mod mutation;
 mod operand;
 mod operator;
 mod site;

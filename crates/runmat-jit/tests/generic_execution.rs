@@ -11,8 +11,10 @@ use runmat_hir::{FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, Funct
 use runmat_jit::{GenericExecutor, JitError};
 use runmat_mir::{
     AsyncBehaviorFact, BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall,
-    MirCallArg, MirCallee, MirConstant, MirFunctionMetadata, MirLocal, MirLocalId, MirLocalKind,
-    MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind,
+    MirCallArg, MirCallee, MirConstant, MirFunctionMetadata, MirIndexComponent, MirIndexPlan,
+    MirIndexing, MirLocal, MirLocalId, MirLocalKind, MirOperand, MirOutputTarget,
+    MirOutputTargetList, MirPlace, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind,
+    MirTerminator, MirTerminatorKind,
 };
 use runmat_native_codegen::{lower_executable, NativeLoweringInput, NativeTarget};
 use runmat_runtime::{context::RuntimeContext, execution::RuntimeExecutionService};
@@ -130,6 +132,63 @@ fn generic_for_iterates_captured_columns_through_compiled_backedges() {
             .unwrap()
             .outputs,
         vec![Value::Num(6.0)]
+    );
+}
+
+#[test]
+fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
+    let indexing = GenericExecutor::compile(index_fixture()).unwrap();
+    assert_eq!(
+        indexing
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(20.0)]
+    );
+
+    let member = GenericExecutor::compile(member_fixture()).unwrap();
+    assert_eq!(
+        member
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(42.0)]
+    );
+}
+
+#[test]
+fn generic_index_and_member_mutations_publish_updated_root_values() {
+    let indexing = GenericExecutor::compile(index_assignment_fixture()).unwrap();
+    let Value::Tensor(updated) = indexing
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap()
+        .outputs
+        .pop()
+        .unwrap()
+    else {
+        panic!("expected updated tensor")
+    };
+    assert_eq!(updated.materialize_f64(), vec![10.0, 99.0, 30.0]);
+
+    let member = GenericExecutor::compile(member_assignment_fixture()).unwrap();
+    let Value::Struct(updated) = member
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap()
+        .outputs
+        .pop()
+        .unwrap()
+    else {
+        panic!("expected updated structure")
+    };
+    assert_eq!(updated.fields.get("answer"), Some(&Value::Num(42.0)));
+
+    let multi = GenericExecutor::compile(multi_assignment_fixture()).unwrap();
+    assert_eq!(
+        multi
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(33.0)]
     );
 }
 
@@ -652,6 +711,244 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
         target: NativeTarget::current(),
     })
     .unwrap()
+}
+
+fn index_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 3 };
+    lower_body(
+        "index",
+        2,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::Aggregate {
+                        kind: MirAggregateKind::Tensor,
+                        rows: 1,
+                        cols: 3,
+                        elements: vec![
+                            MirOperand::Constant(MirConstant::Number("10".into())),
+                            MirOperand::Constant(MirConstant::Number("20".into())),
+                            MirOperand::Constant(MirConstant::Number("30".into())),
+                        ],
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(1)),
+                    value: MirRvalue::Index {
+                        base: MirOperand::Local(MirLocalId(0)),
+                        indexing: MirIndexing {
+                            kind: runmat_types::IndexKind::Paren,
+                            plan: MirIndexPlan::Scalar,
+                            components: vec![MirIndexComponent::Expr(MirOperand::Constant(
+                                MirConstant::Number("2".into()),
+                            ))],
+                            result_context: runmat_types::IndexResultContext::ReadSingle,
+                            cell_expand_all: false,
+                        },
+                    },
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(1)),
+        span,
+    )
+}
+
+fn member_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 3 };
+    lower_body(
+        "member",
+        2,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::StructLiteral {
+                        fields: vec![(
+                            runmat_types::MemberName("answer".into()),
+                            MirOperand::Constant(MirConstant::Number("42".into())),
+                        )],
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(1)),
+                    value: MirRvalue::Member {
+                        base: MirOperand::Local(MirLocalId(0)),
+                        member: runmat_types::MemberName("answer".into()),
+                    },
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(1)),
+        span,
+    )
+}
+
+fn index_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let indexing = MirIndexing {
+        kind: runmat_types::IndexKind::Paren,
+        plan: MirIndexPlan::Scalar,
+        components: vec![MirIndexComponent::Expr(MirOperand::Constant(
+            MirConstant::Number("2".into()),
+        ))],
+        result_context: runmat_types::IndexResultContext::AssignmentTarget,
+        cell_expand_all: false,
+    };
+    let place = MirPlace::Index(Box::new(MirPlace::Local(MirLocalId(0))), indexing);
+    lower_body(
+        "index_assignment",
+        1,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::Aggregate {
+                        kind: MirAggregateKind::Tensor,
+                        rows: 1,
+                        cols: 3,
+                        elements: vec![
+                            MirOperand::Constant(MirConstant::Number("10".into())),
+                            MirOperand::Constant(MirConstant::Number("20".into())),
+                            MirOperand::Constant(MirConstant::Number("30".into())),
+                        ],
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
+                    place: place.clone(),
+                    kind: runmat_types::PlaceMutationKind::IndexedAssign,
+                    creation_policy: runmat_types::AssignmentCreationPolicy::CreateArrayByIndex,
+                    shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
+                }),
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place,
+                    value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("99".into()))),
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+fn member_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let place = MirPlace::Member(
+        Box::new(MirPlace::Local(MirLocalId(0))),
+        runmat_types::MemberName("answer".into()),
+    );
+    lower_body(
+        "member_assignment",
+        1,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::StructLiteral {
+                        fields: vec![(
+                            runmat_types::MemberName("answer".into()),
+                            MirOperand::Constant(MirConstant::Number("1".into())),
+                        )],
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
+                    place: place.clone(),
+                    kind: runmat_types::PlaceMutationKind::MemberAssign,
+                    creation_policy: runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
+                    shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
+                }),
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place,
+                    value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("42".into()))),
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+fn multi_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    lower_body(
+        "multi_assignment",
+        4,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::Aggregate {
+                        kind: MirAggregateKind::Cell,
+                        rows: 1,
+                        cols: 2,
+                        elements: vec![
+                            MirOperand::Constant(MirConstant::Number("11".into())),
+                            MirOperand::Constant(MirConstant::Number("22".into())),
+                        ],
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::MultiAssign {
+                    targets: MirOutputTargetList {
+                        targets: vec![
+                            MirOutputTarget::Place(MirPlace::Local(MirLocalId(1))),
+                            MirOutputTarget::Place(MirPlace::Local(MirLocalId(2))),
+                        ],
+                        requested_outputs: RequestedOutputCount::Exactly(2),
+                    },
+                    value: MirRvalue::Index {
+                        base: MirOperand::Local(MirLocalId(0)),
+                        indexing: MirIndexing {
+                            kind: runmat_types::IndexKind::Brace,
+                            plan: MirIndexPlan::Cell,
+                            components: vec![MirIndexComponent::Colon],
+                            result_context: runmat_types::IndexResultContext::ReadCommaList,
+                            cell_expand_all: true,
+                        },
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(3)),
+                    value: MirRvalue::Binary(
+                        MirOperand::Local(MirLocalId(1)),
+                        runmat_types::OperatorKind::Add,
+                        MirOperand::Local(MirLocalId(2)),
+                    ),
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(3)),
+        span,
+    )
 }
 
 fn lower_body(

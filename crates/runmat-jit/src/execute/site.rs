@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_mir::{MirPlace, MirStmtKind};
+use runmat_mir::MirStmtKind;
 use runmat_native_codegen::{
     NativeEdge, NativeEdgeArgument, NativeInstruction, NativeOperation, NativeTerminator,
     NativeTerminatorKind,
@@ -136,7 +136,7 @@ fn runtime_source(
 fn execute_instruction(state: &mut HostState, instruction: &NativeInstruction) -> JitResult<()> {
     match &instruction.operation {
         NativeOperation::Rvalue { value, .. } => {
-            let results = evaluate_rvalue(state, value)?;
+            let results = evaluate_rvalue(state, value, instruction.outputs.len())?;
             if instruction.outputs.len() != results.len() {
                 return Err(JitError::Host(format!(
                     "native rvalue produced {} values for {} SSA outputs",
@@ -158,27 +158,11 @@ fn execute_statement(
     instruction: &NativeInstruction,
     statement: &MirStmtKind,
 ) -> JitResult<()> {
+    if super::mutation::execute(state, instruction, statement)? {
+        return Ok(());
+    }
     match statement {
-        MirStmtKind::Assign {
-            place: MirPlace::Local(local),
-            ..
-        } => {
-            let source = instruction
-                .inputs
-                .first()
-                .and_then(|value| state.values.get(value))
-                .copied()
-                .ok_or_else(|| JitError::Host("assignment result is unavailable".into()))?;
-            let slot = state
-                .locals
-                .get_mut(local.0)
-                .ok_or_else(|| JitError::Host("assignment local is out of bounds".into()))?;
-            *slot = source;
-            for output in &instruction.outputs {
-                state.values.insert(output.value, source);
-            }
-        }
-        MirStmtKind::Expr(_) => {}
+        MirStmtKind::Expr(_) => state.pending_place_mutation = None,
         other => {
             return Err(JitError::UnsupportedSite(format!(
                 "statement {other:?} is not in the first generic-host cohort"

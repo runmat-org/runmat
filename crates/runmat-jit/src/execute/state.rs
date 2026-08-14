@@ -22,6 +22,7 @@ pub(super) struct HostState {
     pub last_error: Option<RuntimeError>,
     pub host_failure: Option<JitError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
+    pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
 }
 
@@ -80,6 +81,7 @@ impl HostState {
                 ..runmat_runtime::native::NativeSourceLocation::default()
             },
             active_for_loops: BTreeMap::new(),
+            pending_place_mutation: None,
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
