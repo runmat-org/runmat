@@ -1,9 +1,12 @@
 //! MATLAB-compatible `magic` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -34,10 +37,10 @@ const MAGIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 
 const MAGIC_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
-    ty: BuiltinParamType::IntegerScalar,
+    ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Order of the magic square.",
+    description: "Numeric input whose floored first real element selects the square order.",
 }];
 
 const MAGIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -46,7 +49,28 @@ const MAGIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &MAGIC_OUTPUT,
 }];
 
-const MAGIC_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const MAGIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are accepted; the first element is read exactly as the square order.",
+    }];
+
+pub const MAGIC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "A = magic(integer_n)",
+        inputs: &MAGIC_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The first real element selects the order and the result is a host double matrix; explicit gpuArray input is unsupported while automatic residency gathers transparently.",
+    }];
+
+const MAGIC_ERRORS: [BuiltinErrorDescriptor; 5] = [
     BuiltinErrorDescriptor {
         code: "RM.MAGIC.ARG_COUNT",
         identifier: None,
@@ -54,10 +78,10 @@ const MAGIC_ERRORS: [BuiltinErrorDescriptor; 6] = [
         message: "magic: requires exactly one input argument",
     },
     BuiltinErrorDescriptor {
-        code: "RM.MAGIC.NON_SCALAR",
+        code: "RM.MAGIC.EMPTY_INPUT",
         identifier: None,
-        when: "The input is not a numeric scalar.",
-        message: "magic: input must be a numeric scalar",
+        when: "The input has no numeric elements.",
+        message: "magic: input must contain a numeric value",
     },
     BuiltinErrorDescriptor {
         code: "RM.MAGIC.NON_FINITE",
@@ -66,22 +90,16 @@ const MAGIC_ERRORS: [BuiltinErrorDescriptor; 6] = [
         message: "magic: dimension must be finite",
     },
     BuiltinErrorDescriptor {
-        code: "RM.MAGIC.NON_INTEGER",
-        identifier: None,
-        when: "The order argument is not an integer.",
-        message: "magic: dimension must be an integer",
-    },
-    BuiltinErrorDescriptor {
         code: "RM.MAGIC.NEGATIVE",
         identifier: None,
-        when: "The order argument is negative.",
+        when: "The floored order argument is negative.",
         message: "magic: dimension must be non-negative",
     },
     BuiltinErrorDescriptor {
-        code: "RM.MAGIC.ORDER_TWO_UNDEFINED",
+        code: "RM.MAGIC.EXPLICIT_GPU",
         identifier: None,
-        when: "The requested order is 2.",
-        message: "magic: magic squares of order 2 do not exist",
+        when: "The order is supplied as an explicit gpuArray.",
+        message: "magic: gpuArray input is not supported",
     },
 ];
 
@@ -100,6 +118,7 @@ pub const MAGIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(magic_type),
     descriptor(crate::builtins::array::creation::magic::MAGIC_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::magic::MAGIC_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::magic"
 )]
 async fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -117,6 +136,9 @@ async fn parse_order(args: Vec<Value>) -> crate::BuiltinResult<usize> {
 
 async fn parse_order_value(value: &Value) -> crate::BuiltinResult<usize> {
     if let Value::GpuTensor(handle) = value {
+        if runmat_accelerate_api::handle_is_explicit(handle) {
+            return Err(builtin_error("magic: gpuArray input is not supported"));
+        }
         let tensor = gpu_helpers::gather_tensor_async(handle)
             .await
             .map_err(|err| builtin_error(format!("magic: {err}")))?;
@@ -130,62 +152,94 @@ async fn parse_order_host(value: &Value) -> crate::BuiltinResult<usize> {
         return parse_integer_order(value);
     }
     if let Value::Tensor(tensor) = value {
-        if !tensor::is_scalar_tensor(tensor) {
-            return Err(builtin_error("magic: input must be a numeric scalar"));
-        }
         if let Some(storage) = tensor.integer_storage() {
             return parse_integer_order(
                 &storage
                     .value_at(0)
-                    .expect("scalar integer storage has one element"),
+                    .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?,
             );
         }
+        let raw = *tensor
+            .materialize_f64()
+            .first()
+            .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?;
+        return parse_floating_order(raw);
+    }
+    if let Value::Complex(re, _) = value {
+        return parse_floating_order(*re);
+    }
+    if let Value::ComplexTensor(tensor) = value {
+        if let Some(storage) = tensor.integer_storage() {
+            return parse_integer_order(
+                &storage
+                    .real
+                    .value_at(0)
+                    .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?,
+            );
+        }
+        let raw = tensor
+            .materialize_f64()
+            .first()
+            .map(|value| value.0)
+            .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?;
+        return parse_floating_order(raw);
+    }
+    if let Value::LogicalArray(array) = value {
+        let raw = array
+            .data
+            .first()
+            .map(|value| f64::from(*value != 0))
+            .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?;
+        return parse_floating_order(raw);
+    }
+    if let Value::CharArray(array) = value {
+        let raw = array
+            .data
+            .first()
+            .map(|value| *value as u32 as f64)
+            .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?;
+        return parse_floating_order(raw);
     }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| builtin_error(format!("magic: {err}")))?
     else {
-        return Err(builtin_error("magic: input must be a numeric scalar"));
+        return Err(builtin_error("magic: input must contain a numeric value"));
     };
+    parse_floating_order(raw)
+}
+
+fn parse_floating_order(raw: f64) -> crate::BuiltinResult<usize> {
     if !raw.is_finite() {
         return Err(builtin_error("magic: dimension must be finite"));
     }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > 1e-6 {
-        return Err(builtin_error("magic: dimension must be an integer"));
-    }
-    if rounded < 0.0 {
+    let floored = raw.floor();
+    if floored < 0.0 {
         return Err(builtin_error("magic: dimension must be non-negative"));
     }
-    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+    if floored > usize::MAX as f64 || (usize::BITS == 64 && floored == usize::MAX as f64) {
         return Err(builtin_error(
             "magic: dimension is too large for this platform",
         ));
     }
-    let n = rounded as usize;
-    if n == 2 {
-        return Err(builtin_error(
-            "magic: magic squares of order 2 do not exist",
-        ));
-    }
-    Ok(n)
+    Ok(floored as usize)
 }
 
 fn parse_integer_order(value: &IntValue) -> crate::BuiltinResult<usize> {
     let n = value
         .try_to_usize()
         .ok_or_else(|| builtin_error("magic: dimension is outside the supported range"))?;
-    if n == 2 {
-        return Err(builtin_error(
-            "magic: magic squares of order 2 do not exist",
-        ));
-    }
     Ok(n)
 }
 
 fn magic_tensor(n: usize) -> Result<Tensor, crate::RuntimeError> {
     if n == 0 {
         return Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|err| builtin_error(format!("magic: {err}")));
+    }
+
+    if n == 2 {
+        return Tensor::new(vec![1.0, 4.0, 3.0, 2.0], vec![2, 2])
             .map_err(|err| builtin_error(format!("magic: {err}")));
     }
 
@@ -313,16 +367,52 @@ fn swap_cells(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{ComplexTensor, IntegerStorage};
 
     fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::magic_builtin(args))
     }
 
     #[test]
-    fn magic_rejects_two() {
-        let err = magic_builtin(vec![Value::Num(2.0)]).unwrap_err();
-        assert!(err.to_string().contains("order 2"));
+    fn magic_two_matches_documented_degenerate_square() {
+        let value = magic_builtin(vec![Value::Num(2.0)]).expect("magic(2)");
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 4.0, 3.0, 2.0]);
+    }
+
+    #[test]
+    fn magic_uses_floor_of_real_first_element() {
+        let input = Tensor::new(vec![3.9, 99.0], vec![1, 2]).expect("input");
+        let value = magic_builtin(vec![Value::Tensor(input)]).expect("magic");
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![3, 3]);
+
+        let complex =
+            ComplexTensor::new(vec![(4.8, 7.0), (12.0, 0.0)], vec![1, 2]).expect("complex input");
+        let value = magic_builtin(vec![Value::ComplexTensor(complex)]).expect("magic");
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![4, 4]);
+
+        let logical =
+            runmat_builtins::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical input");
+        assert_eq!(
+            block_on(parse_order_value(&Value::LogicalArray(logical))).unwrap(),
+            1
+        );
+        assert_eq!(
+            block_on(parse_order_value(&Value::CharArray(
+                runmat_builtins::CharArray::new_row("\u{3}\u{7}"),
+            )))
+            .unwrap(),
+            3
+        );
     }
 
     #[test]

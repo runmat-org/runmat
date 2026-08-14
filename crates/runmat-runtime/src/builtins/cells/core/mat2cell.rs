@@ -1,7 +1,11 @@
 //! MATLAB-compatible `mat2cell` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
     NumericDType, StringArray, Tensor, Value,
@@ -47,6 +51,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "mat2cell";
+
+const MAT2CELL_INTEGER_PARTITIONS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "mat2cell-integer-partitions",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "typed integer mat2cell partition vectors are a RunMat extension because the public MATLAB page documents numeric partitions without enumerating integer storage classes",
+        error_identifier: Some("RunMat:compatibility:Mat2cellIntegerPartitionsExtension"),
+    };
+
+pub const MAT2CELL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [MAT2CELL_INTEGER_PARTITIONS_EXTENSION];
 
 const MAT2CELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -100,6 +115,48 @@ const MAT2CELL_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         label: "C = mat2cell(A, dim1dist, dim2dist, ...)",
         inputs: &MAT2CELL_SIG_MULTI_PARTITION_INPUTS,
         outputs: &MAT2CELL_OUTPUT,
+    },
+];
+
+const MAT2CELL_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "A may be any array type; integer blocks preserve A's exact native class and values.",
+    }];
+
+const MAT2CELL_INTEGER_PARTITION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dimdist",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat accepts all eight typed integer classes as exact partition vectors; strict compatibility requires the publicly documented floating numeric form until stronger class evidence is available.",
+    }];
+
+pub const MAT2CELL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = mat2cell(integer_A, dim1dist, ...)",
+        inputs: &MAT2CELL_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Cell blocks preserve authoritative integer storage; automatic residency gathers to construct the host cell array, while explicit gpuArray input is unsupported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = mat2cell(A, integer_dim1dist, ...)",
+        inputs: &MAT2CELL_INTEGER_PARTITION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "RunMat-only typed partitions are validated exactly before block construction; explicit resident partition vectors reject before transfer.",
     },
 ];
 
@@ -163,6 +220,8 @@ fn mat2cell_error_with_message(
     keywords = "mat2cell,cell array,partition,block",
     type_resolver(mat2cell_type),
     descriptor(crate::builtins::cells::core::mat2cell::MAT2CELL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::cells::core::mat2cell::MAT2CELL_INTEGER_CAPABILITIES),
+    extensions(crate::builtins::cells::core::mat2cell::MAT2CELL_EXTENSIONS),
     builtin_path = "crate::builtins::cells::core::mat2cell"
 )]
 async fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -173,9 +232,17 @@ async fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         ));
     }
 
+    reject_explicit_gpu(&value, "input array")?;
     let host_value = gather_if_needed_async(&value).await?;
     let mut size_args = Vec::with_capacity(rest.len());
     for arg in rest {
+        reject_explicit_gpu(&arg, "partition vector")?;
+        if value_is_typed_integer(&arg) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &MAT2CELL_INTEGER_PARTITIONS_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
         let gathered = gather_if_needed_async(&arg).await?;
         size_args.push(gathered);
     }
@@ -183,6 +250,26 @@ async fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
     let input = Mat2CellInput::try_new(host_value)?;
     let partitions = parse_partitions(input.normalized_dims(), &size_args)?;
     split_into_cells(&input, partitions)
+}
+
+fn reject_explicit_gpu(value: &Value, role: &str) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        return Err(mat2cell_error_with_message(
+            format!("mat2cell: explicit gpuArray {role} is not supported"),
+            &MAT2CELL_ERROR_INVALID_INPUT,
+        ));
+    }
+    Ok(())
+}
+
+fn value_is_typed_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
 }
 
 #[derive(Debug)]
@@ -1137,6 +1224,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn typed_integer_blocks_and_partitions_preserve_exact_values() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
             vec![2, 1],
@@ -1153,9 +1241,35 @@ pub(crate) mod tests {
         assert_eq!(cells.data[1], Value::Int(IntValue::U64(u64::MAX)));
     }
 
+    #[test]
+    fn typed_integer_partition_vectors_follow_extension_policy() {
+        let input =
+            || Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+        let partition = || Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = mat2cell_builtin(Value::Tensor(input()), vec![Value::Tensor(partition())])
+                .expect_err("typed partitions are extension-gated");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:Mat2cellIntegerPartitionsExtension")
+            );
+        }
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result = mat2cell_builtin(Value::Tensor(input()), vec![Value::Tensor(partition())])
+                .expect("RunMat extension");
+            let Value::Cell(cells) = result else {
+                panic!("expected cell array");
+            };
+            assert_eq!(cells.data, vec![Value::Int(IntValue::U64(u64::MAX))]);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn typed_partition_entries_are_checked_without_f64_truncation() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let partitions =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();

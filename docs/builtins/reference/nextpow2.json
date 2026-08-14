@@ -5,7 +5,7 @@
   "summary": "Return next-power-of-two exponents in MATLAB and RunMat.",
   "description": "`nextpow2(X)` returns exponent values `p` such that `2^p` is the next power of two greater than or equal to `abs(X)`. Element-wise mapping and zero handling follow MATLAB semantics.",
   "behaviors": [
-    "`nextpow2` accepts real numeric scalars and tensors.",
+    "`nextpow2` accepts real numeric scalars and tensors, preserves every integer input class, and evaluates integer magnitudes exactly.",
     "The transform is applied elementwise for array inputs.",
     "Zero maps to `0`.",
     "Negative values use `abs(X)` before computing the exponent.",

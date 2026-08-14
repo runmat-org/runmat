@@ -38,7 +38,7 @@
     "`meshgrid(x, y, z)` returns three outputs sized `length(y) × length(x) × length(z)`, enabling 3-D volume visualisation.",
     "Input vectors may be row or column vectors (or even scalars). Empty vectors propagate to empty grids of matching shape.",
     "In `runmat` compatibility mode, complex axes are a RunMat extension and produce complex grids that preserve their values and precision.",
-    "Supplying GPU vectors keeps real and complex-interleaved outputs on the GPU when an acceleration provider is active. Without provider support, RunMat gathers inputs, materialises the grid on the host, and uploads the result transparently.",
+    "Documented single and double GPU vectors keep outputs resident when an acceleration provider is active. Explicit integer gpuArray axes reject; automatically resident integer axes gather transparently and produce exact host grids.",
     "In `runmat` compatibility mode, the RunMat-only `'like', prototype` selector matches both residency and numeric class. Ordinary MATLAB-compatible calls preserve each corresponding input axis class, including all eight integer classes."
   ],
   "examples": [

@@ -91994,10 +91994,10 @@
           "inputs": [
             {
               "name": "n",
-              "ty": "IntegerScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Order of the magic square."
+              "description": "Numeric input whose floored first real element selects the square order."
             }
           ],
           "outputs": [
@@ -92019,10 +92019,10 @@
           "message": "magic: requires exactly one input argument"
         },
         {
-          "code": "RM.MAGIC.NON_SCALAR",
+          "code": "RM.MAGIC.EMPTY_INPUT",
           "identifier": null,
-          "when": "The input is not a numeric scalar.",
-          "message": "magic: input must be a numeric scalar"
+          "when": "The input has no numeric elements.",
+          "message": "magic: input must contain a numeric value"
         },
         {
           "code": "RM.MAGIC.NON_FINITE",
@@ -92031,22 +92031,45 @@
           "message": "magic: dimension must be finite"
         },
         {
-          "code": "RM.MAGIC.NON_INTEGER",
-          "identifier": null,
-          "when": "The order argument is not an integer.",
-          "message": "magic: dimension must be an integer"
-        },
-        {
           "code": "RM.MAGIC.NEGATIVE",
           "identifier": null,
-          "when": "The order argument is negative.",
+          "when": "The floored order argument is negative.",
           "message": "magic: dimension must be non-negative"
         },
         {
-          "code": "RM.MAGIC.ORDER_TWO_UNDEFINED",
+          "code": "RM.MAGIC.EXPLICIT_GPU",
           "identifier": null,
-          "when": "The requested order is 2.",
-          "message": "magic: magic squares of order 2 do not exist"
+          "when": "The order is supplied as an explicit gpuArray.",
+          "message": "magic: gpuArray input is not supported"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = magic(integer_n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are accepted; the first element is read exactly as the square order."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "The first real element selects the order and the result is a host double matrix; explicit gpuArray input is unsupported while automatic residency gathers transparently."
         }
       ]
     },
@@ -92137,6 +92160,70 @@
           "when": "Internal partitioning, indexing, or allocation failed.",
           "message": "mat2cell: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "mat2cell-integer-partitions",
+          "mode": "RunMatOnly",
+          "description": "typed integer mat2cell partition vectors are a RunMat extension because the public MATLAB page documents numeric partitions without enumerating integer storage classes",
+          "error_identifier": "RunMat:compatibility:Mat2cellIntegerPartitionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = mat2cell(integer_A, dim1dist, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A may be any array type; integer blocks preserve A's exact native class and values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Cell blocks preserve authoritative integer storage; automatic residency gathers to construct the host cell array, while explicit gpuArray input is unsupported."
+        },
+        {
+          "form": "C = mat2cell(A, integer_dim1dist, ...)",
+          "inputs": [
+            {
+              "name": "dimdist",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat accepts all eight typed integer classes as exact partition vectors; strict compatibility requires the publicly documented floating numeric form until stronger class evidence is available."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only typed partitions are validated exactly before block construction; explicit resident partition vectors reject before transfer."
+        }
       ]
     },
     {
@@ -92148,18 +92235,102 @@
           "label": "s = mat2str(A)",
           "inputs": [
             {
-              "name": "text",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
+              "description": "Numeric or logical matrix to serialize."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        },
+        {
+          "label": "s = mat2str(A, n)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric or logical matrix to serialize."
             },
             {
-              "name": "arg",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Positive number of significant digits."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        },
+        {
+          "label": "s = mat2str(A, 'class')",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric or logical matrix to serialize."
+            },
+            {
+              "name": "class",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"class\"",
+              "description": "Include the input class constructor in the expression."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        },
+        {
+          "label": "s = mat2str(A, n, 'class')",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric or logical matrix to serialize."
+            },
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional positive number of significant digits."
+            },
+            {
+              "name": "class",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"class\"",
+              "description": "Include the input class constructor in the expression."
             }
           ],
           "outputs": [
@@ -92173,7 +92344,77 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "mat2str-integer-precision",
+          "mode": "RunMatOnly",
+          "description": "typed integer mat2str precision is a RunMat extension because the public MATLAB page requires a positive integer without enumerating native integer storage classes",
+          "error_identifier": "RunMat:compatibility:Mat2strIntegerPrecisionExtension"
+        },
+        {
+          "id": "mat2str-text-input",
+          "mode": "RunMatOnly",
+          "description": "mat2str input outside the documented numeric and logical matrix domain is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Mat2strTextInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "s = mat2str(integer_A[, n][, 'class'])",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer matrix classes serialize from exact native values; the 'class' option emits the matching constructor."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Decimal serialization never crosses binary64; automatic residency gathers authoritatively, while explicit gpuArray input is unsupported."
+        },
+        {
+          "form": "s = mat2str(A, integer_n[, 'class'])",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat accepts an exact positive typed integer precision under its extension policy; strict compatibility retains the publicly evidenced floating scalar form."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "The RunMat-only typed precision is read exactly and must be positive; explicit resident precision rejects before transfer."
+        }
+      ]
     },
     {
       "name": "matches",
@@ -95302,6 +95543,35 @@
           "mode": "RunMatOnly",
           "description": "complex meshgrid axes are a RunMat extension",
           "error_identifier": "RunMat:compatibility:MeshgridComplexAxesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[X,Y,Z] = meshgrid(integer_x, integer_y, integer_z)",
+          "inputs": [
+            {
+              "name": "x, y, z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every documented integer axis class is replicated without conversion and each corresponding grid preserves that axis class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Host axes preserve exact native storage independently. MATLAB documents gpuArray axes only for single and double; explicit integer gpuArray axes reject, while automatic integer residency gathers transparently and returns exact host grids."
         }
       ]
     },
@@ -106410,21 +106680,21 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "s = native2unicode(bytes, encoding)",
+          "label": "text = native2unicode(bytes, encoding)",
           "inputs": [
             {
-              "name": "text",
-              "ty": "Any",
+              "name": "bytes",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
+              "description": "Numeric byte vector with values in the range 0 through 255."
             },
             {
-              "name": "arg",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Additional arguments."
+              "name": "encoding",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"UTF-8\"",
+              "description": "Source character encoding."
             }
           ],
           "outputs": [
@@ -106438,7 +106708,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "text = native2unicode(integer_bytes[, encoding])",
+          "inputs": [
+            {
+              "name": "bytes",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for byte vectors; every element must be exactly within 0 through 255."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Native byte extraction is exact and range checked before decoding to a host character vector; explicit gpuArray input is unsupported and automatic residency gathers transparently."
+        }
+      ]
     },
     {
       "name": "nchoosek",
@@ -106725,6 +107024,35 @@
           "identifier": "RunMat:ndgrid:Internal",
           "when": "Output allocation, GPU gather, or GPU upload fails.",
           "message": "ndgrid: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[X1,...,Xn] = ndgrid(integer_x1, ..., integer_xn)",
+          "inputs": [
+            {
+              "name": "x1, x2, ..., xn",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every documented integer grid-vector class is replicated exactly and each corresponding output preserves that input class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Host axes preserve authoritative native storage independently. MATLAB documents gpuArray axes only for single and double; explicit integer gpuArray axes reject, while automatic integer residency gathers transparently to exact host grids."
         }
       ]
     },
@@ -107055,6 +107383,35 @@
           "identifier": "RunMat:nextpow2:Internal",
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "nextpow2: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = nextpow2(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented and retain their native class in the exponent result."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer magnitude and exponent selection use exact native storage, including signed minima and uint64 values; documented gpuArray execution preserves class and residency through typed fallback when no provider kernel exists."
         }
       ]
     },

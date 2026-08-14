@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Resident real/logical gpuArray vector inputs use the provider ndgrid hook when available, producing resident gpuArray coordinate grids without host round-trips. Unsupported providers or complex axes fall back to host materialization."
+    "notes": "Documented resident single and double gpuArray vector inputs use the provider ndgrid hook when available. Explicit integer gpuArray axes reject; automatically resident integer axes gather transparently and produce exact host grids."
   },
   "fusion": {
     "elementwise": false,
@@ -75,7 +75,7 @@
     },
     {
       "question": "Can `ndgrid` return gpuArray outputs?",
-      "answer": "Yes. Resident real/logical gpuArray vectors use the provider ndgrid hook when available, so outputs remain on the GPU. Unsupported providers or complex axes use the host materialization fallback; upload failures raise an error instead of silently returning host arrays."
+      "answer": "Documented single and double gpuArray vectors use the provider hook when available. Explicit integer gpuArray axes are unsupported; automatic integer residency gathers transparently to exact host output."
     }
   ],
   "links": [

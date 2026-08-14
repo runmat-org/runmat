@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The builtin gathers gpuArray inputs back to the host because providers do not yet expose block-splitting hooks."
+    "notes": "Automatically resident inputs gather back to the host because providers do not expose block-splitting hooks; explicit gpuArray input is unsupported."
   },
   "fusion": {
     "elementwise": false,

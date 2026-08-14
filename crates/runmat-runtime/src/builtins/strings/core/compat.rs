@@ -1,6 +1,6 @@
 //! MATLAB text compatibility helpers that do not warrant larger domain modules yet.
 
-use encoding_rs::{Encoding, UTF_8};
+use encoding_rs::Encoding;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use runmat_builtins::{
@@ -354,18 +354,196 @@ descriptor_by_outputs!(
     &IN_TEXT,
     &OUT_ANY
 );
-descriptor!(
-    MAT2STR_DESCRIPTOR,
-    "s = mat2str(A)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
+const MAT2STR_INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric or logical matrix to serialize.",
+}];
+const MAT2STR_INPUT_N: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric or logical matrix to serialize.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive number of significant digits.",
+    },
+];
+const MAT2STR_INPUT_CLASS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric or logical matrix to serialize.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional positive number of significant digits.",
+    },
+    BuiltinParamDescriptor {
+        name: "class",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"class\""),
+        description: "Include the input class constructor in the expression.",
+    },
+];
+const MAT2STR_INPUT_CLASS_ONLY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric or logical matrix to serialize.",
+    },
+    BuiltinParamDescriptor {
+        name: "class",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"class\""),
+        description: "Include the input class constructor in the expression.",
+    },
+];
+const MAT2STR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "s = mat2str(A)",
+        inputs: &MAT2STR_INPUT_A,
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "s = mat2str(A, n)",
+        inputs: &MAT2STR_INPUT_N,
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "s = mat2str(A, 'class')",
+        inputs: &MAT2STR_INPUT_CLASS_ONLY,
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "s = mat2str(A, n, 'class')",
+        inputs: &MAT2STR_INPUT_CLASS,
+        outputs: &OUT_ANY,
+    },
+];
+const MAT2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MAT2STR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NO_ERRORS,
+};
+
+const MAT2STR_INTEGER_PRECISION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "mat2str-integer-precision",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "typed integer mat2str precision is a RunMat extension because the public MATLAB page requires a positive integer without enumerating native integer storage classes",
+        error_identifier: Some("RunMat:compatibility:Mat2strIntegerPrecisionExtension"),
+    };
+const MAT2STR_TEXT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mat2str-text-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mat2str input outside the documented numeric and logical matrix domain is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Mat2strTextInputExtension"),
+};
+pub const MAT2STR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    MAT2STR_INTEGER_PRECISION_EXTENSION,
+    MAT2STR_TEXT_INPUT_EXTENSION,
+];
+
+const MAT2STR_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer matrix classes serialize from exact native values; the 'class' option emits the matching constructor.",
+    }];
+const MAT2STR_INTEGER_PRECISION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat accepts an exact positive typed integer precision under its extension policy; strict compatibility retains the publicly evidenced floating scalar form.",
+    }];
+pub const MAT2STR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = mat2str(integer_A[, n][, 'class'])",
+        inputs: &MAT2STR_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Decimal serialization never crosses binary64; automatic residency gathers authoritatively, while explicit gpuArray input is unsupported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = mat2str(A, integer_n[, 'class'])",
+        inputs: &MAT2STR_INTEGER_PRECISION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The RunMat-only typed precision is read exactly and must be positive; explicit resident precision rejects before transfer.",
+    },
+];
+
+const NATIVE2UNICODE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "bytes",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric byte vector with values in the range 0 through 255.",
+    },
+    BuiltinParamDescriptor {
+        name: "encoding",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"UTF-8\""),
+        description: "Source character encoding.",
+    },
+];
 descriptor!(
     NATIVE2UNICODE_DESCRIPTOR,
-    "s = native2unicode(bytes, encoding)",
-    &IN_TEXT_REST,
+    "text = native2unicode(bytes, encoding)",
+    &NATIVE2UNICODE_INPUTS,
     &OUT_ANY
 );
+
+const NATIVE2UNICODE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "bytes",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented for byte vectors; every element must be exactly within 0 through 255.",
+    }];
+pub const NATIVE2UNICODE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "text = native2unicode(integer_bytes[, encoding])",
+        inputs: &NATIVE2UNICODE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native byte extraction is exact and range checked before decoding to a host character vector; explicit gpuArray input is unsupported and automatic residency gathers transparently.",
+    }];
 descriptor_by_outputs!(
     SSCANF_DESCRIPTOR,
     "[A, count, errmsg, nextindex] = sscanf(text, format, size)",
@@ -911,21 +1089,74 @@ async fn str2num_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(string_type),
     descriptor(crate::builtins::strings::core::compat::MAT2STR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::core::compat::MAT2STR_INTEGER_CAPABILITIES),
+    extensions(crate::builtins::strings::core::compat::MAT2STR_EXTENSIONS),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn mat2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_flow("mat2str"))?;
-    let precision = if let Some(arg) = rest.first() {
+    if rest.len() > 2 {
+        return Err(compat_error(
+            "mat2str",
+            "mat2str: expected A, A,n, A,'class', or A,n,'class'",
+        ));
+    }
+    reject_explicit_gpu_text_sink(&value, "mat2str", "input array")?;
+    if matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MAT2STR_TEXT_INPUT_EXTENSION,
+            "mat2str",
+        )?;
+    }
+
+    let mut precision = None;
+    let mut include_class = false;
+    for (index, arg) in rest.iter().enumerate() {
+        reject_explicit_gpu_text_sink(arg, "mat2str", "precision")?;
+        if let Ok(keyword) = scalar_text(arg, "mat2str") {
+            if keyword.eq_ignore_ascii_case("class") && index + 1 == rest.len() {
+                include_class = true;
+                continue;
+            }
+            return Err(compat_error(
+                "mat2str",
+                "mat2str: the only supported text option is final 'class'",
+            ));
+        }
+        if precision.is_some() || include_class {
+            return Err(compat_error(
+                "mat2str",
+                "mat2str: precision must precede the optional 'class' flag",
+            ));
+        }
+        if is_typed_integer_value(arg) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &MAT2STR_INTEGER_PRECISION_EXTENSION,
+                "mat2str",
+            )?;
+        }
         let arg = gather_if_needed_async(arg)
             .await
             .map_err(map_flow("mat2str"))?;
-        Some(parse_nonnegative_usize(&arg, "mat2str")?)
-    } else {
-        None
-    };
-    Ok(Value::String(mat2str_value(&value, precision)))
+        let parsed = parse_nonnegative_usize(&arg, "mat2str")?;
+        if parsed == 0 {
+            return Err(compat_error(
+                "mat2str",
+                "mat2str: precision must be a positive integer scalar",
+            ));
+        }
+        precision = Some(parsed);
+    }
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(map_flow("mat2str"))?;
+    Ok(Value::CharArray(CharArray::new_row(&mat2str_value(
+        &value,
+        precision,
+        include_class,
+    ))))
 }
 
 #[runtime_builtin(
@@ -936,13 +1167,27 @@ async fn mat2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     accel = "sink",
     type_resolver(string_type),
     descriptor(crate::builtins::strings::core::compat::NATIVE2UNICODE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::compat::NATIVE2UNICODE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn native2unicode_builtin(bytes: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(compat_error(
+            "native2unicode",
+            "native2unicode: expected bytes and optional encoding",
+        ));
+    }
+    reject_explicit_gpu_text_sink(&bytes, "native2unicode", "byte vector")?;
     let bytes = gather_if_needed_async(&bytes)
         .await
         .map_err(map_flow("native2unicode"))?;
+    if matches!(&bytes, Value::String(_) | Value::CharArray(_)) {
+        return Ok(bytes);
+    }
     let encoding = if let Some(value) = rest.first() {
+        reject_explicit_gpu_text_sink(value, "native2unicode", "encoding")?;
         let value = gather_if_needed_async(value)
             .await
             .map_err(map_flow("native2unicode"))?;
@@ -950,8 +1195,29 @@ async fn native2unicode_builtin(bytes: Value, rest: Vec<Value>) -> BuiltinResult
     } else {
         "UTF-8".to_string()
     };
+    let shape = byte_vector_shape(&bytes, "native2unicode")?;
     let bytes = bytes_from_value(&bytes, "native2unicode")?;
-    decode_bytes(&bytes, &encoding)
+    decode_bytes(&bytes, &encoding, shape)
+}
+
+fn reject_explicit_gpu_text_sink(value: &Value, name: &str, role: &str) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        return Err(compat_error(
+            name,
+            format!("{name}: explicit gpuArray {role} is not supported"),
+        ));
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
 }
 
 #[runtime_builtin(
@@ -1884,8 +2150,8 @@ fn parse_numeric_matrix(text: &str, fn_name: &str) -> BuiltinResult<Value> {
         .map_err(|e| compat_error(fn_name, e))
 }
 
-fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
-    match value {
+fn mat2str_value(value: &Value, precision: Option<usize>, include_class: bool) -> String {
+    let body = match value {
         Value::Num(n) => format_number(*n, precision),
         Value::Int(i) => i.decimal_string(),
         Value::Bool(b) => {
@@ -1914,6 +2180,23 @@ fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
             matrix_to_string(&data, rows, cols, precision)
         }
         _ => value.to_string(),
+    };
+    if !include_class {
+        return body;
+    }
+    match mat2str_class_name(value) {
+        Some(class) => format!("{class}({body})"),
+        None => body,
+    }
+}
+
+fn mat2str_class_name(value: &Value) -> Option<&'static str> {
+    match value {
+        Value::Num(_) => Some("double"),
+        Value::Int(value) => Some(value.class_name()),
+        Value::Bool(_) | Value::LogicalArray(_) => Some("logical"),
+        Value::Tensor(tensor) => Some(tensor.numeric_dtype().class_name()),
+        _ => None,
     }
 }
 
@@ -1959,16 +2242,57 @@ fn matrix_to_string_with(
 }
 
 fn format_number(value: f64, precision: Option<usize>) -> String {
-    if let Some(precision) = precision {
-        format!("{value:.precision$}")
-    } else if value.fract() == 0.0 && value.is_finite() {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.15}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_string()
+    if value.is_nan() {
+        return "NaN".to_string();
     }
+    if value == f64::INFINITY {
+        return "Inf".to_string();
+    }
+    if value == f64::NEG_INFINITY {
+        return "-Inf".to_string();
+    }
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let digits = precision.unwrap_or(15).max(1);
+    let exponent = value.abs().log10().floor() as i32;
+    if exponent < -4 || exponent >= digits as i32 {
+        let decimals = digits.saturating_sub(1);
+        return normalize_scientific(format!("{value:.decimals$e}"));
+    }
+    let decimals = (digits as i32 - 1 - exponent).max(0) as usize;
+    let fixed = trim_decimal(format!("{value:.decimals$}"));
+    if fixed
+        .parse::<f64>()
+        .ok()
+        .is_some_and(|rounded| rounded != 0.0 && rounded.abs().log10().floor() >= digits as f64)
+    {
+        let decimals = digits.saturating_sub(1);
+        normalize_scientific(format!("{value:.decimals$e}"))
+    } else {
+        fixed
+    }
+}
+
+fn trim_decimal(mut value: String) -> String {
+    if value.contains('.') {
+        while value.ends_with('0') {
+            value.pop();
+        }
+        if value.ends_with('.') {
+            value.pop();
+        }
+    }
+    value
+}
+
+fn normalize_scientific(value: String) -> String {
+    let Some((mantissa, exponent)) = value.split_once('e') else {
+        return value;
+    };
+    let mantissa = trim_decimal(mantissa.to_string());
+    let exponent = exponent.parse::<i32>().unwrap_or(0);
+    format!("{mantissa}e{exponent:+03}")
 }
 
 fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
@@ -1984,15 +2308,16 @@ fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
                 match value {
                     NumericScalar::F64(value) => byte_from_f64(value, fn_name),
                     NumericScalar::F32(value) => byte_from_f64(f64::from(value), fn_name),
-                    integer => Ok(byte_from_intvalue(
+                    integer => byte_from_intvalue(
                         &integer
                             .into_int_value()
                             .expect("non-floating numeric scalar is integer"),
-                    )),
+                        fn_name,
+                    ),
                 }
             })
             .collect(),
-        Value::Int(i) => Ok(vec![byte_from_intvalue(i)]),
+        Value::Int(i) => Ok(vec![byte_from_intvalue(i, fn_name)?]),
         Value::Num(n) => Ok(vec![byte_from_f64(*n, fn_name)?]),
         Value::CharArray(array) => {
             Ok(char_row_to_string_slice(&array.data, array.cols, 0).into_bytes())
@@ -2005,11 +2330,17 @@ fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
     }
 }
 
-fn byte_from_intvalue(value: &IntValue) -> u8 {
+fn byte_from_intvalue(value: &IntValue, fn_name: &str) -> BuiltinResult<u8> {
     value
         .try_to_u64()
-        .map(|value| value.min(255) as u8)
-        .unwrap_or(0)
+        .filter(|value| *value <= u8::MAX as u64)
+        .map(|value| value as u8)
+        .ok_or_else(|| {
+            compat_error(
+                fn_name,
+                format!("{fn_name}: byte values must be in the range 0 through 255"),
+            )
+        })
 }
 
 fn byte_from_f64(value: f64, fn_name: &str) -> BuiltinResult<u8> {
@@ -2019,13 +2350,55 @@ fn byte_from_f64(value: f64, fn_name: &str) -> BuiltinResult<u8> {
             format!("{fn_name}: byte values must be finite"),
         ));
     }
-    Ok(value.round().clamp(0.0, 255.0) as u8)
+    if !(0.0..=255.0).contains(&value) {
+        return Err(compat_error(
+            fn_name,
+            format!("{fn_name}: byte values must be in the range 0 through 255"),
+        ));
+    }
+    Ok(value.round() as u8)
 }
 
-fn decode_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<Value> {
-    let encoding = Encoding::for_label(encoding.as_bytes()).unwrap_or(UTF_8);
+fn decode_bytes(bytes: &[u8], encoding: &str, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let encoding = Encoding::for_label(encoding.as_bytes()).ok_or_else(|| {
+        compat_error(
+            "native2unicode",
+            format!("native2unicode: unsupported encoding '{encoding}'"),
+        )
+    })?;
     let (text, _, _) = encoding.decode(bytes);
-    Ok(Value::String(text.into_owned()))
+    let chars = text.chars().collect::<Vec<_>>();
+    let output = if shape.iter().product::<usize>() == chars.len() {
+        CharArray::from_column_major(chars, shape)
+    } else {
+        Ok(CharArray::new_row(text.as_ref()))
+    }
+    .map_err(|error| compat_error("native2unicode", error))?;
+    Ok(Value::CharArray(output))
+}
+
+fn byte_vector_shape(value: &Value, fn_name: &str) -> BuiltinResult<Vec<usize>> {
+    let shape = match value {
+        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::Int(_) | Value::Num(_) => vec![1, 1],
+        other => {
+            return Err(compat_error(
+                fn_name,
+                format!("{fn_name}: expected a numeric byte vector, got {other:?}"),
+            ))
+        }
+    };
+    if shape.iter().filter(|&&extent| extent > 1).count() > 1 {
+        return Err(compat_error(
+            fn_name,
+            format!("{fn_name}: byte input must be a vector"),
+        ));
+    }
+    Ok(match shape.as_slice() {
+        [] => vec![1, 1],
+        [length] => vec![1, *length],
+        _ => shape,
+    })
 }
 
 struct SscanfResult {
@@ -2368,7 +2741,11 @@ mod tests {
     #[test]
     fn mat2str_preserves_exact_uint64_scalar_text() {
         assert_eq!(
-            mat2str_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), None),
+            mat2str_value(
+                &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+                None,
+                false,
+            ),
             "18446744073709551615"
         );
         let tensor = Tensor::new_integer(
@@ -2377,8 +2754,46 @@ mod tests {
         )
         .expect("typed integer matrix");
         assert_eq!(
-            mat2str_value(&Value::Tensor(tensor), None),
+            mat2str_value(&Value::Tensor(tensor), None, false),
             "[18446744073709551615 9007199254740993]"
+        );
+
+        let typed = Tensor::new_integer(IntegerStorage::U16(vec![256, 512]), vec![1, 2])
+            .expect("typed integer matrix");
+        assert_eq!(
+            mat2str_value(&Value::Tensor(typed), None, true),
+            "uint16([256 512])"
+        );
+    }
+
+    #[test]
+    fn mat2str_precision_is_significant_digits_and_positive() {
+        assert_eq!(format_number(std::f64::consts::PI, Some(3)), "3.14");
+        assert_eq!(format_number(12_345.0, Some(3)), "1.23e+04");
+        assert_eq!(format_number(0.000_012_345, Some(3)), "1.23e-05");
+        assert_eq!(format_number(999.9, Some(3)), "1e+03");
+        let error = block(mat2str_builtin(Value::Num(1.0), vec![Value::Num(0.0)]))
+            .expect_err("zero precision must reject");
+        assert!(error.message().contains("positive"));
+    }
+
+    #[test]
+    fn mat2str_typed_precision_and_text_input_follow_extension_policy() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block(mat2str_builtin(
+            Value::Int(IntValue::U16(12)),
+            vec![Value::Int(IntValue::U8(3))],
+        ))
+        .expect_err("typed precision is extension-gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:Mat2strIntegerPrecisionExtension")
+        );
+        let error = block(mat2str_builtin(Value::String("x".into()), Vec::new()))
+            .expect_err("text input is extension-gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:Mat2strTextInputExtension")
         );
     }
 
@@ -2443,13 +2858,28 @@ mod tests {
         let bytes = Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![1, 2]).unwrap();
         assert_eq!(
             block(native2unicode_builtin(Value::Tensor(bytes), Vec::new())).unwrap(),
-            Value::String("hi".into())
+            Value::CharArray(CharArray::new_row("hi"))
         );
         let single = Tensor::from_f32(vec![111.0, 107.0], vec![1, 2]).expect("single bytes");
         assert_eq!(
             block(native2unicode_builtin(Value::Tensor(single), Vec::new())).unwrap(),
-            Value::String("ok".into())
+            Value::CharArray(CharArray::new_row("ok"))
         );
+
+        for value in [IntValue::I16(-1), IntValue::U16(256)] {
+            let error = block(native2unicode_builtin(Value::Int(value), Vec::new()))
+                .expect_err("out-of-range byte");
+            assert!(error.message().contains("0 through 255"));
+        }
+
+        let column = Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![2, 1])
+            .expect("column bytes");
+        let Value::CharArray(decoded) =
+            block(native2unicode_builtin(Value::Tensor(column), Vec::new())).unwrap()
+        else {
+            panic!("expected character vector");
+        };
+        assert_eq!(decoded.shape, vec![2, 1]);
     }
 
     fn block(
@@ -2747,7 +3177,7 @@ mod tests {
                 Vec::new(),
             ))
             .unwrap(),
-            Value::String("[1 2;3 4]".into())
+            Value::CharArray(CharArray::new_row("[1 2;3 4]"))
         );
     }
 
@@ -2936,7 +3366,7 @@ mod tests {
                 Vec::new(),
             ))
             .unwrap(),
-            Value::String("hi".into())
+            Value::CharArray(CharArray::new_row("hi"))
         );
         assert_eq!(
             block(sscanf_builtin(
