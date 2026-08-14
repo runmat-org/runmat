@@ -356,10 +356,40 @@ validator_integer_capability!(
     BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
     "All elements compare exactly against zero; empty arrays pass."
 );
+validator_integer_capability!(MUST_BE_REAL_INTEGER_CAPABILITIES, "mustBeReal(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::FunctionSpecific, "All eight native integer classes are real by construction; host and resident values pass from authoritative class/storage metadata without floating conversion or payload access.");
+validator_integer_capability!(MUST_BE_SCALAR_OR_EMPTY_INTEGER_CAPABILITIES, "mustBeScalarOrEmpty(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::StructuralParameter, "Scalar-or-empty validation reads shape metadata only, including all documented empty integer shapes, without gathering resident payloads.");
+validator_integer_capability!(MUST_BE_SPARSE_INTEGER_CAPABILITIES, "mustBeSparse(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::StructuralParameter, "Every empty integer array passes as documented; nonempty dense or resident integer arrays fail from storage metadata, while RunMat-native sparse integer values pass without materialization.");
+validator_integer_capability!(MUST_BE_UNDERLYING_TYPE_INTEGER_CAPABILITIES, "mustBeUnderlyingType(integer_A, typenames)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::FunctionSpecific, "One or more requested type names are compared with the authoritative signedness and width of host or resident integer storage without reading payload values.");
+
+pub const MUST_BE_VECTOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "mustBeVector(integer_A)",
+        inputs: &VALIDATOR_INTEGER_VALUE,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented 1-by-N or N-by-1 rule, including only vector-shaped empties, is decided from host or resident shape metadata without payload access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "mustBeVector(integer_A, \"allow-all-empties\")",
+        inputs: &VALIDATOR_INTEGER_VALUE,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The R2026a option additionally accepts every empty integer shape while preserving the ordinary vector rule for nonempty values; callable and arguments-block paths share the same metadata-only predicate.",
+    },
+];
 
 pub const MUST_BE_FILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeFile is a text/path validator; integer host or resident values reject without numeric conversion or provider access." };
 pub const MUST_BE_FOLDER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeFolder is a text/path validator; integer host or resident values reject without numeric conversion or provider access." };
 pub const MUST_BE_NONZERO_LENGTH_TEXT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeNonzeroLengthText is a text validator; integer host or resident values fail without numeric conversion or provider access." };
+pub const MUST_BE_TEXT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeText is a text validator; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
+pub const MUST_BE_TEXT_SCALAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeTextScalar is a text-shape validator; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
+pub const MUST_BE_VALID_VARIABLE_NAME_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeValidVariableName accepts text names only; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
 
 const MUST_BE_INTEGER_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "mustBeInteger.resident-input",
@@ -482,6 +512,22 @@ pub fn dispatch_validator(builtin: &str, args: Vec<Value>) -> BuiltinResult<Valu
 
 pub async fn dispatch_validator_async(builtin: &str, args: Vec<Value>) -> BuiltinResult<Value> {
     let value = require_args(builtin, &args, 1, usize::MAX)?;
+    if matches!(value, Value::GpuTensor(_))
+        && matches!(
+            builtin,
+            "mustBeText" | "mustBeTextScalar" | "mustBeValidVariableName"
+        )
+    {
+        require_exact_arg_count(builtin, &args, 1)?;
+        return Err(
+            build_runtime_error(format!("{builtin}: value does not satisfy validator"))
+                .with_builtin(builtin)
+                .with_identifier(format!("RunMat:{builtin}:ValidationFailed"))
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+                .into(),
+        );
+    }
     validate_resident_metadata(value)?;
     match builtin {
         "mustBeA" => {
@@ -606,7 +652,7 @@ pub async fn dispatch_validator_async(builtin: &str, args: Vec<Value>) -> Builti
         }
         "mustBeReal" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_real(value))
+            check_validator(builtin, value_is_real_async(value).await?)
         }
         "mustBeScalarOrEmpty" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -614,7 +660,10 @@ pub async fn dispatch_validator_async(builtin: &str, args: Vec<Value>) -> Builti
         }
         "mustBeSparse" => {
             require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, matches!(value, Value::SparseTensor(_)))
+            check_validator(
+                builtin,
+                value_is_empty(value) || matches!(value, Value::SparseTensor(_)),
+            )
         }
         "mustBeText" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -641,8 +690,27 @@ pub async fn dispatch_validator_async(builtin: &str, args: Vec<Value>) -> Builti
             )
         }
         "mustBeVector" => {
-            require_exact_arg_count(builtin, &args, 1)?;
-            check_validator(builtin, value_is_vector(value)?)
+            require_arg_count(builtin, &args, 1, 2)?;
+            let allow_all_empties = match args.get(1) {
+                None => false,
+                Some(flag)
+                    if text_scalar_arg(builtin, flag)?
+                        .eq_ignore_ascii_case("allow-all-empties") =>
+                {
+                    true
+                }
+                Some(_) => {
+                    return Err(invalid_argument_error(
+                        builtin,
+                        "option must be 'allow-all-empties'",
+                    )
+                    .into())
+                }
+            };
+            check_validator(
+                builtin,
+                value_satisfies_vector_validator(value, allow_all_empties)?,
+            )
         }
         "validateFunctionSignaturesJSON" => {
             require_exact_arg_count(builtin, &args, 1)?;
@@ -780,6 +848,9 @@ pub fn value_is_scalar_or_empty(value: &Value) -> bool {
 }
 
 pub fn value_is_real(value: &Value) -> bool {
+    if value_is_empty(value) {
+        return true;
+    }
     match value {
         Value::Complex(_, im) => *im == 0.0,
         Value::ComplexTensor(t) if t.integer_storage().is_some() => t
@@ -791,8 +862,24 @@ pub fn value_is_real(value: &Value) -> bool {
             .iter()
             .all(IntValue::is_zero),
         Value::ComplexTensor(t) => t.materialize_f64().iter().all(|(_, im)| *im == 0.0),
-        _ => true,
+        Value::GpuTensor(handle) => handle_storage(handle) == GpuTensorStorage::Real,
+        Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::Tensor(_)
+        | Value::SparseTensor(_)
+        | Value::LogicalArray(_)
+        | Value::CharArray(_) => true,
+        _ => false,
     }
+}
+
+pub async fn value_is_real_async(value: &Value) -> BuiltinResult<bool> {
+    if matches!(value, Value::GpuTensor(handle) if handle_storage(handle) == GpuTensorStorage::ComplexInterleaved)
+    {
+        return Ok(value_is_real(&host_value(value).await?));
+    }
+    Ok(value_is_real(value))
 }
 
 pub fn value_is_integer(value: &Value) -> bool {
@@ -1246,7 +1333,7 @@ fn comparison_all(lhs: &Value, rhs: &Value, operation: IntegerComparisonOp) -> B
         }
     };
     let result = if let Some(result) =
-        try_real_ordering_comparison(lhs, rhs, operation).map_err(&map_error)?
+        try_real_ordering_comparison(lhs, rhs, operation).map_err(map_error)?
     {
         result
     } else {
@@ -1396,8 +1483,37 @@ pub fn value_is_column(value: &Value) -> bool {
 }
 
 pub fn value_is_vector(value: &Value) -> Result<bool, RuntimeError> {
-    let (rows, cols) = value_shape_2d(value);
-    Ok((rows == 1 || cols == 1) && !(rows == 0 && cols > 1) && !(cols == 0 && rows > 1))
+    fn shape_is_vector(shape: &[usize]) -> bool {
+        let mut dimensions = shape.len();
+        while dimensions > 2 && shape[dimensions - 1] == 1 {
+            dimensions -= 1;
+        }
+        if dimensions > 2 {
+            return false;
+        }
+        let rows = shape.first().copied().unwrap_or(1);
+        let cols = shape.get(1).copied().unwrap_or(1);
+        rows == 1 || cols == 1
+    }
+
+    Ok(match value {
+        Value::Tensor(value) => shape_is_vector(&value.shape),
+        Value::ComplexTensor(value) => shape_is_vector(&value.shape),
+        Value::LogicalArray(value) => shape_is_vector(&value.shape),
+        Value::StringArray(value) => shape_is_vector(&value.shape),
+        Value::Cell(value) => shape_is_vector(&value.shape),
+        Value::CharArray(value) => shape_is_vector(&value.shape),
+        Value::GpuTensor(handle) => shape_is_vector(&handle.shape),
+        Value::SparseTensor(value) => value.rows == 1 || value.cols == 1,
+        _ => true,
+    })
+}
+
+pub fn value_satisfies_vector_validator(
+    value: &Value,
+    allow_all_empties: bool,
+) -> Result<bool, RuntimeError> {
+    Ok(value_is_vector(value)? || (allow_all_empties && value_is_empty(value)))
 }
 
 pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
@@ -2280,17 +2396,46 @@ validator_builtin!(
     "mustBePositive",
     capabilities = self::MUST_BE_POSITIVE_INTEGER_CAPABILITIES
 );
-validator_builtin!(must_be_real_builtin, "mustBeReal");
-validator_builtin!(must_be_scalar_or_empty_builtin, "mustBeScalarOrEmpty");
-validator_builtin!(must_be_sparse_builtin, "mustBeSparse");
-validator_builtin!(must_be_text_builtin, "mustBeText");
-validator_builtin!(must_be_text_scalar_builtin, "mustBeTextScalar");
-validator_builtin!(must_be_underlying_type_builtin, "mustBeUnderlyingType");
+validator_builtin!(
+    must_be_real_builtin,
+    "mustBeReal",
+    capabilities = self::MUST_BE_REAL_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_scalar_or_empty_builtin,
+    "mustBeScalarOrEmpty",
+    capabilities = self::MUST_BE_SCALAR_OR_EMPTY_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_sparse_builtin,
+    "mustBeSparse",
+    capabilities = self::MUST_BE_SPARSE_INTEGER_CAPABILITIES
+);
+validator_builtin!(
+    must_be_text_builtin,
+    "mustBeText",
+    audit = self::MUST_BE_TEXT_INTEGER_AUDIT
+);
+validator_builtin!(
+    must_be_text_scalar_builtin,
+    "mustBeTextScalar",
+    audit = self::MUST_BE_TEXT_SCALAR_INTEGER_AUDIT
+);
+validator_builtin!(
+    must_be_underlying_type_builtin,
+    "mustBeUnderlyingType",
+    capabilities = self::MUST_BE_UNDERLYING_TYPE_INTEGER_CAPABILITIES
+);
 validator_builtin!(
     must_be_valid_variable_name_builtin,
-    "mustBeValidVariableName"
+    "mustBeValidVariableName",
+    audit = self::MUST_BE_VALID_VARIABLE_NAME_INTEGER_AUDIT
 );
-validator_builtin!(must_be_vector_builtin, "mustBeVector");
+validator_builtin!(
+    must_be_vector_builtin,
+    "mustBeVector",
+    capabilities = self::MUST_BE_VECTOR_INTEGER_CAPABILITIES
+);
 validator_builtin!(
     validate_function_signatures_json_builtin,
     "validateFunctionSignaturesJSON"
@@ -2406,6 +2551,131 @@ mod tests {
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+    }
+
+    #[test]
+    fn structural_validators_cover_all_native_integer_classes_without_conversion() {
+        let cases = [
+            (IntegerStorage::I8(vec![1]), "int8"),
+            (IntegerStorage::I16(vec![1]), "int16"),
+            (IntegerStorage::I32(vec![1]), "int32"),
+            (IntegerStorage::I64(vec![1]), "int64"),
+            (IntegerStorage::U8(vec![1]), "uint8"),
+            (IntegerStorage::U16(vec![1]), "uint16"),
+            (IntegerStorage::U32(vec![1]), "uint32"),
+            (IntegerStorage::U64(vec![1]), "uint64"),
+        ];
+
+        for (storage, class_name) in cases {
+            let value = integer_tensor(storage, vec![1, 1]);
+            ok("mustBeReal", vec![value.clone()]);
+            ok("mustBeScalarOrEmpty", vec![value.clone()]);
+            err("mustBeSparse", vec![value.clone()]);
+            ok(
+                "mustBeUnderlyingType",
+                vec![value.clone(), Value::String(class_name.into())],
+            );
+            ok("mustBeVector", vec![value.clone()]);
+            err("mustBeText", vec![value.clone()]);
+            err("mustBeTextScalar", vec![value.clone()]);
+            err("mustBeValidVariableName", vec![value]);
+        }
+    }
+
+    #[test]
+    fn sparse_and_vector_validators_apply_documented_empty_shape_rules() {
+        let empty = integer_tensor(IntegerStorage::U16(vec![]), vec![0, 3]);
+        ok("mustBeScalarOrEmpty", vec![empty.clone()]);
+        ok("mustBeSparse", vec![empty.clone()]);
+        err("mustBeVector", vec![empty.clone()]);
+        ok(
+            "mustBeVector",
+            vec![empty, Value::String("allow-all-empties".into())],
+        );
+
+        let empty_vector = integer_tensor(IntegerStorage::I8(vec![]), vec![0, 1]);
+        ok("mustBeVector", vec![empty_vector]);
+
+        let multidimensional = integer_tensor(IntegerStorage::U32(vec![1, 2]), vec![1, 1, 2]);
+        err("mustBeVector", vec![multidimensional]);
+        let trailing_singleton = integer_tensor(IntegerStorage::U32(vec![1, 2]), vec![1, 2, 1]);
+        ok("mustBeVector", vec![trailing_singleton]);
+
+        err(
+            "mustBeVector",
+            vec![
+                Value::Int(IntValue::U8(1)),
+                Value::String("unsupported".into()),
+            ],
+        );
+    }
+
+    #[test]
+    fn sparse_integer_storage_satisfies_sparse_validation_without_materialization() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 1],
+            vec![0],
+            IntegerStorage::I64(vec![9_007_199_254_740_993]),
+        )
+        .expect("sparse integer");
+        ok("mustBeSparse", vec![Value::SparseTensor(sparse)]);
+    }
+
+    #[test]
+    fn resident_text_validators_reject_before_provider_lookup() {
+        use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX - 1,
+            buffer_id: u64::MAX - 2,
+        };
+        runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I32);
+        for builtin in ["mustBeText", "mustBeTextScalar", "mustBeValidVariableName"] {
+            let error = dispatch_validator(builtin, vec![Value::GpuTensor(handle.clone())])
+                .expect_err("resident integer must fail text validation");
+            let expected_identifier = format!("RunMat:{builtin}:ValidationFailed");
+            assert_eq!(error.identifier(), Some(expected_identifier.as_str()));
+            assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        }
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+    }
+
+    #[test]
+    fn resident_integer_structural_validators_do_not_read_freed_payloads() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+                .expect("resident integer");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload resident integer");
+            provider
+                .free(&handle)
+                .expect("free payload before predicates");
+            runmat_accelerate_api::set_handle_integer_type(
+                &handle,
+                runmat_accelerate_api::IntegerElementType::U64,
+            );
+            runmat_accelerate_api::clear_handle_precision(&handle);
+            runmat_accelerate_api::set_handle_logical(&handle, false);
+            runmat_accelerate_api::set_handle_storage(
+                &handle,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
+            runmat_accelerate_api::set_handle_class_name(&handle, "uint64");
+            let value = Value::GpuTensor(handle.clone());
+
+            ok("mustBeReal", vec![value.clone()]);
+            err("mustBeScalarOrEmpty", vec![value.clone()]);
+            err("mustBeSparse", vec![value.clone()]);
+            ok(
+                "mustBeUnderlyingType",
+                vec![value.clone(), Value::String("uint64".into())],
+            );
+            ok("mustBeVector", vec![value]);
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+        });
     }
 
     #[test]
@@ -3331,11 +3601,11 @@ mod tests {
         use futures::executor::block_on;
         use runmat_accelerate_api::AccelProvider;
 
-        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _lock = test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        ) else {
-            return;
-        };
+        )
+        .expect("register WGPU provider for integer validator coverage");
         let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
@@ -3360,9 +3630,38 @@ mod tests {
             block_on(dispatch_validator_async(name, vec![value.clone()]))
                 .unwrap_or_else(|error| panic!("{name} unexpectedly failed: {error}"));
         }
+        runmat_accelerate_api::set_handle_provenance(
+            &handle,
+            runmat_accelerate_api::GpuHandleProvenance::Explicit,
+        );
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for name in ["mustBeReal", "mustBeVector"] {
+            block_on(dispatch_validator_async(name, vec![value.clone()]))
+                .unwrap_or_else(|error| panic!("{name} unexpectedly failed: {error}"));
+        }
+        block_on(dispatch_validator_async(
+            "mustBeUnderlyingType",
+            vec![value.clone(), Value::String("uint64".into())],
+        ))
+        .expect("resident underlying type metadata");
+        assert!(block_on(dispatch_validator_async(
+            "mustBeScalarOrEmpty",
+            vec![value.clone()],
+        ))
+        .is_err());
+        assert!(block_on(dispatch_validator_async(
+            "mustBeSparse",
+            vec![value.clone()],
+        ))
+        .is_err());
+        for name in ["mustBeText", "mustBeTextScalar", "mustBeValidVariableName"] {
+            let error = block_on(dispatch_validator_async(name, vec![value.clone()]))
+                .expect_err("resident integer must reject text validation");
+            assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        }
         assert_eq!(
             runmat_accelerate_api::handle_provenance(&handle),
-            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         );
         let gathered = block_on(provider.download_integer(&handle)).expect("source survives");
         assert_eq!(

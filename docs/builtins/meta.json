@@ -103730,6 +103730,35 @@
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "mustBeReal(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are validated directly from authoritative class, shape, or exact element storage."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "All eight native integer classes are real by construction; host and resident values pass from authoritative class/storage metadata without floating conversion or payload access."
+        }
       ]
     },
     {
@@ -103770,6 +103799,35 @@
           "identifier": "RunMat:validators:InvalidArgument",
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "mustBeScalarOrEmpty(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are validated directly from authoritative class, shape, or exact element storage."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Scalar-or-empty validation reads shape metadata only, including all documented empty integer shapes, without gathering resident payloads."
         }
       ]
     },
@@ -103812,6 +103870,35 @@
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "mustBeSparse(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are validated directly from authoritative class, shape, or exact element storage."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Every empty integer array passes as documented; nonempty dense or resident integer arrays fail from storage metadata, while RunMat-native sparse integer values pass without materialization."
+        }
       ]
     },
     {
@@ -103853,7 +103940,11 @@
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "mustBeText is a text validator; integer host or resident values fail before numeric conversion, payload access, or provider lookup."
+      }
     },
     {
       "name": "mustBeTextScalar",
@@ -103894,7 +103985,11 @@
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "mustBeTextScalar is a text-shape validator; integer host or resident values fail before numeric conversion, payload access, or provider lookup."
+      }
     },
     {
       "name": "mustBeUnderlyingType",
@@ -103934,6 +104029,35 @@
           "identifier": "RunMat:validators:InvalidArgument",
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "mustBeUnderlyingType(integer_A, typenames)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are validated directly from authoritative class, shape, or exact element storage."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "One or more requested type names are compared with the authoritative signedness and width of host or resident integer storage without reading payload values."
         }
       ]
     },
@@ -103976,7 +104100,11 @@
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "mustBeValidVariableName accepts text names only; integer host or resident values fail before numeric conversion, payload access, or provider lookup."
+      }
     },
     {
       "name": "mustBeVector",
@@ -104016,6 +104144,62 @@
           "identifier": "RunMat:validators:InvalidArgument",
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "mustBeVector(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are validated directly from authoritative class, shape, or exact element storage."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The documented 1-by-N or N-by-1 rule, including only vector-shaped empties, is decided from host or resident shape metadata without payload access."
+        },
+        {
+          "form": "mustBeVector(integer_A, \"allow-all-empties\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are validated directly from authoritative class, shape, or exact element storage."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The R2026a option additionally accepts every empty integer shape while preserving the ordinary vector rule for nonempty values; callable and arguments-block paths share the same metadata-only predicate."
         }
       ]
     },

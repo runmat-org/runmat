@@ -164,7 +164,7 @@ pub enum FunctionArgValidator {
     ScalarOrEmpty,
     Real,
     Integer,
-    Vector,
+    Vector { allow_all_empties: bool },
     Positive,
     Negative,
     Nonnegative,

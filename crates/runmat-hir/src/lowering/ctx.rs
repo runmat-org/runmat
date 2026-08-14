@@ -1516,7 +1516,9 @@ impl LoweringCtx {
             "mustBeScalarOrEmpty" => Ok(FunctionArgValidator::ScalarOrEmpty),
             "mustBeReal" => Ok(FunctionArgValidator::Real),
             "mustBeInteger" => Ok(FunctionArgValidator::Integer),
-            "mustBeVector" => Ok(FunctionArgValidator::Vector),
+            "mustBeVector" => Ok(FunctionArgValidator::Vector {
+                allow_all_empties: Self::lower_vector_allow_all_empties(&validator.args, span)?,
+            }),
             "mustBePositive" => Ok(FunctionArgValidator::Positive),
             "mustBeNegative" => Ok(FunctionArgValidator::Negative),
             "mustBeNonnegative" => Ok(FunctionArgValidator::Nonnegative),
@@ -1572,6 +1574,23 @@ impl LoweringCtx {
                     .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
                     .with_span(span),
             ),
+        }
+    }
+
+    fn lower_vector_allow_all_empties(args: &[AstExpr], span: Span) -> Result<bool, HirError> {
+        match args {
+            [] | [_] => Ok(false),
+            [_, AstExpr::String(flag, _)]
+                if Self::normalize_validator_string_literal(flag)
+                    .eq_ignore_ascii_case("allow-all-empties") =>
+            {
+                Ok(true)
+            }
+            _ => Err(HirError::new(
+                "mustBeVector accepts only the literal option 'allow-all-empties'",
+            )
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+            .with_span(span)),
         }
     }
 

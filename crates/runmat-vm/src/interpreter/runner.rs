@@ -491,7 +491,7 @@ async fn validate_function_arguments(
                     }
                 }
                 crate::bytecode::program::FunctionArgValidator::Real => {
-                    if !arg_validation::value_is_real(value) {
+                    if !arg_validation::value_is_real_async(value).await? {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(
@@ -515,8 +515,9 @@ async fn validate_function_arguments(
                         ));
                     }
                 }
-                crate::bytecode::program::FunctionArgValidator::Vector => {
-                    if !arg_validation::value_is_vector(value)? {
+                crate::bytecode::program::FunctionArgValidator::Vector { allow_all_empties } => {
+                    if !arg_validation::value_satisfies_vector_validator(value, *allow_all_empties)?
+                    {
                         return Err(mex(
                             "ArgumentValidationFunction",
                             &format!(

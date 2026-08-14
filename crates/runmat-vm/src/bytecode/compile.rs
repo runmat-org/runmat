@@ -908,9 +908,11 @@ fn compile_semantic_functions(
                                         runmat_hir::FunctionArgValidator::Integer => {
                                             crate::bytecode::program::FunctionArgValidator::Integer
                                         }
-                                        runmat_hir::FunctionArgValidator::Vector => {
-                                            crate::bytecode::program::FunctionArgValidator::Vector
-                                        }
+                                        runmat_hir::FunctionArgValidator::Vector {
+                                            allow_all_empties,
+                                        } => crate::bytecode::program::FunctionArgValidator::Vector {
+                                            allow_all_empties: *allow_all_empties,
+                                        },
                                         runmat_hir::FunctionArgValidator::Positive => {
                                             crate::bytecode::program::FunctionArgValidator::Positive
                                         }
