@@ -161,6 +161,9 @@ fn execute_statement(
     if super::mutation::execute(state, instruction, statement)? {
         return Ok(());
     }
+    if super::workspace::execute(state, instruction, statement)? {
+        return Ok(());
+    }
     match statement {
         MirStmtKind::Expr(_) => state.pending_place_mutation = None,
         other => {
@@ -314,7 +317,7 @@ fn take_edge(
     }
     for (parameter, value) in transferred {
         state.values.insert(parameter.value, value);
-        state.locals[parameter.local.0 as usize] = value;
+        state.set_local(parameter.local.0 as usize, value)?;
     }
     state.take_control_edge(edge.target);
     Ok(NativeSiteOutcome::edge(index))

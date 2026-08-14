@@ -106,6 +106,18 @@ fn verify_function(
     if function.blocks.is_empty() {
         return Err(error("native.ir.blocks", "function must contain a block"));
     }
+    if function.locals.len() > u32::MAX as usize
+        || function.locals.iter().enumerate().any(|(index, local)| {
+            local.id.0 as usize != index
+                || local.binding.is_some() != local.name.is_some()
+                || local.name.as_ref().is_some_and(|name| name.is_empty())
+        })
+    {
+        return Err(error(
+            "native.ir.function_locals",
+            "locals must be ordered and bound locals must retain non-empty canonical names",
+        ));
+    }
     for local in function
         .abi
         .fixed_inputs
@@ -116,7 +128,7 @@ fn verify_function(
         .chain(function.abi.implicit_nargin.iter())
         .chain(function.abi.implicit_nargout.iter())
     {
-        if local.0 >= function.local_count {
+        if local.0 as usize >= function.local_count() {
             return Err(error(
                 "native.ir.function_abi",
                 "function ABI names a local outside the function",
@@ -156,7 +168,7 @@ fn verify_function(
                 "sites must name their containing function, block, and source",
             ));
         }
-        if block.parameters.len() != function.local_count as usize
+        if block.parameters.len() != function.local_count()
             || block
                 .parameters
                 .iter()
@@ -588,7 +600,7 @@ fn verify_frame_state(
 ) -> NativeCodegenResult<()> {
     if state.point.function != function.id
         || !available.contains(&state.side_effect_epoch)
-        || state.locals.len() != function.local_count as usize
+        || state.locals.len() != function.local_count()
         || state.locals.iter().enumerate().any(|(index, local)| {
             local.local.0 as usize != index || !available.contains(&local.value)
         })

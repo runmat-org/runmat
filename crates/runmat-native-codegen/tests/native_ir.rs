@@ -16,14 +16,15 @@ use runmat_native_codegen::{
     verify_against_mir, NativeLoweringInput, NativeTarget,
 };
 use runmat_types::{
-    CapabilityRequirement, CapabilitySet, CollectiveId, DeoptimizationPointId, DistributedValueId,
-    DynamicReason, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
-    ForeignRequirement, ForeignTypeIdentity, InteropManifest, LabCount, ParallelAccess,
-    ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId, ParallelVariableContract,
-    ParallelVariableRole, ParforContract, ProgramFunctionId, ProgramPointId, ProgramSourceId,
-    ProgramSpan, RegionContract, RegionGuardCondition, RegionGuardContract, RegionGuardId,
-    RegionId, RegionProvenance, RegionValueId, Span, SpmdContract, SpmdLabRequirement, ValueFact,
-    WasmInteropPolicy, INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
+    BindingId, CapabilityRequirement, CapabilitySet, CollectiveId, DeoptimizationPointId,
+    DistributedValueId, DynamicReason, ForeignAffinity, ForeignCapability, ForeignLifetime,
+    ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, InteropManifest, LabCount,
+    ParallelAccess, ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId,
+    ParallelVariableContract, ParallelVariableRole, ParforContract, ProgramFunctionId,
+    ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionGuardCondition,
+    RegionGuardContract, RegionGuardId, RegionId, RegionProvenance, RegionValueId, Span,
+    SpmdContract, SpmdLabRequirement, ValueFact, WasmInteropPolicy,
+    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
     REGION_CONTRACT_SCHEMA_VERSION,
 };
 
@@ -173,12 +174,55 @@ fn lower_with(
     analysis: &runmat_mir::analysis::AnalysisStore,
     manifest: &ExecutableUnitManifest,
 ) -> Result<runmat_native_codegen::NativeAssembly, runmat_native_codegen::NativeCodegenError> {
+    lower_with_bindings(mir, analysis, manifest, None)
+}
+
+fn lower_with_bindings(
+    mir: &MirAssembly,
+    analysis: &runmat_mir::analysis::AnalysisStore,
+    manifest: &ExecutableUnitManifest,
+    binding_names: Option<&std::collections::BTreeMap<BindingId, String>>,
+) -> Result<runmat_native_codegen::NativeAssembly, runmat_native_codegen::NativeCodegenError> {
     lower_executable(NativeLoweringInput {
         mir,
         analysis,
         manifest,
+        binding_names,
         target: NativeTarget::current(),
     })
+}
+
+#[test]
+fn bound_locals_require_and_retain_canonical_semantic_names() {
+    let mut mir = function(vec![assignment(1)]);
+    let binding = BindingId(4);
+    mir.bodies.get_mut(&FunctionId(0)).unwrap().locals[0].binding = Some(binding);
+    mir.bodies.get_mut(&FunctionId(0)).unwrap().locals[0].kind = MirLocalKind::Binding;
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+
+    let error = lower_with(&mir, &analysis, &manifest).unwrap_err();
+    assert_eq!(error.code, "native.lowering.binding_name");
+
+    let names = std::collections::BTreeMap::from([(binding, "answer".to_string())]);
+    let assembly = lower_with_bindings(&mir, &analysis, &manifest, Some(&names)).unwrap();
+    let local = &assembly.functions[0].locals[0];
+    assert_eq!(local.id, runmat_native_codegen::NativeLocalId(0));
+    assert_eq!(local.binding, Some(binding));
+    assert_eq!(local.name.as_deref(), Some("answer"));
+    assert_eq!(local.kind, runmat_native_codegen::NativeLocalKind::Binding);
+    assert_eq!(assembly.schema_version, 2);
+    assembly.verify().unwrap();
+    verify_against_mir(&assembly, &mir, Some(&names)).unwrap();
+
+    let mut tampered = assembly;
+    tampered.functions[0].locals[0].name = Some("different".into());
+    assert_eq!(
+        verify_against_mir(&tampered, &mir, Some(&names))
+            .unwrap_err()
+            .code,
+        "native.ir.mir_locals"
+    );
 }
 
 #[test]
@@ -513,7 +557,7 @@ fn canonical_mir_verification_rejects_coordinated_ir_and_inventory_omission() {
     assembly.functions[0].expected_sites.drain(0..2);
     assembly.verify().unwrap();
     assert_eq!(
-        verify_against_mir(&assembly, &mir).unwrap_err().code,
+        verify_against_mir(&assembly, &mir, None).unwrap_err().code,
         "native.ir.mir_construct_coverage"
     );
 }

@@ -1,4 +1,5 @@
 function f0 main source=7 locals=1 entry=b0
+  local l0 Temporary binding=None name=None
   b0(l0=v0:Generic) effect=v1
     i0 NativeOperation Rvalue { value: Use(Constant(Number("1"))), result: Discard } embedded=[] effects=EffectSet({}) caps=CapabilitySet({}) in=[] out=[] next_effect=None safepoint=None @ 0:0:0:Rvalue:0
     i1 NativeOperation Statement(Expr(Use(Constant(Number("1"))))) embedded=[] effects=EffectSet({}) caps=CapabilitySet({}) in=[] out=[] next_effect=None safepoint=None @ 0:0:0:Statement:0

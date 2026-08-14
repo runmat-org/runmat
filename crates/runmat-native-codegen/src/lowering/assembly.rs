@@ -5,6 +5,9 @@ pub struct NativeLoweringInput<'a> {
     pub mir: &'a runmat_mir::MirAssembly,
     pub analysis: &'a runmat_mir::analysis::AnalysisStore,
     pub manifest: &'a runmat_execution::ExecutableUnitManifest,
+    /// Canonical names for semantic HIR bindings retained by MIR locals.
+    /// May be absent only when the supplied MIR contains no bound locals.
+    pub binding_names: Option<&'a std::collections::BTreeMap<runmat_types::BindingId, String>>,
     pub target: NativeTarget,
 }
 
@@ -58,6 +61,7 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
             metadata,
             body,
             input.analysis,
+            input.binding_names,
             &input.manifest.regions,
         )?);
     }
@@ -107,7 +111,7 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
     };
     assembly.verify()?;
     verify_against_manifest(&assembly, input.manifest)?;
-    verify_against_mir(&assembly, input.mir)?;
+    verify_against_mir(&assembly, input.mir, input.binding_names)?;
     Ok(assembly)
 }
 
@@ -144,6 +148,7 @@ pub fn verify_against_manifest(
 pub fn verify_against_mir(
     assembly: &NativeAssembly,
     mir: &runmat_mir::MirAssembly,
+    binding_names: Option<&std::collections::BTreeMap<runmat_types::BindingId, String>>,
 ) -> NativeCodegenResult<()> {
     let functions = assembly
         .functions
@@ -172,6 +177,50 @@ pub fn verify_against_mir(
             )
             .at_function(function_id)
         })?;
+        if native.locals.len() != body.locals.len() {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_locals",
+                "Native IR local catalog differs from canonical MIR",
+            )
+            .at_function(function_id));
+        }
+        for (native_local, mir_local) in native.locals.iter().zip(&body.locals) {
+            let expected_id = u32::try_from(mir_local.id.0)
+                .map(crate::NativeLocalId)
+                .map_err(|_| {
+                    NativeCodegenError::new(
+                        "native.ir.mir_local_identity",
+                        "MIR local identity exceeds the Native IR schema",
+                    )
+                    .at_function(function_id)
+                })?;
+            let expected_name = mir_local
+                .binding
+                .map(|binding| {
+                    binding_names
+                        .and_then(|names| names.get(&binding))
+                        .cloned()
+                        .ok_or_else(|| {
+                            NativeCodegenError::new(
+                                "native.ir.mir_binding_name",
+                                "bound MIR local has no canonical semantic name",
+                            )
+                            .at_function(function_id)
+                        })
+                })
+                .transpose()?;
+            if native_local.id != expected_id
+                || native_local.binding != mir_local.binding
+                || native_local.name != expected_name
+                || native_local.kind != crate::NativeLocalKind::from(&mir_local.kind)
+            {
+                return Err(NativeCodegenError::new(
+                    "native.ir.mir_locals",
+                    "Native IR local metadata differs from canonical MIR and binding metadata",
+                )
+                .at_function(function_id));
+            }
+        }
         let expected = super::inventory::expected_sites(function_id, body)?;
         if native.expected_sites != expected {
             return Err(NativeCodegenError::new(

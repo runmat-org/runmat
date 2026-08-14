@@ -16,9 +16,7 @@ pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use runtime::{
     RuntimeContext, RuntimeLanguageMode, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
-pub use scope::ContextFuture;
-#[cfg(test)]
-pub(crate) use scope::RuntimeContextGuard;
+pub use scope::{ContextFuture, RuntimeContextGuard};
 pub use services::{
     ForeignCall, HostInteraction, NativeCapability, ParallelCapability, RuntimeAccelerationService,
     RuntimeCallRequest, RuntimeCallService, RuntimeErrorService, RuntimeForeignService,

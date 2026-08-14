@@ -347,6 +347,30 @@ async fn loose_executable_revision_is_stable_and_source_sensitive() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn portable_product_retains_names_for_lexical_and_session_bindings() {
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let unit = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:bindings",
+                "bindings.m",
+                "function y = bindings(x)\n global shared\n y = x + shared;\nend\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let names = unit.binding_names();
+    assert!(names.values().any(|name| name == "x"));
+    assert!(names.values().any(|name| name == "y"));
+    assert!(names.values().any(|name| name == "shared"));
+
+    let envelope = unit.portable_envelope_for(Some("bindings")).unwrap();
+    assert_eq!(envelope.manifest.revisions.vm_layout_schema, 2);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
 async fn coverage_sites_are_source_stable_and_record_missed_statements() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let unit = session

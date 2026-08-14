@@ -75,6 +75,16 @@ impl ExecutableUnit {
         &self.layout
     }
 
+    /// Canonical HIR-derived names for every semantic binding retained by the
+    /// portable executable product.
+    pub fn binding_names(&self) -> std::collections::BTreeMap<runmat_types::BindingId, String> {
+        self.layout
+            .storage_bindings
+            .iter()
+            .map(|(binding, metadata)| (*binding, metadata.name.clone()))
+            .collect()
+    }
+
     pub fn procedure_names(&self) -> Vec<String> {
         let mut names = self.functions.names.keys().cloned().collect::<Vec<_>>();
         names.sort();

@@ -1,4 +1,4 @@
-use super::{ContextFuture, RuntimeContextState, RuntimeServicePorts};
+use super::{ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionServices;
 use std::future::Future;
 use std::rc::Rc;
@@ -170,9 +170,16 @@ impl RuntimeContext {
         self
     }
 
-    /// Scope every poll of `future` to this context. This is the only supported
-    /// bridge for legacy ambient APIs during R09–R29 migration.
+    /// Scope every poll of `future` to this context. This is the supported
+    /// bridge for async code that still reaches ambient compatibility APIs.
     pub fn scope<F: Future>(&self, future: F) -> ContextFuture<F> {
         ContextFuture::new(self.clone(), future)
+    }
+
+    /// Activate this context for one synchronous executor or foreign-host
+    /// extent. Async code should use [`Self::scope`] so the context is removed
+    /// across yields.
+    pub fn enter(&self) -> RuntimeContextGuard {
+        RuntimeContextGuard::enter(self.clone())
     }
 }

@@ -21,8 +21,19 @@ pub fn print_native_ir(assembly: &NativeAssembly) -> String {
         let _ = writeln!(
             output,
             "function f{} {} source={} locals={} entry=b{}",
-            function.id.0, function.name, function.source.0, function.local_count, function.entry.0
+            function.id.0,
+            function.name,
+            function.source.0,
+            function.local_count(),
+            function.entry.0
         );
+        for local in &function.locals {
+            let _ = writeln!(
+                output,
+                "  local l{} {:?} binding={:?} name={:?}",
+                local.id.0, local.kind, local.binding, local.name
+            );
+        }
         for block in &function.blocks {
             let _ = write!(output, "  b{}(", block.id.0);
             for (index, parameter) in block.parameters.iter().enumerate() {

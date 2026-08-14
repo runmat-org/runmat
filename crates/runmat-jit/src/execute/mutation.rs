@@ -88,11 +88,7 @@ fn assign_place(
     let root = flatten_place(place, &mut segments)?;
     if segments.is_empty() {
         let reference = state.arena.insert(rhs);
-        *state
-            .locals
-            .get_mut(root.0)
-            .ok_or_else(|| JitError::Host("assignment local is out of bounds".into()))? = reference;
-        return Ok(());
+        return state.set_local(root.0, reference);
     }
     let root_reference = state
         .locals
@@ -117,8 +113,8 @@ fn assign_place(
     for (parent, segment) in parents.into_iter().rev() {
         updated = write_segment(state, parent, &segment, updated, false, true)?;
     }
-    state.locals[root.0] = state.arena.insert(updated);
-    Ok(())
+    let reference = state.arena.insert(updated);
+    state.set_local(root.0, reference)
 }
 
 fn flatten_place(

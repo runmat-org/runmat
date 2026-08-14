@@ -1,13 +1,15 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_execution::{
     Digest, ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
     ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
     ExecutableUnitManifest, ProgramEnvironment, ProgramRevision, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
-use runmat_hir::{FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span};
+use runmat_hir::{
+    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span, WorkspaceEffect,
+};
 use runmat_jit::{GenericExecutor, JitError};
 use runmat_mir::{
     AsyncBehaviorFact, BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall,
@@ -19,7 +21,7 @@ use runmat_mir::{
 use runmat_native_codegen::{lower_executable, NativeLoweringInput, NativeTarget};
 use runmat_runtime::{context::RuntimeContext, execution::RuntimeExecutionService};
 use runmat_types::{
-    BuiltinId, CallableFallbackPolicy, CallableIdentity, CapabilitySet, InteropManifest,
+    BindingId, BuiltinId, CallableFallbackPolicy, CallableIdentity, CapabilitySet, InteropManifest,
     ParallelManifest, ProgramFunctionId, ProgramSourceId, RequestedOutputCount,
     INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
     REGION_CONTRACT_SCHEMA_VERSION,
@@ -192,6 +194,74 @@ fn generic_index_and_member_mutations_publish_updated_root_values() {
     );
 }
 
+#[test]
+fn generic_global_and_persistent_declarations_use_semantic_session_names() {
+    let runtime = runtime_context();
+    futures::executor::block_on(runtime.scope(async {
+        runmat_runtime::workspace::session::store_global_named("shared", Value::Num(41.0));
+        runmat_runtime::workspace::session::store_persistent_named(
+            "persistent_counter",
+            "calls",
+            Value::Num(9.0),
+        );
+    }));
+
+    let global = GenericExecutor::compile(workspace_binding_fixture(
+        "global_counter",
+        "shared",
+        WorkspaceEffect::MutatesGlobal,
+    ))
+    .unwrap();
+    assert_eq!(
+        global
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime.clone())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(42.0)]
+    );
+    futures::executor::block_on(runtime.scope(async {
+        assert_eq!(
+            runmat_runtime::workspace::session::global_value("shared"),
+            Some(Value::Num(42.0))
+        );
+    }));
+
+    let persistent = GenericExecutor::compile(workspace_binding_fixture(
+        "persistent_counter",
+        "calls",
+        WorkspaceEffect::MutatesPersistent,
+    ))
+    .unwrap();
+    assert_eq!(
+        persistent
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime.clone())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(10.0)]
+    );
+    futures::executor::block_on(runtime.scope(async {
+        assert_eq!(
+            runmat_runtime::workspace::session::persistent_named_value(
+                "persistent_counter",
+                "calls"
+            ),
+            Some(Value::Num(10.0))
+        );
+    }));
+}
+
+#[test]
+fn generic_workspace_first_static_property_prefers_named_local_binding() {
+    let executor = GenericExecutor::compile(workspace_first_static_fixture()).unwrap();
+    assert_eq!(
+        executor
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(55.0)]
+    );
+}
+
 fn runtime_context() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
 }
@@ -263,6 +333,7 @@ fn fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        binding_names: None,
         target: NativeTarget::current(),
     })
     .unwrap()
@@ -357,6 +428,7 @@ fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        binding_names: None,
         target: NativeTarget::current(),
     })
     .unwrap()
@@ -590,6 +662,7 @@ fn switch_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        binding_names: None,
         target: NativeTarget::current(),
     })
     .unwrap()
@@ -708,6 +781,7 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        binding_names: None,
         target: NativeTarget::current(),
     })
     .unwrap()
@@ -1017,6 +1091,189 @@ fn lower_body(
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        binding_names: None,
+        target: NativeTarget::current(),
+    })
+    .unwrap()
+}
+
+fn workspace_binding_fixture(
+    name: &str,
+    binding_name: &str,
+    effect: WorkspaceEffect,
+) -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 3 };
+    let function = FunctionId(0);
+    let binding = BindingId(0);
+    let mir = MirAssembly {
+        bodies: [(
+            function,
+            MirBody {
+                function,
+                abi: FunctionAbi {
+                    fixed_inputs: Vec::new(),
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                locals: vec![MirLocal {
+                    id: MirLocalId(0),
+                    binding: Some(binding),
+                    kind: MirLocalKind::Binding,
+                    span,
+                }],
+                blocks: vec![BasicBlock {
+                    id: BasicBlockId(0),
+                    statements: vec![
+                        MirStmt {
+                            kind: MirStmtKind::WorkspaceEffect {
+                                effect,
+                                bindings: vec![MirLocalId(0)],
+                            },
+                            span,
+                        },
+                        MirStmt {
+                            kind: MirStmtKind::Assign {
+                                place: MirPlace::Local(MirLocalId(0)),
+                                value: MirRvalue::Binary(
+                                    MirOperand::Local(MirLocalId(0)),
+                                    runmat_types::OperatorKind::Add,
+                                    MirOperand::Constant(MirConstant::Number("1".into())),
+                                ),
+                            },
+                            span,
+                        },
+                    ],
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(0))]),
+                        span,
+                    },
+                }],
+            },
+        )]
+        .into_iter()
+        .collect(),
+        functions: [(
+            function,
+            MirFunctionMetadata {
+                source: ProgramSourceId(0),
+                name: FunctionName(name.into()),
+                parent: None,
+                enclosing_class: None,
+                kind: FunctionKind::SyntheticEntrypoint,
+                argument_validations: Vec::new(),
+                captures: Vec::new(),
+                modifiers: FunctionModifiers::default(),
+                span,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        classes: Vec::new(),
+        entrypoints: vec![function],
+    };
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let binding_names = BTreeMap::from([(binding, binding_name.to_string())]);
+    lower_executable(NativeLoweringInput {
+        mir: &mir,
+        analysis: &analysis,
+        manifest: &manifest,
+        binding_names: Some(&binding_names),
+        target: NativeTarget::current(),
+    })
+    .unwrap()
+}
+
+fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 3 };
+    let function = FunctionId(0);
+    let binding = BindingId(0);
+    let local = |id, binding, kind| MirLocal {
+        id: MirLocalId(id),
+        binding,
+        kind,
+        span,
+    };
+    let mir = MirAssembly {
+        bodies: [(
+            function,
+            MirBody {
+                function,
+                abi: FunctionAbi {
+                    fixed_inputs: Vec::new(),
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                locals: vec![
+                    local(0, Some(binding), MirLocalKind::Binding),
+                    local(1, None, MirLocalKind::Temporary),
+                ],
+                blocks: vec![BasicBlock {
+                    id: BasicBlockId(0),
+                    statements: vec![
+                        MirStmt {
+                            kind: MirStmtKind::Assign {
+                                place: MirPlace::Local(MirLocalId(0)),
+                                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number(
+                                    "55".into(),
+                                ))),
+                            },
+                            span,
+                        },
+                        MirStmt {
+                            kind: MirStmtKind::Assign {
+                                place: MirPlace::Local(MirLocalId(1)),
+                                value: MirRvalue::WorkspaceFirstStaticProperty {
+                                    workspace_name: runmat_hir::SymbolName("Candidate".into()),
+                                    class_name: "Candidate".into(),
+                                    property: runmat_hir::MemberName("Missing".into()),
+                                },
+                            },
+                            span,
+                        },
+                    ],
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(1))]),
+                        span,
+                    },
+                }],
+            },
+        )]
+        .into_iter()
+        .collect(),
+        functions: [(
+            function,
+            MirFunctionMetadata {
+                source: ProgramSourceId(0),
+                name: FunctionName("workspace_first".into()),
+                parent: None,
+                enclosing_class: None,
+                kind: FunctionKind::SyntheticEntrypoint,
+                argument_validations: Vec::new(),
+                captures: Vec::new(),
+                modifiers: FunctionModifiers::default(),
+                span,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        classes: Vec::new(),
+        entrypoints: vec![function],
+    };
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let binding_names = BTreeMap::from([(binding, "Candidate".to_string())]);
+    lower_executable(NativeLoweringInput {
+        mir: &mir,
+        analysis: &analysis,
+        manifest: &manifest,
+        binding_names: Some(&binding_names),
         target: NativeTarget::current(),
     })
     .unwrap()

@@ -49,6 +49,17 @@ pub fn global_value(name: &str) -> Option<Value> {
     with_state(|state| state.globals.get(name).cloned())
 }
 
+/// Store a global through its semantic name.
+///
+/// Executor-local slot numbers are deliberately not part of this API. Native,
+/// bytecode, and browser hosts can therefore share one session global without
+/// agreeing on a frame layout.
+pub fn store_global_named(name: &str, value: Value) {
+    with_state_mut(|state| {
+        state.globals.insert(name.to_string(), value);
+    });
+}
+
 pub fn roots() -> Vec<Value> {
     with_state(|state| {
         state
@@ -152,6 +163,21 @@ mod tests {
         }));
         block_on(second.scope(async {
             assert_eq!(global_value("answer"), None);
+        }));
+    }
+
+    #[test]
+    fn semantic_names_bridge_executor_specific_global_and_persistent_layouts() {
+        let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        block_on(context.scope(async {
+            store_global_named("answer", Value::Num(42.0));
+            assert_eq!(global_value("answer"), Some(Value::Num(42.0)));
+
+            store_persistent_named("counter", "calls", Value::Num(3.0));
+            assert_eq!(
+                persistent_named_value("counter", "calls"),
+                Some(Value::Num(3.0))
+            );
         }));
     }
 }

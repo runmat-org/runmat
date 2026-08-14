@@ -1,5 +1,5 @@
 use super::{NativeBlock, NativeBlockId, NativeLocalId, NativeMirSite};
-use runmat_types::{ProgramFunctionId, ProgramSourceId};
+use runmat_types::{BindingId, ProgramFunctionId, ProgramSourceId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -13,6 +13,43 @@ pub struct NativeFunctionAbi {
     pub implicit_nargout: Option<NativeLocalId>,
 }
 
+/// Executor-neutral metadata for one canonical MIR local.
+///
+/// Native artifacts retain semantic binding identity and names instead of VM
+/// slots. This lets every host, including the browser/WASM host, implement
+/// workspace, global, and persistent behavior without depending on bytecode
+/// frame layout.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeLocalMetadata {
+    pub id: NativeLocalId,
+    pub binding: Option<BindingId>,
+    pub name: Option<String>,
+    pub kind: NativeLocalKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeLocalKind {
+    Parameter,
+    Output,
+    Binding,
+    Temporary,
+    Capture,
+}
+
+impl From<&runmat_mir::MirLocalKind> for NativeLocalKind {
+    fn from(kind: &runmat_mir::MirLocalKind) -> Self {
+        match kind {
+            runmat_mir::MirLocalKind::Parameter => Self::Parameter,
+            runmat_mir::MirLocalKind::Output => Self::Output,
+            runmat_mir::MirLocalKind::Binding => Self::Binding,
+            runmat_mir::MirLocalKind::Temporary => Self::Temporary,
+            runmat_mir::MirLocalKind::Capture => Self::Capture,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeFunction {
@@ -20,8 +57,18 @@ pub struct NativeFunction {
     pub source: ProgramSourceId,
     pub name: String,
     pub abi: NativeFunctionAbi,
-    pub local_count: u32,
+    pub locals: Vec<NativeLocalMetadata>,
     pub entry: NativeBlockId,
     pub blocks: Vec<NativeBlock>,
     pub expected_sites: Vec<NativeMirSite>,
+}
+
+impl NativeFunction {
+    pub fn local_count(&self) -> usize {
+        self.locals.len()
+    }
+
+    pub fn local(&self, local: NativeLocalId) -> Option<&NativeLocalMetadata> {
+        self.locals.get(local.0 as usize)
+    }
 }

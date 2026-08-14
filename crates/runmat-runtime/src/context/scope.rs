@@ -14,7 +14,7 @@ pub(super) fn active_runtime_context() -> Option<RuntimeContext> {
 }
 
 #[must_use]
-pub(crate) struct RuntimeContextGuard {
+pub struct RuntimeContextGuard {
     state_identity: *const super::RuntimeContextState,
 }
 
@@ -94,6 +94,33 @@ mod tests {
 
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
+    }
+
+    #[test]
+    fn synchronous_context_guard_restores_the_previous_context() {
+        let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let first_scope = first.execution().scope_id();
+        let second_scope = second.execution().scope_id();
+        {
+            let _first = first.enter();
+            assert_eq!(
+                active_runtime_context().unwrap().execution().scope_id(),
+                first_scope
+            );
+            {
+                let _second = second.enter();
+                assert_eq!(
+                    active_runtime_context().unwrap().execution().scope_id(),
+                    second_scope
+                );
+            }
+            assert_eq!(
+                active_runtime_context().unwrap().execution().scope_id(),
+                first_scope
+            );
+        }
+        assert!(active_runtime_context().is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

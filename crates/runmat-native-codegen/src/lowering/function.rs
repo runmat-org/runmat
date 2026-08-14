@@ -10,16 +10,45 @@ pub(super) fn lower_function(
     metadata: &runmat_mir::MirFunctionMetadata,
     body: &runmat_mir::MirBody,
     analysis: &runmat_mir::analysis::AnalysisStore,
+    binding_names: Option<&BTreeMap<runmat_types::BindingId, String>>,
     regions: &[RegionContract],
 ) -> NativeCodegenResult<NativeFunction> {
     let local_count = body.locals.len();
-    let local_count_u32 = u32::try_from(local_count).map_err(|_| {
+    let _ = u32::try_from(local_count).map_err(|_| {
         NativeCodegenError::new(
             "native.lowering.local_count",
             "MIR local count exceeds the Native IR schema",
         )
         .at_function(function)
     })?;
+    let locals = body
+        .locals
+        .iter()
+        .map(|local| {
+            let id = checked_local(local.id, function)?;
+            let name = local
+                .binding
+                .map(|binding| {
+                    binding_names
+                        .and_then(|names| names.get(&binding))
+                        .cloned()
+                        .ok_or_else(|| {
+                            NativeCodegenError::new(
+                                "native.lowering.binding_name",
+                                "bound MIR local has no canonical semantic name",
+                            )
+                            .at_function(function)
+                        })
+                })
+                .transpose()?;
+            Ok(NativeLocalMetadata {
+                id,
+                binding: local.binding,
+                name,
+                kind: NativeLocalKind::from(&local.kind),
+            })
+        })
+        .collect::<NativeCodegenResult<Vec<_>>>()?;
     let mut ctx = super::context::FunctionLoweringContext::new(function, metadata.source, analysis);
     let mut parameter_sets = BTreeMap::new();
     let mut epoch_parameters = BTreeMap::new();
@@ -187,7 +216,7 @@ pub(super) fn lower_function(
         source: metadata.source,
         name: metadata.name.0.clone(),
         abi: lower_abi(body, function)?,
-        local_count: local_count_u32,
+        locals,
         entry: checked_block(entry.id, function)?,
         blocks,
         expected_sites,

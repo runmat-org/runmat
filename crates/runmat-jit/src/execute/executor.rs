@@ -80,7 +80,10 @@ impl GenericExecutor {
         let mut exit = NativeExit::completed(0);
         let entrypoint = self.compiled.entrypoint(function)?;
         // SAFETY: all borrowed ABI records and their backing slices remain live
-        // and stable until the synchronous generated entrypoint returns.
+        // and stable until the synchronous generated entrypoint returns. The
+        // explicit runtime guard makes direct session/global/persistent helpers
+        // observe the same invocation-owned context as scoped async calls.
+        let _runtime_guard = state.runtime.enter();
         let status = unsafe { entrypoint(&mut call, &mut exit) };
         if status != NativeHostStatus::OK {
             return Err(state.host_failure.take().unwrap_or_else(|| {

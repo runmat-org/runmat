@@ -3,7 +3,7 @@ use serde::Serialize;
 use super::ExecutableUnit;
 
 const BYTECODE_SCHEMA_VERSION: u16 = 1;
-const VM_LAYOUT_SCHEMA_VERSION: u16 = 1;
+const VM_LAYOUT_SCHEMA_VERSION: u16 = 2;
 const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 1;
 const SOURCE_MAP_SCHEMA_VERSION: u16 = 1;
 

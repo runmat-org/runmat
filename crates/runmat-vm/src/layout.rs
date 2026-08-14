@@ -15,6 +15,9 @@ pub struct VmSlotId(pub usize);
 pub struct VmAssemblyLayout {
     pub functions: HashMap<FunctionId, VmFunctionLayout>,
     pub entrypoints: HashMap<EntrypointId, VmEntrypointLayout>,
+    /// Complete semantic binding catalog retained for every executor and
+    /// portable-product consumer. The historical field name is serialized and
+    /// remains stable; entries are not limited to non-lexical storage.
     pub storage_bindings: HashMap<BindingId, VmStorageBinding>,
 }
 
@@ -119,7 +122,6 @@ pub fn derive_layout(
     let storage_bindings = hir
         .bindings
         .iter()
-        .filter(|binding| binding.storage != BindingStorage::Lexical)
         .map(|binding| {
             (
                 binding.id,
@@ -397,6 +399,11 @@ mod tests {
         assert_eq!(function_layout.binding_slots[&binding], VmSlotId(0));
         assert_eq!(function_layout.mir_local_slots[&MirLocalId(0)], VmSlotId(0));
         assert_eq!(function_layout.local_count, 1);
+        assert_eq!(layout.storage_bindings[&binding].name, "x");
+        assert_eq!(
+            layout.storage_bindings[&binding].storage,
+            BindingStorage::Lexical
+        );
     }
 
     #[test]

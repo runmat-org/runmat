@@ -23,6 +23,8 @@ pub(super) struct HostState {
     pub host_failure: Option<JitError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,
+    global_bindings: BTreeMap<usize, String>,
+    persistent_bindings: BTreeMap<usize, String>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
 }
 
@@ -50,7 +52,7 @@ impl HostState {
             .into_iter()
             .map(|value| arena.insert(value))
             .collect::<Vec<_>>();
-        let mut locals = vec![NativeValueRef::NULL; function.local_count as usize];
+        let mut locals = vec![NativeValueRef::NULL; function.local_count()];
         for (local, value) in function.abi.fixed_inputs.iter().zip(&argument_refs) {
             let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
                 JitError::Host("function ABI input local is out of bounds".into())
@@ -82,6 +84,8 @@ impl HostState {
             },
             active_for_loops: BTreeMap::new(),
             pending_place_mutation: None,
+            global_bindings: BTreeMap::new(),
+            persistent_bindings: BTreeMap::new(),
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
@@ -115,6 +119,64 @@ impl HostState {
             roots: self.roots.as_ptr(),
             count: self.roots.len(),
         }
+    }
+
+    pub fn set_local(&mut self, slot: usize, value: NativeValueRef) -> JitResult<()> {
+        let local = self
+            .locals
+            .get_mut(slot)
+            .ok_or_else(|| JitError::Host("native local is out of bounds".into()))?;
+        *local = value;
+        self.synchronize_session_binding(slot, value)
+    }
+
+    pub fn declare_global(&mut self, slot: usize, name: String) -> JitResult<()> {
+        if self.persistent_bindings.contains_key(&slot) {
+            return Err(JitError::Host(
+                "native local cannot be both global and persistent".into(),
+            ));
+        }
+        self.global_bindings.insert(slot, name.clone());
+        let value = runmat_runtime::workspace::session::global_value(&name)
+            .unwrap_or_else(empty_workspace_value);
+        let reference = self.arena.insert(value);
+        self.set_local(slot, reference)
+    }
+
+    pub fn declare_persistent(&mut self, slot: usize, name: String) -> JitResult<()> {
+        if self.global_bindings.contains_key(&slot) {
+            return Err(JitError::Host(
+                "native local cannot be both global and persistent".into(),
+            ));
+        }
+        self.persistent_bindings.insert(slot, name.clone());
+        let value =
+            runmat_runtime::workspace::session::persistent_named_value(&self.function.name, &name)
+                .unwrap_or_else(empty_workspace_value);
+        let reference = self.arena.insert(value);
+        self.set_local(slot, reference)
+    }
+
+    fn synchronize_session_binding(
+        &mut self,
+        slot: usize,
+        reference: NativeValueRef,
+    ) -> JitResult<()> {
+        if reference.is_null() {
+            return Ok(());
+        }
+        let value = self.arena.get(reference)?.clone();
+        if let Some(name) = self.global_bindings.get(&slot) {
+            runmat_runtime::workspace::session::store_global_named(name, value.clone());
+        }
+        if let Some(name) = self.persistent_bindings.get(&slot) {
+            runmat_runtime::workspace::session::store_persistent_named(
+                &self.function.name,
+                name,
+                value,
+            );
+        }
+        Ok(())
     }
 
     pub fn has_for_loop(&self, header: NativeBlockId) -> bool {
@@ -191,6 +253,13 @@ impl HostState {
         }
         reachable_from_body
     }
+}
+
+fn empty_workspace_value() -> runmat_value::Value {
+    runmat_value::Value::Tensor(
+        runmat_value::Tensor::new(Vec::new(), vec![0, 0])
+            .expect("the canonical empty workspace shape is valid"),
+    )
 }
 
 fn successor_blocks(kind: &NativeTerminatorKind) -> Vec<NativeBlockId> {

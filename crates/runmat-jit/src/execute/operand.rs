@@ -119,6 +119,34 @@ pub(super) fn evaluate_rvalue(
             .map_err(JitError::from)?;
             Ok(vec![state.arena.insert(value)])
         }
+        MirRvalue::WorkspaceFirstStaticProperty {
+            workspace_name,
+            class_name,
+            property,
+        } => {
+            let value = runmat_runtime::workspace::lookup(&workspace_name.0)
+                .or_else(|| {
+                    state
+                        .function
+                        .locals
+                        .iter()
+                        .find(|local| local.name.as_deref() == Some(workspace_name.0.as_str()))
+                        .and_then(|local| state.locals.get(local.id.0 as usize))
+                        .copied()
+                        .filter(|value| !value.is_null())
+                        .and_then(|value| state.arena.get(value).ok().cloned())
+                })
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    runmat_runtime::object::resolve::load_static_member(
+                        class_name,
+                        &property.0,
+                        Some(&state.function.name),
+                    )
+                    .map_err(JitError::from)
+                })?;
+            Ok(vec![state.arena.insert(value)])
+        }
         MirRvalue::MetaClass(name) => Ok(vec![state.arena.insert(Value::String(
             name.0
                 .iter()
@@ -149,11 +177,7 @@ fn execute_embedded_statement(
                     "embedded short-circuit assignment did not produce one value".into(),
                 ));
             }
-            let slot = state.locals.get_mut(local.0).ok_or_else(|| {
-                JitError::Host("embedded assignment local is out of bounds".into())
-            })?;
-            *slot = values.remove(0);
-            Ok(())
+            state.set_local(local.0, values.remove(0))
         }
         runmat_mir::MirStmtKind::Expr(value) => {
             let _ = evaluate_rvalue(state, value, 0)?;
