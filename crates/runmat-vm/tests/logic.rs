@@ -462,6 +462,7 @@ fn typed_complex_integer_cross_uses_runmat_double_extension() {
 
 #[test]
 fn typed_complex_integer_pagemtimes_is_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for operation in ["pagemtimes(z, z)", "pagemtimes(z, 1)", "pagemtimes(1, z)"] {
         let source = format!(
             "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
@@ -508,6 +509,7 @@ fn typed_complex_integer_det_is_rejected_before_f64_coercion() {
 
 #[test]
 fn typed_complex_integer_factorization_and_solve_operations_are_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let operations = [
         ("chol", "chol(z)"),
         ("lu", "lu(z)"),

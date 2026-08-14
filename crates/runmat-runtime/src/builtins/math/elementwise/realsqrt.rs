@@ -6,9 +6,13 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericStorage, ResolveContext, SparseTensor, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericDType, NumericStorage, ResolveContext, SparseTensor, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +26,26 @@ use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "realsqrt";
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The public input classes are single and double; host, sparse, and resident integer values reject by class before domain evaluation or provider sqrt dispatch.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = realsqrt(X)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "realsqrt has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+    }];
 
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -115,6 +139,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(realsqrt_type),
     descriptor(crate::builtins::math::elementwise::realsqrt::REALSQRT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::realsqrt::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::realsqrt"
 )]
 async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {

@@ -4,7 +4,11 @@ use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Tensor, Value,
 };
@@ -20,6 +24,44 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rcond";
+
+pub const RCOND_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rcond-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rcond with a typed-integer matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RcondIntegerInputExtension"),
+};
+
+pub const RCOND_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rcond-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rcond with a logical matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RcondLogicalInputExtension"),
+};
+
+pub const RCOND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [RCOND_INTEGER_INPUT_EXTENSION, RCOND_LOGICAL_INPUT_EXTENSION];
+
+const RCOND_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public matrix classes are single and double; RunMat mode admits real integer matrices only when every value is exactly representable as binary64.",
+    }];
+
+pub const RCOND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "c = rcond(integer_A)",
+        inputs: &RCOND_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated integer matrix crosses one checked binary64 condition-estimation boundary. Host output is double, and automatic residency may restore the floating scalar to the owner.",
+    }];
 
 const RCOND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "c",
@@ -138,10 +180,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "rcond",
     type_resolver(numeric_scalar_type),
     descriptor(crate::builtins::math::linalg::solve::rcond::RCOND_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::solve::rcond::RCOND_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::solve::rcond::RCOND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::solve::rcond"
 )]
 async fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RCOND_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_logical_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RCOND_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(builtin_error(
+            "rcond: integer input must be exactly representable as double",
+        ));
+    }
     let estimate = match value {
         Value::GpuTensor(handle) => return rcond_gpu(handle).await,
         Value::ComplexTensor(matrix) => rcond_complex_tensor(&matrix)?,
@@ -163,6 +227,20 @@ async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         return Err(builtin_error(format!(
             "{NAME}: input must be a square matrix."
         )));
+    }
+
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let owner = gpu_helpers::exact_provider_for_handle(&handle);
+        let gathered = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(map_control_flow)?;
+        let estimate = rcond_real_tensor(&gathered)?;
+        if let Some(provider) = owner {
+            if let Ok(uploaded) = upload_scalar(provider, estimate) {
+                return Ok(Value::GpuTensor(uploaded));
+            }
+        }
+        return Ok(Value::Num(estimate));
     }
 
     if rows == 0 {
@@ -410,6 +488,7 @@ pub(crate) mod tests {
 
     #[test]
     fn rcond_reads_typed_integer_tensor_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
             .expect("integer");
         let result = rcond_builtin(Value::Tensor(tensor)).expect("rcond");
@@ -417,6 +496,33 @@ pub(crate) mod tests {
             Value::Num(value) => assert!((value - 0.5).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rcond_resident_integer_gates_then_uses_checked_owner_fallback() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U16(vec![2, 0, 0, 4]), vec![2, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = rcond_builtin(Value::GpuTensor(handle.clone()))
+                    .expect_err("strict mode must gate resident integer input");
+                assert_eq!(
+                    err.identifier(),
+                    RCOND_INTEGER_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let Value::GpuTensor(output) =
+                rcond_builtin(Value::GpuTensor(handle)).expect("resident rcond")
+            else {
+                panic!("resident fallback must restore output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(gathered.materialize_f64(), vec![0.5]);
+        });
     }
 
     #[test]
@@ -518,6 +624,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rcond_accepts_scalar_int() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let int_value = Value::Int(IntValue::I32(5));
         let result = rcond_builtin(int_value).expect("rcond");
         match result {
@@ -547,9 +654,13 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn rcond_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
         let tol = match runmat_accelerate_api::provider()
             .expect("wgpu provider")
             .precision()

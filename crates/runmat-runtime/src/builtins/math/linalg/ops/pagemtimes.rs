@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, NumericDType, Tensor, Type, Value,
 };
@@ -18,6 +22,58 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pagemtimes";
+
+pub const PAGEMTIMES_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pagemtimes-integer-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pagemtimes with typed-integer input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PagemtimesIntegerInputExtension"),
+    };
+
+pub const PAGEMTIMES_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [PAGEMTIMES_INTEGER_INPUT_EXTENSION];
+
+const PAGEMTIMES_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public X is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check.",
+    }];
+
+const PAGEMTIMES_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public Y is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check.",
+    }];
+
+pub const PAGEMTIMES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Z = pagemtimes(integer_X, Y, transpose_options...)",
+        inputs: &PAGEMTIMES_INTEGER_X_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed-integer left pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Z = pagemtimes(X, integer_Y, transpose_options...)",
+        inputs: &PAGEMTIMES_INTEGER_Y_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed-integer right pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible.",
+    },
+];
 
 const PAGEMTIMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Z",
@@ -229,12 +285,34 @@ fn pagemtimes_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Typ
     accel = "custom",
     type_resolver(pagemtimes_type),
     descriptor(crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::ops::pagemtimes"
 )]
 async fn pagemtimes_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let call = PagemtimesCall::parse(first, rest)?;
+    for value in [&call.lhs, &call.rhs] {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PAGEMTIMES_INTEGER_INPUT_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&call.lhs, NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&call.rhs, NAME)?;
+    for value in [&call.lhs, &call.rhs] {
+        if crate::builtins::common::validation::value_has_native_integer_class(value)
+            && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+                .await?
+        {
+            return Err(pagemtimes_invalid_input(
+                "pagemtimes: integer input must be exactly representable as double",
+            ));
+        }
+    }
     pagemtimes_eval(call).await
 }
 
@@ -910,6 +988,7 @@ mod tests {
 
     #[test]
     fn typed_integer_pages_read_exact_storage_and_return_double() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = Tensor::new_integer(
             IntegerStorage::I16(vec![
                 1, 2, 3, 4, // page 1
@@ -938,6 +1017,7 @@ mod tests {
 
     #[test]
     fn mixed_single_and_integer_pages_return_double_from_exact_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::F32)
             .unwrap();
         let rhs = Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
@@ -946,6 +1026,38 @@ mod tests {
         assert_eq!(out.shape, vec![2, 2]);
         assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(out.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
+    }
+
+    #[test]
+    fn resident_integer_pages_gate_then_use_checked_owner_fallback() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = call(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::GpuTensor(handle.clone())],
+                )
+                .expect_err("strict mode must gate resident integer input");
+                assert_eq!(
+                    err.identifier(),
+                    PAGEMTIMES_INTEGER_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let Value::GpuTensor(output) = call(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::GpuTensor(handle)],
+            )
+            .expect("resident pagemtimes") else {
+                panic!("resident fallback must restore output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 4.0]);
+        });
     }
 
     #[test]
@@ -1111,6 +1223,7 @@ mod tests {
 
     #[test]
     fn rejects_integer_scalar_inputs() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = call(Value::Int(IntValue::I32(2)), vec![Value::Num(3.0)]).unwrap_err();
         assert_eq!(err.identifier(), PAGEMTIMES_ERROR_INVALID_INPUT.identifier);
     }

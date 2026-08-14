@@ -114095,6 +114095,70 @@
           "when": "Runtime cannot materialize the page-wise result.",
           "message": "pagemtimes: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "pagemtimes-integer-input",
+          "mode": "RunMatOnly",
+          "description": "pagemtimes with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PagemtimesIntegerInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Z = pagemtimes(integer_X, Y, transpose_options...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public X is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed-integer left pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible."
+        },
+        {
+          "form": "Z = pagemtimes(X, integer_Y, transpose_options...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public Y is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed-integer right pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible."
+        }
       ]
     },
     {
@@ -114142,6 +114206,35 @@
           "identifier": "RunMat:pagetranspose:Internal",
           "when": "Runtime cannot materialize the page-wise transpose output.",
           "message": "pagetranspose: internal runtime failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = pagetranspose(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The public input-class table lists all eight integer classes; real and paired complex-integer storage is transposed without arithmetic."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The first two dimensions are permuted while exact native real or paired-complex integer payloads remain in their original class; providers may keep supported layouts resident and otherwise use transparent gather/restore."
         }
       ]
     },
@@ -116226,6 +116319,88 @@
           "identifier": "RunMat:pinv:Internal",
           "when": "Runtime fails while computing pseudoinverse or executing fallback/upload paths.",
           "message": "pinv: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "pinv-integer-input",
+          "mode": "RunMatOnly",
+          "description": "pinv with a typed-integer matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PinvIntegerInputExtension"
+        },
+        {
+          "id": "pinv-integer-tolerance",
+          "mode": "RunMatOnly",
+          "description": "pinv with a typed-integer tolerance is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PinvIntegerToleranceExtension"
+        },
+        {
+          "id": "pinv-logical-input",
+          "mode": "RunMatOnly",
+          "description": "pinv with a logical matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PinvLogicalInputExtension"
+        },
+        {
+          "id": "pinv-logical-tolerance",
+          "mode": "RunMatOnly",
+          "description": "pinv with a logical tolerance is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PinvLogicalToleranceExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = pinv(integer_A, tol?)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public matrix classes are single and double; RunMat mode admits real integer matrices only when every value is exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The gated integer matrix crosses one checked binary64 SVD boundary. Host output is double, and automatic residency may restore the floating result to the owning provider."
+        },
+        {
+          "form": "X = pinv(A, integer_tol)",
+          "inputs": [
+            {
+              "name": "tol",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public tolerance is a real scalar without an integer class list; RunMat mode admits typed integer tolerance values only when exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer tolerance is a gated RunMat extension and crosses into the SVD threshold only after exact binary64 representability and nonnegative finite validation."
         }
       ]
     },
@@ -121866,6 +122041,94 @@
           "when": "QR runtime fails to materialize output values.",
           "message": "qr: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "qr-integer-input",
+          "mode": "RunMatOnly",
+          "description": "qr with a typed-integer matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QrIntegerInputExtension"
+        },
+        {
+          "id": "qr-integer-option",
+          "mode": "RunMatOnly",
+          "description": "qr with a typed-integer economy selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QrIntegerOptionExtension"
+        },
+        {
+          "id": "qr-resident-option",
+          "mode": "RunMatOnly",
+          "description": "qr with a gpuArray option value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QrResidentOptionExtension"
+        },
+        {
+          "id": "qr-logical-input",
+          "mode": "RunMatOnly",
+          "description": "qr with a logical matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QrLogicalInputExtension"
+        },
+        {
+          "id": "qr-logical-option",
+          "mode": "RunMatOnly",
+          "description": "qr with a logical economy selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QrLogicalOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[Q, R, P] = qr(integer_A, options...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public full-matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The gated matrix crosses one checked binary64 QR boundary. Q, R, and matrix-form P are double; vector-form P is a one-based double index vector, and automatic residency may restore outputs to the owner."
+        },
+        {
+          "form": "[Q, R, P] = qr(A, integer_zero)",
+          "inputs": [
+            {
+              "name": "economy_selector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented legacy economy selector is the numeric literal 0; RunMat mode additionally accepts typed integer scalar zero without a floating conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer scalar zero selects the legacy economy/vector form exactly in RunMat mode; every nonzero or nonscalar integer option rejects as an invalid option, and an explicit resident option is independently gated before exact-owner download."
+        }
       ]
     },
     {
@@ -125079,6 +125342,88 @@
           "when": "Runtime fails while computing rank or executing fallback/upload paths.",
           "message": "rank: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "rank-integer-input",
+          "mode": "RunMatOnly",
+          "description": "rank with a typed-integer matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RankIntegerInputExtension"
+        },
+        {
+          "id": "rank-integer-tolerance",
+          "mode": "RunMatOnly",
+          "description": "rank with a typed-integer tolerance is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RankIntegerToleranceExtension"
+        },
+        {
+          "id": "rank-logical-input",
+          "mode": "RunMatOnly",
+          "description": "rank with a logical matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RankLogicalInputExtension"
+        },
+        {
+          "id": "rank-logical-tolerance",
+          "mode": "RunMatOnly",
+          "description": "rank with a logical tolerance is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RankLogicalToleranceExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "k = rank(integer_A, tol?)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The gated integer matrix crosses one checked binary64 SVD boundary; the structural rank count is returned as an exactly representable double scalar and automatic residency may restore it to the owner."
+        },
+        {
+          "form": "k = rank(A, integer_tol)",
+          "inputs": [
+            {
+              "name": "tol",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public tolerance is a real scalar without an integer class list; RunMat mode admits typed integer tolerance values only when exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer tolerance is a gated RunMat extension and crosses into the SVD threshold only after exact binary64 representability and nonnegative finite validation."
+        }
       ]
     },
     {
@@ -125120,6 +125465,49 @@
           "identifier": "RunMat:rcond:Internal",
           "when": "Runtime fails while computing rcond or executing fallback/upload paths.",
           "message": "rcond: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rcond-integer-input",
+          "mode": "RunMatOnly",
+          "description": "rcond with a typed-integer matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RcondIntegerInputExtension"
+        },
+        {
+          "id": "rcond-logical-input",
+          "mode": "RunMatOnly",
+          "description": "rcond with a logical matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RcondLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "c = rcond(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public matrix classes are single and double; RunMat mode admits real integer matrices only when every value is exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The gated integer matrix crosses one checked binary64 condition-estimation boundary. Host output is double, and automatic residency may restore the floating scalar to the owner."
         }
       ]
     },
@@ -126036,6 +126424,35 @@
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "real: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = real(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a defines real elementwise for numeric input and fully supports gpuArray, but its public page does not enumerate the integer endpoint class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "EvidenceOpen",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "[integer-audit-open] Real integer input is an exact identity and paired complex-integer input projects authoritative real storage without arithmetic. RunMat preserves class, shape, owner, and residency, but the public page does not explicitly state the integer output class."
+        }
       ]
     },
     {
@@ -126149,7 +126566,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Real numeric, logical, char, sparse, or gpuArray input."
+              "description": "Real single or double numeric input."
             }
           ],
           "outputs": [
@@ -126167,7 +126584,7 @@
         {
           "code": "RM.REALSQRT.INVALID_INPUT",
           "identifier": "RunMat:realsqrt:InvalidInput",
-          "when": "Input cannot be interpreted as real numeric, logical, char, sparse, or gpuArray data.",
+          "when": "Input is not real single or double numeric data.",
           "message": "realsqrt: invalid input"
         },
         {
@@ -126181,6 +126598,26 @@
           "identifier": "RunMat:realsqrt:Internal",
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "realsqrt: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = realsqrt(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The public input classes are single and double; host, sparse, and resident integer values reject by class before domain evaluation or provider sqrt dispatch."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "realsqrt has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers."
         }
       ]
     },

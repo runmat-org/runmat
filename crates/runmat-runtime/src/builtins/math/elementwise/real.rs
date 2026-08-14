@@ -1,9 +1,13 @@
 //! MATLAB-compatible `real` builtin with GPU-aware semantics for RunMat.
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -54,6 +58,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "real";
+
+const REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "R2026a defines real elementwise for numeric input and fully supports gpuArray, but its public page does not enumerate the integer endpoint class.",
+}];
+
+pub const REAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = real(integer_X)",
+        inputs: &REAL_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "[integer-audit-open] Real integer input is an exact identity and paired complex-integer input projects authoritative real storage without arithmetic. RunMat preserves class, shape, owner, and residency, but the public page does not explicitly state the integer output class.",
+    }];
 
 const REAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -114,6 +138,7 @@ fn builtin_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::real::REAL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::real::REAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::real"
 )]
 async fn real_builtin(value: Value) -> BuiltinResult<Value> {
@@ -142,6 +167,25 @@ async fn real_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+            builtin_error_with_detail(&REAL_ERROR_INTERNAL, "GPU provider unavailable for input")
+        })?;
+        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let gathered_result =
+            gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        let gathered = gathered_result
+            .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))?;
+        let host = match gathered {
+            Value::Complex(re, _) => Ok(Value::Num(re)),
+            Value::ComplexTensor(ct) => real_complex_tensor(ct),
+            Value::Tensor(tensor) => Ok(tensor::tensor_into_value(real_tensor(tensor)?)),
+            other => real_real(other),
+        }?;
+        return gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
+            .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()));
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_real(&handle).await {
             return Ok(Value::GpuTensor(out));
@@ -434,13 +478,45 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn real_resident_wide_integer_identity_preserves_class_and_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![1, 2],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            let Value::GpuTensor(output) = real_builtin(Value::GpuTensor(handle)).expect("real")
+            else {
+                panic!("documented gpuArray path must remain resident");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&runmat_builtins::IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                ]))
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn real_wgpu_matches_cpu_identity() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
         let tensor = Tensor::new(vec![0.0, 1.0, -2.5, 4.0], vec![4, 1]).unwrap();
         let cpu = real_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
@@ -475,9 +551,13 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn real_wgpu_complex_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
         let provider = runmat_accelerate_api::provider().unwrap();
         let complex = ComplexTensor::new(vec![(1.0, 2.0), (-3.0, 4.5)], vec![2, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");

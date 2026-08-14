@@ -36,7 +36,8 @@
     "`transpX` and `transpY` must both be present in the four-argument form and each must be `none`, `transpose`, or `ctranspose`.",
     "The first two dimensions of each input form the matrix multiplied on each page. Page dimensions are dimensions three and higher and are expanded by position when one side has extent `1` or omits the trailing dimension.",
     "If either operand is scalar, the result uses the first two dimensions of the nonscalar operand and performs page-wise scalar multiplication.",
-    "Dense `double`, `single`, and complex double arrays are supported. Integer, logical, sparse, cell, struct, object, and text inputs are rejected.",
+    "Dense `double`, `single`, and complex double arrays are supported. MATLAB-compatible modes reject integer, logical, sparse, cell, struct, object, and text inputs.",
+    "RunMat mode additionally accepts real arrays in all eight integer classes when every value is exactly representable as binary64. This named extension returns double and rejects wider values instead of rounding them; resident integer inputs use an exact owner-aware gather and restore path rather than a floating provider kernel.",
     "Complex `ctranspose` conjugates each page before multiplication; `transpose` only swaps the first two dimensions."
   ],
   "examples": [
