@@ -505,6 +505,234 @@ fn normal_error(name: &str, message: impl Into<String>) -> RuntimeError {
     builder.build()
 }
 
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn is_single_value(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F32))
+}
+
+fn ensure_exact_integer_boundary(name: &str, tensor: &Tensor, role: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    for index in 0..tensor.len() {
+        let exact = match tensor.numeric_value_at(index) {
+            Some(NumericScalar::I8(value)) => i128::from(value),
+            Some(NumericScalar::I16(value)) => i128::from(value),
+            Some(NumericScalar::I32(value)) => i128::from(value),
+            Some(NumericScalar::I64(value)) => i128::from(value),
+            Some(NumericScalar::U8(value)) => i128::from(value),
+            Some(NumericScalar::U16(value)) => i128::from(value),
+            Some(NumericScalar::U32(value)) => i128::from(value),
+            Some(NumericScalar::U64(value)) => i128::from(value),
+            _ => continue,
+        };
+        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            return Err(normal_error(
+                name,
+                format!("{name}: integer {role} values must be exactly representable as double"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn normal_value_to_tensor(name: &str, role: &str, value: Value) -> BuiltinResult<Tensor> {
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+    let tensor = tensor::value_into_tensor_for(name, gathered)
+        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+    ensure_exact_integer_boundary(name, &tensor, role)?;
+    tensor::integer_tensor_to_f64(tensor)
+        .map_err(|err| normal_error(name, format!("{name}: {err}")))
+}
+
+#[derive(Clone, Copy)]
+enum NormalOutputPrecision {
+    Double,
+    Single,
+}
+
+struct NormalOutputPlan {
+    precision: NormalOutputPrecision,
+    gpu_source: Option<GpuTensorHandle>,
+}
+
+impl NormalOutputPlan {
+    fn inspect(name: &str, first: &Value, rest: &[Value]) -> BuiltinResult<Self> {
+        let precision = if std::iter::once(first)
+            .chain(rest.iter())
+            .any(is_single_value)
+        {
+            NormalOutputPrecision::Single
+        } else {
+            NormalOutputPrecision::Double
+        };
+        let gpu_source = gpu_helpers::select_resident_output_source(
+            std::iter::once(first)
+                .chain(rest.iter())
+                .filter_map(|value| match value {
+                    Value::GpuTensor(handle) => Some(handle.clone()),
+                    _ => None,
+                }),
+            name,
+        )?;
+        Ok(Self {
+            precision,
+            gpu_source,
+        })
+    }
+
+    fn finish(self, name: &str, shape: Vec<usize>, data: Vec<f64>) -> BuiltinResult<Value> {
+        let tensor = match self.precision {
+            NormalOutputPrecision::Double => Tensor::new(data, shape),
+            NormalOutputPrecision::Single => {
+                Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
+            }
+        }
+        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+        let value = match self.precision {
+            NormalOutputPrecision::Double => tensor::tensor_into_value(tensor),
+            NormalOutputPrecision::Single => Value::Tensor(tensor),
+        };
+        let Some(source) = self.gpu_source else {
+            return Ok(value);
+        };
+        let restored = gpu_helpers::restore_class_preserving_value(&source, value, name)
+            .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+        if runmat_accelerate_api::handle_is_explicit(&source)
+            && !matches!(restored, Value::GpuTensor(_))
+        {
+            return Err(normal_error(
+                name,
+                format!("{name}: provider cannot preserve explicit gpuArray output residency"),
+            ));
+        }
+        Ok(restored)
+    }
+}
+
+macro_rules! normal_integer_surface {
+    (
+        $builtin:literal,
+        $x_id:literal, $x_error:literal,
+        $mu_id:literal, $mu_error:literal,
+        $sigma_id:literal, $sigma_error:literal,
+        $logical_id:literal, $logical_error:literal
+    ) => {
+        const INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $x_id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: concat!($builtin, " with typed-integer evaluation values is a RunMat extension"),
+            error_identifier: Some($x_error),
+        };
+        const INTEGER_MU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $mu_id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: concat!($builtin, " with typed-integer mean parameters is a RunMat extension"),
+            error_identifier: Some($mu_error),
+        };
+        const INTEGER_SIGMA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $sigma_id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: concat!($builtin, " with typed-integer standard-deviation parameters is a RunMat extension"),
+            error_identifier: Some($sigma_error),
+        };
+        const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $logical_id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: concat!($builtin, " with logical numeric inputs is a RunMat extension"),
+            error_identifier: Some($logical_error),
+        };
+        pub const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+            INTEGER_X_EXTENSION,
+            INTEGER_MU_EXTENSION,
+            INTEGER_SIGMA_EXTENSION,
+            LOGICAL_INPUT_EXTENSION,
+        ];
+        const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+            BuiltinIntegerInputCapability {
+                name: "x or p",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "Typed-integer evaluation values are gated independently and require exact binary64 representation.",
+            },
+            BuiltinIntegerInputCapability {
+                name: "mu",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "Typed-integer mean parameters are gated independently and require exact binary64 representation.",
+            },
+            BuiltinIntegerInputCapability {
+                name: "sigma",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "Typed-integer standard deviations are gated independently and require exact binary64 representation.",
+            },
+        ];
+        pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+            [BuiltinIntegerCapabilityDescriptor {
+                form: concat!($builtin, "(integer_x_or_p, integer_mu, integer_sigma)"),
+                inputs: &INTEGER_INPUTS,
+                computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+                output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+                overflow: BuiltinIntegerOverflowRule::Error,
+                backend: BuiltinIntegerBackendRule::GatherFallback,
+                overload: BuiltinIntegerOverloadKind::Multiple,
+                notes: "Typed-integer inputs are RunMat-only, cross one checked binary64 distribution boundary, and return single only when another documented input is single; fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors.",
+            }];
+
+        fn ensure_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+            if super::is_typed_integer_value(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_X_EXTENSION,
+                    $builtin,
+                )?;
+            }
+            if rest.first().is_some_and(super::is_typed_integer_value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_MU_EXTENSION,
+                    $builtin,
+                )?;
+            }
+            if rest.get(1).is_some_and(super::is_typed_integer_value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_SIGMA_EXTENSION,
+                    $builtin,
+                )?;
+            }
+            if std::iter::once(value)
+                .chain(rest.iter())
+                .any(super::is_logical_value)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LOGICAL_INPUT_EXTENSION,
+                    $builtin,
+                )?;
+            }
+            Ok(())
+        }
+    };
+}
+
 async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
@@ -543,13 +771,17 @@ async fn normal_args(
             format!("{name}: expected x, x, mu, or x, mu, sigma"),
         ));
     }
-    let x = value_to_tensor(name, first).await?;
+    let output = NormalOutputPlan::inspect(name, &first, &rest)?;
+    let x = normal_value_to_tensor(name, "x or p", first).await?;
     let (mu, sigma) = match rest.as_slice() {
         [] => (scalar_tensor(0.0), scalar_tensor(1.0)),
-        [mu] => (value_to_tensor(name, mu.clone()).await?, scalar_tensor(1.0)),
+        [mu] => (
+            normal_value_to_tensor(name, "mu", mu.clone()).await?,
+            scalar_tensor(1.0),
+        ),
         [mu, sigma] => (
-            value_to_tensor(name, mu.clone()).await?,
-            value_to_tensor(name, sigma.clone()).await?,
+            normal_value_to_tensor(name, "mu", mu.clone()).await?,
+            normal_value_to_tensor(name, "sigma", sigma.clone()).await?,
         ),
         _ => unreachable!(),
     };
@@ -563,6 +795,7 @@ async fn normal_args(
         sigma,
         shape,
         upper,
+        output,
     })
 }
 
@@ -572,6 +805,7 @@ struct NormalArgs {
     sigma: Vec<f64>,
     shape: Vec<usize>,
     upper: bool,
+    output: NormalOutputPlan,
 }
 
 struct TArgs {
@@ -1039,6 +1273,17 @@ where
 pub mod normpdf {
     use super::*;
     normal_descriptor!("normpdf", NORMAL_SIGNATURES_X);
+    normal_integer_surface!(
+        "normpdf",
+        "normpdf-integer-x",
+        "RunMat:compatibility:NormpdfIntegerXExtension",
+        "normpdf-integer-mu",
+        "RunMat:compatibility:NormpdfIntegerMuExtension",
+        "normpdf-integer-sigma",
+        "RunMat:compatibility:NormpdfIntegerSigmaExtension",
+        "normpdf-logical-input",
+        "RunMat:compatibility:NormpdfLogicalInputExtension"
+    );
 
     #[runtime_builtin(
         name = "normpdf",
@@ -1047,9 +1292,12 @@ pub mod normpdf {
         keywords = "normpdf,normal,gaussian,pdf,statistics",
         type_resolver(super::normal_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::normpdf"
     )]
     pub(crate) async fn normpdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        ensure_extensions(&value, &rest)?;
         let args = super::normal_args("normpdf", value, rest, false).await?;
         let data = args
             .x
@@ -1058,13 +1306,24 @@ pub mod normpdf {
             .zip(args.sigma.iter())
             .map(|((x, mu), sigma)| super::normpdf_scalar(*x, *mu, *sigma))
             .collect();
-        super::finish(args.shape, data)
+        args.output.finish("normpdf", args.shape, data)
     }
 }
 
 pub mod normcdf {
     use super::*;
     normal_descriptor!("normcdf", NORMAL_CDF_SIGNATURES);
+    normal_integer_surface!(
+        "normcdf",
+        "normcdf-integer-x",
+        "RunMat:compatibility:NormcdfIntegerXExtension",
+        "normcdf-integer-mu",
+        "RunMat:compatibility:NormcdfIntegerMuExtension",
+        "normcdf-integer-sigma",
+        "RunMat:compatibility:NormcdfIntegerSigmaExtension",
+        "normcdf-logical-input",
+        "RunMat:compatibility:NormcdfLogicalInputExtension"
+    );
 
     #[runtime_builtin(
         name = "normcdf",
@@ -1073,9 +1332,12 @@ pub mod normcdf {
         keywords = "normcdf,normal,gaussian,cdf,statistics",
         type_resolver(super::normal_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::normcdf"
     )]
     pub(crate) async fn normcdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        ensure_extensions(&value, &rest)?;
         let args = super::normal_args("normcdf", value, rest, true).await?;
         let data = args
             .x
@@ -1090,13 +1352,24 @@ pub mod normcdf {
                 }
             })
             .collect();
-        super::finish(args.shape, data)
+        args.output.finish("normcdf", args.shape, data)
     }
 }
 
 pub mod norminv {
     use super::*;
     normal_descriptor!("norminv", NORMAL_INV_SIGNATURES);
+    normal_integer_surface!(
+        "norminv",
+        "norminv-integer-p",
+        "RunMat:compatibility:NorminvIntegerPExtension",
+        "norminv-integer-mu",
+        "RunMat:compatibility:NorminvIntegerMuExtension",
+        "norminv-integer-sigma",
+        "RunMat:compatibility:NorminvIntegerSigmaExtension",
+        "norminv-logical-input",
+        "RunMat:compatibility:NorminvLogicalInputExtension"
+    );
 
     #[runtime_builtin(
         name = "norminv",
@@ -1105,9 +1378,12 @@ pub mod norminv {
         keywords = "norminv,normal,gaussian,inverse,cdf,statistics",
         type_resolver(super::normal_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::norminv"
     )]
     pub(crate) async fn norminv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        ensure_extensions(&value, &rest)?;
         let args = super::normal_args("norminv", value, rest, false).await?;
         let data = args
             .x
@@ -1116,7 +1392,7 @@ pub mod norminv {
             .zip(args.sigma.iter())
             .map(|((p, mu), sigma)| super::norminv_scalar(*p, *mu, *sigma))
             .collect();
-        super::finish(args.shape, data)
+        args.output.finish("norminv", args.shape, data)
     }
 }
 
@@ -2419,6 +2695,109 @@ mod tests {
     }
 
     #[test]
+    fn normal_distribution_integer_roles_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let x = block_on(normcdf::normcdf_builtin(
+            Value::Int(runmat_builtins::IntValue::I16(0)),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            x.identifier(),
+            Some("RunMat:compatibility:NormcdfIntegerXExtension")
+        );
+        let mu = block_on(normcdf::normcdf_builtin(
+            Value::Num(0.0),
+            vec![Value::Int(runmat_builtins::IntValue::I16(0))],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            mu.identifier(),
+            Some("RunMat:compatibility:NormcdfIntegerMuExtension")
+        );
+        let sigma = block_on(normcdf::normcdf_builtin(
+            Value::Num(0.0),
+            vec![
+                Value::Num(0.0),
+                Value::Int(runmat_builtins::IntValue::U16(1)),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            sigma.identifier(),
+            Some("RunMat:compatibility:NormcdfIntegerSigmaExtension")
+        );
+    }
+
+    #[test]
+    fn normal_distribution_extensions_preserve_single_and_reject_lossy_integers() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let single = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
+        let out = block_on(normpdf::normpdf_builtin(
+            single,
+            vec![
+                mirrorless_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+                mirrorless_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(out) = out else {
+            panic!("single normal inputs must retain tensor class");
+        };
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        assert_close(out.materialize_f64()[0], INV_SQRT_2PI, 1.0e-6);
+
+        for storage in all_integer_binocdf_storages(0) {
+            let out = block_on(normcdf::normcdf_builtin(
+                Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap()),
+                Vec::new(),
+            ))
+            .unwrap();
+            match out {
+                Value::Num(value) => assert_close(value, 0.5, 1.0e-12),
+                other => panic!("expected double scalar, got {other:?}"),
+            }
+        }
+
+        let wide = mirrorless_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]);
+        let error = block_on(norminv::norminv_builtin(wide, Vec::new())).unwrap_err();
+        assert!(error.message.contains("exactly representable"));
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn normal_distribution_wgpu_integer_fallback_preserves_class_and_explicit_intent() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("wgpu provider");
+        let input = Tensor::new_integer(IntegerStorage::U16(vec![0, 1]), vec![1, 2]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+        let out = block_on(normcdf::normcdf_builtin(
+            Value::GpuTensor(handle.clone()),
+            Vec::new(),
+        ))
+        .expect("normcdf");
+        let Value::Tensor(host) = out else {
+            panic!("F32 owner cannot relabel required double output");
+        };
+        assert_eq!(host.numeric_dtype(), NumericDType::F64);
+        assert_close(host.materialize_f64()[0], 0.5, 1.0e-12);
+
+        runmat_accelerate_api::set_handle_provenance(
+            &handle,
+            runmat_accelerate_api::GpuHandleProvenance::Explicit,
+        );
+        let error = block_on(normcdf::normcdf_builtin(
+            Value::GpuTensor(handle),
+            Vec::new(),
+        ))
+        .expect_err("explicit output class mismatch must reject");
+        assert!(error.message.contains("cannot preserve explicit gpuArray"));
+    }
+
+    #[test]
     fn normal_distribution_accepts_mu_only_and_upper_tail() {
         let cdf = block_on(normcdf::normcdf_builtin(
             Value::Num(2.0),
@@ -2907,6 +3286,7 @@ mod tests {
 
     #[test]
     fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(normcdf::normcdf_builtin(
             mirrorless_int_tensor(IntegerStorage::I16(vec![0, 1]), vec![1, 2]),
             vec![

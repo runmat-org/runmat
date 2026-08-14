@@ -3,15 +3,19 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, NumericDType, NumericScalar, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::keyword_of;
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -19,8 +23,97 @@ const PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Input numeric, logical, complex, or gpuArray data.",
+    description:
+        "Floating input data; native integer and logical data are gated RunMat extensions.",
 };
+
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "normalize-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "normalize with native-class integer data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormalizeIntegerDataExtension"),
+};
+
+const LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "normalize-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "normalize with logical data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormalizeLogicalDataExtension"),
+};
+
+const RESIDENT_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "normalize-resident-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "normalize with explicit gpuArray control or parameter values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NormalizeResidentControlExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_DATA_EXTENSION,
+    LOGICAL_DATA_EXTENSION,
+    RESIDENT_CONTROL_EXTENSION,
+];
+
+const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer data is gated by normalize-integer-data and enters the documented double normalization domain from authoritative storage.",
+    }];
+
+const INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented positive integer scalar operating dimension is parsed exactly from every native integer class.",
+    }];
+
+const INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "methodtype, centertype, or scaletype",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented numeric p-norm, range, center, and scale parameters retain exact native storage until the selected floating normalization boundary.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "N = normalize(integer_A, ___)",
+        inputs: &INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer A is a RunMat-only extension and returns double normalized values; fallback restores through the exact owner when it can preserve double, otherwise automatic residency may remain host and explicit residency errors.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "N = normalize(A, integer_dim, ___)",
+        inputs: &INTEGER_DIM_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer dimensions select an axis without conversion; explicit resident controls are separately gated while automatic controls may gather.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "N = normalize(A, method, integer_methodtype)",
+        inputs: &INTEGER_PARAMETER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Numeric normalization parameters are authoritative until their method-specific floating calculation; output precision follows A.",
+    },
+];
 
 const PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "dim",
@@ -297,6 +390,100 @@ struct NormalizeEval {
     s: Value,
 }
 
+struct NormalizeOutputPlan {
+    single: bool,
+    gpu_source: Option<runmat_accelerate_api::GpuTensorHandle>,
+}
+
+impl NormalizeOutputPlan {
+    fn inspect(value: &Value, _rest: &[Value]) -> BuiltinResult<Self> {
+        let single = matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            || matches!(value, Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            || matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(handle)
+                    && runmat_accelerate_api::handle_precision(handle)
+                        == Some(runmat_accelerate_api::ProviderPrecision::F32));
+        let gpu_source = gpu_helpers::select_resident_output_source(
+            std::iter::once(value).filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            }),
+            "normalize",
+        )?;
+        Ok(Self { single, gpu_source })
+    }
+
+    fn finish(self, eval: NormalizeEval) -> BuiltinResult<NormalizeEval> {
+        Ok(NormalizeEval {
+            n: self.finish_value(eval.n)?,
+            c: self.finish_value(eval.c)?,
+            s: self.finish_value(eval.s)?,
+        })
+    }
+
+    fn finish_value(&self, value: Value) -> BuiltinResult<Value> {
+        let value = if self.single {
+            value_to_single(value)?
+        } else {
+            value
+        };
+        match &self.gpu_source {
+            Some(source) => {
+                let restored =
+                    gpu_helpers::restore_class_preserving_value(source, value, "normalize")?;
+                if runmat_accelerate_api::handle_is_explicit(source)
+                    && !matches!(restored, Value::GpuTensor(_))
+                {
+                    return Err(normalize_internal(
+                        "normalize: provider cannot preserve explicit gpuArray output residency",
+                    ));
+                }
+                Ok(restored)
+            }
+            None => Ok(value),
+        }
+    }
+}
+
+fn value_to_single(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::Num(value) => Tensor::from_f32(vec![value as f32], vec![1, 1])
+            .map(Value::Tensor)
+            .map_err(|err| normalize_internal(format!("normalize: {err}"))),
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            Ok(Value::Tensor(tensor))
+        }
+        Value::Tensor(tensor) => Tensor::from_f32(
+            tensor
+                .materialize_f64()
+                .iter()
+                .map(|value| *value as f32)
+                .collect(),
+            tensor.shape.clone(),
+        )
+        .map(Value::Tensor)
+        .map_err(|err| normalize_internal(format!("normalize: {err}"))),
+        Value::Complex(re, im) => ComplexTensor::from_f32(vec![(re as f32, im as f32)], vec![1, 1])
+            .map(Value::ComplexTensor)
+            .map_err(|err| normalize_internal(format!("normalize: {err}"))),
+        Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            Ok(Value::ComplexTensor(tensor))
+        }
+        Value::ComplexTensor(tensor) => ComplexTensor::from_f32(
+            tensor
+                .materialize_f64()
+                .iter()
+                .map(|(re, im)| (*re as f32, *im as f32))
+                .collect(),
+            tensor.shape.clone(),
+        )
+        .map(Value::ComplexTensor)
+        .map_err(|err| normalize_internal(format!("normalize: {err}"))),
+        other => Ok(other),
+    }
+}
+
 const MAX_NORMALIZE_DIM: usize = 64;
 
 fn normalize_type(args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -317,12 +504,16 @@ fn normalize_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "normalize,zscore,scale,range,norm,center,statistics",
     type_resolver(normalize_type),
     descriptor(crate::builtins::stats::summary::normalize::DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::normalize::EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::normalize::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::normalize"
 )]
 async fn normalize_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_compatibility(&value, &rest)?;
+    let output = NormalizeOutputPlan::inspect(&value, &rest)?;
     let input = value_to_input(value).await?;
     let parsed = parse_args(&input, rest).await?;
-    let eval = evaluate(input, parsed)?;
+    let eval = output.finish(evaluate(input, parsed)?)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -336,6 +527,42 @@ async fn normalize_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         ));
     }
     Ok(eval.n)
+}
+
+fn ensure_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_DATA_EXTENSION,
+            "normalize",
+        )?;
+    }
+    if is_logical(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOGICAL_DATA_EXTENSION,
+            "normalize",
+        )?;
+    }
+    if rest.iter().any(|value| {
+        matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESIDENT_CONTROL_EXTENSION,
+            "normalize",
+        )?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
 fn normalize_error(message: impl Into<String>) -> RuntimeError {
@@ -358,6 +585,7 @@ async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
         .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
     match value {
         Value::Tensor(tensor) => {
+            ensure_exact_integer_tensor(&tensor, "input data")?;
             let shape = normalize_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
             Ok(NumericInput::Real {
                 shape,
@@ -379,7 +607,7 @@ async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
             shape: vec![1, 1],
         }),
         Value::Int(i) => Ok(NumericInput::Real {
-            data: vec![i.to_f64()],
+            data: vec![exact_integer_as_f64(&i, "input data")?],
             shape: vec![1, 1],
         }),
         Value::Bool(b) => Ok(NumericInput::Real {
@@ -391,7 +619,10 @@ async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
             shape: vec![1, 1],
         }),
         Value::ComplexTensor(tensor) => Ok(NumericInput::Complex {
-            shape: normalize_shape_for(&tensor.shape, tensor::complex_tensor_element_len(&tensor)),
+            shape: {
+                ensure_exact_complex_integer_tensor(&tensor, "input data")?;
+                normalize_shape_for(&tensor.shape, tensor::complex_tensor_element_len(&tensor))
+            },
             data: tensor::complex_tensor_into_values_complex64(tensor)
                 .into_iter()
                 .map(|value| (value.re, value.im))
@@ -579,13 +810,108 @@ async fn parse_args(input: &NumericInput, rest: Vec<Value>) -> BuiltinResult<Par
 async fn gather_rest(rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(rest.len());
     for value in rest {
-        out.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(|err| normalize_internal(format!("normalize: {err}")))?,
-        );
+        let gathered = gather_if_needed_async(&value)
+            .await
+            .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
+        ensure_exact_integer_value(&gathered, "numeric parameter")?;
+        out.push(gathered);
     }
     Ok(out)
+}
+
+fn ensure_exact_integer_value(value: &Value, role: &str) -> BuiltinResult<()> {
+    match value {
+        Value::Int(value) => {
+            exact_integer_as_f64(value, role)?;
+            Ok(())
+        }
+        Value::Tensor(tensor) => ensure_exact_integer_tensor(tensor, role),
+        Value::ComplexTensor(tensor) => ensure_exact_complex_integer_tensor(tensor, role),
+        _ => Ok(()),
+    }
+}
+
+fn ensure_exact_complex_integer_tensor(tensor: &ComplexTensor, role: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    for index in 0..tensor.len() {
+        let Some((real, imag)) = tensor.numeric_value_at(index) else {
+            continue;
+        };
+        if !numeric_scalar_is_exact_f64(real) || !numeric_scalar_is_exact_f64(imag) {
+            return Err(normalize_error(format!(
+                "normalize: complex integer {role} must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn numeric_scalar_is_exact_f64(value: NumericScalar) -> bool {
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    match value {
+        NumericScalar::I8(value) => {
+            (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&i128::from(value))
+        }
+        NumericScalar::I16(value) => {
+            (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&i128::from(value))
+        }
+        NumericScalar::I32(value) => {
+            (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&i128::from(value))
+        }
+        NumericScalar::I64(value) => {
+            (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&i128::from(value))
+        }
+        NumericScalar::U8(value) => i128::from(value) <= MAX_EXACT_INTEGER,
+        NumericScalar::U16(value) => i128::from(value) <= MAX_EXACT_INTEGER,
+        NumericScalar::U32(value) => i128::from(value) <= MAX_EXACT_INTEGER,
+        NumericScalar::U64(value) => i128::from(value) <= MAX_EXACT_INTEGER,
+        NumericScalar::F32(_) | NumericScalar::F64(_) => true,
+    }
+}
+
+fn exact_integer_as_f64(value: &IntValue, role: &str) -> BuiltinResult<f64> {
+    const MAX_EXACT_INTEGER: u64 = 1 << 53;
+    match value {
+        IntValue::I8(value) => Ok(*value as f64),
+        IntValue::I16(value) => Ok(*value as f64),
+        IntValue::I32(value) => Ok(*value as f64),
+        IntValue::I64(value) if value.unsigned_abs() <= MAX_EXACT_INTEGER => Ok(*value as f64),
+        IntValue::U8(value) => Ok(*value as f64),
+        IntValue::U16(value) => Ok(*value as f64),
+        IntValue::U32(value) => Ok(*value as f64),
+        IntValue::U64(value) if *value <= MAX_EXACT_INTEGER => Ok(*value as f64),
+        _ => Err(normalize_error(format!(
+            "normalize: integer {role} must be exactly representable as double"
+        ))),
+    }
+}
+
+fn ensure_exact_integer_tensor(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    for index in 0..tensor.len() {
+        let exact = match tensor.numeric_value_at(index) {
+            Some(NumericScalar::I8(value)) => i128::from(value),
+            Some(NumericScalar::I16(value)) => i128::from(value),
+            Some(NumericScalar::I32(value)) => i128::from(value),
+            Some(NumericScalar::I64(value)) => i128::from(value),
+            Some(NumericScalar::U8(value)) => i128::from(value),
+            Some(NumericScalar::U16(value)) => i128::from(value),
+            Some(NumericScalar::U32(value)) => i128::from(value),
+            Some(NumericScalar::U64(value)) => i128::from(value),
+            _ => continue,
+        };
+        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            return Err(normalize_error(format!(
+                "normalize: integer {role} must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn optional_keyword(rest: &[Value], idx: &mut usize) -> Option<String> {
@@ -1427,6 +1753,7 @@ mod tests {
 
     #[test]
     fn normalize_reads_typed_integer_input_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = expect_tensor(
             call(
                 int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
@@ -1440,7 +1767,65 @@ mod tests {
     }
 
     #[test]
+    fn normalize_integer_data_gates_and_wide_values_reject() {
+        let data = int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]);
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(data, Vec::new()).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:NormalizeIntegerDataExtension")
+            );
+        }
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]);
+        let error = call(wide, Vec::new()).unwrap_err();
+        assert!(error.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn normalize_single_input_preserves_single_outputs() {
+        let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let Value::OutputList(values) = call(input, Vec::new()).unwrap() else {
+            panic!("expected three outputs");
+        };
+        for value in values {
+            let Value::Tensor(tensor) = value else {
+                panic!("single normalize outputs must be tensors");
+            };
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn normalize_wgpu_integer_fallback_preserves_class_and_explicit_intent() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("wgpu provider");
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+        let out = call(Value::GpuTensor(handle.clone()), Vec::new()).expect("normalize");
+        let Value::Tensor(host) = out else {
+            panic!("F32 owner cannot relabel required double output");
+        };
+        assert_eq!(host.numeric_dtype(), NumericDType::F64);
+        assert_close(host.materialize_f64()[0], -1.0);
+        runmat_accelerate_api::set_handle_provenance(
+            &handle,
+            runmat_accelerate_api::GpuHandleProvenance::Explicit,
+        );
+        let error = call(Value::GpuTensor(handle), Vec::new())
+            .expect_err("explicit output class mismatch must reject");
+        assert!(error.message.contains("cannot preserve explicit gpuArray"));
+    }
+
+    #[test]
     fn normalize_real_input_shape_uses_typed_integer_storage_not_mirror() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = expect_tensor(
             call(
                 mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
@@ -1485,6 +1870,7 @@ mod tests {
 
     #[test]
     fn normalize_reads_typed_integer_range_bounds_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = expect_tensor(
             call(
                 tensor(vec![2., 4., 6.], vec![3, 1]),
@@ -1555,6 +1941,7 @@ mod tests {
 
     #[test]
     fn normalize_reads_typed_integer_explicit_center_and_scale_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = expect_tensor(
             call(
                 int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]),
@@ -1572,6 +1959,7 @@ mod tests {
 
     #[test]
     fn normalize_explicit_param_shape_uses_typed_integer_storage_not_mirror() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = expect_tensor(
             call(
                 mirrorless_int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]),
@@ -1679,6 +2067,7 @@ mod tests {
 
     #[test]
     fn normalize_reads_typed_complex_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = complex_int_tensor(
             IntegerStorage::I16(vec![3, 0]),
             IntegerStorage::I16(vec![4, 12]),
@@ -1697,6 +2086,7 @@ mod tests {
 
     #[test]
     fn normalize_reuses_typed_complex_integer_center_from_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Value::ComplexTensor(
             ComplexTensor::new(vec![(3.0, 4.0), (5.0, 8.0)], vec![2, 1]).unwrap(),
         );

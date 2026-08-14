@@ -2,14 +2,18 @@
 
 use nalgebra::{DMatrix, SymmetricEigen};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    NumericDType, NumericScalar, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::random;
 use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, random};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mvnrnd";
@@ -17,6 +21,90 @@ const SYMMETRY_TOL: f64 = 1.0e-10;
 const PSD_TOL: f64 = 1.0e-10;
 const MAX_OUTPUT_CELLS: usize = 20_000_000;
 const MAX_FACTOR_CELLS: usize = 20_000_000;
+
+const INTEGER_MU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mvnrnd-integer-mu",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mvnrnd with a typed-integer mean array is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MvnrndIntegerMuExtension"),
+};
+const INTEGER_SIGMA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mvnrnd-integer-sigma",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mvnrnd with a typed-integer covariance array is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MvnrndIntegerSigmaExtension"),
+};
+const INTEGER_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mvnrnd-integer-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mvnrnd with a typed-integer sample count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MvnrndIntegerCountExtension"),
+};
+const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mvnrnd-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mvnrnd with logical numeric inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MvnrndLogicalInputExtension"),
+};
+const RESIDENT_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mvnrnd-resident-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mvnrnd with an explicit gpuArray sample count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MvnrndResidentCountExtension"),
+};
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    INTEGER_MU_EXTENSION,
+    INTEGER_SIGMA_EXTENSION,
+    INTEGER_N_EXTENSION,
+    LOGICAL_INPUT_EXTENSION,
+    RESIDENT_N_EXTENSION,
+];
+
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "mu",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer means are independently gated and require exact binary64 representation.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Sigma",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer covariance values are independently gated and require exact binary64 representation.",
+    },
+];
+const INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "n",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Current MATLAB documents single and double n; native integer n is a gated RunMat structural extension.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "r = mvnrnd(integer_mu, integer_Sigma, ___)",
+        inputs: &INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer distribution arrays are RunMat-only, cross one checked binary64 boundary, and return double unless another documented data input is single; fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "r = mvnrnd(mu, Sigma, integer_n)",
+        inputs: &INTEGER_N_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer n is parsed exactly without selecting output class or residency; explicit resident n is separately gated.",
+    },
+];
 
 const OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "r",
@@ -123,9 +211,13 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     keywords = "mvnrnd,multivariate normal,gaussian,random,statistics",
     type_resolver(mvnrnd_type),
     descriptor(crate::builtins::stats::random::mvnrnd::MVNRND_DESCRIPTOR),
+    extensions(crate::builtins::stats::random::mvnrnd::EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::random::mvnrnd::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::random::mvnrnd"
 )]
 async fn mvnrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_extensions(&args)?;
+    let output = MvnrndOutputPlan::inspect(&args)?;
     let parsed = parse_args(args).await?;
     let output_len = parsed
         .sample_count
@@ -147,9 +239,90 @@ async fn mvnrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             out[dim * parsed.sample_count + sample] = value;
         }
     }
-    Tensor::new(out, vec![parsed.sample_count, parsed.dimension])
-        .map(tensor::tensor_into_value)
-        .map_err(|err| internal(format!("mvnrnd: {err}")))
+    output.finish(out, vec![parsed.sample_count, parsed.dimension])
+}
+
+struct MvnrndOutputPlan {
+    single: bool,
+    source: Option<runmat_accelerate_api::GpuTensorHandle>,
+}
+
+impl MvnrndOutputPlan {
+    fn inspect(args: &[Value]) -> BuiltinResult<Self> {
+        let single = args.iter().take(2).any(|value| {
+            matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+                || matches!(value, Value::GpuTensor(handle)
+                    if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(handle)
+                        && runmat_accelerate_api::handle_precision(handle)
+                            == Some(runmat_accelerate_api::ProviderPrecision::F32))
+        });
+        let source = gpu_helpers::select_resident_output_source(
+            args.iter().take(2).filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            }),
+            NAME,
+        )?;
+        Ok(Self { single, source })
+    }
+
+    fn finish(&self, data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
+        let host = if self.single {
+            Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
+                .map(Value::Tensor)
+                .map_err(|err| internal(format!("mvnrnd: {err}")))?
+        } else {
+            Tensor::new(data, shape)
+                .map(tensor::tensor_into_value)
+                .map_err(|err| internal(format!("mvnrnd: {err}")))?
+        };
+        match &self.source {
+            Some(source) => {
+                let restored = gpu_helpers::restore_class_preserving_value(source, host, NAME)?;
+                if runmat_accelerate_api::handle_is_explicit(source)
+                    && !matches!(restored, Value::GpuTensor(_))
+                {
+                    return Err(internal(
+                        "mvnrnd: provider cannot preserve explicit gpuArray output residency",
+                    ));
+                }
+                Ok(restored)
+            }
+            None => Ok(host),
+        }
+    }
+}
+
+fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
+    if args.first().is_some_and(is_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_MU_EXTENSION, NAME)?;
+    }
+    if args.get(1).is_some_and(is_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_SIGMA_EXTENSION, NAME)?;
+    }
+    if args.get(2).is_some_and(is_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_N_EXTENSION, NAME)?;
+    }
+    if args.iter().any(is_logical) {
+        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_INPUT_EXTENSION, NAME)?;
+    }
+    if matches!(args.get(2), Some(Value::GpuTensor(handle)) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_N_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
 struct ParsedArgs {
@@ -241,7 +414,36 @@ async fn value_to_tensor(value: &Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(value)
         .await
         .map_err(|err| invalid(format!("mvnrnd: {err}")))?;
-    tensor::value_into_tensor_for(NAME, gathered).map_err(|err| invalid(format!("mvnrnd: {err}")))
+    let tensor = tensor::value_into_tensor_for(NAME, gathered)
+        .map_err(|err| invalid(format!("mvnrnd: {err}")))?;
+    ensure_exact_integer_tensor(&tensor)?;
+    Ok(tensor)
+}
+
+fn ensure_exact_integer_tensor(tensor: &Tensor) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    for index in 0..tensor.len() {
+        let exact = match tensor.numeric_value_at(index) {
+            Some(NumericScalar::I8(value)) => i128::from(value),
+            Some(NumericScalar::I16(value)) => i128::from(value),
+            Some(NumericScalar::I32(value)) => i128::from(value),
+            Some(NumericScalar::I64(value)) => i128::from(value),
+            Some(NumericScalar::U8(value)) => i128::from(value),
+            Some(NumericScalar::U16(value)) => i128::from(value),
+            Some(NumericScalar::U32(value)) => i128::from(value),
+            Some(NumericScalar::U64(value)) => i128::from(value),
+            _ => continue,
+        };
+        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            return Err(invalid(
+                "mvnrnd: integer distribution values must be exactly representable as double",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn parse_means(mu: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
@@ -625,5 +827,75 @@ mod tests {
         assert_eq!(covariances[0][(1, 1)], 9.0);
         assert_eq!(covariances[0][(0, 1)], 0.0);
         assert_eq!(covariances[0][(1, 0)], 0.0);
+    }
+
+    #[test]
+    fn mvnrnd_integer_roles_gate_and_wide_distribution_values_reject() {
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(mvnrnd_builtin(vec![
+                Value::Int(runmat_builtins::IntValue::I16(0)),
+                Value::Num(1.0),
+            ]))
+            .expect_err("integer mu must gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:MvnrndIntegerMuExtension")
+            );
+        }
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap(),
+        );
+        let error = block_on(mvnrnd_builtin(vec![wide, Value::Num(1.0)]))
+            .expect_err("wide integer mu must reject");
+        assert!(error.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn mvnrnd_single_distribution_input_selects_single_output() {
+        let _guard = reset_rng();
+        let mu = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
+        let out = block_on(mvnrnd_builtin(vec![mu, Value::Num(1.0)])).unwrap();
+        let Value::Tensor(out) = out else {
+            panic!("expected single tensor output");
+        };
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn mvnrnd_wgpu_integer_fallback_preserves_class_and_explicit_intent() {
+        let _guard = reset_rng();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("wgpu provider");
+        let mu = Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &mu).expect("integer upload");
+        let sigma = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap());
+        let out = block_on(mvnrnd_builtin(vec![
+            Value::GpuTensor(handle.clone()),
+            sigma.clone(),
+            Value::Num(2.0),
+        ]))
+        .expect("mvnrnd");
+        let Value::Tensor(host) = out else {
+            panic!("F32 owner cannot relabel required double output");
+        };
+        assert_eq!(host.numeric_dtype(), NumericDType::F64);
+        assert_eq!(host.shape, vec![2, 2]);
+        runmat_accelerate_api::set_handle_provenance(
+            &handle,
+            runmat_accelerate_api::GpuHandleProvenance::Explicit,
+        );
+        let error = block_on(mvnrnd_builtin(vec![
+            Value::GpuTensor(handle),
+            sigma,
+            Value::Num(2.0),
+        ]))
+        .expect_err("explicit output class mismatch must reject");
+        assert!(error.message.contains("cannot preserve explicit gpuArray"));
     }
 }

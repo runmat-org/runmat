@@ -6,25 +6,27 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "Sampling currently runs on the host RNG path. GPU inputs are gathered to host."
+    "notes": "Sampling currently uses the host RNG and covariance-factor path. Resident mu or Sigma gathers without consuming the source and restores through the exact owner only when it can preserve the required class; incompatible automatic residency may finish on host and incompatible explicit gpuArray intent errors."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::random::mvnrnd::tests",
-    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+    "integration": "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs"
   },
   "description": "`mvnrnd(mu,Sigma)` draws rows from one or more multivariate normal distributions. `mu` supplies mean vectors and `Sigma` supplies covariance matrices.",
   "behaviors": [
     "`mu` can be a scalar, a vector, or an m-by-d matrix with one mean vector per row. A d-by-1 column vector is treated as d one-dimensional means.",
     "`Sigma` can be a d-by-d covariance matrix, a 1-by-d diagonal-variance vector, a d-by-d-by-m array of covariance pages, or a 1-by-d-by-m array of diagonal-variance pages.",
     "`mvnrnd(mu,Sigma,n)` draws `n` rows when `mu` is a single mean vector and `Sigma` has one covariance page; `n` must be a positive scalar integer.",
+    "Current MATLAB documents single and double mu, Sigma, and n values. Typed integers and logical inputs are independently gated RunMat extensions; integer distribution values must be exactly representable as double.",
+    "A single mu or Sigma selects single output; otherwise output is double. Integer n is structural and does not select output class or residency.",
     "Without `n`, RunMat draws one row for each row of `mu`, each page of `Sigma`, or their shared row/page count.",
     "A single covariance matrix is reused for all rows of matrix `mu`; a single mean vector is reused for all covariance pages.",
     "`Sigma` must be symmetric positive semidefinite. Positive-definite covariances use Cholesky; singular semidefinite covariances use a symmetric eigen factor.",
-    "All inputs must be real finite numeric values, and outputs are double precision with observations in rows."
+    "All distribution inputs must be real finite numeric values, and outputs place observations in rows."
   ],
   "examples": [
     {

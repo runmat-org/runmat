@@ -98049,6 +98049,149 @@
           "when": "RunMat cannot allocate or construct mnrfit outputs.",
           "message": "mnrfit: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "mnrfit-integer-x",
+          "mode": "RunMatOnly",
+          "description": "mnrfit with a typed-integer predictor matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MnrfitIntegerXExtension"
+        },
+        {
+          "id": "mnrfit-integer-y",
+          "mode": "RunMatOnly",
+          "description": "mnrfit with a typed-integer response array is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MnrfitIntegerYExtension"
+        },
+        {
+          "id": "mnrfit-integer-parameter",
+          "mode": "RunMatOnly",
+          "description": "mnrfit with typed-integer floating options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MnrfitIntegerParameterExtension"
+        },
+        {
+          "id": "mnrfit-integer-control",
+          "mode": "RunMatOnly",
+          "description": "mnrfit with typed-integer structural controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MnrfitIntegerControlExtension"
+        },
+        {
+          "id": "mnrfit-logical-x",
+          "mode": "RunMatOnly",
+          "description": "mnrfit with logical predictor data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MnrfitLogicalXExtension"
+        },
+        {
+          "id": "mnrfit-resident-input",
+          "mode": "RunMatOnly",
+          "description": "mnrfit host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MnrfitResidentInputExtension"
+        },
+        {
+          "id": "mnrfit-legacy-options",
+          "mode": "RunMatOnly",
+          "description": "mnrfit Constant, MaxIter, TolX, Options, and Display option aliases are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:MnrfitLegacyOptionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = mnrfit(integer_X, integer_Y, ___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer predictors are gated before gather and checked at the binary64 solver boundary."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The current public Y type list omits integer classes; typed-integer categories or grouped counts are a checked RunMat extension."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer data crosses one checked binary64 host-solver boundary."
+        },
+        {
+          "form": "B = mnrfit(X, Y, Name, integer_parameter)",
+          "inputs": [
+            {
+              "name": "Weights or Tolerance",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer floating solver parameters are independently gated and require exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Floating option values reject lossy integer conversion."
+        },
+        {
+          "form": "B = mnrfit(X, Y, 'IterationLimit', integer_control)",
+          "inputs": [
+            {
+              "name": "IterationLimit",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Current MATLAB documents single and double IterationLimit values; native integer controls are a gated structural extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Structural controls are parsed exactly; the MaxIter and Options spellings are separately gated RunMat extensions."
+        }
       ]
     },
     {
@@ -104746,6 +104889,110 @@
           "when": "RunMat cannot allocate or construct the requested random samples.",
           "message": "mvnrnd: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "mvnrnd-integer-mu",
+          "mode": "RunMatOnly",
+          "description": "mvnrnd with a typed-integer mean array is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MvnrndIntegerMuExtension"
+        },
+        {
+          "id": "mvnrnd-integer-sigma",
+          "mode": "RunMatOnly",
+          "description": "mvnrnd with a typed-integer covariance array is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MvnrndIntegerSigmaExtension"
+        },
+        {
+          "id": "mvnrnd-integer-count",
+          "mode": "RunMatOnly",
+          "description": "mvnrnd with a typed-integer sample count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MvnrndIntegerCountExtension"
+        },
+        {
+          "id": "mvnrnd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "mvnrnd with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MvnrndLogicalInputExtension"
+        },
+        {
+          "id": "mvnrnd-resident-count",
+          "mode": "RunMatOnly",
+          "description": "mvnrnd with an explicit gpuArray sample count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MvnrndResidentCountExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = mvnrnd(integer_mu, integer_Sigma, ___)",
+          "inputs": [
+            {
+              "name": "mu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer means are independently gated and require exact binary64 representation."
+            },
+            {
+              "name": "Sigma",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer covariance values are independently gated and require exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer distribution arrays are RunMat-only, cross one checked binary64 boundary, and return double unless another documented data input is single; fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors."
+        },
+        {
+          "form": "r = mvnrnd(mu, Sigma, integer_n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Current MATLAB documents single and double n; native integer n is a gated RunMat structural extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Integer n is parsed exactly without selecting output class or residency; explicit resident n is separately gated."
+        }
       ]
     },
     {
@@ -107706,6 +107953,94 @@
           "when": "Runtime fails while computing norm or executing fallback/upload paths.",
           "message": "norm: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "norm-integer-data",
+          "mode": "RunMatOnly",
+          "description": "norm with native-class integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormIntegerDataExtension"
+        },
+        {
+          "id": "norm-logical-data",
+          "mode": "RunMatOnly",
+          "description": "norm with logical input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormLogicalDataExtension"
+        },
+        {
+          "id": "norm-logical-order",
+          "mode": "RunMatOnly",
+          "description": "norm with a logical norm-order selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormLogicalOrderExtension"
+        },
+        {
+          "id": "norm-zero-order",
+          "mode": "RunMatOnly",
+          "description": "norm with the undocumented zero-norm selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormZeroOrderExtension"
+        },
+        {
+          "id": "norm-nuclear-order",
+          "mode": "RunMatOnly",
+          "description": "norm with the undocumented nuclear-norm selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormNuclearOrderExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "n = norm(integer_A, p)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer vectors and matrices are gated by norm-integer-data and enter the explicitly floating norm domain from authoritative storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer A is a RunMat-only extension. Host and automatic-resident inputs materialize once into the floating norm domain; restoration uses the exact owner only when it can preserve double, while incompatible automatic residency may remain host and explicit residency errors."
+        },
+        {
+          "form": "n = norm(A, integer_p)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive real scalar norm order accepts exact native integer scalars; wide values must be representable at the floating exponent boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Integer p is parsed exactly before conversion to the documented real scalar selector; GPU-resident order selectors remain unsupported."
+        }
       ]
     },
     {
@@ -107721,7 +108056,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             }
           ],
           "outputs": [
@@ -107742,7 +108077,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             },
             {
               "name": "dim",
@@ -107770,7 +108105,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             },
             {
               "name": "method",
@@ -107798,7 +108133,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             },
             {
               "name": "dim",
@@ -107833,7 +108168,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             },
             {
               "name": "method",
@@ -107868,7 +108203,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             },
             {
               "name": "dim",
@@ -107910,7 +108245,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             },
             {
               "name": "center_keyword",
@@ -107959,7 +108294,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             },
             {
               "name": "dim",
@@ -108015,7 +108350,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input numeric, logical, complex, or gpuArray data."
+              "description": "Floating input data; native integer and logical data are gated RunMat extensions."
             }
           ],
           "outputs": [
@@ -108055,6 +108390,109 @@
           "identifier": "RunMat:normalize:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normalize: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "normalize-integer-data",
+          "mode": "RunMatOnly",
+          "description": "normalize with native-class integer data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormalizeIntegerDataExtension"
+        },
+        {
+          "id": "normalize-logical-data",
+          "mode": "RunMatOnly",
+          "description": "normalize with logical data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormalizeLogicalDataExtension"
+        },
+        {
+          "id": "normalize-resident-control",
+          "mode": "RunMatOnly",
+          "description": "normalize with explicit gpuArray control or parameter values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormalizeResidentControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "N = normalize(integer_A, ___)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer data is gated by normalize-integer-data and enters the documented double normalization domain from authoritative storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer A is a RunMat-only extension and returns double normalized values; fallback restores through the exact owner when it can preserve double, otherwise automatic residency may remain host and explicit residency errors."
+        },
+        {
+          "form": "N = normalize(A, integer_dim, ___)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive integer scalar operating dimension is parsed exactly from every native integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Integer dimensions select an axis without conversion; explicit resident controls are separately gated while automatic controls may gather."
+        },
+        {
+          "form": "N = normalize(A, method, integer_methodtype)",
+          "inputs": [
+            {
+              "name": "methodtype, centertype, or scaletype",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented numeric p-norm, range, center, and scale parameters retain exact native storage until the selected floating normalization boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Numeric normalization parameters are authoritative until their method-specific floating calculation; output precision follows A."
         }
       ]
     },
@@ -108281,6 +108719,93 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "normcdf-integer-x",
+          "mode": "RunMatOnly",
+          "description": "normcdf with typed-integer evaluation values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormcdfIntegerXExtension"
+        },
+        {
+          "id": "normcdf-integer-mu",
+          "mode": "RunMatOnly",
+          "description": "normcdf with typed-integer mean parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormcdfIntegerMuExtension"
+        },
+        {
+          "id": "normcdf-integer-sigma",
+          "mode": "RunMatOnly",
+          "description": "normcdf with typed-integer standard-deviation parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormcdfIntegerSigmaExtension"
+        },
+        {
+          "id": "normcdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "normcdf with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormcdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "normcdf(integer_x_or_p, integer_mu, integer_sigma)",
+          "inputs": [
+            {
+              "name": "x or p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer evaluation values are gated independently and require exact binary64 representation."
+            },
+            {
+              "name": "mu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer mean parameters are gated independently and require exact binary64 representation."
+            },
+            {
+              "name": "sigma",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer standard deviations are gated independently and require exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed-integer inputs are RunMat-only, cross one checked binary64 distribution boundary, and return single only when another documented input is single; fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors."
+        }
       ]
     },
     {
@@ -108386,6 +108911,93 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "norminv-integer-p",
+          "mode": "RunMatOnly",
+          "description": "norminv with typed-integer evaluation values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NorminvIntegerPExtension"
+        },
+        {
+          "id": "norminv-integer-mu",
+          "mode": "RunMatOnly",
+          "description": "norminv with typed-integer mean parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NorminvIntegerMuExtension"
+        },
+        {
+          "id": "norminv-integer-sigma",
+          "mode": "RunMatOnly",
+          "description": "norminv with typed-integer standard-deviation parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NorminvIntegerSigmaExtension"
+        },
+        {
+          "id": "norminv-logical-input",
+          "mode": "RunMatOnly",
+          "description": "norminv with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NorminvLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "norminv(integer_x_or_p, integer_mu, integer_sigma)",
+          "inputs": [
+            {
+              "name": "x or p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer evaluation values are gated independently and require exact binary64 representation."
+            },
+            {
+              "name": "mu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer mean parameters are gated independently and require exact binary64 representation."
+            },
+            {
+              "name": "sigma",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer standard deviations are gated independently and require exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed-integer inputs are RunMat-only, cross one checked binary64 distribution boundary, and return single only when another documented input is single; fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors."
+        }
       ]
     },
     {
@@ -108490,6 +109102,93 @@
           "identifier": "RunMat:normpdf:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "normpdf-integer-x",
+          "mode": "RunMatOnly",
+          "description": "normpdf with typed-integer evaluation values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormpdfIntegerXExtension"
+        },
+        {
+          "id": "normpdf-integer-mu",
+          "mode": "RunMatOnly",
+          "description": "normpdf with typed-integer mean parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormpdfIntegerMuExtension"
+        },
+        {
+          "id": "normpdf-integer-sigma",
+          "mode": "RunMatOnly",
+          "description": "normpdf with typed-integer standard-deviation parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormpdfIntegerSigmaExtension"
+        },
+        {
+          "id": "normpdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "normpdf with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormpdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "normpdf(integer_x_or_p, integer_mu, integer_sigma)",
+          "inputs": [
+            {
+              "name": "x or p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer evaluation values are gated independently and require exact binary64 representation."
+            },
+            {
+              "name": "mu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer mean parameters are gated independently and require exact binary64 representation."
+            },
+            {
+              "name": "sigma",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer standard deviations are gated independently and require exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed-integer inputs are RunMat-only, cross one checked binary64 distribution boundary, and return single only when another documented input is single; fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors."
         }
       ]
     },
@@ -108615,6 +109314,110 @@
           "identifier": "RunMat:normrnd:Internal",
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "normrnd: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "normrnd-integer-mu",
+          "mode": "RunMatOnly",
+          "description": "normrnd with a typed-integer mean parameter is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormrndIntegerMuExtension"
+        },
+        {
+          "id": "normrnd-integer-sigma",
+          "mode": "RunMatOnly",
+          "description": "normrnd with a typed-integer standard deviation is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormrndIntegerSigmaExtension"
+        },
+        {
+          "id": "normrnd-integer-size",
+          "mode": "RunMatOnly",
+          "description": "normrnd with typed-integer size arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormrndIntegerSizeExtension"
+        },
+        {
+          "id": "normrnd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "normrnd with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormrndLogicalInputExtension"
+        },
+        {
+          "id": "normrnd-resident-size",
+          "mode": "RunMatOnly",
+          "description": "normrnd with explicit gpuArray size controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NormrndResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = normrnd(integer_mu, integer_sigma, ___)",
+          "inputs": [
+            {
+              "name": "mu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer means are independently gated and cross one exact binary64 boundary."
+            },
+            {
+              "name": "sigma",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer standard deviations are independently gated and cross one exact binary64 boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer distribution parameters are RunMat-only; output is double unless another documented data parameter is single. Fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors."
+        },
+        {
+          "form": "r = normrnd(mu, sigma, integer_sz)",
+          "inputs": [
+            {
+              "name": "sz, sz1, ...",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Current MATLAB documents single and double size arguments; native integer size controls are a gated RunMat extension parsed structurally."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Integer extents are parsed exactly without selecting output class or residency; explicit resident size controls are separately gated."
         }
       ]
     },
