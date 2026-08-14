@@ -17,16 +17,22 @@ struct DeoptimizationInvocation {
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
     policy: DeoptimizationPolicy,
+    osr: Option<runmat_jit::osr::OsrTarget>,
+}
+
+pub(super) struct DeoptimizationRequest {
+    pub executor: Rc<GenericExecutor>,
+    pub function: runmat_types::ProgramFunctionId,
+    pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub arguments: Vec<Value>,
+    pub requested_outputs: usize,
+    pub runtime: runmat_runtime::context::RuntimeContext,
+    pub osr: Option<runmat_jit::osr::OsrTarget>,
 }
 
 pub(super) async fn invoke(
     unit: &ExecutableUnit,
-    executor: Rc<GenericExecutor>,
-    function: runmat_types::ProgramFunctionId,
-    captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
-    arguments: Vec<Value>,
-    requested_outputs: usize,
-    runtime: runmat_runtime::context::RuntimeContext,
+    request: DeoptimizationRequest,
 ) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
     let policy = DeoptimizationPolicy {
         target: ResumeTarget::Interpreter,
@@ -35,13 +41,14 @@ pub(super) async fn invoke(
     invoke_with_policy(
         unit,
         DeoptimizationInvocation {
-            executor,
-            function,
-            captures,
-            arguments,
-            requested_outputs,
-            runtime,
+            executor: request.executor,
+            function: request.function,
+            captures: request.captures,
+            arguments: request.arguments,
+            requested_outputs: request.requested_outputs,
+            runtime: request.runtime,
             policy,
+            osr: request.osr,
         },
     )
     .await
@@ -59,15 +66,17 @@ async fn invoke_with_policy(
         requested_outputs,
         runtime,
         policy,
+        osr,
     } = invocation;
     let mut invocation = executor
-        .begin_with_deoptimization(
+        .begin_with_deoptimization_and_osr(
             function,
             captures,
             arguments,
             requested_outputs,
             runtime.clone(),
             policy,
+            osr,
         )
         .map_err(super::error::from_jit_error)?;
     loop {
@@ -85,6 +94,13 @@ async fn invoke_with_policy(
             {
                 invocation
                     .resume_deoptimization()
+                    .map_err(super::error::from_jit_error)?;
+            }
+            GenericInvocationStep::Deoptimized { target, .. }
+                if target == runmat_runtime::native::NativeResumeKind::OPTIMIZED_NATIVE =>
+            {
+                invocation
+                    .resume_optimization()
                     .map_err(super::error::from_jit_error)?;
             }
             GenericInvocationStep::Deoptimized { frame, .. } => {
@@ -252,6 +268,7 @@ async fn resume_interpreter(
         outputs,
         captures,
         loop_backedges: BTreeMap::new(),
+        osr_entry: None,
     })
 }
 
@@ -299,6 +316,7 @@ mod tests {
                 requested_outputs: 2,
                 runtime: session.runtime_context().clone(),
                 policy,
+                osr: None,
             },
         ))
         .expect("native execution should resume in the interpreter");

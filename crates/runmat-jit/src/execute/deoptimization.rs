@@ -9,6 +9,12 @@ use crate::{JitError, JitResult};
 
 use super::state::HostState;
 
+pub(super) struct NativeTransfer {
+    pub reason: NativeDeoptReason,
+    pub target: runmat_runtime::native::NativeResumeKind,
+    pub identity: u64,
+}
+
 pub(super) fn checkpoint(
     state: &mut HostState,
     call: &mut NativeCall,
@@ -71,6 +77,38 @@ fn install_exit(
     identity: u64,
     exit: &mut NativeExit,
 ) -> JitResult<()> {
+    let materialized = state.materialize_deoptimization(frame_state, site)?;
+    let target = state.effective_deoptimization_target(&materialized);
+    install_materialized_exit(call, materialized, reason, target, identity, exit)
+}
+
+pub(super) fn install_exit_for_target(
+    state: &mut HostState,
+    call: &mut NativeCall,
+    site: &NativeMirSite,
+    frame_state: &NativeFrameState,
+    transfer: NativeTransfer,
+    exit: &mut NativeExit,
+) -> JitResult<()> {
+    let materialized = state.materialize_deoptimization(frame_state, site)?;
+    install_materialized_exit(
+        call,
+        materialized,
+        transfer.reason,
+        transfer.target,
+        transfer.identity,
+        exit,
+    )
+}
+
+fn install_materialized_exit(
+    call: &mut NativeCall,
+    materialized: crate::deopt::MaterializedFrame,
+    reason: NativeDeoptReason,
+    target: runmat_runtime::native::NativeResumeKind,
+    identity: u64,
+    exit: &mut NativeExit,
+) -> JitResult<()> {
     if call.frame.is_null() {
         return Err(JitError::Host(
             "native call has no frame for deoptimization".into(),
@@ -84,7 +122,6 @@ fn install_exit(
             "native frame has no exact deoptimization resume state".into(),
         ));
     }
-    let materialized = state.materialize_deoptimization(frame_state, site)?;
     let operand_depth = u32::try_from(materialized.operands.len())
         .map_err(|_| JitError::Host("deoptimization operand depth exceeds native ABI".into()))?;
     let local_count = u32::try_from(materialized.locals.len())
@@ -98,7 +135,7 @@ fn install_exit(
     }
     *exit = NativeExit::deoptimized(NativeDeoptimization {
         reason,
-        target: state.effective_deoptimization_target(&materialized),
+        target,
         guard: identity,
         resume,
     });

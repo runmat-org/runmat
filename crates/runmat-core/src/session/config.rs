@@ -173,6 +173,7 @@ impl RunMatSession {
             total_executions = self.stats.total_executions,
             jit_compiled = self.stats.jit_compiled,
             interpreter_fallback = self.stats.interpreter_fallback,
+            native_osr_transfers = self.stats.native_osr_transfers,
             avg_time_ms = self.stats.average_execution_time_ms,
             total_allocations = gc_stats
                 .total_allocations

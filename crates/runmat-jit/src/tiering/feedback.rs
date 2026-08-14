@@ -202,6 +202,26 @@ impl TieringSession {
         )
     }
 
+    /// Select the hottest exact loop that has crossed the OSR threshold for
+    /// one entry/function identity. Ties follow the stable site ordering.
+    pub fn hottest_osr_site(&self, function_site: &TierSiteId) -> Option<TierSiteId> {
+        if function_site.loop_header.is_some() {
+            return None;
+        }
+        self.state
+            .borrow()
+            .sites
+            .iter()
+            .filter(|(site, feedback)| {
+                site.entry == function_site.entry
+                    && site.function == function_site.function
+                    && site.loop_header.is_some()
+                    && feedback.backedges >= self.config.loop_hot_threshold
+            })
+            .max_by_key(|(_, feedback)| feedback.backedges)
+            .map(|(site, _)| site.clone())
+    }
+
     pub fn snapshot(&self) -> TierFeedbackSnapshot {
         let sites = self
             .state

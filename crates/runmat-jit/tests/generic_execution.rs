@@ -22,6 +22,7 @@ use runmat_jit::{
     deopt::{DeoptimizationPolicy, FaultInjection, ResumeTarget},
     entry::{EntryKey, EntryRegistry},
     invalidation::{DependencyKey, DependencyTracker},
+    osr::OsrTarget,
     specialization::GuardEnvironment,
     GenericExecutor, JitError,
 };
@@ -755,6 +756,62 @@ fn generic_for_iterates_captured_columns_through_compiled_backedges() {
     assert_eq!(execution.outputs, vec![Value::Num(6.0)]);
     assert_eq!(execution.loop_backedges.len(), 1);
     assert_eq!(execution.loop_backedges.values().sum::<u64>(), 3);
+}
+
+#[test]
+fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
+    let assembly = for_fixture();
+    let point = assembly.functions[0]
+        .blocks
+        .iter()
+        .find_map(|block| {
+            matches!(
+                block.terminator.kind,
+                runmat_native_codegen::NativeTerminatorKind::For { .. }
+            )
+            .then_some(block.terminator.site.point)
+        })
+        .expect("for fixture must expose a loop header");
+    let generic = GenericExecutor::compile(assembly.clone()).unwrap();
+    let profile =
+        runmat_jit::tiering::RepresentationProfile::from_facts(Vec::new(), usize::MAX).unwrap();
+    let optimized = Rc::new(
+        GenericExecutor::compile_specialized_with_resume_points(
+            assembly,
+            None,
+            BTreeMap::new(),
+            profile,
+        )
+        .unwrap(),
+    );
+    let target = OsrTarget::new(Rc::clone(&optimized), ProgramFunctionId(0), point).unwrap();
+    let mut invocation = generic
+        .begin_with_deoptimization_and_osr(
+            ProgramFunctionId(0),
+            Vec::new(),
+            Vec::new(),
+            1,
+            runtime_context(),
+            DeoptimizationPolicy::default(),
+            Some(target),
+        )
+        .unwrap();
+    let transfer = invocation.advance().unwrap();
+    assert!(matches!(
+        transfer,
+        runmat_jit::execute::GenericInvocationStep::Deoptimized { target, .. }
+            if target == runmat_runtime::native::NativeResumeKind::OPTIMIZED_NATIVE
+    ));
+    invocation.resume_optimization().unwrap();
+    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+        invocation.advance().unwrap()
+    else {
+        panic!("optimized continuation must complete")
+    };
+    assert_eq!(execution.outputs, vec![Value::Num(6.0)]);
+    assert_eq!(execution.loop_backedges.values().sum::<u64>(), 3);
+    assert_eq!(execution.osr_entry, Some(point));
+    drop(optimized);
 }
 
 #[test]

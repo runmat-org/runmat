@@ -12,6 +12,7 @@ mod invocation;
 mod mutation;
 mod operand;
 mod operator;
+mod osr;
 mod site;
 mod state;
 mod sync;

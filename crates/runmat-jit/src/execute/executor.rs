@@ -4,6 +4,7 @@ use runmat_value::Value;
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::deopt::DeoptimizationPolicy;
+use crate::osr::OsrTarget;
 use crate::{CompiledExecutable, GenericCompiler, JitError, JitResult};
 
 use super::invocation::{GenericInvocation, GenericInvocationStep};
@@ -24,6 +25,7 @@ pub struct GenericExecution {
     pub outputs: Vec<Value>,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
+    pub osr_entry: Option<runmat_types::ProgramPointId>,
 }
 
 impl GenericExecutor {
@@ -93,6 +95,13 @@ impl GenericExecutor {
         self.entry_profile.as_ref()
     }
 
+    pub(crate) fn compiled_entrypoint(
+        &self,
+        function: ProgramFunctionId,
+    ) -> JitResult<runmat_runtime::native::NativeEntryPoint> {
+        self.compiled.entrypoint(function)
+    }
+
     pub fn invoke(
         &self,
         function: ProgramFunctionId,
@@ -113,6 +122,11 @@ impl GenericExecutor {
                     if target == runmat_runtime::native::NativeResumeKind::GENERIC_NATIVE =>
                 {
                     invocation.resume_deoptimization()?
+                }
+                GenericInvocationStep::Deoptimized { target, .. }
+                    if target == runmat_runtime::native::NativeResumeKind::OPTIMIZED_NATIVE =>
+                {
+                    invocation.resume_optimization()?
                 }
                 GenericInvocationStep::Deoptimized { .. } => {
                     return Err(JitError::UnsupportedExit(
@@ -160,6 +174,11 @@ impl GenericExecutor {
                 {
                     invocation.resume_deoptimization()?;
                 }
+                GenericInvocationStep::Deoptimized { target, .. }
+                    if target == runmat_runtime::native::NativeResumeKind::OPTIMIZED_NATIVE =>
+                {
+                    invocation.resume_optimization()?;
+                }
                 GenericInvocationStep::Deoptimized { .. } => {
                     return Err(JitError::UnsupportedExit(
                         runmat_runtime::native::NativeExitKind::DEOPTIMIZED.0,
@@ -206,18 +225,31 @@ impl GenericExecutor {
         runtime: RuntimeContext,
         deoptimization: DeoptimizationPolicy,
     ) -> JitResult<GenericInvocation> {
-        if let Some(profile) = &self.entry_profile {
-            let actual = arguments
-                .iter()
-                .map(runmat_runtime::value_fact::value_fact)
-                .collect::<Vec<_>>();
-            let actual = crate::tiering::RepresentationProfile::from_facts(actual, usize::MAX)
-                .map_err(|error| JitError::Host(error.into()))?;
-            if actual.digest != profile.digest || actual.facts != profile.facts {
-                return Err(JitError::Host(
-                    "specialized native entry representation guard failed".into(),
-                ));
-            }
+        self.begin_with_deoptimization_and_osr(
+            function,
+            captures,
+            arguments,
+            requested_outputs,
+            runtime,
+            deoptimization,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_with_deoptimization_and_osr(
+        &self,
+        function: ProgramFunctionId,
+        captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+        deoptimization: DeoptimizationPolicy,
+        osr_target: Option<OsrTarget>,
+    ) -> JitResult<GenericInvocation> {
+        self.validate_entry_profile(&arguments)?;
+        if let Some(target) = &osr_target {
+            target.executor().validate_entry_profile(&arguments)?;
         }
         let function_ir = self
             .functions
@@ -227,6 +259,22 @@ impl GenericExecutor {
             .ok_or_else(|| {
                 JitError::Host(format!("native function {} is unavailable", function.0))
             })?;
+        if let Some(target) = &osr_target {
+            let point = target.point();
+            if point.function != function
+                || !function_ir.blocks.iter().any(|block| {
+                    block.terminator.site.point == point
+                        && matches!(
+                            block.terminator.kind,
+                            runmat_native_codegen::NativeTerminatorKind::For { .. }
+                        )
+                })
+            {
+                return Err(JitError::Host(
+                    "OSR target is not an exact for-loop header in this function".into(),
+                ));
+            }
+        }
         let requested_outputs = u32::try_from(requested_outputs)
             .map_err(|_| JitError::Host("requested output count exceeds native ABI".into()))?;
         let (state, argument_refs) = HostState::new(HostStateInput {
@@ -239,6 +287,7 @@ impl GenericExecutor {
             captures,
             deoptimization,
             interpreter_resume_points: self.interpreter_resume_points.clone(),
+            osr_point: osr_target.as_ref().map(OsrTarget::point),
         })?;
         let resume = runmat_runtime::native::NativeResumeState {
             function: function.0,
@@ -252,13 +301,38 @@ impl GenericExecutor {
             ..runmat_runtime::native::NativeResumeState::default()
         };
         let entrypoint = self.compiled.entrypoint(function)?;
+        let osr_target = if let Some(target) = osr_target {
+            let entrypoint = target.entrypoint()?;
+            Some((target, entrypoint))
+        } else {
+            None
+        };
         Ok(GenericInvocation::new(
             state,
             entrypoint,
             argument_refs,
             requested_outputs,
             resume,
+            osr_target,
         ))
+    }
+
+    fn validate_entry_profile(&self, arguments: &[Value]) -> JitResult<()> {
+        let Some(profile) = &self.entry_profile else {
+            return Ok(());
+        };
+        let actual = arguments
+            .iter()
+            .map(runmat_runtime::value_fact::value_fact)
+            .collect::<Vec<_>>();
+        let actual = crate::tiering::RepresentationProfile::from_facts(actual, usize::MAX)
+            .map_err(|error| JitError::Host(error.into()))?;
+        if actual.digest != profile.digest || actual.facts != profile.facts {
+            return Err(JitError::Host(
+                "specialized native entry representation guard failed".into(),
+            ));
+        }
+        Ok(())
     }
 }
 

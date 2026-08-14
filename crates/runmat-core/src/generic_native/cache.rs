@@ -37,6 +37,16 @@ struct CompilationKey {
     tier: CompilationTier,
 }
 
+struct SpecializedCompilationRequest<'a> {
+    unit: &'a ExecutableUnit,
+    preferred_function: Option<&'a str>,
+    profile: &'a RepresentationProfile,
+    key: &'a EntryKey,
+    current: &'a runmat_jit::invalidation::DependencySnapshot,
+    dependency_keys: &'a BTreeSet<DependencyKey>,
+    compilation: &'a CompilationKey,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum CompilationTier {
     Generic,
@@ -187,40 +197,15 @@ impl GenericNativeCache {
                     return Ok(self.entries.resolve(&key, &current));
                 }
                 let compile = |this: &mut Self| {
-                    let compiled = super::compile::compile_prepared(super::compile::prepare(
+                    this.compile_specialized_now(SpecializedCompilationRequest {
                         unit,
                         preferred_function,
-                        Some(invocation_profile.clone()),
-                    )?)?;
-                    if this
-                        .entries
-                        .make_room_for_specialized(
-                            &key,
-                            &current,
-                            compiled.executor.retained_code_bytes(),
-                            this.tiering.config().max_versions_per_entry,
-                            this.tiering.config().max_code_bytes,
-                        )
-                        .is_err()
-                    {
-                        this.failed_compilations.insert(compilation.clone());
-                        return Ok(None);
-                    }
-                    #[cfg(test)]
-                    {
-                        this.compilations += 1;
-                    }
-                    let snapshot = this.dependencies.snapshot(dependency_keys.iter());
-                    this.entries
-                        .publish_specialized(
-                            key.clone(),
-                            profile,
-                            Rc::new(compiled.executor),
-                            compiled.entrypoint,
-                            snapshot,
-                        )
-                        .map(Some)
-                        .map_err(|error| super::error::stage("NativePublication", error))
+                        profile: invocation_profile,
+                        key: &key,
+                        current: &current,
+                        dependency_keys: &dependency_keys,
+                        compilation: &compilation,
+                    })
                 };
                 match mode {
                     CompilationMode::DeterministicSynchronous => compile(self),
@@ -288,6 +273,70 @@ impl GenericNativeCache {
         Ok(())
     }
 
+    pub(crate) fn resolve_or_schedule_osr(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        profile: &RepresentationProfile,
+    ) -> Result<Option<(PublishedEntry, runmat_types::ProgramPointId)>, runmat_runtime::RuntimeError>
+    {
+        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let current = self.dependencies.snapshot_all();
+        self.publish_completed(&current)?;
+        let key = entry_key(unit, preferred_function);
+        let function_site = tier_site(unit, preferred_function, &key)?;
+        let Some(loop_site) = self.tiering.hottest_osr_site(&function_site) else {
+            return Ok(None);
+        };
+        let point = loop_site
+            .loop_header
+            .expect("OSR policy must return an exact loop site");
+        if let Some(published) = self
+            .entries
+            .resolve_specialized(&key, profile.digest, &current)
+        {
+            return Ok(Some((published, point)));
+        }
+
+        let compilation = CompilationKey {
+            entry: key.clone(),
+            tier: CompilationTier::Specialized(profile.digest),
+        };
+        if self.failed_compilations.contains(&compilation)
+            || self.pending.contains_key(&compilation)
+            || self.pending.len() >= self.tiering.config().max_pending_compilations
+        {
+            return Ok(None);
+        }
+        match self.tiering.config().compilation_mode() {
+            CompilationMode::DeterministicSynchronous => {
+                let published = self.compile_specialized_now(SpecializedCompilationRequest {
+                    unit,
+                    preferred_function,
+                    profile,
+                    key: &key,
+                    current: &current,
+                    dependency_keys: &dependency_keys,
+                    compilation: &compilation,
+                })?;
+                Ok(published.map(|published| (published, point)))
+            }
+            CompilationMode::Background => {
+                if let Err(error) = self.schedule_background(
+                    unit,
+                    preferred_function,
+                    compilation.clone(),
+                    Some(profile.clone()),
+                    self.dependencies.snapshot(dependency_keys.iter()),
+                ) {
+                    log::warn!("adaptive OSR compilation was not scheduled: {error}");
+                    self.failed_compilations.insert(compilation);
+                }
+                Ok(None)
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn tiering_snapshot(&self) -> runmat_jit::tiering::TierFeedbackSnapshot {
         self.tiering.snapshot()
@@ -322,6 +371,46 @@ impl GenericNativeCache {
             },
         );
         Ok(())
+    }
+
+    fn compile_specialized_now(
+        &mut self,
+        request: SpecializedCompilationRequest<'_>,
+    ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
+        let compiled = super::compile::compile_prepared(super::compile::prepare(
+            request.unit,
+            request.preferred_function,
+            Some(request.profile.clone()),
+        )?)?;
+        if self
+            .entries
+            .make_room_for_specialized(
+                request.key,
+                request.current,
+                compiled.executor.retained_code_bytes(),
+                self.tiering.config().max_versions_per_entry,
+                self.tiering.config().max_code_bytes,
+            )
+            .is_err()
+        {
+            self.failed_compilations.insert(request.compilation.clone());
+            return Ok(None);
+        }
+        #[cfg(test)]
+        {
+            self.compilations += 1;
+        }
+        let snapshot = self.dependencies.snapshot(request.dependency_keys.iter());
+        self.entries
+            .publish_specialized(
+                request.key.clone(),
+                request.profile.digest,
+                Rc::new(compiled.executor),
+                compiled.entrypoint,
+                snapshot,
+            )
+            .map(Some)
+            .map_err(|error| super::error::stage("NativePublication", error))
     }
 
     fn publish_completed(

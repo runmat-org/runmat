@@ -4,6 +4,7 @@ use runmat_runtime::native::{
 };
 
 use crate::deopt::MaterializedFrame;
+use crate::osr::OsrTarget;
 use crate::{JitError, JitResult};
 
 use super::executor::GenericExecution;
@@ -25,6 +26,8 @@ pub struct GenericInvocation {
     resume_pending: bool,
     terminal: bool,
     deoptimization_target: Option<NativeResumeKind>,
+    osr_target: Option<(OsrTarget, NativeEntryPoint)>,
+    _active_osr_target: Option<OsrTarget>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -49,6 +52,7 @@ impl GenericInvocation {
         argument_refs: Vec<NativeValueRef>,
         requested_outputs: u32,
         resume: NativeResumeState,
+        osr_target: Option<(OsrTarget, NativeEntryPoint)>,
     ) -> Self {
         Self {
             state,
@@ -60,6 +64,8 @@ impl GenericInvocation {
             resume_pending: false,
             terminal: false,
             deoptimization_target: None,
+            osr_target,
+            _active_osr_target: None,
         }
     }
 
@@ -111,6 +117,25 @@ impl GenericInvocation {
         Ok(())
     }
 
+    /// Transfer the live generic-native frame to the session-admitted
+    /// optimized entrypoint at the exact materialized loop header.
+    pub fn resume_optimization(&mut self) -> JitResult<()> {
+        if self.deoptimization_target != Some(NativeResumeKind::OPTIMIZED_NATIVE) {
+            return Err(JitError::Host(
+                "native continuation is not targeted at optimized code".into(),
+            ));
+        }
+        let (target, entrypoint) = self.osr_target.take().ok_or_else(|| {
+            JitError::Host("optimized native continuation has no retained OSR target".into())
+        })?;
+        self.state.prepare_resume(self.resume)?;
+        self.entrypoint = entrypoint;
+        self._active_osr_target = Some(target);
+        self.resume_pending = false;
+        self.deoptimization_target = None;
+        Ok(())
+    }
+
     pub fn advance(&mut self) -> JitResult<GenericInvocationStep> {
         if self.terminal {
             return Err(JitError::Host(
@@ -136,6 +161,7 @@ impl GenericInvocation {
                         outputs,
                         captures: self.state.capture_results()?,
                         loop_backedges: self.state.loop_backedges(),
+                        osr_entry: self.state.osr_entry(),
                     }));
                 }
                 NativeExitKind::EXCEPTION => {

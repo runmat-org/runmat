@@ -14408,6 +14408,15 @@ fn native_tiering_records_exact_loop_header_backedges() {
         .find(|site| site.site.loop_header.is_none())
         .expect("function aggregate feedback");
     assert_eq!(function_site.backedges, 3);
+
+    assert_eq!(
+        block_on(session.invoke_executable(&unit, invocation, &InvocationControl::default(),))
+            .unwrap(),
+        runmat_value::Value::Num(6.0)
+    );
+    assert_eq!(session.generic_native_cache_counts(), (2, 1));
+    assert_eq!(session.specialized_native_version_count_for_testing(), 1);
+    assert_eq!(session.native_osr_transfer_count_for_testing(), 1);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

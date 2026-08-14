@@ -13,6 +13,7 @@ use crate::ExecutableUnit;
 pub(crate) struct NativeExecution {
     pub value: Value,
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
+    pub osr_entry: Option<runmat_types::ProgramPointId>,
 }
 
 // Semantic invokers use Runtime's established Arc callback ABI, while the
@@ -22,6 +23,10 @@ pub(crate) struct NativeExecution {
 pub(crate) async fn invoke(
     unit: &ExecutableUnit,
     published: runmat_jit::entry::PublishedEntry,
+    osr: Option<(
+        runmat_jit::entry::PublishedEntry,
+        runmat_types::ProgramPointId,
+    )>,
     preferred_function: Option<&str>,
     arguments: Vec<Value>,
     requested_outputs: usize,
@@ -98,12 +103,15 @@ pub(crate) async fn invoke(
                         let arguments = arguments[captures.len()..].to_vec();
                         let execution = super::deopt::invoke(
                             &unit,
-                            executor,
-                            function,
-                            captures,
-                            arguments,
-                            requested_outputs,
-                            runtime,
+                            super::deopt::DeoptimizationRequest {
+                                executor,
+                                function,
+                                captures,
+                                arguments,
+                                requested_outputs,
+                                runtime,
+                                osr: None,
+                            },
                         )
                         .await?;
                         normalize_outputs(execution.outputs, requested_outputs)
@@ -178,12 +186,15 @@ pub(crate) async fn invoke(
                 let function = program_function(runmat_hir::FunctionId(call.function))?;
                 let execution = super::deopt::invoke(
                     &unit,
-                    executor,
-                    function,
-                    call.captures,
-                    call.arguments,
-                    call.requested_outputs,
-                    runtime,
+                    super::deopt::DeoptimizationRequest {
+                        executor,
+                        function,
+                        captures: call.captures,
+                        arguments: call.arguments,
+                        requested_outputs: call.requested_outputs,
+                        runtime,
+                        osr: None,
+                    },
                 )
                 .await?;
                 Ok(runmat_runtime::call::lexical::LexicalCallResult {
@@ -222,14 +233,23 @@ pub(crate) async fn invoke(
     source_functions.sort_by_key(|function| function.function);
     let catalog = user_functions::install_source_function_catalog(Some(Arc::new(source_functions)));
     let active = user_functions::push_active_semantic_function(function.0 as usize);
+    let osr = osr
+        .map(|(target, point)| {
+            runmat_jit::osr::OsrTarget::new(target.executor, function, point)
+                .map_err(|error| super::error::stage("NativeOsrTarget", error))
+        })
+        .transpose()?;
     let execution = super::deopt::invoke(
         unit,
-        published.executor,
-        function,
-        Vec::new(),
-        arguments,
-        requested_outputs,
-        runtime,
+        super::deopt::DeoptimizationRequest {
+            executor: published.executor,
+            function,
+            captures: Vec::new(),
+            arguments,
+            requested_outputs,
+            runtime,
+            osr,
+        },
     )
     .await;
     drop(active);
@@ -242,6 +262,7 @@ pub(crate) async fn invoke(
     Ok(NativeExecution {
         value: normalize_outputs(execution.outputs, requested_outputs)?,
         loop_backedges: execution.loop_backedges,
+        osr_entry: execution.osr_entry,
     })
 }
 

@@ -35,6 +35,7 @@ pub(super) struct HostStateInput {
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub deoptimization: DeoptimizationPolicy,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    pub osr_point: Option<runmat_types::ProgramPointId>,
 }
 
 pub(super) struct HostState {
@@ -57,6 +58,8 @@ pub(super) struct HostState {
     persistent_bindings: BTreeMap<usize, String>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
     loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
+    osr_point: Option<runmat_types::ProgramPointId>,
+    osr_entry: Option<runmat_types::ProgramPointId>,
     active_exception_handlers: Vec<ActiveExceptionHandler>,
     next_await_continuation: u64,
     deoptimization: DeoptimizationPolicy,
@@ -80,6 +83,7 @@ impl HostState {
             captures,
             deoptimization,
             interpreter_resume_points,
+            osr_point,
         } = input;
         let construction_values = arguments
             .iter()
@@ -206,6 +210,8 @@ impl HostState {
             },
             active_for_loops: BTreeMap::new(),
             loop_backedges: BTreeMap::new(),
+            osr_point,
+            osr_entry: None,
             pending_place_mutation: None,
             program_capture,
             pending_await: None,
@@ -716,6 +722,20 @@ impl HostState {
 
     pub fn loop_backedges(&self) -> BTreeMap<runmat_types::ProgramPointId, u64> {
         self.loop_backedges.clone()
+    }
+
+    pub fn take_osr_request(&mut self, point: runmat_types::ProgramPointId) -> bool {
+        if self.osr_point == Some(point) {
+            self.osr_point = None;
+            self.osr_entry = Some(point);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn osr_entry(&self) -> Option<runmat_types::ProgramPointId> {
+        self.osr_entry
     }
 
     /// Retire loop snapshots when control leaves their natural loop body.

@@ -25,6 +25,11 @@ impl RunMatSession {
     }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn native_osr_transfer_count_for_testing(&self) -> usize {
+        self.stats.native_osr_transfers
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn generic_native_cache_counts(&self) -> (usize, usize) {
         (
             self.generic_native_cache.compilation_count(),
@@ -46,6 +51,7 @@ impl RunMatSession {
         crate::generic_native::invoke(
             unit,
             published,
+            None,
             preferred_function,
             arguments,
             requested_outputs,
@@ -72,12 +78,22 @@ impl RunMatSession {
         let published = self
             .generic_native_cache
             .resolve_or_schedule(unit, None, &profile)?;
-        let (result, backedges) = match published {
+        let osr = if published
+            .as_ref()
+            .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
+        {
+            self.generic_native_cache
+                .resolve_or_schedule_osr(unit, None, &profile)?
+        } else {
+            None
+        };
+        let (result, backedges, osr_entry) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
                 let execution = crate::generic_native::invoke(
                     unit,
                     published,
+                    osr,
                     None,
                     Vec::new(),
                     0,
@@ -87,8 +103,12 @@ impl RunMatSession {
                 )
                 .await;
                 match execution {
-                    Ok(execution) => (Ok(execution.value), execution.loop_backedges),
-                    Err(error) => (Err(error), BTreeMap::new()),
+                    Ok(execution) => (
+                        Ok(execution.value),
+                        execution.loop_backedges,
+                        execution.osr_entry,
+                    ),
+                    Err(error) => (Err(error), BTreeMap::new(), None),
                 }
             }
             None => {
@@ -96,9 +116,11 @@ impl RunMatSession {
                 (
                     self.invoke_entrypoint_interpreted(unit).await,
                     BTreeMap::new(),
+                    None,
                 )
             }
         };
+        self.stats.native_osr_transfers += usize::from(osr_entry.is_some());
         if let Err(error) = self.generic_native_cache.observe_invocation(
             unit,
             None,
@@ -139,12 +161,22 @@ impl RunMatSession {
         let published =
             self.generic_native_cache
                 .resolve_or_schedule(unit, Some(name), &profile)?;
-        let (result, backedges) = match published {
+        let osr = if published
+            .as_ref()
+            .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
+        {
+            self.generic_native_cache
+                .resolve_or_schedule_osr(unit, Some(name), &profile)?
+        } else {
+            None
+        };
+        let (result, backedges, osr_entry) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
                 let execution = crate::generic_native::invoke(
                     unit,
                     published,
+                    osr,
                     Some(name),
                     arguments,
                     requested_outputs,
@@ -154,8 +186,12 @@ impl RunMatSession {
                 )
                 .await;
                 match execution {
-                    Ok(execution) => (Ok(execution.value), execution.loop_backedges),
-                    Err(error) => (Err(error), BTreeMap::new()),
+                    Ok(execution) => (
+                        Ok(execution.value),
+                        execution.loop_backedges,
+                        execution.osr_entry,
+                    ),
+                    Err(error) => (Err(error), BTreeMap::new(), None),
                 }
             }
             None => {
@@ -164,9 +200,11 @@ impl RunMatSession {
                     self.invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
                         .await,
                     BTreeMap::new(),
+                    None,
                 )
             }
         };
+        self.stats.native_osr_transfers += usize::from(osr_entry.is_some());
         if let Err(error) = self.generic_native_cache.observe_invocation(
             unit,
             Some(name),

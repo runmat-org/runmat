@@ -10,6 +10,8 @@ mod error;
 pub mod execute;
 pub mod invalidation;
 pub mod memory;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod osr;
 pub mod specialization;
 pub mod tiering;
 

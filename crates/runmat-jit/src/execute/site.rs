@@ -65,6 +65,17 @@ pub(super) fn execute(
         )? {
             return Ok(NativeSiteOutcome::exit());
         }
+        if matches!(block.terminator.kind, NativeTerminatorKind::For { .. })
+            && super::osr::checkpoint(
+                state,
+                call,
+                &block.terminator.site,
+                &block.terminator.frame_state,
+                exit,
+            )?
+        {
+            return Ok(NativeSiteOutcome::exit());
+        }
         let outcome = execute_terminator(state, call, block.id, &block.terminator, exit)?;
         refresh_frame_roots(state, call)?;
         Ok(outcome)
