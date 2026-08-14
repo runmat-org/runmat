@@ -1,8 +1,8 @@
 use std::ffi::c_void;
 
 use super::{
-    NativeCall, NativeExit, NativeSafepoint, NativeSourceMapEntry, NativeValueRef,
-    NATIVE_ABI_VERSION,
+    NativeCall, NativeExecuteSiteFn, NativeExit, NativeSafepoint, NativeSourceMapEntry,
+    NativeValueRef, NATIVE_ABI_VERSION,
 };
 
 /// Uniform generated-function entrypoint.
@@ -66,6 +66,7 @@ pub struct NativeHostVTable {
     pub slow_call: Option<NativeSlowCallFn>,
     pub poll_safepoint: Option<NativeSafepointFn>,
     pub source_lookup: Option<NativeSourceLookupFn>,
+    pub execute_site: Option<NativeExecuteSiteFn>,
 }
 
 impl NativeHostVTable {
@@ -87,6 +88,7 @@ impl NativeHostVTable {
             || self.slow_call.is_none()
             || self.poll_safepoint.is_none()
             || self.source_lookup.is_none()
+            || self.execute_site.is_none()
         {
             return Err(super::NativeAbiError::new(
                 "native.host.callbacks",
@@ -133,6 +135,16 @@ mod tests {
         NativeHostStatus::OK
     }
 
+    unsafe extern "C" fn site(
+        _: *mut c_void,
+        _: *mut NativeCall,
+        _: *const crate::native::NativeSiteRequest,
+        _: *mut crate::native::NativeSiteOutcome,
+        _: *mut NativeExit,
+    ) -> NativeHostStatus {
+        NativeHostStatus::OK
+    }
+
     fn table() -> NativeHostVTable {
         NativeHostVTable {
             abi_version: NATIVE_ABI_VERSION.encoded(),
@@ -143,6 +155,7 @@ mod tests {
             slow_call: Some(slow),
             poll_safepoint: Some(safepoint),
             source_lookup: Some(source),
+            execute_site: Some(site),
         }
     }
 

@@ -3,11 +3,12 @@ use std::mem::{align_of, size_of};
 use super::{
     NativeCall, NativeCancellation, NativeDeoptimization, NativeException, NativeExit, NativeFrame,
     NativeHostStatus, NativeHostVTable, NativeResumeState, NativeRoot, NativeRootSet,
-    NativeSafepoint, NativeSourceLocation, NativeSourceMapEntry, NativeSourceMapView,
-    NativeSuspension, NativeUtf8, NativeValueRef,
+    NativeSafepoint, NativeSiteOutcome, NativeSiteOutcomeKind, NativeSitePhase, NativeSiteRequest,
+    NativeSourceLocation, NativeSourceMapEntry, NativeSourceMapView, NativeSuspension, NativeUtf8,
+    NativeValueRef,
 };
 
-pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 1;
+pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,12 +23,12 @@ impl NativeAbiVersion {
     }
 }
 
-pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 0 };
+pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 1 };
 
 /// Target-independent identity used by executable/runtime compatibility keys.
 pub fn native_abi_contract_fingerprint() -> runmat_execution::Digest {
     runmat_execution::Digest::sha256(
-        b"runmat-native-abi-v1\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-resume\0transactional-exit\0path-free-sources",
+        b"runmat-native-abi-v2\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch",
     )
 }
 
@@ -70,6 +71,10 @@ pub struct NativeAbiLayout {
     pub deoptimization: NativeTypeLayout,
     pub exit: NativeTypeLayout,
     pub safepoint: NativeTypeLayout,
+    pub site_phase: NativeTypeLayout,
+    pub site_request: NativeTypeLayout,
+    pub site_outcome_kind: NativeTypeLayout,
+    pub site_outcome: NativeTypeLayout,
 }
 
 pub fn native_abi_layout() -> NativeAbiLayout {
@@ -93,6 +98,10 @@ pub fn native_abi_layout() -> NativeAbiLayout {
         deoptimization: NativeTypeLayout::of::<NativeDeoptimization>(),
         exit: NativeTypeLayout::of::<NativeExit>(),
         safepoint: NativeTypeLayout::of::<NativeSafepoint>(),
+        site_phase: NativeTypeLayout::of::<NativeSitePhase>(),
+        site_request: NativeTypeLayout::of::<NativeSiteRequest>(),
+        site_outcome_kind: NativeTypeLayout::of::<NativeSiteOutcomeKind>(),
+        site_outcome: NativeTypeLayout::of::<NativeSiteOutcome>(),
     }
 }
 
@@ -112,10 +121,10 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn version_and_contract_identity_are_stable() {
-        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0000);
+        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0001);
         assert_eq!(
             native_abi_contract_fingerprint().to_string(),
-            "sha256:390471cf6d408207d63ef2f5cc33fff362e1cd1ff538e48188f136908bdb8b8a"
+            "sha256:11fb9e34aa820757ad3a574040fe73156444f02ba2d2eb1cab0df62e6f3832f0"
         );
     }
 
@@ -156,6 +165,24 @@ mod tests {
         assert_eq!(std::mem::offset_of!(NativeCall, host), 16);
         assert_eq!(std::mem::offset_of!(NativeExit, exception), 16);
         assert_eq!(std::mem::offset_of!(NativeResumeState, bytecode_pc), 16);
+        assert_eq!(
+            layout.site_request,
+            NativeTypeLayout {
+                size: 24,
+                alignment: 4
+            }
+        );
+        assert_eq!(
+            layout.site_outcome,
+            NativeTypeLayout {
+                size: 16,
+                alignment: 4
+            }
+        );
+        assert!(
+            std::mem::offset_of!(NativeHostVTable, execute_site)
+                > std::mem::offset_of!(NativeHostVTable, source_lookup)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

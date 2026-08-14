@@ -235,6 +235,196 @@ fn deterministic_printer_matches_the_reviewable_snapshot() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn generic_cranelift_executes_the_native_block_graph_through_typed_sites() {
+    use cranelift_codegen::settings::Configurable;
+    use cranelift_jit::{JITBuilder, JITModule};
+    use cranelift_module::{default_libcall_names, Linkage, Module};
+    use runmat_runtime::native::{
+        NativeCall, NativeEntryPoint, NativeExit, NativeFrame, NativeHostStatus, NativeHostVTable,
+        NativeResumeState, NativeSiteOutcome, NativeSiteOutcomeKind, NativeSitePhase,
+        NativeSiteRequest, NativeSourceMapEntry, NativeValueRef, NATIVE_ABI_VERSION,
+    };
+    use std::ffi::c_void;
+
+    #[derive(Default)]
+    struct SiteLog(Vec<NativeSiteRequest>);
+
+    unsafe extern "C" fn retain(_: *mut c_void, _: NativeValueRef) -> NativeHostStatus {
+        NativeHostStatus::OK
+    }
+
+    unsafe extern "C" fn release(_: *mut c_void, _: NativeValueRef) -> NativeHostStatus {
+        NativeHostStatus::OK
+    }
+
+    unsafe extern "C" fn slow(
+        _: *mut c_void,
+        _: *mut NativeCall,
+        _: *mut NativeExit,
+    ) -> NativeHostStatus {
+        NativeHostStatus::HOST_FAILURE
+    }
+
+    unsafe extern "C" fn safepoint(
+        _: *mut c_void,
+        _: *const runmat_runtime::native::NativeSafepoint,
+        _: *mut NativeExit,
+    ) -> NativeHostStatus {
+        NativeHostStatus::OK
+    }
+
+    unsafe extern "C" fn source(
+        _: *mut c_void,
+        _: u32,
+        output: *mut NativeSourceMapEntry,
+    ) -> NativeHostStatus {
+        if output.is_null() {
+            return NativeHostStatus::INVALID_ARGUMENT;
+        }
+        // SAFETY: the ABI caller supplied the checked non-null output slot.
+        unsafe { *output = NativeSourceMapEntry::default() };
+        NativeHostStatus::OK
+    }
+
+    unsafe extern "C" fn site(
+        context: *mut c_void,
+        _: *mut NativeCall,
+        request: *const NativeSiteRequest,
+        outcome: *mut NativeSiteOutcome,
+        exit: *mut NativeExit,
+    ) -> NativeHostStatus {
+        if context.is_null() || request.is_null() || outcome.is_null() || exit.is_null() {
+            return NativeHostStatus::INVALID_ARGUMENT;
+        }
+        // SAFETY: every pointer was checked and remains borrowed for this callback.
+        let request = unsafe { *request };
+        if request.validate().is_err() {
+            return NativeHostStatus::INVALID_ARGUMENT;
+        }
+        // SAFETY: context is the SiteLog installed in the vtable below.
+        unsafe { &mut *context.cast::<SiteLog>() }.0.push(request);
+        let decision = if request.phase == NativeSitePhase::TERMINATOR {
+            match request.block {
+                0 => NativeSiteOutcome::edge(0),
+                1 => {
+                    // SAFETY: the generated entrypoint supplied its writable exit slot.
+                    unsafe { *exit = NativeExit::completed(0) };
+                    NativeSiteOutcome::exit()
+                }
+                _ => return NativeHostStatus::HOST_FAILURE,
+            }
+        } else {
+            NativeSiteOutcome::continue_execution()
+        };
+        // SAFETY: the generated entrypoint supplied its writable outcome slot.
+        unsafe { *outcome = decision };
+        NativeHostStatus::OK
+    }
+
+    let mut mir = function(vec![assignment(1)]);
+    let span = Span { start: 0, end: 8 };
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    body.blocks[0].terminator = MirTerminator {
+        kind: MirTerminatorKind::Branch {
+            cond: MirOperand::Constant(MirConstant::Number("1".into())),
+            then_block: BasicBlockId(1),
+            else_block: BasicBlockId(2),
+        },
+        span,
+    };
+    body.blocks.extend([
+        BasicBlock {
+            id: BasicBlockId(1),
+            statements: Vec::new(),
+            terminator: MirTerminator {
+                kind: MirTerminatorKind::Return(Vec::new()),
+                span,
+            },
+        },
+        BasicBlock {
+            id: BasicBlockId(2),
+            statements: Vec::new(),
+            terminator: MirTerminator {
+                kind: MirTerminatorKind::Return(Vec::new()),
+                span,
+            },
+        },
+    ]);
+    let native = lower(&mir);
+    let compiled =
+        runmat_native_codegen::cranelift::lower_function(&native.functions[0], &native.target)
+            .unwrap();
+
+    let mut flags = cranelift_codegen::settings::builder();
+    flags.set("use_colocated_libcalls", "false").unwrap();
+    flags.set("is_pic", "false").unwrap();
+    flags.set("enable_verifier", "true").unwrap();
+    let isa = cranelift_native::builder()
+        .unwrap()
+        .finish(cranelift_codegen::settings::Flags::new(flags))
+        .unwrap();
+    let builder = JITBuilder::with_isa(isa, default_libcall_names());
+    let mut module = JITModule::new(builder);
+    let function_id = module
+        .declare_function(
+            "runmat_r13_generic_test",
+            Linkage::Export,
+            &compiled.ir.signature,
+        )
+        .unwrap();
+    let mut context = module.make_context();
+    context.func = compiled.ir;
+    module.define_function(function_id, &mut context).unwrap();
+    module.clear_context(&mut context);
+    module.finalize_definitions().unwrap();
+    let code = module.get_finalized_function(function_id);
+    // SAFETY: the lowered function uses the exact runtime-owned NativeEntryPoint ABI.
+    let entry: NativeEntryPoint = unsafe { std::mem::transmute(code) };
+
+    let mut log = SiteLog::default();
+    let host = NativeHostVTable {
+        abi_version: NATIVE_ABI_VERSION.encoded(),
+        struct_size: std::mem::size_of::<NativeHostVTable>() as u32,
+        context: (&mut log as *mut SiteLog).cast(),
+        retain_value: Some(retain),
+        release_value: Some(release),
+        slow_call: Some(slow),
+        poll_safepoint: Some(safepoint),
+        source_lookup: Some(source),
+        execute_site: Some(site),
+    };
+    host.validate().unwrap();
+    let mut resume = NativeResumeState::default();
+    let mut frame = NativeFrame {
+        resume: &mut resume,
+        ..NativeFrame::default()
+    };
+    let mut call = NativeCall {
+        host: &host,
+        frame: &mut frame,
+        ..NativeCall::default()
+    };
+    let mut exit = NativeExit::completed(0);
+    // SAFETY: call, frame, host table, and exit remain live for the invocation.
+    let status = unsafe { entry(&mut call, &mut exit) };
+    assert_eq!(status, NativeHostStatus::OK);
+    call.validate_exit(&exit).unwrap();
+    assert!(log.0.iter().any(|site| site.block == 0));
+    assert!(log.0.iter().any(|site| site.block == 1));
+    assert!(!log.0.iter().any(|site| site.block == 2));
+    assert_eq!(
+        log.0.last().map(|site| site.phase),
+        Some(NativeSitePhase::TERMINATOR)
+    );
+    assert_eq!(NativeSiteOutcomeKind::EXIT.0, 2);
+
+    // SAFETY: a null call is intentionally passed to exercise generated ABI validation.
+    let invalid_status = unsafe { entry(std::ptr::null_mut(), &mut exit) };
+    assert_eq!(invalid_status, NativeHostStatus::INVALID_ARGUMENT);
+}
+
 #[test]
 fn verifier_rejects_omission_stale_effect_state_and_abi_drift() {
     let mut statements = vec![assignment(1)];

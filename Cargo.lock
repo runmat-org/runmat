@@ -6764,6 +6764,11 @@ dependencies = [
 name = "runmat-native-codegen"
 version = "0.6.1"
 dependencies = [
+ "cranelift",
+ "cranelift-codegen",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native",
  "runmat-execution",
  "runmat-hir",
  "runmat-mir",
@@ -6771,6 +6776,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
+ "target-lexicon",
  "thiserror 1.0.69",
  "wasm-bindgen-test",
 ]

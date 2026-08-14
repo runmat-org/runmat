@@ -1,6 +1,8 @@
 //! Verified, deterministic generic Native IR for RunMat.
 
 pub mod abi;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cranelift;
 mod error;
 pub mod ir;
 pub mod lowering;

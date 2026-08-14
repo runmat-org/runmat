@@ -16,7 +16,10 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cranelift = { workspace = true }
+cranelift-codegen = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
+target-lexicon = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-web"] }
@@ -25,3 +28,8 @@ runmat-runtime = { workspace = true, features = ["plot-web"] }
 runmat-hir = { workspace = true }
 serde_json = { workspace = true }
 wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+cranelift-jit = { workspace = true }
+cranelift-module = { workspace = true }
+cranelift-native = { workspace = true }
