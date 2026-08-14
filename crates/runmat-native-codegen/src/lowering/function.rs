@@ -211,17 +211,61 @@ pub(super) fn lower_function(
         NativeCodegenError::new("native.lowering.blocks", "MIR function has no blocks")
             .at_function(function)
     })?;
+    let abi = lower_abi(body, function)?;
+    let argument_validations = lower_argument_validations(metadata, &locals, &abi, function)?;
     Ok(NativeFunction {
         id: function,
         source: metadata.source,
         name: metadata.name.0.clone(),
-        abi: lower_abi(body, function)?,
+        abi,
+        argument_validations,
         locals,
         index_expressions: super::index_expression::derive(body, function)?,
         entry: checked_block(entry.id, function)?,
         blocks,
         expected_sites,
     })
+}
+
+pub(super) fn lower_argument_validations(
+    metadata: &runmat_mir::MirFunctionMetadata,
+    locals: &[NativeLocalMetadata],
+    abi: &NativeFunctionAbi,
+    function: ProgramFunctionId,
+) -> NativeCodegenResult<Vec<NativeFunctionArgumentValidation>> {
+    let mut validations = metadata
+        .argument_validations
+        .iter()
+        .map(|validation| {
+            let input = locals
+                .iter()
+                .find(|local| local.binding == Some(validation.binding))
+                .map(|local| local.id)
+                .ok_or_else(|| {
+                    NativeCodegenError::new(
+                        "native.lowering.argument_validation",
+                        "argument validation binding has no retained Native IR local",
+                    )
+                    .at_function(function)
+                })?;
+            if !abi.fixed_inputs.contains(&input) {
+                return Err(NativeCodegenError::new(
+                    "native.lowering.argument_validation",
+                    "argument validation binding is not a fixed function input",
+                )
+                .at_function(function));
+            }
+            Ok(NativeFunctionArgumentValidation {
+                input,
+                size: validation.size.clone(),
+                class_name: validation.class_name.clone(),
+                validators: validation.validators.clone(),
+                default_value: validation.default_value.clone(),
+            })
+        })
+        .collect::<NativeCodegenResult<Vec<_>>>()?;
+    validations.sort_by_key(|validation| validation.input);
+    Ok(validations)
 }
 
 fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueResult> {
@@ -298,7 +342,7 @@ fn statement_output_roots(statement: &MirStmtKind) -> Vec<MirLocalId> {
         .collect()
 }
 
-fn lower_abi(
+pub(super) fn lower_abi(
     body: &runmat_mir::MirBody,
     function: ProgramFunctionId,
 ) -> NativeCodegenResult<NativeFunctionAbi> {
@@ -321,6 +365,7 @@ fn lower_abi(
             .abi
             .fixed_inputs
             .iter()
+            .filter(|binding| Some(**binding) != body.abi.varargin)
             .copied()
             .map(find)
             .collect::<NativeCodegenResult<_>>()?,
@@ -329,6 +374,7 @@ fn lower_abi(
             .abi
             .fixed_outputs
             .iter()
+            .filter(|binding| Some(**binding) != body.abi.varargout)
             .copied()
             .map(find)
             .collect::<NativeCodegenResult<_>>()?,

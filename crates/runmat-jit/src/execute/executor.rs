@@ -41,7 +41,8 @@ impl GenericExecutor {
             })?;
         let requested_outputs = u32::try_from(requested_outputs)
             .map_err(|_| JitError::Host("requested output count exceeds native ABI".into()))?;
-        let (mut state, argument_refs) = HostState::new(function_ir, arguments, runtime)?;
+        let (mut state, argument_refs) =
+            HostState::new(function_ir, arguments, requested_outputs as usize, runtime)?;
         let host = super::callbacks::table(&mut state);
         host.validate()
             .map_err(|error| JitError::Host(error.to_string()))?;

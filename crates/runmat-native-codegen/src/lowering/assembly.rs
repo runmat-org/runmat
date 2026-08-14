@@ -221,6 +221,34 @@ pub fn verify_against_mir(
                 .at_function(function_id));
             }
         }
+        let metadata = mir.functions.get(function).ok_or_else(|| {
+            NativeCodegenError::new(
+                "native.ir.mir_function_metadata",
+                "canonical MIR body has no immutable function metadata",
+            )
+            .at_function(function_id)
+        })?;
+        let expected_abi = super::function::lower_abi(body, function_id)?;
+        if native.abi != expected_abi {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_function_abi",
+                "Native IR function ABI differs from canonical MIR",
+            )
+            .at_function(function_id));
+        }
+        let expected_validations = super::function::lower_argument_validations(
+            metadata,
+            &native.locals,
+            &native.abi,
+            function_id,
+        )?;
+        if native.argument_validations != expected_validations {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_argument_validations",
+                "Native IR argument-validation metadata differs from canonical MIR",
+            )
+            .at_function(function_id));
+        }
         if native.index_expressions != super::index_expression::derive(body, function_id)? {
             return Err(NativeCodegenError::new(
                 "native.ir.mir_index_expressions",

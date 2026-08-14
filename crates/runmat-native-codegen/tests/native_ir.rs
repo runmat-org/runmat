@@ -4,7 +4,8 @@ use runmat_execution::{
     ExecutableUnitManifest, ProgramEnvironment, ProgramRevision, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_hir::{
-    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, WorkspaceEffect,
+    FunctionAbi, FunctionArgumentValidation, FunctionId, FunctionKind, FunctionModifiers,
+    FunctionName, WorkspaceEffect,
 };
 use runmat_mir::{
     BasicBlock, BasicBlockId, MirAssembly, MirBody, MirConstant, MirFunctionMetadata, MirLocal,
@@ -18,7 +19,8 @@ use runmat_native_codegen::{
 use runmat_types::{
     BindingId, CapabilityRequirement, CapabilitySet, CollectiveId, DeoptimizationPointId,
     DistributedValueId, DynamicReason, ForeignAffinity, ForeignCapability, ForeignLifetime,
-    ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, InteropManifest, LabCount,
+    ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, FunctionArgDefaultValue,
+    FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidator, InteropManifest, LabCount,
     ParallelAccess, ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId,
     ParallelVariableContract, ParallelVariableRole, ParforContract, ProgramFunctionId,
     ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionGuardCondition,
@@ -211,7 +213,7 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
     assert_eq!(local.binding, Some(binding));
     assert_eq!(local.name.as_deref(), Some("answer"));
     assert_eq!(local.kind, runmat_native_codegen::NativeLocalKind::Binding);
-    assert_eq!(assembly.schema_version, 3);
+    assert_eq!(assembly.schema_version, 4);
     assembly.verify().unwrap();
     verify_against_mir(&assembly, &mir, Some(&names)).unwrap();
 
@@ -222,6 +224,72 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
             .unwrap_err()
             .code,
         "native.ir.mir_locals"
+    );
+}
+
+#[test]
+fn argument_validations_round_trip_and_are_bound_to_canonical_mir() {
+    let mut mir = function(vec![assignment(1)]);
+    let binding = BindingId(9);
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    body.locals[0].binding = Some(binding);
+    body.locals[0].kind = MirLocalKind::Parameter;
+    body.abi.fixed_inputs = vec![binding];
+    mir.functions
+        .get_mut(&FunctionId(0))
+        .unwrap()
+        .argument_validations = vec![FunctionArgumentValidation {
+        binding,
+        size: Some(FunctionArgSizeSpec {
+            rows: FunctionArgDim::Exact(1),
+            cols: FunctionArgDim::Any,
+        }),
+        class_name: Some("double".into()),
+        validators: vec![FunctionArgValidator::Positive],
+        default_value: Some(FunctionArgDefaultValue::Number(1.0)),
+    }];
+    let names = std::collections::BTreeMap::from([(binding, "input".to_string())]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let assembly = lower_with_bindings(&mir, &analysis, &manifest, Some(&names)).unwrap();
+
+    let validation = &assembly.functions[0].argument_validations[0];
+    assert_eq!(validation.input, runmat_native_codegen::NativeLocalId(0));
+    assert_eq!(validation.validators, vec![FunctionArgValidator::Positive]);
+    assert_eq!(
+        validation.default_value,
+        Some(FunctionArgDefaultValue::Number(1.0))
+    );
+    assembly.verify().unwrap();
+    verify_against_mir(&assembly, &mir, Some(&names)).unwrap();
+
+    let mut noncanonical = assembly.clone();
+    noncanonical.functions[0].argument_validations[0].default_value =
+        Some(FunctionArgDefaultValue::Number(2.0));
+    assert_eq!(
+        verify_against_mir(&noncanonical, &mir, Some(&names))
+            .unwrap_err()
+            .code,
+        "native.ir.mir_argument_validations"
+    );
+
+    let mut abi_tampered = assembly.clone();
+    abi_tampered.functions[0].abi.fixed_inputs.clear();
+    abi_tampered.functions[0].argument_validations.clear();
+    abi_tampered.verify().unwrap();
+    assert_eq!(
+        verify_against_mir(&abi_tampered, &mir, Some(&names))
+            .unwrap_err()
+            .code,
+        "native.ir.mir_function_abi"
+    );
+
+    let mut malformed = assembly;
+    malformed.functions[0].argument_validations[0].validators =
+        vec![FunctionArgValidator::GreaterThan(f64::NAN)];
+    assert_eq!(
+        malformed.verify().unwrap_err().code,
+        "native.ir.argument_validations"
     );
 }
 

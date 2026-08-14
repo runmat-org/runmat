@@ -14255,6 +14255,126 @@ fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_counts() {
+    let source = ExecutableSource::new(
+        "core-native-function-abi-test@1",
+        "nativeFunctionAbi.m",
+        "function [value, inputs, outputs] = nativeFunctionAbi(x)\narguments\nx (1,1) double {mustBePositive} = 3\nend\nvalue = x * 2;\ninputs = nargin;\noutputs = nargout;\nend\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile function ABI unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+
+    for (arguments, expected) in [
+        (
+            Vec::new(),
+            runmat_value::Value::OutputList(vec![
+                runmat_value::Value::Num(6.0),
+                runmat_value::Value::Num(0.0),
+                runmat_value::Value::Num(3.0),
+            ]),
+        ),
+        (
+            vec![runmat_value::Value::Num(4.0)],
+            runmat_value::Value::OutputList(vec![
+                runmat_value::Value::Num(8.0),
+                runmat_value::Value::Num(1.0),
+                runmat_value::Value::Num(3.0),
+            ]),
+        ),
+    ] {
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeFunctionAbi".into()),
+            arguments,
+            requested_outputs: 3,
+        };
+        let established = block_on(established_session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established function ABI execution");
+        let native = block_on(native_session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native function ABI execution");
+        assert_eq!(native, established);
+        assert_eq!(native, expected);
+    }
+
+    let invalid = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeFunctionAbi".into()),
+        arguments: vec![runmat_value::Value::Num(-1.0)],
+        requested_outputs: 1,
+    };
+    let established = block_on(established_session.invoke_executable(
+        &unit,
+        invalid.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect_err("established validation must fail");
+    let native = block_on(native_session.invoke_executable(
+        &unit,
+        invalid,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect_err("native validation must fail");
+    let (RunError::Runtime(established), RunError::Runtime(native)) = (established, native) else {
+        panic!("validation failures must remain runtime semantic errors");
+    };
+    assert_eq!(native.identifier(), established.identifier());
+    assert_eq!(native.message(), established.message());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_matches_varargin_and_varargout() {
+    let source = ExecutableSource::new(
+        "core-native-variadic-abi-test@1",
+        "nativeVariadicAbi.m",
+        "function [fixed, varargout] = nativeVariadicAbi(x, varargin)\nfixed = nargin;\nvarargout{1} = x;\nvarargout{2} = varargin{1};\nend\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile variadic ABI unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeVariadicAbi".into()),
+        arguments: vec![runmat_value::Value::Num(4.0), runmat_value::Value::Num(9.0)],
+        requested_outputs: 3,
+    };
+    let established = block_on(established_session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("established variadic execution");
+    let native = block_on(native_session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native variadic execution");
+    assert_eq!(native, established);
+    assert_eq!(
+        native,
+        runmat_value::Value::OutputList(vec![
+            runmat_value::Value::Num(2.0),
+            runmat_value::Value::Num(4.0),
+            runmat_value::Value::Num(9.0),
+        ])
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_console_effects_exactly_once() {
     let source = ExecutableSource::new(
         "core-native-console-test@1",

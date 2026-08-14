@@ -259,13 +259,41 @@ fn execute_terminator(
         }
         NativeTerminatorKind::Return { values } => {
             let requested_outputs = call.requested_outputs as usize;
-            if requested_outputs > values.len() || requested_outputs > call.result_capacity {
+            if requested_outputs > call.result_capacity {
                 return Err(JitError::Host(
                     "native return cannot satisfy the requested output window".into(),
                 ));
             }
-            for (index, value) in values.iter().take(requested_outputs).enumerate() {
-                let reference = value_for(state, *value)?;
+            let fixed_outputs = if state.function.abi.fixed_outputs.is_empty()
+                && state.function.abi.varargout.is_none()
+            {
+                values
+                    .iter()
+                    .map(|value| state.arena.get(value_for(state, *value)?).cloned())
+                    .collect::<JitResult<Vec<_>>>()?
+            } else {
+                state
+                    .function
+                    .abi
+                    .fixed_outputs
+                    .iter()
+                    .map(|local| return_local_value(state, terminator, *local))
+                    .collect::<JitResult<Vec<_>>>()?
+            };
+            let varargout = state
+                .function
+                .abi
+                .varargout
+                .map(|local| return_local_value(state, terminator, local))
+                .transpose()?;
+            let outputs = runmat_runtime::call::function_abi::collect_function_outputs(
+                &state.function.name,
+                &fixed_outputs,
+                varargout.as_ref(),
+                requested_outputs,
+            )?;
+            for (index, value) in outputs.into_iter().enumerate() {
+                let reference = state.arena.insert(value);
                 // SAFETY: NativeCall validation guarantees a writable result
                 // slice of result_capacity elements for this invocation.
                 unsafe { *call.results.add(index) = reference };
@@ -280,6 +308,21 @@ fn execute_terminator(
             "terminator {other:?} is not in the first generic-host cohort"
         ))),
     }
+}
+
+fn return_local_value(
+    state: &HostState,
+    terminator: &NativeTerminator,
+    local: runmat_native_codegen::NativeLocalId,
+) -> JitResult<runmat_value::Value> {
+    let value = terminator
+        .frame_state
+        .locals
+        .iter()
+        .find(|candidate| candidate.local == local)
+        .map(|candidate| candidate.value)
+        .ok_or_else(|| JitError::Host("native return frame omits an ABI output local".into()))?;
+    state.arena.get(value_for(state, value)?).cloned()
 }
 
 fn take_edge(

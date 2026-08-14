@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_native_codegen::{NativeBlockId, NativeFunction, NativeTerminatorKind, NativeValueId};
+use runmat_native_codegen::{
+    NativeBlockId, NativeFunction, NativeLocalKind, NativeTerminatorKind, NativeValueId,
+};
+use runmat_runtime::call::function_abi::{prepare_function_inputs, FunctionInputSpec};
 use runmat_runtime::native::{NativeRoot, NativeRootKind, NativeRootSet, NativeValueRef};
 use runmat_runtime::{context::RuntimeContext, RuntimeError};
 
@@ -32,32 +35,78 @@ impl HostState {
     pub fn new(
         function: NativeFunction,
         arguments: Vec<runmat_value::Value>,
+        requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> JitResult<(Self, Vec<NativeValueRef>)> {
-        if function.abi.varargin.is_some() {
+        if function
+            .locals
+            .iter()
+            .any(|local| local.kind == NativeLocalKind::Capture)
+        {
             return Err(JitError::UnsupportedSite(
-                "varargin entry requires the generic call-shape cohort".into(),
+                "captured native function entry requires closure environment materialization"
+                    .into(),
             ));
         }
-        if arguments.len() != function.abi.fixed_inputs.len() {
-            return Err(JitError::Host(format!(
-                "function {} expects {} inputs but received {}",
-                function.name,
-                function.abi.fixed_inputs.len(),
-                arguments.len()
-            )));
-        }
+        let input_specs = function
+            .argument_validations
+            .iter()
+            .map(|validation| {
+                let input_index = function
+                    .abi
+                    .fixed_inputs
+                    .iter()
+                    .position(|local| *local == validation.input)
+                    .ok_or_else(|| {
+                        JitError::Host(
+                            "native argument validation does not name a fixed input".into(),
+                        )
+                    })?;
+                Ok(FunctionInputSpec {
+                    input_index,
+                    size: validation.size.as_ref(),
+                    class_name: validation.class_name.as_deref(),
+                    validators: &validation.validators,
+                    default_value: validation.default_value.as_ref(),
+                })
+            })
+            .collect::<JitResult<Vec<_>>>()?;
+        let prepared = prepare_function_inputs(
+            &function.name,
+            &arguments,
+            function.abi.fixed_inputs.len(),
+            function.abi.varargin.is_some(),
+            &input_specs,
+        )?;
         let mut arena = ValueArena::default();
         let argument_refs = arguments
             .into_iter()
             .map(|value| arena.insert(value))
             .collect::<Vec<_>>();
         let mut locals = vec![NativeValueRef::NULL; function.local_count()];
-        for (local, value) in function.abi.fixed_inputs.iter().zip(&argument_refs) {
+        for (local, value) in function.abi.fixed_inputs.iter().zip(&prepared.fixed) {
             let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
                 JitError::Host("function ABI input local is out of bounds".into())
             })?;
-            *slot = *value;
+            if let Some(value) = value {
+                *slot = arena.insert(value.clone());
+            }
+        }
+        if let (Some(local), Some(varargin)) = (function.abi.varargin, prepared.varargin) {
+            locals[local.0 as usize] = arena.insert(runmat_value::Value::Cell(varargin));
+        }
+        if let Some(local) = function.abi.varargout {
+            let empty = runmat_value::CellArray::new(Vec::new(), 1, 0)
+                .map_err(|error| JitError::Host(format!("varargout: {error}")))?;
+            locals[local.0 as usize] = arena.insert(runmat_value::Value::Cell(empty));
+        }
+        if let Some(local) = function.abi.implicit_nargin {
+            locals[local.0 as usize] =
+                arena.insert(runmat_value::Value::Num(prepared.nargin as f64));
+        }
+        if let Some(local) = function.abi.implicit_nargout {
+            locals[local.0 as usize] =
+                arena.insert(runmat_value::Value::Num(requested_outputs as f64));
         }
         let roots = locals
             .iter()

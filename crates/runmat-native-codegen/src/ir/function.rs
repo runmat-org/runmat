@@ -1,5 +1,8 @@
 use super::{NativeBlock, NativeBlockId, NativeIndexExpression, NativeLocalId, NativeMirSite};
-use runmat_types::{BindingId, ProgramFunctionId, ProgramSourceId};
+use runmat_types::{
+    BindingId, FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator,
+    ProgramFunctionId, ProgramSourceId,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -11,6 +14,20 @@ pub struct NativeFunctionAbi {
     pub varargout: Option<NativeLocalId>,
     pub implicit_nargin: Option<NativeLocalId>,
     pub implicit_nargout: Option<NativeLocalId>,
+}
+
+/// Executor-neutral validation and default metadata for one fixed input.
+///
+/// The semantic constraint vocabulary is owned by `runmat-types`; Native IR
+/// adds only the exact local identity needed by a native execution host.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeFunctionArgumentValidation {
+    pub input: NativeLocalId,
+    pub size: Option<FunctionArgSizeSpec>,
+    pub class_name: Option<String>,
+    pub validators: Vec<FunctionArgValidator>,
+    pub default_value: Option<FunctionArgDefaultValue>,
 }
 
 /// Executor-neutral metadata for one canonical MIR local.
@@ -57,6 +74,7 @@ pub struct NativeFunction {
     pub source: ProgramSourceId,
     pub name: String,
     pub abi: NativeFunctionAbi,
+    pub argument_validations: Vec<NativeFunctionArgumentValidation>,
     pub locals: Vec<NativeLocalMetadata>,
     pub index_expressions: Vec<NativeIndexExpression>,
     pub entry: NativeBlockId,

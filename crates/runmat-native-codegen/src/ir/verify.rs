@@ -151,6 +151,45 @@ fn verify_function(
             ));
         }
     }
+    if has_duplicates(&function.abi.fixed_inputs)
+        || has_duplicates(&function.abi.fixed_outputs)
+        || function
+            .abi
+            .varargin
+            .is_some_and(|local| function.abi.fixed_inputs.contains(&local))
+        || function
+            .abi
+            .varargout
+            .is_some_and(|local| function.abi.fixed_outputs.contains(&local))
+    {
+        return Err(error(
+            "native.ir.function_abi",
+            "fixed function ABI locals must be unique and exclude variadic locals",
+        ));
+    }
+    ensure_sorted_unique_by(
+        "native.ir.argument_validations",
+        &function.argument_validations,
+        |validation| validation.input,
+    )
+    .map_err(|error| error.at_function(function.id))?;
+    for validation in &function.argument_validations {
+        if !function.abi.fixed_inputs.contains(&validation.input)
+            || validation
+                .class_name
+                .as_ref()
+                .is_some_and(|name| name.is_empty())
+            || validation
+                .validators
+                .iter()
+                .any(|validator| !argument_validator_is_valid(validator))
+        {
+            return Err(error(
+                "native.ir.argument_validations",
+                "argument validations must be canonical, finite, and attached to fixed inputs",
+            ));
+        }
+    }
     ensure_sorted_unique_by("native.ir.blocks", &function.blocks, |block| block.id)
         .map_err(|error| error.at_function(function.id))?;
     let blocks = function
@@ -376,6 +415,33 @@ fn verify_function(
     }
     verify_region_boundaries(function, regions)?;
     Ok(())
+}
+
+fn has_duplicates<T: Ord + Copy>(values: &[T]) -> bool {
+    let mut seen = BTreeSet::new();
+    values.iter().any(|value| !seen.insert(*value))
+}
+
+fn argument_validator_is_valid(validator: &runmat_types::FunctionArgValidator) -> bool {
+    use runmat_types::{FunctionArgValidationLiteral, FunctionArgValidator};
+
+    match validator {
+        FunctionArgValidator::A(names) | FunctionArgValidator::UnderlyingType(names) => {
+            !names.is_empty() && names.iter().all(|name| !name.is_empty())
+        }
+        FunctionArgValidator::Member(values) => values.iter().all(|value| match value {
+            FunctionArgValidationLiteral::Number(value) => value.is_finite(),
+            FunctionArgValidationLiteral::Text(_) | FunctionArgValidationLiteral::Bool(_) => true,
+        }),
+        FunctionArgValidator::InRange(lower, upper, _) => {
+            lower.is_finite() && upper.is_finite() && lower <= upper
+        }
+        FunctionArgValidator::GreaterThanOrEqual(value)
+        | FunctionArgValidator::LessThanOrEqual(value)
+        | FunctionArgValidator::GreaterThan(value)
+        | FunctionArgValidator::LessThan(value) => value.is_finite(),
+        _ => true,
+    }
 }
 
 fn verify_index_expression(

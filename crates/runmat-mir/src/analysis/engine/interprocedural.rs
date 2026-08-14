@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_hir::{FunctionArgDim, FunctionArgValidator, FunctionArgumentValidation, FunctionId};
+use runmat_hir::{FunctionArgumentValidation, FunctionId};
 use runmat_types::{
-    CertaintyFact, DynamicReason, FactJoin, NumericClass, NumericDomain, NumericFact, ShapeFact,
-    StorageFact, ValueFact, ValueKindFact,
+    CertaintyFact, DynamicReason, FactJoin, FunctionArgDim, FunctionArgValidator, NumericClass,
+    NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 use crate::{MirAssembly, MirBody};

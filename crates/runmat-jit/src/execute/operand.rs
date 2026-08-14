@@ -219,11 +219,27 @@ pub(super) fn evaluate_operand(
     operand: &MirOperand,
 ) -> JitResult<NativeValueRef> {
     match operand {
-        MirOperand::Local(local) => state
-            .locals
-            .get(local.0)
-            .copied()
-            .ok_or_else(|| JitError::Host(format!("local {} is out of bounds", local.0))),
+        MirOperand::Local(local) => {
+            let value = state
+                .locals
+                .get(local.0)
+                .copied()
+                .ok_or_else(|| JitError::Host(format!("local {} is out of bounds", local.0)))?;
+            if value.is_null()
+                && u32::try_from(local.0)
+                    .ok()
+                    .map(runmat_native_codegen::NativeLocalId)
+                    .is_some_and(|local| state.function.abi.fixed_inputs.contains(&local))
+            {
+                return Err(JitError::from(
+                    runmat_runtime::runtime_error::semantic_error(
+                        "NotEnoughInputs",
+                        "Not enough input arguments.",
+                    ),
+                ));
+            }
+            Ok(value)
+        }
         MirOperand::Constant(constant) => {
             let value = match constant {
                 MirConstant::Number(text) => Value::Num(text.parse::<f64>().map_err(|error| {

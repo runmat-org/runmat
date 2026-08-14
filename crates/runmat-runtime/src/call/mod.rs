@@ -3,4 +3,5 @@
 pub mod arguments;
 pub mod closures;
 pub mod descriptor;
+pub mod function_abi;
 pub mod identity;

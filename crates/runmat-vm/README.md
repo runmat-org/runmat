@@ -49,7 +49,7 @@ src/
 
 ### `call/`
 - Bytecode call decoding and interpreter-frame preparation.
-- Stack argument specifications are materialized here, while comma-list expansion, callable descriptors, object brace dispatch, and output contracts are delegated to Runtime so VM, native, and browser executors share one language implementation.
+- Stack argument specifications are materialized here, while comma-list expansion, callable descriptors, object brace dispatch, function-entry preparation, argument validation/defaults, and output contracts are delegated to Runtime so VM, native, and browser executors share one language implementation.
 
 ### `indexing/`
 - Bytecode indexing adapters and VM-specific stack/slot coordination.

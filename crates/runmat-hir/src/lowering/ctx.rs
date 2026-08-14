@@ -1,7 +1,4 @@
-use crate::hir::{
-    FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
-    FunctionArgValidationLiteral, FunctionArgValidator, FunctionArgumentValidation,
-};
+use crate::hir::FunctionArgumentValidation;
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
@@ -21,6 +18,10 @@ use crate::{
     SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
+use runmat_types::{
+    FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
+    FunctionArgValidationLiteral, FunctionArgValidator,
+};
 use std::collections::{HashMap, HashSet};
 
 const IDENT_AWAIT_EXTENSION_DISABLED: &str = "RunMat:AwaitExtensionDisabled";

@@ -12,7 +12,9 @@ use crate::runtime::workspace::{
     refresh_workspace_state, workspace_assign, workspace_clear, workspace_lookup, workspace_remove,
     workspace_snapshot,
 };
-use runmat_runtime::builtins::common::validation as arg_validation;
+use runmat_runtime::call::function_abi::{
+    collect_function_outputs, prepare_function_inputs, FunctionInputSpec,
+};
 use runmat_runtime::{
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
@@ -20,7 +22,7 @@ use runmat_runtime::{
 };
 use runmat_value::{CellArray, Value};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
@@ -197,89 +199,49 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
         );
         return Err(mex("SemanticFunctionArity", &message));
     }
-    let runtime_arg_count = args.len() - func.capture_slots.len();
-    if runtime_arg_count > func.input_slots.len() && func.varargin_slot.is_none() {
-        let message = format!(
-            "semantic function {} expected {} inputs, got {}",
-            func.display_name,
-            func.input_slots.len(),
-            runtime_arg_count
-        );
-        return Err(mex("TooManyInputs", &message));
-    }
-    if requested_outputs > func.output_slots.len() && func.varargout_slot.is_none() {
-        let message = format!(
-            "semantic function {} expected {} outputs, got {}",
-            func.display_name,
-            func.output_slots.len(),
-            requested_outputs
-        );
-        return Err(mex("TooManyOutputs", &message));
-    }
-
+    let runtime_args = &args[func.capture_slots.len()..];
     let mut vars = vec![Value::Num(0.0); func.var_count];
-    let mut missing_input_slots = HashSet::new();
     for (slot, value) in func.capture_slots.iter().zip(args.iter()) {
         if *slot < vars.len() {
             vars[*slot] = value.clone();
         }
     }
-    for (slot, value) in func
-        .input_slots
-        .iter()
-        .take(runtime_arg_count)
-        .zip(args.iter().skip(func.capture_slots.len()))
-    {
-        if *slot < vars.len() {
-            vars[*slot] = value.clone();
-        }
-    }
-    let default_values_by_slot: HashMap<usize, Value> = func
+    let input_specs = func
         .argument_validations
         .iter()
-        .filter_map(|validation| {
-            validation.default_value.as_ref().map(|value| {
-                let lowered = match value {
-                    crate::bytecode::program::FunctionArgDefaultValue::Number(value) => {
-                        Value::Num(*value)
-                    }
-                    crate::bytecode::program::FunctionArgDefaultValue::Bool(value) => {
-                        Value::Bool(*value)
-                    }
-                    crate::bytecode::program::FunctionArgDefaultValue::String(value) => {
-                        Value::String(value.clone())
-                    }
-                    crate::bytecode::program::FunctionArgDefaultValue::EmptyArray => Value::Tensor(
-                        runmat_value::Tensor::new(Vec::new(), vec![0, 0])
-                            .expect("empty default tensor"),
-                    ),
-                };
-                (validation.input_slot, lowered)
+        .map(|validation| {
+            let input_index = func
+                .input_slots
+                .iter()
+                .position(|slot| *slot == validation.input_slot)
+                .ok_or_else(|| mex("InvalidInputSlot", "function argument slot out of bounds"))?;
+            Ok(FunctionInputSpec {
+                input_index,
+                size: validation.size.as_ref(),
+                class_name: validation.class_name.as_deref(),
+                validators: &validation.validators,
+                default_value: validation.default_value.as_ref(),
             })
         })
-        .collect();
-    if runtime_arg_count < func.input_slots.len() {
-        for slot in func.input_slots.iter().skip(runtime_arg_count) {
-            if let Some(default_value) = default_values_by_slot.get(slot) {
-                if *slot < vars.len() {
-                    vars[*slot] = default_value.clone();
-                }
-            } else {
-                missing_input_slots.insert(*slot);
+        .collect::<Result<Vec<_>, RuntimeError>>()?;
+    let prepared = prepare_function_inputs(
+        &func.display_name,
+        runtime_args,
+        func.input_slots.len(),
+        func.varargin_slot.is_some(),
+        &input_specs,
+    )?;
+    let mut missing_input_slots = HashSet::new();
+    for (slot, value) in func.input_slots.iter().zip(&prepared.fixed) {
+        if let Some(value) = value {
+            if *slot < vars.len() {
+                vars[*slot] = value.clone();
             }
+        } else {
+            missing_input_slots.insert(*slot);
         }
     }
-    validate_function_arguments(func, &vars, &missing_input_slots)?;
-    if let Some(slot) = func.varargin_slot {
-        let fixed_count = func.input_slots.len();
-        let rest = if runtime_arg_count > fixed_count {
-            args[func.capture_slots.len() + fixed_count..].to_vec()
-        } else {
-            Vec::new()
-        };
-        let cols = rest.len();
-        let cell = CellArray::new(rest, 1, cols)
-            .map_err(|err| mex("VararginPack", &format!("varargin: {err}")))?;
+    if let (Some(slot), Some(cell)) = (func.varargin_slot, prepared.varargin) {
         if slot < vars.len() {
             vars[slot] = Value::Cell(cell);
         }
@@ -293,7 +255,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
     }
     if let Some(slot) = func.implicit_nargin_slot {
         if slot < vars.len() {
-            vars[slot] = Value::Num(runtime_arg_count as f64);
+            vars[slot] = Value::Num(prepared.nargin as f64);
         }
     }
     if let Some(slot) = func.implicit_nargout_slot {
@@ -314,11 +276,8 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
     for slot in &func.capture_slots {
         initially_unassigned_slots.remove(slot);
     }
-    for slot in func.input_slots.iter().take(runtime_arg_count) {
-        initially_unassigned_slots.remove(slot);
-    }
-    for slot in func.input_slots.iter().skip(runtime_arg_count) {
-        if default_values_by_slot.contains_key(slot) {
+    for (slot, value) in func.input_slots.iter().zip(&prepared.fixed) {
+        if value.is_some() {
             initially_unassigned_slots.remove(slot);
         }
     }
@@ -343,7 +302,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
             vars,
             &func.display_name,
             requested_outputs,
-            runtime_arg_count,
+            prepared.nargin,
             missing_input_slots,
             runtime,
         );
@@ -368,7 +327,18 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
             .await?
         }
     };
-    let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
+    let fixed_outputs = func
+        .output_slots
+        .iter()
+        .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
+        .collect::<Vec<_>>();
+    let varargout = func.varargout_slot.and_then(|slot| result_vars.get(slot));
+    let output_values = collect_function_outputs(
+        &func.display_name,
+        &fixed_outputs,
+        varargout,
+        requested_outputs,
+    )?;
     let updated_captures = func
         .capture_slots
         .iter()
@@ -386,538 +356,6 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
         output_value(output_values, requested_outputs),
         updated_captures,
     ))
-}
-
-fn validate_function_arguments(
-    func: &crate::bytecode::program::FunctionBytecode,
-    vars: &[Value],
-    missing_input_slots: &HashSet<usize>,
-) -> Result<(), RuntimeError> {
-    for validation in &func.argument_validations {
-        if missing_input_slots.contains(&validation.input_slot) {
-            continue;
-        }
-        let Some(input_index) = func
-            .input_slots
-            .iter()
-            .position(|slot| *slot == validation.input_slot)
-        else {
-            continue;
-        };
-        let value = vars
-            .get(validation.input_slot)
-            .ok_or_else(|| mex("InvalidInputSlot", "function argument slot out of bounds"))?;
-
-        if let Some(size) = &validation.size {
-            let (rows, cols) = arg_validation::value_shape_2d(value);
-            if !dim_matches(&size.rows, rows) || !dim_matches(&size.cols, cols) {
-                return Err(mex(
-                    "ArgumentValidationSize",
-                    &format!(
-                        "Function '{}' argument #{} failed size validation",
-                        func.display_name,
-                        input_index + 1
-                    ),
-                ));
-            }
-        }
-
-        if let Some(class_name) = &validation.class_name {
-            if !arg_validation::value_matches_class(value, class_name) {
-                return Err(mex(
-                    "ArgumentValidationClass",
-                    &format!(
-                        "Function '{}' argument #{} failed class validation (expected {})",
-                        func.display_name,
-                        input_index + 1,
-                        class_name
-                    ),
-                ));
-            }
-        }
-        for validator in &validation.validators {
-            match validator {
-                crate::bytecode::program::FunctionArgValidator::A(class_names) => {
-                    if !arg_validation::must_be_a(value, class_names.clone())? {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeA validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Column => {
-                    if !arg_validation::value_is_column(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeColumn validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Finite => {
-                    if !arg_validation::value_is_finite(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeFinite validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Float => {
-                    if !arg_validation::value_is_float(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeFloat validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Folder => {
-                    if arg_validation::dispatch_validator("mustBeFolder", vec![value.clone()])
-                        .is_err()
-                    {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeFolder validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::File => {
-                    if arg_validation::dispatch_validator("mustBeFile", vec![value.clone()])
-                        .is_err()
-                    {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeFile validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::NumericOrLogical => {
-                    if !arg_validation::value_is_numeric_or_logical(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNumericOrLogical validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Numeric => {
-                    if !arg_validation::value_is_numeric(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNumeric validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Text => {
-                    if !arg_validation::value_is_text(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeText validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::TextScalar => {
-                    if !arg_validation::value_is_text_scalar(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeTextScalar validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::NonzeroLengthText => {
-                    if !arg_validation::value_is_nonzero_length_text(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonzeroLengthText validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Nonempty => {
-                    if arg_validation::value_is_empty(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonempty validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::ScalarOrEmpty => {
-                    if !arg_validation::value_is_scalar_or_empty(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeScalarOrEmpty validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Real => {
-                    if !arg_validation::value_is_real(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeReal validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Integer => {
-                    if !arg_validation::value_is_integer(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeInteger validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Vector => {
-                    if !arg_validation::value_is_vector(value)? {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeVector validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Positive => {
-                    if !arg_validation::value_is_positive(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBePositive validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Negative => {
-                    if !arg_validation::value_is_negative(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNegative validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Nonnegative => {
-                    if !arg_validation::value_is_nonnegative(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonnegative validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Nonmissing => {
-                    if !arg_validation::value_is_nonmissing(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonmissing validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::NonNan => {
-                    if !arg_validation::value_is_non_nan(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonNan validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Nonzero => {
-                    if !arg_validation::value_is_nonzero(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonzero validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Nonpositive => {
-                    if !arg_validation::value_is_nonpositive(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonpositive validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Nonsparse => {
-                    if matches!(value, Value::SparseTensor(_)) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeNonsparse validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Sparse => {
-                    if !matches!(value, Value::SparseTensor(_)) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeSparse validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::ValidVariableName => {
-                    if !arg_validation::isvarname_value(value) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeValidVariableName validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::UnderlyingType(class_names) => {
-                    if !arg_validation::value_underlying_type_matches(value, class_names.clone())? {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeUnderlyingType validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::Member(literals) => {
-                    let allowed: Vec<_> = literals.iter().map(validation_literal_to_atom).collect();
-                    if !arg_validation::value_is_member_atoms(value, &allowed)? {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeMember validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::InRange(
-                    lower,
-                    upper,
-                    inclusivity,
-                ) => {
-                    if !arg_validation::value_is_in_range(
-                        value,
-                        *lower,
-                        *upper,
-                        arg_validation::RangeInclusivity {
-                            lower: inclusivity.lower,
-                            upper: inclusivity.upper,
-                        },
-                    ) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeInRange validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::GreaterThanOrEqual(threshold) => {
-                    if !arg_validation::value_is_greater_than_or_equal(value, *threshold) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeGreaterThanOrEqual validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::LessThanOrEqual(threshold) => {
-                    if !arg_validation::value_is_less_than_or_equal(value, *threshold) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeLessThanOrEqual validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::GreaterThan(threshold) => {
-                    if !arg_validation::value_is_greater_than(value, *threshold) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeGreaterThan validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-                crate::bytecode::program::FunctionArgValidator::LessThan(threshold) => {
-                    if !arg_validation::value_is_less_than(value, *threshold) {
-                        return Err(mex(
-                            "ArgumentValidationFunction",
-                            &format!(
-                                "Function '{}' argument #{} failed mustBeLessThan validation",
-                                func.display_name,
-                                input_index + 1
-                            ),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validation_literal_to_atom(
-    literal: &crate::bytecode::program::FunctionArgValidationLiteral,
-) -> arg_validation::ValidationAtom {
-    match literal {
-        crate::bytecode::program::FunctionArgValidationLiteral::Number(value) => {
-            arg_validation::ValidationAtom::Number(*value)
-        }
-        crate::bytecode::program::FunctionArgValidationLiteral::Text(value) => {
-            arg_validation::ValidationAtom::Text(value.clone())
-        }
-        crate::bytecode::program::FunctionArgValidationLiteral::Bool(value) => {
-            arg_validation::ValidationAtom::Bool(*value)
-        }
-    }
-}
-
-fn dim_matches(dim: &crate::bytecode::program::FunctionArgDim, actual: usize) -> bool {
-    match dim {
-        crate::bytecode::program::FunctionArgDim::Any => true,
-        crate::bytecode::program::FunctionArgDim::Exact(expected) => *expected == actual,
-    }
-}
-
-fn collect_semantic_outputs(
-    func: &crate::bytecode::program::FunctionBytecode,
-    result_vars: &[Value],
-    requested_outputs: usize,
-) -> Result<Vec<Value>, RuntimeError> {
-    let mut values = Vec::with_capacity(requested_outputs.max(1));
-    for slot in func.output_slots.iter().take(requested_outputs) {
-        values.push(result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
-    }
-    if values.len() < requested_outputs {
-        if let Some(slot) = func.varargout_slot {
-            let available = match result_vars.get(slot) {
-                Some(Value::Cell(cell)) => {
-                    let expanded = runmat_runtime::object::cell::expand_all_cell_values(cell)?;
-                    let available = expanded.len();
-                    for value in expanded {
-                        if values.len() >= requested_outputs {
-                            break;
-                        }
-                        values.push(value);
-                    }
-                    available
-                }
-                _ => 0,
-            };
-            if values.len() < requested_outputs {
-                let need = requested_outputs - func.output_slots.len();
-                let message = format!(
-                    "Function '{}' returned {available} varargout values, {need} requested",
-                    func.display_name
-                );
-                return Err(mex("VarargoutMismatch", &message));
-            }
-        }
-    }
-    while values.len() < requested_outputs {
-        values.push(Value::Num(0.0));
-    }
-    Ok(values)
 }
 
 fn output_value(output_values: Vec<Value>, requested_outputs: usize) -> Value {
@@ -1622,14 +1060,11 @@ async fn interpret_function_with_counts_in_context_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        collect_semantic_outputs, interpret_with_vars, output_value, run_interpreter_inner,
-    };
-    use crate::bytecode::program::{Bytecode, FunctionBytecode};
+    use super::{interpret_with_vars, output_value, run_interpreter_inner};
+    use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
     use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
-    use runmat_hir::FunctionId;
     use runmat_runtime::builtins::common::validation::{
         value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
         value_is_less_than, value_is_less_than_or_equal, value_is_negative, value_is_nonnegative,
@@ -1637,7 +1072,6 @@ mod tests {
         value_is_real, value_is_scalar_or_empty, value_is_text,
     };
     use runmat_value::{CellArray, HandleRef, StructValue, Tensor, Value};
-    use std::collections::{HashMap, HashSet};
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]
     use {
@@ -1660,48 +1094,6 @@ mod tests {
                 shape: &shape,
             })
             .expect("upload should succeed")
-    }
-
-    fn test_function(varargout_slot: Option<usize>) -> FunctionBytecode {
-        FunctionBytecode {
-            function: FunctionId(0),
-            display_name: "f".into(),
-            private_owner_scope: String::new(),
-            source_id: None,
-            instructions: vec![Instr::Return],
-            instr_spans: Vec::new(),
-            call_arg_spans: Vec::new(),
-            coverage_sites: Vec::new(),
-            var_count: 1,
-            input_slots: Vec::new(),
-            varargin_slot: None,
-            implicit_nargin_slot: None,
-            output_slots: Vec::new(),
-            varargout_slot,
-            implicit_nargout_slot: None,
-            capture_slots: Vec::new(),
-            var_names: HashMap::new(),
-            initially_unassigned_slots: HashSet::new(),
-            argument_validations: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn collect_outputs_zero_requested_does_not_consume_varargout() {
-        let func = test_function(Some(0));
-        let varargout = CellArray::new(vec![Value::Num(7.0)], 1, 1).expect("cell");
-        let result_vars = vec![Value::Cell(varargout)];
-        let outputs = collect_semantic_outputs(&func, &result_vars, 0).expect("collect");
-        assert!(outputs.is_empty());
-    }
-
-    #[test]
-    fn collect_outputs_one_requested_reads_varargout() {
-        let func = test_function(Some(0));
-        let varargout = CellArray::new(vec![Value::Num(7.0)], 1, 1).expect("cell");
-        let result_vars = vec![Value::Cell(varargout)];
-        let outputs = collect_semantic_outputs(&func, &result_vars, 1).expect("collect");
-        assert_eq!(outputs, vec![Value::Num(7.0)]);
     }
 
     #[test]

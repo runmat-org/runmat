@@ -10,6 +10,7 @@ use runmat_accelerate::graph::AccelGraph;
 use runmat_accelerate::FusionGroup;
 use runmat_builtins::Type;
 use runmat_hir::FunctionId;
+use runmat_types::{FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator};
 use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -106,18 +107,6 @@ impl Default for FunctionBytecode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgDim {
-    Any,
-    Exact(usize),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionArgSizeSpec {
-    pub rows: FunctionArgDim,
-    pub cols: FunctionArgDim,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionArgumentValidation {
     pub input_slot: usize,
     pub size: Option<FunctionArgSizeSpec>,
@@ -126,64 +115,6 @@ pub struct FunctionArgumentValidation {
     pub validators: Vec<FunctionArgValidator>,
     #[serde(default)]
     pub default_value: Option<FunctionArgDefaultValue>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgValidator {
-    A(Vec<String>),
-    Column,
-    Finite,
-    Float,
-    Folder,
-    File,
-    NumericOrLogical,
-    Numeric,
-    Text,
-    TextScalar,
-    NonzeroLengthText,
-    Nonempty,
-    ScalarOrEmpty,
-    Real,
-    Integer,
-    Vector,
-    Positive,
-    Negative,
-    Nonnegative,
-    Nonmissing,
-    NonNan,
-    Nonzero,
-    Nonpositive,
-    Nonsparse,
-    Sparse,
-    ValidVariableName,
-    UnderlyingType(Vec<String>),
-    Member(Vec<FunctionArgValidationLiteral>),
-    InRange(f64, f64, FunctionArgRangeInclusivity),
-    GreaterThanOrEqual(f64),
-    LessThanOrEqual(f64),
-    GreaterThan(f64),
-    LessThan(f64),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct FunctionArgRangeInclusivity {
-    pub lower: bool,
-    pub upper: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgValidationLiteral {
-    Number(f64),
-    Text(String),
-    Bool(bool),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgDefaultValue {
-    Number(f64),
-    Bool(bool),
-    String(String),
-    EmptyArray,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

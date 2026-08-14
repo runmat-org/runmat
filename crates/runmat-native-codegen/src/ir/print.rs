@@ -34,6 +34,17 @@ pub fn print_native_ir(assembly: &NativeAssembly) -> String {
                 local.id.0, local.kind, local.binding, local.name
             );
         }
+        for validation in &function.argument_validations {
+            let _ = writeln!(
+                output,
+                "  argument-validation l{} size={:?} class={:?} validators={:?} default={:?}",
+                validation.input.0,
+                validation.size,
+                validation.class_name,
+                validation.validators,
+                validation.default_value
+            );
+        }
         for expression in &function.index_expressions {
             let _ = writeln!(
                 output,

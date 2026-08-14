@@ -12,8 +12,10 @@ pub use contract::*;
 pub use declaration::{
     ClassDeclaration, ClassKind, EnumerationDeclaration, EventDeclaration,
     ExternalClassDeclaration, ExternalMethodDeclaration, ExternalPropertyDeclaration,
-    InheritanceDeclaration, MemberAccess, MethodAttributes, MethodDeclaration, PropertyAttributes,
-    PropertyDeclaration, SemanticAttribute,
+    FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
+    FunctionArgValidationLiteral, FunctionArgValidator, InheritanceDeclaration, MemberAccess,
+    MethodAttributes, MethodDeclaration, PropertyAttributes, PropertyDeclaration,
+    SemanticAttribute,
 };
 pub use fact::*;
 pub use identity::*;
