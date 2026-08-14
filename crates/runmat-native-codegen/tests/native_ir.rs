@@ -294,6 +294,51 @@ fn argument_validations_round_trip_and_are_bound_to_canonical_mir() {
 }
 
 #[test]
+fn selector_mask_limit_is_rejected_before_native_execution() {
+    let span = Span { start: 0, end: 8 };
+    let mir = function(vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(0)),
+            value: MirRvalue::Index {
+                base: MirOperand::Local(MirLocalId(0)),
+                indexing: runmat_mir::MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: runmat_mir::MirIndexPlan::Slice,
+                    components: vec![runmat_mir::MirIndexComponent::Colon; 33],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            },
+        },
+        span,
+    }]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    assert_eq!(
+        lower_with(&mir, &analysis, &manifest).unwrap_err().code,
+        "native.capability.selector_dimension_limit"
+    );
+}
+
+#[test]
+fn legacy_binding_places_are_rejected_before_native_execution() {
+    let span = Span { start: 0, end: 8 };
+    let mir = function(vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Binding(BindingId(99)),
+            value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("1".into()))),
+        },
+        span,
+    }]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    assert_eq!(
+        lower_with(&mir, &analysis, &manifest).unwrap_err().code,
+        "native.ir.legacy_binding_place"
+    );
+}
+
+#[test]
 fn end_expression_catalog_is_verified_against_canonical_mir() {
     let span = Span { start: 0, end: 3 };
     let mut mir = function(vec![
@@ -460,14 +505,6 @@ fn generic_cranelift_executes_the_native_block_graph_through_typed_sites() {
         NativeHostStatus::OK
     }
 
-    unsafe extern "C" fn slow(
-        _: *mut c_void,
-        _: *mut NativeCall,
-        _: *mut NativeExit,
-    ) -> NativeHostStatus {
-        NativeHostStatus::HOST_FAILURE
-    }
-
     unsafe extern "C" fn safepoint(
         _: *mut c_void,
         _: *const runmat_runtime::native::NativeSafepoint,
@@ -591,7 +628,6 @@ fn generic_cranelift_executes_the_native_block_graph_through_typed_sites() {
         context: (&mut log as *mut SiteLog).cast(),
         retain_value: Some(retain),
         release_value: Some(release),
-        slow_call: Some(slow),
         poll_safepoint: Some(safepoint),
         source_lookup: Some(source),
         execute_site: Some(site),

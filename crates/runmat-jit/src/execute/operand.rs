@@ -165,9 +165,12 @@ pub(super) fn evaluate_rvalue(
         ))]),
         MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
         MirRvalue::End => Ok(vec![state.arena.insert(Value::Num(-0.0))]),
-        other => Err(JitError::UnsupportedSite(format!(
-            "rvalue {other:?} is not in the current generic-host cohort"
-        ))),
+        MirRvalue::Future { .. } | MirRvalue::Spawn(_) => Err(JitError::UnsupportedSite(
+            "future/spawn rvalue requires R14 continuation state".into(),
+        )),
+        MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(JitError::Host(
+            "predeclared distributed capability rejection reached native execution".into(),
+        )),
     }
 }
 
@@ -195,8 +198,8 @@ fn execute_embedded_statement(
             let _ = evaluate_rvalue(state, value, 0, None)?;
             Ok(())
         }
-        other => Err(JitError::UnsupportedSite(format!(
-            "embedded short-circuit statement {other:?} is not supported"
+        other => Err(JitError::Host(format!(
+            "verified short-circuit payload contains invalid statement {other:?}"
         ))),
     }
 }

@@ -8,7 +8,7 @@ use super::{
     NativeValueRef,
 };
 
-pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 2;
+pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 3;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,12 +23,12 @@ impl NativeAbiVersion {
     }
 }
 
-pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 1 };
+pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 2 };
 
 /// Target-independent identity used by executable/runtime compatibility keys.
 pub fn native_abi_contract_fingerprint() -> runmat_execution::Digest {
     runmat_execution::Digest::sha256(
-        b"runmat-native-abi-v2\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch",
+        b"runmat-native-abi-v3\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch\0no-obsolete-slow-call-slot",
     )
 }
 
@@ -121,10 +121,10 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn version_and_contract_identity_are_stable() {
-        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0001);
+        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0002);
         assert_eq!(
             native_abi_contract_fingerprint().to_string(),
-            "sha256:11fb9e34aa820757ad3a574040fe73156444f02ba2d2eb1cab0df62e6f3832f0"
+            "sha256:029205fe1105fd14c4b637269a12c69f0e6f3395255e6b8239508b7741177317"
         );
     }
 

@@ -34,11 +34,6 @@ pub type NativeRetainValueFn =
     unsafe extern "C" fn(context: *mut c_void, value: NativeValueRef) -> NativeHostStatus;
 pub type NativeReleaseValueFn =
     unsafe extern "C" fn(context: *mut c_void, value: NativeValueRef) -> NativeHostStatus;
-pub type NativeSlowCallFn = unsafe extern "C" fn(
-    context: *mut c_void,
-    call: *mut NativeCall,
-    exit: *mut NativeExit,
-) -> NativeHostStatus;
 pub type NativeSafepointFn = unsafe extern "C" fn(
     context: *mut c_void,
     safepoint: *const NativeSafepoint,
@@ -63,7 +58,6 @@ pub struct NativeHostVTable {
     pub context: *mut c_void,
     pub retain_value: Option<NativeRetainValueFn>,
     pub release_value: Option<NativeReleaseValueFn>,
-    pub slow_call: Option<NativeSlowCallFn>,
     pub poll_safepoint: Option<NativeSafepointFn>,
     pub source_lookup: Option<NativeSourceLookupFn>,
     pub execute_site: Option<NativeExecuteSiteFn>,
@@ -85,7 +79,6 @@ impl NativeHostVTable {
         }
         if self.retain_value.is_none()
             || self.release_value.is_none()
-            || self.slow_call.is_none()
             || self.poll_safepoint.is_none()
             || self.source_lookup.is_none()
             || self.execute_site.is_none()
@@ -108,14 +101,6 @@ mod tests {
     }
 
     unsafe extern "C" fn release(_: *mut c_void, _: NativeValueRef) -> NativeHostStatus {
-        NativeHostStatus::OK
-    }
-
-    unsafe extern "C" fn slow(
-        _: *mut c_void,
-        _: *mut NativeCall,
-        _: *mut NativeExit,
-    ) -> NativeHostStatus {
         NativeHostStatus::OK
     }
 
@@ -152,7 +137,6 @@ mod tests {
             context: std::ptr::null_mut(),
             retain_value: Some(retain),
             release_value: Some(release),
-            slow_call: Some(slow),
             poll_safepoint: Some(safepoint),
             source_lookup: Some(source),
             execute_site: Some(site),
@@ -167,7 +151,7 @@ mod tests {
         assert!(!NativeHostStatus(u32::MAX).is_known());
 
         let mut missing = table();
-        missing.slow_call = None;
+        missing.execute_site = None;
         assert_eq!(
             missing.validate().unwrap_err().field,
             "native.host.callbacks"

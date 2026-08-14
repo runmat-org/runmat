@@ -122,8 +122,8 @@ fn flatten_place(
 ) -> JitResult<runmat_mir::MirLocalId> {
     match place {
         MirPlace::Local(local) => Ok(*local),
-        MirPlace::Binding(binding) => Err(JitError::UnsupportedSite(format!(
-            "legacy MIR binding place {binding:?} has no native local"
+        MirPlace::Binding(binding) => Err(JitError::Host(format!(
+            "verified Native IR retains legacy MIR binding place {binding:?}"
         ))),
         MirPlace::Member(base, member) => {
             let root = flatten_place(base, segments)?;

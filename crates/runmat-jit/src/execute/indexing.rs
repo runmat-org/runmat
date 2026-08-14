@@ -161,8 +161,8 @@ fn materialize_selectors(
     indexing: &MirIndexing,
 ) -> JitResult<MaterializedSelectors> {
     if indexing.components.len() > u32::BITS as usize {
-        return Err(JitError::UnsupportedSite(
-            "native indexing currently supports at most 32 dimensions".into(),
+        return Err(JitError::Host(
+            "verified Native IR exceeds the shared 32-dimension selector mask".into(),
         ));
     }
     let shape = value_shape(base);

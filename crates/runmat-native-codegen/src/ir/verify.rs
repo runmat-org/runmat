@@ -592,6 +592,18 @@ fn verify_instruction(
                 "rvalue contains a construct requiring the R25 distributed core",
             ));
         }
+        if !rvalue_selector_arity_valid(value) {
+            return Err(error(
+                "native.capability.selector_dimension_limit",
+                "index selector count exceeds the shared 32-dimension mask contract",
+            ));
+        }
+        if rvalue_contains_legacy_binding_place(value) {
+            return Err(error(
+                "native.ir.legacy_binding_place",
+                "legacy MIR binding places must be canonicalized to locals before Native IR",
+            ));
+        }
         let (declared_effects, declared_capabilities) =
             runmat_mir::rvalue_declared_requirements(value);
         if !declared_effects.0.is_subset(&instruction.effects.0)
@@ -618,6 +630,18 @@ fn verify_instruction(
             return Err(error(
                 "native.ir.declared_requirements",
                 "instruction omits effects declared by canonical MIR",
+            ));
+        }
+        if !statement_selector_arity_valid(statement) {
+            return Err(error(
+                "native.capability.selector_dimension_limit",
+                "index selector count exceeds the shared 32-dimension mask contract",
+            ));
+        }
+        if statement_contains_legacy_binding_place(statement) {
+            return Err(error(
+                "native.ir.legacy_binding_place",
+                "legacy MIR binding places must be canonicalized to locals before Native IR",
             ));
         }
     }
@@ -718,6 +742,84 @@ fn verify_instruction(
         }
     }
     Ok(())
+}
+
+fn rvalue_selector_arity_valid(value: &runmat_mir::MirRvalue) -> bool {
+    match value {
+        runmat_mir::MirRvalue::Index { indexing, .. } => {
+            indexing.components.len() <= u32::BITS as usize
+        }
+        runmat_mir::MirRvalue::ShortCircuit { right_temps, .. } => right_temps
+            .iter()
+            .all(|statement| statement_selector_arity_valid(&statement.kind)),
+        _ => true,
+    }
+}
+
+fn rvalue_contains_legacy_binding_place(value: &runmat_mir::MirRvalue) -> bool {
+    matches!(value, runmat_mir::MirRvalue::ShortCircuit { right_temps, .. }
+        if right_temps.iter().any(|statement| statement_contains_legacy_binding_place(&statement.kind)))
+}
+
+fn statement_selector_arity_valid(statement: &runmat_mir::MirStmtKind) -> bool {
+    match statement {
+        runmat_mir::MirStmtKind::Assign { place, value } => {
+            place_selector_arity_valid(place) && rvalue_selector_arity_valid(value)
+        }
+        runmat_mir::MirStmtKind::MultiAssign { targets, value } => {
+            targets.targets.iter().all(|target| match target {
+                runmat_mir::MirOutputTarget::Place(place) => place_selector_arity_valid(place),
+                runmat_mir::MirOutputTarget::Discard => true,
+            }) && rvalue_selector_arity_valid(value)
+        }
+        runmat_mir::MirStmtKind::Expr(value) => rvalue_selector_arity_valid(value),
+        runmat_mir::MirStmtKind::PlaceMutation(mutation) => {
+            place_selector_arity_valid(&mutation.place)
+        }
+        runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+        | runmat_mir::MirStmtKind::EnvironmentEffect(_) => true,
+    }
+}
+
+fn statement_contains_legacy_binding_place(statement: &runmat_mir::MirStmtKind) -> bool {
+    match statement {
+        runmat_mir::MirStmtKind::Assign { place, value } => {
+            place_contains_legacy_binding(place) || rvalue_contains_legacy_binding_place(value)
+        }
+        runmat_mir::MirStmtKind::MultiAssign { targets, value } => {
+            targets.targets.iter().any(|target| match target {
+                runmat_mir::MirOutputTarget::Place(place) => place_contains_legacy_binding(place),
+                runmat_mir::MirOutputTarget::Discard => false,
+            }) || rvalue_contains_legacy_binding_place(value)
+        }
+        runmat_mir::MirStmtKind::Expr(value) => rvalue_contains_legacy_binding_place(value),
+        runmat_mir::MirStmtKind::PlaceMutation(mutation) => {
+            place_contains_legacy_binding(&mutation.place)
+        }
+        runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+        | runmat_mir::MirStmtKind::EnvironmentEffect(_) => false,
+    }
+}
+
+fn place_contains_legacy_binding(place: &runmat_mir::MirPlace) -> bool {
+    match place {
+        runmat_mir::MirPlace::Binding(_) => true,
+        runmat_mir::MirPlace::Local(_) => false,
+        runmat_mir::MirPlace::Member(base, _)
+        | runmat_mir::MirPlace::DynamicMember(base, _)
+        | runmat_mir::MirPlace::Index(base, _) => place_contains_legacy_binding(base),
+    }
+}
+
+fn place_selector_arity_valid(place: &runmat_mir::MirPlace) -> bool {
+    match place {
+        runmat_mir::MirPlace::Local(_) | runmat_mir::MirPlace::Binding(_) => true,
+        runmat_mir::MirPlace::Member(base, _) => place_selector_arity_valid(base),
+        runmat_mir::MirPlace::DynamicMember(base, _) => place_selector_arity_valid(base),
+        runmat_mir::MirPlace::Index(base, indexing) => {
+            place_selector_arity_valid(base) && indexing.components.len() <= u32::BITS as usize
+        }
+    }
 }
 
 fn expected_output_locals(

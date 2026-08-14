@@ -14,7 +14,6 @@ pub(super) fn table(state: &mut HostState) -> NativeHostVTable {
         context: (state as *mut HostState).cast(),
         retain_value: Some(retain),
         release_value: Some(release),
-        slow_call: Some(slow_call),
         poll_safepoint: Some(poll_safepoint),
         source_lookup: Some(source_lookup),
         execute_site: Some(execute_site),
@@ -27,18 +26,6 @@ unsafe extern "C" fn retain(context: *mut c_void, value: NativeValueRef) -> Nati
 
 unsafe extern "C" fn release(context: *mut c_void, value: NativeValueRef) -> NativeHostStatus {
     boundary(context, |state| state.arena.release(value))
-}
-
-unsafe extern "C" fn slow_call(
-    context: *mut c_void,
-    _: *mut NativeCall,
-    _: *mut NativeExit,
-) -> NativeHostStatus {
-    boundary(context, |_| {
-        Err(JitError::UnsupportedSite(
-            "standalone slow-call callback is not yet wired".into(),
-        ))
-    })
 }
 
 unsafe extern "C" fn poll_safepoint(

@@ -168,10 +168,17 @@ fn execute_statement(
     }
     match statement {
         MirStmtKind::Expr(_) => state.pending_place_mutation = None,
-        other => {
-            return Err(JitError::UnsupportedSite(format!(
-                "statement {other:?} is not in the first generic-host cohort"
-            )))
+        MirStmtKind::Assign { .. }
+        | MirStmtKind::MultiAssign { .. }
+        | MirStmtKind::PlaceMutation(_) => {
+            return Err(JitError::Host(
+                "native mutation statement was not consumed by its semantic adapter".into(),
+            ))
+        }
+        MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {
+            return Err(JitError::Host(
+                "native environment statement was not consumed by its semantic adapter".into(),
+            ))
         }
     }
     Ok(())
@@ -304,9 +311,16 @@ fn execute_terminator(
         NativeTerminatorKind::Unreachable => Err(JitError::Host(
             "reached a Native IR unreachable terminator".into(),
         )),
-        other => Err(JitError::UnsupportedSite(format!(
-            "terminator {other:?} is not in the first generic-host cohort"
-        ))),
+        NativeTerminatorKind::TryCatch { .. } | NativeTerminatorKind::Await { .. } => {
+            Err(JitError::UnsupportedSite(
+                "exception/await terminator requires R14 continuation state".into(),
+            ))
+        }
+        NativeTerminatorKind::ParFor { .. } | NativeTerminatorKind::Spmd { .. } => {
+            Err(JitError::UnsupportedSite(
+                "parallel terminator requires the R27 native parallel executor".into(),
+            ))
+        }
     }
 }
 
@@ -352,10 +366,10 @@ fn take_edge(
                 .ok_or_else(|| {
                     JitError::Host("native loop iteration edge binding is unavailable".into())
                 })?,
-            other => {
-                return Err(JitError::UnsupportedSite(format!(
-                    "edge argument {other:?} requires structured continuation state"
-                )))
+            NativeEdgeArgument::CaughtException { .. } | NativeEdgeArgument::AwaitResult { .. } => {
+                return Err(JitError::UnsupportedSite(
+                    "exception/await edge value requires R14 continuation state".into(),
+                ))
             }
         };
         transferred.push((parameter.clone(), value));
