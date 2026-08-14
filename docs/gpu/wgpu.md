@@ -105,6 +105,8 @@ The provider also exposes `export_context` and `export_wgpu_buffer` for zero-cop
 
 Both calls are observational. Providers must not allocate buffers, compile pipelines, transfer values, submit commands, or synchronize the device while answering them. This lets placement eliminate unsupported candidates before profitability comparison and prevents call-to-discover behavior. Operation identities advertised by the WGPU and in-process providers cover the current transfer, automatic-offload, and fusion pilot paths; they are not an assertion that every builtin has completed systematic placement migration.
 
+`estimate_cost()` is also observational. For an operation already proven feasible, it can report cold or warm preparation, transfer, allocation, queue, execution, synchronization, download, downstream, and scratch-memory estimates. WGPU uses observed dispatch averages when trustworthy telemetry exists and otherwise returns explicit low-confidence priors. Placement accounts for uncertainty and supplies a bounded fallback when a provider returns no estimate; it never runs a probe operation to discover cost.
+
 ## Operation Categories
 
 | Category | Examples |

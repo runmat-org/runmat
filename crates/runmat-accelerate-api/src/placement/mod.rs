@@ -6,6 +6,7 @@
 //! each provider implementation.
 
 mod capability;
+mod cost;
 mod feasibility;
 mod representation;
 
@@ -13,6 +14,7 @@ pub use capability::{
     ProviderCapabilityOperation, ProviderCapabilitySnapshot, ProviderConcurrencyCapabilities,
     ProviderOperationFamily, PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
+pub use cost::{ProviderCostEstimate, ProviderCostQuery};
 pub use feasibility::{
     ProviderFeasibility, ProviderFeasibilityQuery, ProviderOperationIdentity, ProviderRejection,
     ProviderRejectionCode, ProviderResourceEstimate, ProviderWorkload,

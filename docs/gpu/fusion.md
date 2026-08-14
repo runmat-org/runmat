@@ -104,7 +104,9 @@ Residency cleanup is recursive. The VM clears GPU handles inside cells, structs,
 
 ## Auto-Promotion
 
-Auto-promotion chooses when host tensors should become GPU tensors before or during built-in execution. The policy considers value shape, provider availability, calibrated thresholds, built-in residency policy, and whether any operand is already GPU-resident. Chain-aware promotion keeps operations on the device once a chain has started, avoiding repeated host/device round trips.
+Auto-promotion chooses when host tensors should become GPU tensors before or during built-in execution. Provider feasibility is normalized first. A shared local planner then compares complete CPU and provider candidates, including preparation, transfer, allocation, queueing, execution, synchronization, download, and downstream materialization costs. Calibrated thresholds, profile observations, existing residency, and fusion opportunities remain useful priors, but they no longer force a placement by themselves.
+
+Residency accounting walks nested cells, structs, objects, object arrays, closures, handle objects, and output lists. Repeated GPU handles are counted once, cross-device handles require an explicit transition, and host or device mutation invalidates the stale copy. Small host-resident fusion groups can therefore fall back before upload or compilation, while a profitable resident chain remains on its provider.
 
 ## Barriers and Fallbacks
 
@@ -116,6 +118,6 @@ Each fusion attempt uses one correlation from the VM gate through input preparat
 
 ## Tuning
 
-The acceleration layer exposes runtime knobs for thresholds, calibration, and backend tuning. The exact set is backend-dependent, but the important policy is stable: small or synchronization-heavy work remains on CPU; large elementwise, reduction, matrix, image, and signal workloads are candidates for GPU execution.
+The acceleration layer exposes runtime knobs for calibration and backend tuning. The exact set is backend-dependent, but the important policy is stable: small or synchronization-heavy work remains on CPU; large or already-resident elementwise, reduction, matrix, image, and signal workloads are provider candidates when their complete risk-adjusted cost clears the placement margins.
 
 From here, provider execution is covered in [wgpu Backend & Accelerate Provider](/docs/runtime/gpu/wgpu).

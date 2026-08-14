@@ -40,6 +40,13 @@ impl AccelProvider for WgpuProvider {
         crate::placement::dense_feasibility(&self.capability_snapshot(), query)
     }
 
+    fn estimate_cost(
+        &self,
+        query: &runmat_accelerate_api::ProviderCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        Some(crate::placement::wgpu_cost_estimate(self, query))
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,

@@ -4,6 +4,7 @@ mod error;
 pub mod executable;
 pub mod handle;
 pub mod identity;
+pub mod placement;
 pub mod protocol;
 pub mod resource;
 pub mod schema;
@@ -23,4 +24,9 @@ pub use executable::{
 pub use handle::{FutureHandle, JobHandle, OutputContract, PoolHandle, TaskHandle};
 pub use identity::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
 pub use identity::{ExecutionScopeId, FutureId, JobId, PoolId, RunId, TaskId};
+pub use placement::{
+    CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
+    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
+    ExecutionCostEstimate,
+};
 pub use state::CancellationReason;

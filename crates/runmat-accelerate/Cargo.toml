@@ -24,8 +24,10 @@ thiserror = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
+runmat-gc = { workspace = true }
 runmat-types = { workspace = true }
 runmat-accelerate-api = { workspace = true }
+runmat-execution = { workspace = true }
 runmat-time = { workspace = true }
 once_cell = "1"
 bytemuck = { version = "1.14", features = ["derive"] }

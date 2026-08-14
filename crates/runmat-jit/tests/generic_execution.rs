@@ -10,9 +10,10 @@ use std::{
 };
 
 use runmat_execution::{
-    Digest, ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
-    ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
-    ExecutableUnitManifest, ProgramEnvironment, ProgramRevision, EXECUTABLE_UNIT_SCHEMA_VERSION,
+    Digest, EstimateSource, ExecutableComponentDescriptor, ExecutableComponentKind,
+    ExecutableComponentPayload, ExecutableComponentRevisions, ExecutableEntrypointKind,
+    ExecutableIdentity, ExecutableUnitManifest, ExecutionCandidateKind, ProgramEnvironment,
+    ProgramRevision, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_hir::{
     FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span, WorkspaceEffect,
@@ -98,6 +99,33 @@ fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(41.0)]);
+}
+
+#[test]
+fn generic_executor_describes_only_its_real_cpu_candidate() {
+    let region = fixture_region(ValueFact::scalar(ValueKindFact::String));
+    let region_id = region.id;
+    let executor = GenericExecutor::compile(fixture_with_regions(vec![region])).unwrap();
+    let candidate = executor
+        .cpu_candidate(region_id, 4, Some(42))
+        .expect("retained region candidate");
+
+    assert_eq!(candidate.kind, ExecutionCandidateKind::GenericNativeCpu);
+    assert_eq!(candidate.region, Some(region_id));
+    assert_eq!(candidate.cost.components.execution_ns, 42);
+    assert_eq!(candidate.cost.source, EstimateSource::Observation);
+    assert_eq!(executor.region_contracts().len(), 1);
+    assert!(candidate.validate().is_ok());
+    assert!(executor
+        .cpu_candidate(
+            RegionId {
+                function: ProgramFunctionId(9),
+                ordinal: 0,
+            },
+            1,
+            None,
+        )
+        .is_none());
 }
 
 #[test]

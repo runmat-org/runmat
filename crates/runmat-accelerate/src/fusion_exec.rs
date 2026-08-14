@@ -6,12 +6,22 @@ use crate::fusion::{
 use crate::fusion_residency;
 use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
-use crate::placement::{FusionPlacementObserver, PlacementCorrelationId};
+use crate::placement::{
+    dense_output_representation, fusion_operation_token, plan_local, FusionPlacementObserver,
+    LocalPlacementOutcome, LocalPlacementRequest, PlacementCorrelationId, PlacementPolicy,
+    PlacementVariant,
+};
 use crate::precision::ensure_provider_supports_dtype;
 use log;
 use runmat_accelerate_api::{
     provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
-    ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision, ReductionFlavor,
+    ImageNormalizeDescriptor, PowerStepEpilogue, ProviderOperationFamily, ProviderPrecision,
+    ProviderWorkload, ReductionFlavor,
+};
+use runmat_execution::{
+    CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
+    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
+    ExecutionCostEstimate,
 };
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::gather_if_needed;
@@ -168,14 +178,104 @@ fn select_fusion_provider(
     output_shapes: &[Vec<usize>],
 ) -> Result<FusionPlacementObserver> {
     let observer = FusionPlacementObserver::new(request.placement);
-    observer.select_provider(
+    let elements = fusion_input_elements(&request.inputs);
+    if request.placement.is_none() {
+        let _ = observer.select_provider(
+            provider,
+            &request.plan.group.kind,
+            &request.inputs,
+            output_shapes,
+            elements,
+            None,
+        )?;
+        observer.selected(PlacementVariant::ProviderFusion, "direct_request", None);
+        return Ok(observer);
+    }
+
+    let operation = fusion_operation_token(&request.plan.group.kind);
+    let element_count = u64::try_from(elements.unwrap_or(1)).unwrap_or(u64::MAX);
+    let cpu_cost = ExecutionCostEstimate {
+        components: ExecutionCostComponents {
+            execution_ns: element_count.saturating_mul(100).max(100),
+            ..ExecutionCostComponents::default()
+        },
+        scratch_bytes: 0,
+        confidence: EstimateConfidence::Low,
+        source: EstimateSource::StaticPrior,
+    };
+    let cpu = ExecutionCandidateDescriptor {
+        identity: format!("cpu.shared.{operation}"),
+        region: None,
+        kind: ExecutionCandidateKind::SharedRuntime,
+        preparation: CandidatePreparationState::Ready,
+        cost: cpu_cost,
+        output_residency: CandidateOutputResidency::Host,
+        guards: Vec::new(),
+    };
+    let input_refs = request.inputs.iter().collect::<Vec<_>>();
+    let provider_fallback = ExecutionCostEstimate {
+        components: ExecutionCostComponents {
+            compile_or_prepare_ns: 20_000,
+            allocation_ns: 5_000,
+            queue_ns: 10_000,
+            execution_ns: element_count.saturating_mul(10).max(100),
+            ..ExecutionCostComponents::default()
+        },
+        scratch_bytes: 0,
+        confidence: EstimateConfidence::Prior,
+        source: EstimateSource::StaticPrior,
+    };
+    match plan_local(
         provider,
-        &request.plan.group.kind,
-        &request.inputs,
-        output_shapes,
-        fusion_input_elements(&request.inputs),
-        None,
-    )?;
+        LocalPlacementRequest {
+            operation,
+            family: ProviderOperationFamily::Fusion,
+            provider_kind: ExecutionCandidateKind::ProviderFusion,
+            inputs: &input_refs,
+            outputs: output_shapes
+                .iter()
+                .map(|shape| dense_output_representation(provider.precision(), shape))
+                .collect(),
+            workload: ProviderWorkload {
+                elements: Some(element_count),
+                flops: None,
+                batch: None,
+            },
+            preparation: CandidatePreparationState::Warm,
+            cpu,
+            provider_fallback,
+            required_download_bytes: 0,
+            downstream_materialization: false,
+            compare_profitability: true,
+        },
+        PlacementPolicy::default(),
+    ) {
+        LocalPlacementOutcome::ProviderRejected { code, .. } => {
+            observer.provider_rejected(code);
+            return Err(anyhow!("fusion provider rejected operation"));
+        }
+        LocalPlacementOutcome::Selected {
+            selected,
+            provider_cost,
+            ..
+        } if selected.kind.is_provider() => {
+            observer.provider_candidate();
+            observer.selected(
+                PlacementVariant::ProviderFusion,
+                "complete_cost",
+                provider_cost.checked_total_ns(),
+            );
+        }
+        LocalPlacementOutcome::Selected { cpu_cost, .. } => {
+            observer.provider_candidate();
+            observer.selected(
+                PlacementVariant::SharedRuntime,
+                "complete_cost",
+                cpu_cost.checked_total_ns(),
+            );
+            return Err(anyhow!("fusion placement selected shared runtime"));
+        }
+    }
     Ok(observer)
 }
 
@@ -374,14 +474,10 @@ fn execute_elementwise_outputs(
         }
     }
     output_shape = normalize_scalar_shape(&output_shape);
-    let observer = FusionPlacementObserver::new(request.placement);
-    observer.select_provider(
+    let observer = select_fusion_provider(
+        request,
         provider,
-        &request.plan.group.kind,
-        &request.inputs,
         &vec![output_shape.clone(); output_ids.len()],
-        Some(len),
-        None,
     )?;
     let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
     let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
@@ -618,15 +714,7 @@ pub fn execute_reduction_with_shape(
         let constant_shape = request.plan.constant_shape(len);
         normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
-    let observer = FusionPlacementObserver::new(request.placement);
-    observer.select_provider(
-        provider,
-        &request.plan.group.kind,
-        &request.inputs,
-        &[output_shape.to_vec()],
-        Some(len),
-        None,
-    )?;
+    let observer = select_fusion_provider(&request, provider, &[output_shape.to_vec()])?;
     let mut timer = FusionStageTimer::new("reduction", request.plan.index, len);
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();

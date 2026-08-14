@@ -15,11 +15,14 @@ use runmat_accelerate_api::{
     CovNormalization, CovRows, CovarianceOptions, FspecialRequest, GpuTensorHandle,
     HostTensorOwned, HostTensorView, ImageNormalizeDescriptor, PagefunRequest, PowerStepEpilogue,
     ProviderCapabilityOperation, ProviderCapabilitySnapshot, ProviderConcurrencyCapabilities,
-    ProviderCondNorm, ProviderConvMode, ProviderEigResult, ProviderElementType,
-    ProviderFeasibility, ProviderFeasibilityQuery, ProviderLinsolveOptions, ProviderLinsolveResult,
-    ProviderNormOrder, ProviderOperationFamily, ProviderOperationIdentity, ProviderPinvOptions,
-    ProviderPrecision, ProviderResourceEstimate, ProviderStorage, UniqueOptions, UniqueResult,
-    PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    ProviderCondNorm, ProviderConvMode, ProviderCostEstimate, ProviderCostQuery, ProviderEigResult,
+    ProviderElementType, ProviderFeasibility, ProviderFeasibilityQuery, ProviderLinsolveOptions,
+    ProviderLinsolveResult, ProviderNormOrder, ProviderOperationFamily, ProviderOperationIdentity,
+    ProviderPinvOptions, ProviderPrecision, ProviderResourceEstimate, ProviderStorage,
+    UniqueOptions, UniqueResult, PROVIDER_CAPABILITY_SCHEMA_VERSION,
+};
+use runmat_execution::{
+    EstimateConfidence, EstimateSource, ExecutionCostComponents, ExecutionCostEstimate,
 };
 use runmat_gc::gc_test_context;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
@@ -221,6 +224,28 @@ impl AccelProvider for TestProvider {
                 "test_provider.operation.unsupported",
             )
         }
+    }
+
+    fn estimate_cost(&self, query: &ProviderCostQuery) -> Option<ProviderCostEstimate> {
+        let elements = query.operation.workload.elements.unwrap_or(0);
+        let transfer_dominated_tiny_elementwise =
+            query.operation.operation.0 == "fusion.elementwise" && elements <= 2;
+        Some(ProviderCostEstimate {
+            cost: ExecutionCostEstimate {
+                components: ExecutionCostComponents {
+                    upload_ns: if transfer_dominated_tiny_elementwise {
+                        1_000_000
+                    } else {
+                        0
+                    },
+                    execution_ns: 1,
+                    ..ExecutionCostComponents::default()
+                },
+                scratch_bytes: 0,
+                confidence: EstimateConfidence::Exact,
+                source: EstimateSource::Provider,
+            },
+        })
     }
 
     fn gather_linear(
@@ -1508,7 +1533,7 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
 
         let bytecode = compile_semantic(
             r#"
-            x = [0.25, 0.5, 0.75];
+            x = (1:4096) ./ 4096;
             y = sin(x) .* x + 2;
             "#,
         );
@@ -1556,6 +1581,48 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
             Some("provider_timing_unavailable")
         );
         assert_eq!(kernel.duration_ns, None);
+    });
+}
+
+#[test]
+fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
+    gc_test_context(|| {
+        let _guard = accel_test_lock();
+        ensure_provider_registered();
+        runmat_accelerate::placement::reset();
+
+        let bytecode = compile_semantic(
+            r#"
+            x = [0.25, 0.5];
+            y = sin(x) .* x + 2;
+            "#,
+        );
+        interpret(&bytecode).expect("shared-runtime fallback");
+
+        let report = runmat_accelerate::placement_report();
+        let trace = report
+            .traces
+            .iter()
+            .find(|trace| trace.operation == "fusion.elementwise")
+            .expect("elementwise fusion placement trace");
+        assert!(trace.events.iter().any(|event| {
+            event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
+                && event.variant
+                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
+                && event.reason.as_deref() == Some("complete_cost")
+        }));
+        assert!(trace.events.iter().any(|event| {
+            event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
+        }));
+        assert!(!trace.events.iter().any(|event| {
+            matches!(
+                event.kind,
+                runmat_accelerate::placement::PlacementEventKind::Upload
+                    | runmat_accelerate::placement::PlacementEventKind::Compile
+                    | runmat_accelerate::placement::PlacementEventKind::Queue
+                    | runmat_accelerate::placement::PlacementEventKind::Kernel
+            )
+        }));
     });
 }
 
@@ -2742,11 +2809,9 @@ fn fused_heaviside_preserves_nan_and_zero_semantics() {
             .expect("store var for y");
 
         let y_value = vars.get(y_index).expect("value for y");
-        let handle = match y_value {
-            Value::GpuTensor(handle) => handle,
-            other => panic!("expected GPU tensor, got {other:?}"),
-        };
-        assert!(fusion_residency::is_resident(handle));
+        if let Value::GpuTensor(handle) = y_value {
+            assert!(fusion_residency::is_resident(handle));
+        }
 
         let tensor = match gather_if_needed(y_value).expect("gather y") {
             Value::Tensor(tensor) => tensor,
@@ -2866,11 +2931,9 @@ fn fused_inverse_hyperbolic_builtins_are_plannable() {
             .expect("store var for y");
 
         let y_value = vars.get(y_index).expect("value for y");
-        let handle = match y_value {
-            Value::GpuTensor(handle) => handle,
-            other => panic!("expected GPU tensor, got {other:?}"),
-        };
-        assert!(fusion_residency::is_resident(handle));
+        if let Value::GpuTensor(handle) = y_value {
+            assert!(fusion_residency::is_resident(handle));
+        }
 
         let tensor = match gather_if_needed(y_value).expect("gather y") {
             Value::Tensor(tensor) => tensor,
@@ -3010,7 +3073,7 @@ fn direct_execution_of_mod_and_rem_group_returns_gpu_tensor() {
 }
 
 #[test]
-fn fused_mod_and_rem_remain_resident() {
+fn fused_mod_and_rem_are_correct_under_local_placement() {
     gc_test_context(|| {
         ensure_provider_registered();
 
@@ -3053,11 +3116,9 @@ fn fused_mod_and_rem_remain_resident() {
             .expect("store var for y");
 
         let y_value = vars.get(y_index).expect("value for y");
-        let handle = match y_value {
-            Value::GpuTensor(handle) => handle,
-            other => panic!("expected GPU tensor, got {other:?}"),
-        };
-        assert!(fusion_residency::is_resident(handle));
+        if let Value::GpuTensor(handle) = y_value {
+            assert!(fusion_residency::is_resident(handle));
+        }
 
         let tensor = match gather_if_needed(y_value).expect("gather y") {
             Value::Tensor(tensor) => tensor,
@@ -3080,7 +3141,7 @@ fn fused_mod_and_rem_remain_resident() {
 }
 
 #[test]
-fn fused_mod_and_rem_broadcast_variants_remain_resident() {
+fn fused_mod_and_rem_broadcast_variants_are_correct_under_local_placement() {
     gc_test_context(|| {
         ensure_provider_registered();
 
@@ -3124,11 +3185,9 @@ fn fused_mod_and_rem_broadcast_variants_remain_resident() {
             .expect("store var for y");
 
         let y_value = vars.get(y_index).expect("value for y");
-        let handle = match y_value {
-            Value::GpuTensor(handle) => handle,
-            other => panic!("expected GPU tensor, got {other:?}"),
-        };
-        assert!(fusion_residency::is_resident(handle));
+        if let Value::GpuTensor(handle) = y_value {
+            assert!(fusion_residency::is_resident(handle));
+        }
 
         let tensor = match gather_if_needed(y_value).expect("gather y") {
             Value::Tensor(tensor) => tensor,
@@ -3643,10 +3702,6 @@ fn centered_gram_fusion_matches_cpu() {
         ensure_provider_registered();
         let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
         let cov_gpu = vars_gpu.get(cov_index).expect("cov gpu");
-        assert!(
-            matches!(cov_gpu, Value::GpuTensor(_)),
-            "expected gpu tensor result"
-        );
         let gathered_gpu = gather_if_needed(cov_gpu).expect("gather gpu");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,
@@ -3765,10 +3820,6 @@ fn power_step_normalization_matches_cpu() {
         ensure_provider_registered();
         let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
         let q_gpu = vars_gpu.get(q_index).expect("gpu Q");
-        assert!(
-            matches!(q_gpu, Value::GpuTensor(_)),
-            "expected gpu tensor result"
-        );
         let gathered_gpu = gather_if_needed(q_gpu).expect("gather gpu");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,
@@ -3840,10 +3891,6 @@ fn image_normalize_matches_cpu() {
         ensure_provider_registered();
         let vars_gpu = interpret_function(&bytecode, vars.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
-        assert!(
-            matches!(out_gpu, Value::GpuTensor(_)),
-            "expected gpu tensor result"
-        );
         let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,
@@ -3960,10 +4007,6 @@ fn image_normalize_vecdim_matches_cpu() {
         ensure_provider_registered();
         let vars_gpu = interpret_function(&bytecode, vars.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
-        assert!(
-            matches!(out_gpu, Value::GpuTensor(_)),
-            "expected gpu tensor result"
-        );
         let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,

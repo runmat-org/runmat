@@ -25,7 +25,7 @@ fn make_tensor(len: usize) -> Tensor {
 #[tokio::test]
 async fn promotes_large_tensors_to_gpu_for_elementwise() {
     ensure_auto_init();
-    let tensor = make_tensor(8);
+    let tensor = make_tensor(8_192);
     let value = Value::Tensor(tensor.clone());
     let (a_gpu, b_gpu) = promote_binary(BinaryOp::Elementwise, &value, &value)
         .await
@@ -37,7 +37,7 @@ async fn promotes_large_tensors_to_gpu_for_elementwise() {
 #[tokio::test]
 async fn gather_occurs_for_sink_builtins() {
     ensure_auto_init();
-    let tensor = make_tensor(4);
+    let tensor = make_tensor(8_192);
     let value = Value::Tensor(tensor.clone());
     let (gpu, _) = promote_binary(BinaryOp::Elementwise, &value, &value)
         .await
@@ -49,7 +49,7 @@ async fn gather_occurs_for_sink_builtins() {
 #[tokio::test]
 async fn prepare_builtin_promotes_sinc_as_unary() {
     ensure_auto_init();
-    let tensor = make_tensor(4);
+    let tensor = make_tensor(8_192);
     let prepared = prepare_builtin_args("sinc", &[Value::Tensor(tensor)])
         .await
         .expect("prepare");

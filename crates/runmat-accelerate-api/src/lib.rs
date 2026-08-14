@@ -1562,6 +1562,14 @@ pub trait AccelProvider: Send + Sync {
         query.conservative_transfer_feasibility(self.precision())
     }
 
+    /// Returns a side-effect-free component cost estimate for an already
+    /// feasible operation. Providers may return `None` until they have a
+    /// trustworthy prior or observation; placement then supplies a bounded
+    /// low-confidence policy prior rather than probing by execution.
+    fn estimate_cost(&self, _query: &ProviderCostQuery) -> Option<ProviderCostEstimate> {
+        None
+    }
+
     /// Export a shared GPU context handle, allowing downstream systems (plotting, visualization)
     /// to reuse the same device/queue without copying tensor data back to the host.
     fn export_context(&self, _kind: AccelContextKind) -> Option<AccelContextHandle> {

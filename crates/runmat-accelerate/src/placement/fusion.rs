@@ -43,7 +43,7 @@ impl FusionPlacementObserver {
         output_shapes: &[Vec<usize>],
         elements: Option<usize>,
         batch: Option<usize>,
-    ) -> Result<()> {
+    ) -> Result<ProviderFeasibilityQuery> {
         let started = Instant::now();
         let inputs = inputs
             .iter()
@@ -84,14 +84,14 @@ impl FusionPlacementObserver {
                 })
                 .collect::<Vec<_>>();
                 self.event(
-                    PlacementEventKind::Selected,
+                    PlacementEventKind::Candidate,
                     Some(PlacementVariant::ProviderFusion),
                     Some("provider_feasible"),
                     duration_ns,
                     None,
                     &attributes,
                 );
-                Ok(())
+                Ok(query)
             }
             ProviderFeasibility::Rejected { rejection } => {
                 let reason = provider_rejection_token(rejection.code);
@@ -106,6 +106,50 @@ impl FusionPlacementObserver {
                 Err(anyhow!("fusion provider rejected operation: {reason}"))
             }
         }
+    }
+
+    pub(crate) fn selected(
+        &self,
+        variant: PlacementVariant,
+        reason: &'static str,
+        estimated_ns: Option<u64>,
+    ) {
+        self.event(
+            PlacementEventKind::Selected,
+            Some(variant),
+            Some(reason),
+            None,
+            None,
+            &estimated_ns
+                .map(|value| PlacementAttribute {
+                    key: "estimated_total_ns".to_string(),
+                    value,
+                })
+                .into_iter()
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    pub(crate) fn provider_candidate(&self) {
+        self.event(
+            PlacementEventKind::Candidate,
+            Some(PlacementVariant::ProviderFusion),
+            Some("provider_feasible"),
+            None,
+            None,
+            &[],
+        );
+    }
+
+    pub(crate) fn provider_rejected(&self, code: runmat_accelerate_api::ProviderRejectionCode) {
+        self.event(
+            PlacementEventKind::Selected,
+            Some(PlacementVariant::SharedRuntime),
+            Some(provider_rejection_token(code)),
+            None,
+            None,
+            &[],
+        );
     }
 
     pub(crate) fn compile(&self, started: Instant) {
@@ -193,5 +237,28 @@ impl FusionPlacementObserver {
                 attributes,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observer_records_candidate_and_cost_selection() {
+        super::super::reset();
+        let trace = super::super::begin_trace("fusion.test", None);
+        let observer = FusionPlacementObserver::new(Some(trace.correlation()));
+        observer.provider_candidate();
+        observer.selected(PlacementVariant::ProviderFusion, "complete_cost", Some(42));
+        trace.complete(Some(PlacementVariant::ProviderFusion), None);
+        let report = super::super::report();
+        let events = &report.traces.last().unwrap().events;
+        assert!(events
+            .iter()
+            .any(|event| event.kind == PlacementEventKind::Candidate));
+        assert!(events
+            .iter()
+            .any(|event| event.kind == PlacementEventKind::Selected));
     }
 }

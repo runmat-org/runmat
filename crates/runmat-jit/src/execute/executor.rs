@@ -14,6 +14,8 @@ pub struct GenericExecutor {
     compiled: CompiledExecutable,
     program_capture: Option<Vec<u8>>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    pub(super) regions: Vec<runmat_types::RegionContract>,
+    pub(super) compile_duration_ns: u64,
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,12 +41,17 @@ impl GenericExecutor {
         program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     ) -> JitResult<Self> {
+        let regions = assembly.requirements.regions.clone();
+        let compile_started = std::time::Instant::now();
         let compiled = GenericCompiler::compile(&assembly)?;
+        let compile_duration_ns = runmat_time::duration_ns_saturating(compile_started.elapsed());
         Ok(Self {
             functions: Rc::new(assembly.functions),
             compiled,
             program_capture,
             interpreter_resume_points,
+            regions,
+            compile_duration_ns,
         })
     }
 

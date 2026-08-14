@@ -4,6 +4,7 @@ mod aggregate;
 mod awaiting;
 mod call;
 mod callbacks;
+mod candidate;
 mod deoptimization;
 mod executor;
 mod indexing;

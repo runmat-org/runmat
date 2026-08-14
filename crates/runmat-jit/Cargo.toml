@@ -16,6 +16,7 @@ runmat-execution = { workspace = true }
 runmat-native-codegen = { workspace = true }
 runmat-types = { workspace = true }
 runmat-value = { workspace = true }
+runmat-time = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
