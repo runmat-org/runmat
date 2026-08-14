@@ -14738,3 +14738,46 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
         ])
     );
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_matches_lexical_capture_calls_and_handles() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
+    let source = ExecutableSource::new(
+        "core-native-captures-test@1",
+        "nativeCaptures.m",
+        "function [direct, sharedAfter, handled, anonymous, recursive, escaped] = nativeCaptures(x)\nshared = x;\nfunction y = bump(delta)\nshared = shared + delta;\ny = shared;\nend\ndirect = bump(2);\nsharedAfter = shared;\nhandle = @bump;\nhandled = feval(handle, 3);\noffset = 10;\nclosure = @(value) value + offset;\nanonymous = feval(closure, 1);\nrecursive = nestedRecursive(3);\nreturned = makeAdder(7);\nescaped = feval(returned, 2);\nfunction y = nestedRecursive(n)\nif n <= 1\ny = shared;\nelse\ny = shared + nestedRecursive(n - 1);\nend\nend\nfunction result = makeAdder(base)\nfunction y = add(value)\ny = base + value;\nend\nresult = @add;\nend\nend\n",
+    );
+    let unit =
+        block_on(session.compile_executable_unit(source, None)).expect("compile capture unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeCaptures".into()),
+        arguments: vec![runmat_value::Value::Num(4.0)],
+        requested_outputs: 6,
+    };
+    let established = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("established capture path");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native capture path");
+    assert_eq!(native, established);
+    assert_eq!(
+        native,
+        runmat_value::Value::OutputList(vec![
+            runmat_value::Value::Num(6.0),
+            runmat_value::Value::Num(6.0),
+            runmat_value::Value::Num(9.0),
+            runmat_value::Value::Num(11.0),
+            runmat_value::Value::Num(18.0),
+            runmat_value::Value::Num(9.0),
+        ])
+    );
+}

@@ -304,14 +304,42 @@ pub(super) fn evaluate_operand(
             };
             Ok(state.arena.insert(value))
         }
-        MirOperand::FunctionHandle(identity) => identity
-            .display_name()
-            .map(Value::FunctionHandle)
-            .map(|value| state.arena.insert(value))
-            .ok_or_else(|| {
-                JitError::UnsupportedSite(format!(
-                    "bound function handle {identity:?} requires R14 closure state"
-                ))
-            }),
+        MirOperand::FunctionHandle(identity) => {
+            if let runmat_hir::CallableIdentity::BoundFunction(function)
+            | runmat_hir::CallableIdentity::AnonymousFunction(function) = identity
+            {
+                let function = u32::try_from(function.0)
+                    .map(runmat_types::ProgramFunctionId)
+                    .map_err(|_| {
+                        JitError::Host("function handle identity exceeds native schema".into())
+                    })?;
+                if let Some(target) = state.program_function(function) {
+                    let name = target.name.clone();
+                    let captures = state.lexical_captures(function)?.unwrap_or_default();
+                    let value = if captures.is_empty() {
+                        Value::BoundFunctionHandle {
+                            name,
+                            function: function.0 as usize,
+                        }
+                    } else {
+                        runmat_runtime::call::closures::semantic_closure_value(
+                            runmat_types::FunctionId(function.0 as usize),
+                            name,
+                            captures.into_iter().map(|capture| capture.value).collect(),
+                        )
+                    };
+                    return Ok(state.arena.insert(value));
+                }
+            }
+            identity
+                .display_name()
+                .map(Value::FunctionHandle)
+                .map(|value| state.arena.insert(value))
+                .ok_or_else(|| {
+                    JitError::Host(format!(
+                        "function handle {identity:?} has no runtime identity"
+                    ))
+                })
+        }
     }
 }

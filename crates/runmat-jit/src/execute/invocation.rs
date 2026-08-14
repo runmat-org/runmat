@@ -117,6 +117,7 @@ impl GenericInvocation {
                         .collect::<JitResult<Vec<_>>>()?;
                     return Ok(GenericInvocationStep::Completed(GenericExecution {
                         outputs,
+                        captures: self.state.capture_results()?,
                     }));
                 }
                 NativeExitKind::EXCEPTION => {

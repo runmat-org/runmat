@@ -13,6 +13,30 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<V
     let requested_outputs = call.requested_outputs.fixed_count();
     let result = match &call.callee {
         MirCallee::Static(identity) => {
+            if let Some(function) = local_program_function(identity)? {
+                if let Some(captures) = state.lexical_captures(function)? {
+                    let invoker =
+                        runmat_runtime::user_functions::current_lexical_function_invoker()
+                            .ok_or_else(|| {
+                                JitError::Host(
+                                    "native nested call has no lexical function invoker".into(),
+                                )
+                            })?;
+                    let runtime = state.runtime.clone();
+                    let result = super::sync::complete(
+                        &runtime,
+                        invoker(runmat_runtime::call::lexical::LexicalCall {
+                            function: function.0 as usize,
+                            captures,
+                            arguments,
+                            requested_outputs,
+                        }),
+                        "nested lexical call",
+                    )?;
+                    state.apply_lexical_captures(result.captures)?;
+                    return normalize_outputs(result.value, requested_outputs);
+                }
+            }
             let descriptor = CallableDescriptor::resolved(
                 identity.clone(),
                 arguments,
@@ -72,6 +96,20 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<V
         }
     }?;
     normalize_outputs(result, requested_outputs)
+}
+
+fn local_program_function(
+    identity: &runmat_hir::CallableIdentity,
+) -> JitResult<Option<runmat_types::ProgramFunctionId>> {
+    let function = match identity {
+        runmat_hir::CallableIdentity::BoundFunction(function)
+        | runmat_hir::CallableIdentity::AnonymousFunction(function) => function.0,
+        _ => return Ok(None),
+    };
+    u32::try_from(function)
+        .map(runmat_types::ProgramFunctionId)
+        .map(Some)
+        .map_err(|_| JitError::Host("semantic function identity exceeds native schema".into()))
 }
 
 pub(super) fn materialize_arguments(

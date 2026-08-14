@@ -11,6 +11,10 @@ pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeE
 pub type DynamicFunctionLoadFuture =
     Pin<Box<dyn Future<Output = Option<Result<Value, RuntimeError>>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
+pub type LexicalFunctionFuture =
+    Pin<Box<dyn Future<Output = Result<crate::call::lexical::LexicalCallResult, RuntimeError>>>>;
+pub type LexicalFunctionInvoker =
+    dyn Fn(crate::call::lexical::LexicalCall) -> LexicalFunctionFuture;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
 pub type DynamicFunctionLoader =
     dyn Fn(String, Vec<Value>, usize) -> DynamicFunctionLoadFuture + Send + Sync;
@@ -58,6 +62,8 @@ impl CallableRequest {
 runmat_thread_local! {
     static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Arc<FunctionInvoker>>> =
         const { RefCell::new(None) };
+    static LEXICAL_FUNCTION_INVOKER: RefCell<Option<Arc<LexicalFunctionInvoker>>> =
+        const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
         const { RefCell::new(None) };
     static SOURCE_FUNCTION_CATALOG: RefCell<Option<Arc<Vec<SourceFunctionInfo>>>> =
@@ -68,6 +74,11 @@ runmat_thread_local! {
 
 pub struct FunctionInvokerGuard {
     previous: Option<Arc<FunctionInvoker>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
+
+pub struct LexicalFunctionInvokerGuard {
+    previous: Option<Arc<LexicalFunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
@@ -92,6 +103,19 @@ impl Drop for FunctionInvokerGuard {
             state.call.borrow_mut().semantic_invoker = previous;
         } else {
             SEMANTIC_FUNCTION_INVOKER.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
+    }
+}
+
+impl Drop for LexicalFunctionInvokerGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().lexical_invoker = previous;
+        } else {
+            LEXICAL_FUNCTION_INVOKER.with(|slot| {
                 *slot.borrow_mut() = previous;
             });
         }
@@ -154,6 +178,24 @@ pub fn install_semantic_function_invoker(
     }
 }
 
+pub fn install_lexical_function_invoker(
+    invoker: Option<Arc<LexicalFunctionInvoker>>,
+) -> LexicalFunctionInvokerGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(&mut state.call.borrow_mut().lexical_invoker, invoker);
+        return LexicalFunctionInvokerGuard {
+            previous,
+            state: Some(state),
+        };
+    }
+    let previous =
+        LEXICAL_FUNCTION_INVOKER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), invoker));
+    LexicalFunctionInvokerGuard {
+        previous,
+        state: None,
+    }
+}
+
 pub fn install_semantic_function_resolver(
     resolver: Option<Arc<FunctionResolver>>,
 ) -> FunctionResolverGuard {
@@ -208,6 +250,13 @@ pub fn current_semantic_function_invoker() -> Option<Arc<FunctionInvoker>> {
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
+pub fn current_lexical_function_invoker() -> Option<Arc<LexicalFunctionInvoker>> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().lexical_invoker.clone();
+    }
+    LEXICAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
+}
+
 pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
     if let Some(state) = active_state() {
         return state.call.borrow().semantic_resolver.clone();
@@ -241,6 +290,13 @@ pub async fn try_call_semantic_function(
     let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
     Some(invoker(function, args, requested_outputs).await)
+}
+
+pub async fn try_call_lexical_function(
+    call: crate::call::lexical::LexicalCall,
+) -> Option<Result<crate::call::lexical::LexicalCallResult, RuntimeError>> {
+    let invoker = current_lexical_function_invoker()?;
+    Some(invoker(call).await)
 }
 
 pub async fn try_call_semantic_function_by_name(
@@ -326,4 +382,41 @@ pub async fn try_call_semantic_descriptor(
         return try_load_and_call_dynamic_function(name, args, requested_outputs).await;
     }
     None
+}
+
+#[cfg(test)]
+mod lexical_tests {
+    use super::*;
+    use crate::call::lexical::{LexicalCall, LexicalCallResult, LexicalCapture};
+
+    #[test]
+    fn lexical_invoker_preserves_binding_identity_and_restores_scope() {
+        assert!(current_lexical_function_invoker().is_none());
+        let guard = install_lexical_function_invoker(Some(Arc::new(|mut call| {
+            Box::pin(async move {
+                assert_eq!(call.function, 7);
+                assert_eq!(call.arguments, vec![Value::Num(2.0)]);
+                call.captures[0].value = Value::Num(5.0);
+                Ok(LexicalCallResult {
+                    value: Value::Num(7.0),
+                    captures: call.captures,
+                })
+            })
+        })));
+        let result = futures::executor::block_on(try_call_lexical_function(LexicalCall {
+            function: 7,
+            captures: vec![LexicalCapture {
+                binding: runmat_types::BindingId(3),
+                value: Value::Num(1.0),
+            }],
+            arguments: vec![Value::Num(2.0)],
+            requested_outputs: 1,
+        }))
+        .expect("lexical invoker is installed")
+        .expect("lexical call succeeds");
+        assert_eq!(result.value, Value::Num(7.0));
+        assert_eq!(result.captures[0].value, Value::Num(5.0));
+        drop(guard);
+        assert!(current_lexical_function_invoker().is_none());
+    }
 }

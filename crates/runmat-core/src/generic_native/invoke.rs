@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, rc::Rc, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+    sync::Arc,
+};
 
 use runmat_runtime::user_functions;
 use runmat_types::ProgramFunctionId;
@@ -34,38 +38,119 @@ pub(crate) async fn invoke(
         .keys()
         .map(|function| program_function(*function))
         .collect::<Result<BTreeSet<_>, _>>()?;
+    let capture_bindings = unit
+        .mir()
+        .functions
+        .iter()
+        .map(|(function, metadata)| {
+            Ok((
+                program_function(*function)?,
+                metadata
+                    .captures
+                    .iter()
+                    .map(|capture| capture.binding)
+                    .collect::<Vec<_>>(),
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>, runmat_runtime::RuntimeError>>()?;
 
     let previous_invoker = user_functions::current_semantic_function_invoker();
     let nested_executor = Rc::clone(&compiled.executor);
     let nested_runtime = runtime.clone();
-    let invoker = user_functions::install_semantic_function_invoker(Some(Arc::new(
-        move |function, arguments, requested_outputs| {
-            let arguments = arguments.to_vec();
-            let previous_invoker = previous_invoker.clone();
-            let executor = Rc::clone(&nested_executor);
-            let runtime = nested_runtime.clone();
-            let is_native = u32::try_from(function)
+    let semantic_capture_bindings = Arc::new(capture_bindings.clone());
+    let semantic_native_functions = native_functions.clone();
+    let invoker =
+        user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, arguments, requested_outputs| {
+                let arguments = arguments.to_vec();
+                let previous_invoker = previous_invoker.clone();
+                let executor = Rc::clone(&nested_executor);
+                let runtime = nested_runtime.clone();
+                let capture_bindings = Arc::clone(&semantic_capture_bindings);
+                let is_native = u32::try_from(function)
+                    .map(ProgramFunctionId)
+                    .is_ok_and(|function| semantic_native_functions.contains(&function));
+                Box::pin(async move {
+                    if is_native {
+                        let function = program_function(runmat_hir::FunctionId(function))?;
+                        let bindings = capture_bindings.get(&function).cloned().unwrap_or_default();
+                        if arguments.len() < bindings.len() {
+                            return Err(super::error::stage(
+                                "NativeCaptureArity",
+                                "closure invocation omitted lexical captures",
+                            ));
+                        }
+                        let captures =
+                            bindings
+                                .into_iter()
+                                .zip(arguments.iter().cloned())
+                                .map(|(binding, value)| {
+                                    runmat_runtime::call::lexical::LexicalCapture { binding, value }
+                                })
+                                .collect::<Vec<_>>();
+                        let arguments = arguments[captures.len()..].to_vec();
+                        let execution = executor
+                            .invoke_async_with_captures(
+                                function,
+                                captures,
+                                arguments,
+                                requested_outputs,
+                                runtime,
+                            )
+                            .await
+                            .map_err(super::error::from_jit_error)?;
+                        normalize_outputs(execution.outputs, requested_outputs)
+                    } else if let Some(previous_invoker) = previous_invoker {
+                        previous_invoker(function, &arguments, requested_outputs).await
+                    } else {
+                        Err(super::error::stage(
+                            "UndefinedFunction",
+                            format!("semantic function {function} is unavailable"),
+                        ))
+                    }
+                })
+            },
+        )));
+
+    let previous_lexical_invoker = user_functions::current_lexical_function_invoker();
+    let lexical_executor = Rc::clone(&compiled.executor);
+    let lexical_runtime = runtime.clone();
+    let lexical_native_functions = native_functions.clone();
+    let lexical_invoker =
+        user_functions::install_lexical_function_invoker(Some(Arc::new(move |call| {
+            let previous = previous_lexical_invoker.clone();
+            let executor = Rc::clone(&lexical_executor);
+            let runtime = lexical_runtime.clone();
+            let is_native = u32::try_from(call.function)
                 .map(ProgramFunctionId)
-                .is_ok_and(|function| native_functions.contains(&function));
+                .is_ok_and(|function| lexical_native_functions.contains(&function));
             Box::pin(async move {
-                if is_native {
-                    let function = program_function(runmat_hir::FunctionId(function))?;
-                    let execution = executor
-                        .invoke_async(function, arguments, requested_outputs, runtime)
-                        .await
-                        .map_err(super::error::from_jit_error)?;
-                    normalize_outputs(execution.outputs, requested_outputs)
-                } else if let Some(previous_invoker) = previous_invoker {
-                    previous_invoker(function, &arguments, requested_outputs).await
-                } else {
-                    Err(super::error::stage(
+                if !is_native {
+                    if let Some(previous) = previous {
+                        return previous(call).await;
+                    }
+                    return Err(super::error::stage(
                         "UndefinedFunction",
-                        format!("semantic function {function} is unavailable"),
-                    ))
+                        format!("lexical function {} is unavailable", call.function),
+                    ));
                 }
+                let function = program_function(runmat_hir::FunctionId(call.function))?;
+                let execution = executor
+                    .invoke_async_with_captures(
+                        function,
+                        call.captures,
+                        call.arguments,
+                        call.requested_outputs,
+                        runtime,
+                    )
+                    .await
+                    .map_err(super::error::from_jit_error)?;
+                Ok(runmat_runtime::call::lexical::LexicalCallResult {
+                    value: normalize_outputs(execution.outputs, call.requested_outputs)?,
+                    captures: execution.captures,
+                })
             })
-        },
-    )));
+        })));
 
     let previous_resolver = user_functions::current_semantic_function_resolver();
     let resolver_registry = Arc::clone(&registry);
@@ -104,6 +189,7 @@ pub(crate) async fn invoke(
     drop(active);
     drop(catalog);
     drop(resolver);
+    drop(lexical_invoker);
     drop(invoker);
     normalize_outputs(execution?.outputs, requested_outputs)
 }

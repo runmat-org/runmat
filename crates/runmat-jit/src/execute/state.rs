@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use runmat_native_codegen::{
     NativeBlockId, NativeEdge, NativeFunction, NativeLocalKind, NativeTerminatorKind, NativeValueId,
@@ -22,6 +23,7 @@ pub(super) struct ActiveExceptionHandler {
 
 pub(super) struct HostState {
     pub function: NativeFunction,
+    pub functions: Rc<Vec<NativeFunction>>,
     pub runtime: RuntimeContext,
     pub arena: ValueArena,
     pub locals: Vec<NativeValueRef>,
@@ -49,17 +51,9 @@ impl HostState {
         requested_outputs: usize,
         runtime: RuntimeContext,
         program_capture: Option<Vec<u8>>,
+        functions: Rc<Vec<NativeFunction>>,
+        captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     ) -> JitResult<(Self, Vec<NativeValueRef>)> {
-        if function
-            .locals
-            .iter()
-            .any(|local| local.kind == NativeLocalKind::Capture)
-        {
-            return Err(JitError::UnsupportedSite(
-                "captured native function entry requires closure environment materialization"
-                    .into(),
-            ));
-        }
         let input_specs = function
             .argument_validations
             .iter()
@@ -96,6 +90,30 @@ impl HostState {
             .map(|value| arena.insert(value))
             .collect::<Vec<_>>();
         let mut locals = vec![NativeValueRef::NULL; function.local_count()];
+        let capture_locals = function
+            .locals
+            .iter()
+            .filter(|local| local.kind == NativeLocalKind::Capture)
+            .collect::<Vec<_>>();
+        if capture_locals.len() != captures.len() {
+            return Err(JitError::Host(format!(
+                "native lexical entry expected {} captures but received {}",
+                capture_locals.len(),
+                captures.len()
+            )));
+        }
+        for local in capture_locals {
+            let binding = local.binding.ok_or_else(|| {
+                JitError::Host("native capture local has no semantic binding".into())
+            })?;
+            let capture = captures
+                .iter()
+                .find(|capture| capture.binding == binding)
+                .ok_or_else(|| {
+                    JitError::Host("native lexical capture binding is missing".into())
+                })?;
+            locals[local.id.0 as usize] = arena.insert(capture.value.clone());
+        }
         for (local, value) in function.abi.fixed_inputs.iter().zip(&prepared.fixed) {
             let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
                 JitError::Host("function ABI input local is out of bounds".into())
@@ -132,6 +150,7 @@ impl HostState {
         let source = function.source.0;
         let mut state = Self {
             function,
+            functions,
             runtime,
             arena,
             locals,
@@ -156,6 +175,90 @@ impl HostState {
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
+    }
+
+    pub fn lexical_captures(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+    ) -> JitResult<Option<Vec<runmat_runtime::call::lexical::LexicalCapture>>> {
+        let target = self
+            .functions
+            .iter()
+            .find(|candidate| candidate.id == function);
+        let Some(target) = target else {
+            return Ok(None);
+        };
+        let mut captures = Vec::new();
+        for target_local in target
+            .locals
+            .iter()
+            .filter(|local| local.kind == NativeLocalKind::Capture)
+        {
+            let binding = target_local.binding.ok_or_else(|| {
+                JitError::Host("native capture local has no semantic binding".into())
+            })?;
+            let source = self
+                .function
+                .locals
+                .iter()
+                .find(|local| local.binding == Some(binding))
+                .ok_or_else(|| {
+                    JitError::Host("nested native capture is not visible in its caller".into())
+                })?;
+            let value = self
+                .locals
+                .get(source.id.0 as usize)
+                .copied()
+                .ok_or_else(|| JitError::Host("native capture local is out of bounds".into()))?;
+            captures.push(runmat_runtime::call::lexical::LexicalCapture {
+                binding,
+                value: self.arena.get(value)?.clone(),
+            });
+        }
+        Ok((!captures.is_empty()).then_some(captures))
+    }
+
+    pub fn program_function(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+    ) -> Option<&NativeFunction> {
+        self.functions
+            .iter()
+            .find(|candidate| candidate.id == function)
+    }
+
+    pub fn apply_lexical_captures(
+        &mut self,
+        captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    ) -> JitResult<()> {
+        for capture in captures {
+            let local = self
+                .function
+                .locals
+                .iter()
+                .find(|local| local.binding == Some(capture.binding))
+                .ok_or_else(|| JitError::Host("returned lexical binding is not visible".into()))?;
+            self.locals[local.id.0 as usize] = self.arena.insert(capture.value);
+        }
+        Ok(())
+    }
+
+    pub fn capture_results(&self) -> JitResult<Vec<runmat_runtime::call::lexical::LexicalCapture>> {
+        self.function
+            .locals
+            .iter()
+            .filter(|local| local.kind == NativeLocalKind::Capture)
+            .map(|local| {
+                let binding = local.binding.ok_or_else(|| {
+                    JitError::Host("native capture local has no semantic binding".into())
+                })?;
+                let value = self.locals[local.id.0 as usize];
+                Ok(runmat_runtime::call::lexical::LexicalCapture {
+                    binding,
+                    value: self.arena.get(value)?.clone(),
+                })
+            })
+            .collect()
     }
 
     pub fn enter_block(&mut self, block: runmat_native_codegen::NativeBlockId) -> JitResult<()> {

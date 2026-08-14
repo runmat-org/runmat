@@ -1,6 +1,7 @@
 use runmat_runtime::context::RuntimeContext;
 use runmat_types::ProgramFunctionId;
 use runmat_value::Value;
+use std::rc::Rc;
 
 use crate::{CompiledExecutable, GenericCompiler, JitError, JitResult};
 
@@ -8,7 +9,7 @@ use super::invocation::{GenericInvocation, GenericInvocationStep};
 use super::state::HostState;
 
 pub struct GenericExecutor {
-    assembly: runmat_native_codegen::NativeAssembly,
+    functions: Rc<Vec<runmat_native_codegen::NativeFunction>>,
     compiled: CompiledExecutable,
     program_capture: Option<Vec<u8>>,
 }
@@ -16,6 +17,7 @@ pub struct GenericExecutor {
 #[derive(Debug, PartialEq)]
 pub struct GenericExecution {
     pub outputs: Vec<Value>,
+    pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
 }
 
 impl GenericExecutor {
@@ -29,7 +31,7 @@ impl GenericExecutor {
     ) -> JitResult<Self> {
         let compiled = GenericCompiler::compile(&assembly)?;
         Ok(Self {
-            assembly,
+            functions: Rc::new(assembly.functions),
             compiled,
             program_capture,
         })
@@ -61,7 +63,20 @@ impl GenericExecutor {
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> JitResult<GenericExecution> {
-        let mut invocation = self.begin(function, arguments, requested_outputs, runtime)?;
+        self.invoke_async_with_captures(function, Vec::new(), arguments, requested_outputs, runtime)
+            .await
+    }
+
+    pub async fn invoke_async_with_captures(
+        &self,
+        function: ProgramFunctionId,
+        captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+    ) -> JitResult<GenericExecution> {
+        let mut invocation =
+            self.begin_with_captures(function, captures, arguments, requested_outputs, runtime)?;
         loop {
             match invocation.advance()? {
                 GenericInvocationStep::Completed(execution) => return Ok(execution),
@@ -89,8 +104,18 @@ impl GenericExecutor {
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> JitResult<GenericInvocation> {
+        self.begin_with_captures(function, Vec::new(), arguments, requested_outputs, runtime)
+    }
+
+    pub fn begin_with_captures(
+        &self,
+        function: ProgramFunctionId,
+        captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+    ) -> JitResult<GenericInvocation> {
         let function_ir = self
-            .assembly
             .functions
             .iter()
             .find(|candidate| candidate.id == function)
@@ -106,6 +131,8 @@ impl GenericExecutor {
             requested_outputs as usize,
             runtime,
             self.program_capture.clone(),
+            Rc::clone(&self.functions),
+            captures,
         )?;
         let resume = runmat_runtime::native::NativeResumeState {
             function: function.0,
