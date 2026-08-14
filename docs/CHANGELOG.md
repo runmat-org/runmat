@@ -18,6 +18,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 #### Fixed
 * Fixed `try`/`catch` protection across nested control flow and native execution, preserving exact catch bindings, nested-handler and `rethrow` behavior, normal exits, and canonical exception identifiers without replaying completed work.
+* Fixed native `spawn`/`await` execution so spawned work no longer blocks the awaiting runtime thread, and native suspension resumes at the exact post-`await` site without replaying completed effects.
 
 ## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - July 2026
 

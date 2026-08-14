@@ -2,7 +2,7 @@
 title: "Async Execution"
 category: "Execution"
 section: "12.1"
-last_updated: "May 28, 2026"
+last_updated: "August 13, 2026"
 ---
 
 # Async Execution
@@ -68,7 +68,7 @@ y = await(f); % prompt happens here
 
 ## Spawn Handles
 
-`spawn(value)` is also a RunMat language extension to the MATLAB language. It accepts a future and returns a single-use spawn handle. It currently resolves the future before returning the handle, but this will change in a future release to return the future itself.
+`spawn(value)` is also a RunMat language extension to the MATLAB language. It accepts a future, submits it to the active execution service, and returns a single-use task handle without waiting for the result. Native sessions can run the task in an isolated worker process, while browser sessions schedule it through the browser worker service. A host that installs the lightweight in-process execution service may defer the function body until the task is awaited.
 
 ```matlab
 async function y = ask()
@@ -77,8 +77,8 @@ async function y = ask()
 end
 
 f = ask();      % no prompt yet
-t = spawn(f);   % prompt happens here in the current runtime
-y = await(t);   % consumes the spawn handle
+t = spawn(f);   % schedules the work and returns a task handle
+y = await(t);   % waits for the result and consumes the task handle
 ```
 
 Spawn handles are retired when they are awaited, replaced, dropped from the stack, or removed from scope. Awaiting the same spawn handle twice is an error.
@@ -93,7 +93,7 @@ Each execution installs the session's async interaction handler as a scoped runt
 
 `ExecutionOutcome::suspension` is not active for normal execution. Await points complete inside `execute_request`; hosts do not receive a resumable execution token today.
 
-`spawn` is not a background scheduler yet; it resolves work before returning the spawn handle.
+The amount of parallelism available to `spawn` is determined by the active execution service and its pool limits. Code should use `await` for ordering and must not rely on a task completing before `spawn` returns.
 
 Native local filesystem, native remote filesystem, and native HTTP code expose async-shaped APIs but can block internally. The remote filesystem path is still designed for throughput: large reads can be split across worker threads and issued in parallel chunks.
 

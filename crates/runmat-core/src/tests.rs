@@ -14645,3 +14645,96 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
         assert_eq!(native, expected);
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
+    let source = ExecutableSource::new(
+        "core-native-async-test@1",
+        "nativeAwait.m",
+        "async function y = asyncPass(x)\ny = x + 1;\nend\nasync function y = asyncFail()\nvalues = [1, 2];\ny = values(3);\nend\nfunction resetAsyncCount()\nglobal asyncResumeCount\nasyncResumeCount = 0;\nend\nasync function y = nativeAwait(x)\ny = await(asyncPass(x));\nend\nasync function y = nativeSpawnAwait(x)\ntask = spawn(asyncPass(x));\ny = await(task);\nend\nasync function [y, count] = nativeNoReplay(x)\nglobal asyncResumeCount\nasyncResumeCount = asyncResumeCount + 1;\ny = await(asyncPass(x));\ncount = asyncResumeCount;\nend\nasync function [y, id] = nativeAwaitCatch()\ntry\ny = await(asyncFail());\nid = 0;\ncatch e\ny = 7;\nid = e.identifier;\nend\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile async unit");
+
+    for function in ["nativeAwait", "nativeSpawnAwait"] {
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function(function.into()),
+            arguments: vec![runmat_value::Value::Num(4.0)],
+            requested_outputs: 1,
+        };
+        let established = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established async path");
+        let native = block_on(session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native async path");
+        assert_eq!(native, established);
+        assert_eq!(native, runmat_value::Value::Num(5.0));
+    }
+
+    let reset = ProcedureInvocation {
+        target: ProcedureTarget::Function("resetAsyncCount".into()),
+        arguments: Vec::new(),
+        requested_outputs: 0,
+    };
+    let no_replay = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeNoReplay".into()),
+        arguments: vec![runmat_value::Value::Num(4.0)],
+        requested_outputs: 2,
+    };
+    block_on(session.invoke_executable(&unit, reset.clone(), &InvocationControl::default()))
+        .expect("reset established async counter");
+    let established = block_on(session.invoke_executable(
+        &unit,
+        no_replay.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("established no-replay async path");
+    block_on(session.invoke_executable(&unit, reset, &InvocationControl::default()))
+        .expect("reset native async counter");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        no_replay,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native no-replay async path");
+    assert_eq!(native, established);
+    assert_eq!(
+        native,
+        runmat_value::Value::OutputList(vec![
+            runmat_value::Value::Num(5.0),
+            runmat_value::Value::Num(1.0),
+        ])
+    );
+
+    let caught = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeAwaitCatch".into()),
+        arguments: Vec::new(),
+        requested_outputs: 2,
+    };
+    let established =
+        block_on(session.invoke_executable(&unit, caught.clone(), &InvocationControl::default()))
+            .expect("established caught async failure");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        caught,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native caught async failure");
+    assert_eq!(native, established);
+    assert_eq!(
+        native,
+        runmat_value::Value::OutputList(vec![
+            runmat_value::Value::Num(7.0),
+            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+        ])
+    );
+}

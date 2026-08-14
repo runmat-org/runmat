@@ -325,9 +325,51 @@ fn execute_terminator(
         NativeTerminatorKind::Unreachable => Err(JitError::Host(
             "reached a Native IR unreachable terminator".into(),
         )),
-        NativeTerminatorKind::Await { .. } => Err(JitError::UnsupportedSite(
-            "await terminator requires R14 continuation state".into(),
-        )),
+        NativeTerminatorKind::Await { future, resume, .. } => {
+            let value = state.arena.get(value_for(state, *future)?)?.clone();
+            match super::awaiting::begin(state, value, resume.clone())? {
+                super::awaiting::AwaitStart::Ready(value) => {
+                    let value = state.arena.insert(value);
+                    take_edge(state, resume, 0, None, Some(value))
+                }
+                super::awaiting::AwaitStart::Suspended {
+                    continuation,
+                    generation,
+                } => {
+                    if call.frame.is_null() {
+                        return Err(JitError::Host("native await has no frame".into()));
+                    }
+                    let roots = state.refresh_roots();
+                    // SAFETY: NativeCall validation guarantees a live frame and resume
+                    // record for this synchronous entry. The pointer is validated before
+                    // returning from this entry and is not retained by the Rust driver.
+                    let resume_state = unsafe { (*call.frame).resume };
+                    if resume_state.is_null() {
+                        return Err(JitError::Host("native await has no resume state".into()));
+                    }
+                    let target = state.resume_request_for_block(resume.target)?;
+                    // SAFETY: the resume record belongs to this invocation and remains
+                    // writable for the complete synchronous entry. Publish the exact
+                    // post-await site in the ABI exit; the Rust continuation transfers
+                    // the awaited value before generated code re-enters that same site.
+                    unsafe {
+                        (*resume_state).function = target.function;
+                        (*resume_state).block = target.block;
+                        (*resume_state).position = target.position;
+                        (*resume_state).phase = target.phase.0;
+                        (*resume_state).ordinal = target.ordinal;
+                        (*call.frame).roots = roots;
+                    }
+                    *exit = NativeExit::suspended(runmat_runtime::native::NativeSuspension {
+                        continuation,
+                        generation,
+                        resume: resume_state,
+                        roots,
+                    });
+                    Ok(NativeSiteOutcome::exit())
+                }
+            }
+        }
         NativeTerminatorKind::ParFor { .. } | NativeTerminatorKind::Spmd { .. } => {
             Err(JitError::UnsupportedSite(
                 "parallel terminator requires the R27 native parallel executor".into(),
@@ -356,7 +398,7 @@ fn take_edge(
     edge: &NativeEdge,
     index: u32,
     loop_iteration: Option<(runmat_native_codegen::NativeLocalId, NativeValueRef)>,
-    caught_exception: Option<NativeValueRef>,
+    transferred_value: Option<NativeValueRef>,
 ) -> JitResult<NativeSiteOutcome> {
     let parameters = state
         .function
@@ -379,14 +421,11 @@ fn take_edge(
                 .ok_or_else(|| {
                     JitError::Host("native loop iteration edge binding is unavailable".into())
                 })?,
-            NativeEdgeArgument::CaughtException { .. } => caught_exception.ok_or_else(|| {
+            NativeEdgeArgument::CaughtException { .. } => transferred_value.ok_or_else(|| {
                 JitError::Host("native catch edge has no materialized exception".into())
             })?,
-            NativeEdgeArgument::AwaitResult { .. } => {
-                return Err(JitError::UnsupportedSite(
-                    "await edge value requires R14 continuation state".into(),
-                ))
-            }
+            NativeEdgeArgument::AwaitResult { .. } => transferred_value
+                .ok_or_else(|| JitError::Host("native await edge has no completed value".into()))?,
         };
         transferred.push((parameter.clone(), value));
     }
@@ -396,6 +435,16 @@ fn take_edge(
     }
     state.take_control_edge(edge.target);
     Ok(NativeSiteOutcome::edge(index))
+}
+
+pub(super) fn resume_await(
+    state: &mut HostState,
+    completion: super::awaiting::AwaitCompletion,
+) -> JitResult<runmat_runtime::native::NativeSiteRequest> {
+    let value = state.arena.insert(completion.value);
+    let target = completion.edge.target;
+    let _ = take_edge(state, &completion.edge, 0, None, Some(value))?;
+    state.resume_request_for_block(target)
 }
 
 pub(super) fn redirect_exception(

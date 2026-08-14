@@ -9,16 +9,7 @@ use super::operand::materialize_operand;
 use super::state::HostState;
 
 pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<Value>> {
-    let materialized = call
-        .args
-        .iter()
-        .map(|argument| materialize_argument(state, argument))
-        .collect::<JitResult<Vec<_>>>()?;
-    let arguments = super::sync::complete(
-        &state.runtime,
-        runmat_runtime::call::arguments::expand_arguments(materialized),
-        "call argument expansion",
-    )?;
+    let arguments = materialize_arguments(state, &call.args)?;
     let requested_outputs = call.requested_outputs.fixed_count();
     let result = match &call.callee {
         MirCallee::Static(identity) => {
@@ -81,6 +72,21 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<V
         }
     }?;
     normalize_outputs(result, requested_outputs)
+}
+
+pub(super) fn materialize_arguments(
+    state: &mut HostState,
+    arguments: &[MirCallArg],
+) -> JitResult<Vec<Value>> {
+    let materialized = arguments
+        .iter()
+        .map(|argument| materialize_argument(state, argument))
+        .collect::<JitResult<Vec<_>>>()?;
+    super::sync::complete(
+        &state.runtime,
+        runmat_runtime::call::arguments::expand_arguments(materialized),
+        "call argument expansion",
+    )
 }
 
 fn materialize_argument(

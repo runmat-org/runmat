@@ -2,7 +2,7 @@ use super::*;
 
 impl RunMatSession {
     #[cfg(not(target_arch = "wasm32"))]
-    fn invoke_generic_native(
+    async fn invoke_generic_native(
         &mut self,
         unit: &crate::ExecutableUnit,
         preferred_function: Option<&str>,
@@ -18,6 +18,7 @@ impl RunMatSession {
                 .clone()
                 .with_program_revision(Some(unit.revision().program_revision.clone())),
         )
+        .await
     }
 
     /// Invoke one immutable unit while collecting its backend-independent
@@ -108,7 +109,7 @@ impl RunMatSession {
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
-                    self.invoke_generic_native(unit, None, Vec::new(), 0)
+                    self.invoke_generic_native(unit, None, Vec::new(), 0).await
                 } else {
                     self.invoke_entrypoint(unit).await
                 }
@@ -130,6 +131,7 @@ impl RunMatSession {
                         invocation.arguments,
                         invocation.requested_outputs,
                     )
+                    .await
                 } else {
                     self.invoke_procedure(
                         unit,

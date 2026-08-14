@@ -66,6 +66,10 @@ pub(crate) fn apply_rvalue_contract(
         }
         MirRvalue::Future { .. } | MirRvalue::Spawn(_) => {
             state.effects.0.insert(EffectKind::MaySuspend);
+            state
+                .capabilities
+                .0
+                .insert(CapabilityRequirement::ParallelRuntime);
         }
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => {
             state

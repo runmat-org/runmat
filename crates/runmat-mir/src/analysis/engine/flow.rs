@@ -410,6 +410,10 @@ fn edge_states(
             };
             let mut resumed = state.clone();
             resumed.effects.0.insert(EffectKind::MaySuspend);
+            resumed
+                .capabilities
+                .0
+                .insert(CapabilityRequirement::ParallelRuntime);
             if let Some(place) = result {
                 assign_place(place, output, LiteralValue::Unknown, None, &mut resumed);
             }

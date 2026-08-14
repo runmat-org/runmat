@@ -165,13 +165,60 @@ pub(super) fn evaluate_rvalue(
         ))]),
         MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
         MirRvalue::End => Ok(vec![state.arena.insert(Value::Num(-0.0))]),
-        MirRvalue::Future { .. } | MirRvalue::Spawn(_) => Err(JitError::UnsupportedSite(
-            "future/spawn rvalue requires R14 continuation state".into(),
-        )),
+        MirRvalue::Future {
+            function,
+            args,
+            requested_outputs,
+            ..
+        } => {
+            let arguments = super::call::materialize_arguments(state, args)?;
+            runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
+                arguments.clone(),
+            ))?;
+            let program = if state.runtime.execution().requires_program_capture() {
+                Some(state.program_capture.clone().ok_or_else(|| {
+                    JitError::Host("native async execution is missing its exact program".into())
+                })?)
+            } else {
+                None
+            };
+            let future = state
+                .runtime
+                .execution()
+                .create_future(runmat_runtime::execution::DeferredCall {
+                    function: function.0,
+                    arguments,
+                    requested_outputs: requested_outputs.fixed_count(),
+                    program_revision: state.runtime.program_revision().cloned(),
+                    program,
+                })
+                .map_err(execution_service_error)?;
+            Ok(vec![state.arena.insert(Value::Future(future))])
+        }
+        MirRvalue::Spawn(operand) => {
+            let value = materialize_operand(state, operand)?;
+            let Value::Future(future) = value else {
+                return Err(runmat_runtime::runtime_error::semantic_error(
+                    "SpawnOperandInvalid",
+                    "spawn expects a lazy future produced by an async call",
+                )
+                .into());
+            };
+            let task = state
+                .runtime
+                .execution()
+                .spawn(&future)
+                .map_err(execution_service_error)?;
+            Ok(vec![state.arena.insert(Value::Task(task))])
+        }
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(JitError::Host(
             "predeclared distributed capability rejection reached native execution".into(),
         )),
     }
+}
+
+fn execution_service_error(error: runmat_runtime::execution::ExecutionServiceError) -> JitError {
+    runmat_runtime::runtime_error::semantic_error("ExecutionService", error.to_string()).into()
 }
 
 fn execute_embedded_statement(

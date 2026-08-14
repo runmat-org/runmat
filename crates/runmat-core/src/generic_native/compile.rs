@@ -26,8 +26,15 @@ pub(super) fn compile(
             target: runmat_native_codegen::NativeTarget::current(),
         })
         .map_err(|error| super::error::stage("NativeLowering", error))?;
+    let program_capture = serde_json::to_vec(unit.functions()).map_err(|error| {
+        super::error::stage(
+            "NativeProduct",
+            format!("failed to capture native async program: {error}"),
+        )
+    })?;
     let executor =
-        runmat_jit::GenericExecutor::compile(assembly).map_err(super::error::from_jit_error)?;
+        runmat_jit::GenericExecutor::compile_with_program_capture(assembly, Some(program_capture))
+            .map_err(super::error::from_jit_error)?;
     Ok(CompiledGenericUnit {
         executor: Rc::new(executor),
         entrypoint: envelope.manifest.identity.entrypoint_function,

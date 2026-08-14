@@ -200,6 +200,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         if let Value::Job(handle) = &value {
             return self.await_job(handle).map(AwaitAction::Completed);
         }
+        let original = value.clone();
         let future = match self.future_for_value(value)? {
             Ok(future) => future,
             Err(value) => return Ok(AwaitAction::Passthrough(value)),
@@ -232,8 +233,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
             }
         };
+        let Some(completion) = completion.try_value() else {
+            return Ok(AwaitAction::Pending(original));
+        };
         let result = completion
-            .wait()
             .and_then(|payload| {
                 runmat_runtime::execution::value_codec::decode_inline_value(&payload)
                     .map_err(|error| error.to_string())

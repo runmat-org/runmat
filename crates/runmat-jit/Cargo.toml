@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 futures = "0.3"
 runmat-mir = { workspace = true }
 runmat-hir = { workspace = true }
+runmat-execution = { workspace = true }
 runmat-native-codegen = { workspace = true }
 runmat-types = { workspace = true }
 runmat-value = { workspace = true }
@@ -29,4 +30,3 @@ runmat-runtime = { workspace = true, features = ["plot-web"] }
 
 [dev-dependencies]
 runmat-builtins = { workspace = true }
-runmat-execution = { workspace = true }

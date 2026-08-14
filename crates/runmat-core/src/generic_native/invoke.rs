@@ -10,7 +10,7 @@ use crate::ExecutableUnit;
 // executable-memory owner, RuntimeContext, and GC Values are deliberately
 // invocation-thread confined. This callback never crosses that thread.
 #[allow(clippy::arc_with_non_send_sync)]
-pub(crate) fn invoke(
+pub(crate) async fn invoke(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
     arguments: Vec<Value>,
@@ -51,7 +51,8 @@ pub(crate) fn invoke(
                 if is_native {
                     let function = program_function(runmat_hir::FunctionId(function))?;
                     let execution = executor
-                        .invoke(function, arguments, requested_outputs, runtime)
+                        .invoke_async(function, arguments, requested_outputs, runtime)
+                        .await
                         .map_err(super::error::from_jit_error)?;
                     normalize_outputs(execution.outputs, requested_outputs)
                 } else if let Some(previous_invoker) = previous_invoker {
@@ -97,7 +98,8 @@ pub(crate) fn invoke(
     let active = user_functions::push_active_semantic_function(function.0 as usize);
     let execution = compiled
         .executor
-        .invoke(function, arguments, requested_outputs, runtime)
+        .invoke_async(function, arguments, requested_outputs, runtime)
+        .await
         .map_err(super::error::from_jit_error);
     drop(active);
     drop(catalog);

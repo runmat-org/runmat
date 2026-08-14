@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use runmat_execution::identity::{ArtifactId, WorkerId};
@@ -32,7 +32,6 @@ pub(crate) type TransferResult = Result<ValuePayload, String>;
 
 pub(crate) struct TaskCompletion {
     value: Mutex<Option<TransferResult>>,
-    ready: Condvar,
     cancelled: AtomicBool,
 }
 
@@ -40,17 +39,12 @@ impl TaskCompletion {
     fn new() -> Self {
         Self {
             value: Mutex::new(None),
-            ready: Condvar::new(),
             cancelled: AtomicBool::new(false),
         }
     }
 
-    pub(crate) fn wait(&self) -> TransferResult {
-        let mut value = self.value.lock().expect("task completion poisoned");
-        while value.is_none() {
-            value = self.ready.wait(value).expect("task completion poisoned");
-        }
-        value.clone().expect("completion checked")
+    pub(crate) fn try_value(&self) -> Option<TransferResult> {
+        self.value.lock().expect("task completion poisoned").clone()
     }
 
     pub(crate) fn cancel(&self) {
@@ -61,7 +55,6 @@ impl TaskCompletion {
         let mut result = self.value.lock().expect("task completion poisoned");
         if result.is_none() {
             *result = Some(value);
-            self.ready.notify_all();
         }
     }
 }
@@ -402,4 +395,19 @@ fn runmat_time_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_millis() as u64)
+}
+
+#[cfg(test)]
+mod task_completion_tests {
+    use super::{TaskCompletion, TransferResult};
+
+    #[test]
+    fn completion_is_pollable_without_blocking_the_await_caller() {
+        let completion = TaskCompletion::new();
+        assert_eq!(completion.try_value(), None);
+
+        let result: TransferResult = Err("completed".into());
+        completion.complete(result.clone());
+        assert_eq!(completion.try_value(), Some(result));
+    }
 }

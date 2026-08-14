@@ -63,6 +63,37 @@ impl GenericInvocation {
         self.resume
     }
 
+    pub async fn resume_suspension(&mut self, continuation: u64, generation: u64) -> JitResult<()> {
+        let completion =
+            match super::awaiting::complete(&mut self.state, continuation, generation).await {
+                Ok(completion) => completion,
+                Err(JitError::Runtime(error)) => {
+                    let error = *error;
+                    let exception = self.state.arena.insert(runmat_value::Value::MException(
+                        runmat_runtime::runtime_error::exception_from_error(&error),
+                    ));
+                    let native_exception = runmat_runtime::native::NativeException {
+                        handle: exception.handle,
+                        generation: exception.generation,
+                        source: self.state.current_source,
+                    };
+                    if let Some(target) =
+                        super::site::redirect_exception(&mut self.state, native_exception)?
+                    {
+                        self.install_resume_target(target)?;
+                        self.resume_pending = false;
+                        return Ok(());
+                    }
+                    return Err(JitError::from(self.state.annotate_error(error)));
+                }
+                Err(error) => return Err(error),
+            };
+        let target = super::site::resume_await(&mut self.state, completion)?;
+        self.install_resume_target(target)?;
+        self.resume_pending = false;
+        Ok(())
+    }
+
     pub fn advance(&mut self) -> JitResult<GenericInvocationStep> {
         if self.terminal {
             return Err(JitError::Host(

@@ -1070,6 +1070,12 @@ fn future_spawn_and_await_carry_exact_structured_safepoints() {
     };
     body.blocks.push(return_block(1));
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    assert!(analysis.functions.iter().any(|function| {
+        function
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::ParallelRuntime)
+    }));
     let mut manifest = manifest(analysis.revision.schema_version);
     manifest
         .capabilities

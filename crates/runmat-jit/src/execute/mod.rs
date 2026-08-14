@@ -1,6 +1,7 @@
 //! Invocation lifecycle and semantic host for generic Native IR.
 
 mod aggregate;
+mod awaiting;
 mod call;
 mod callbacks;
 mod executor;

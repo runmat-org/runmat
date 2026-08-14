@@ -31,12 +31,15 @@ pub(super) struct HostState {
     pub host_failure: Option<JitError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,
+    pub program_capture: Option<Vec<u8>>,
+    pub pending_await: Option<super::awaiting::PendingAwait>,
     resume_target: Option<runmat_runtime::native::NativeSiteRequest>,
     current_block: Option<NativeBlockId>,
     global_bindings: BTreeMap<usize, String>,
     persistent_bindings: BTreeMap<usize, String>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
     active_exception_handlers: Vec<ActiveExceptionHandler>,
+    next_await_continuation: u64,
 }
 
 impl HostState {
@@ -45,6 +48,7 @@ impl HostState {
         arguments: Vec<runmat_value::Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
+        program_capture: Option<Vec<u8>>,
     ) -> JitResult<(Self, Vec<NativeValueRef>)> {
         if function
             .locals
@@ -141,11 +145,14 @@ impl HostState {
             },
             active_for_loops: BTreeMap::new(),
             pending_place_mutation: None,
+            program_capture,
+            pending_await: None,
             resume_target: None,
             current_block: None,
             global_bindings: BTreeMap::new(),
             persistent_bindings: BTreeMap::new(),
             active_exception_handlers: Vec::new(),
+            next_await_continuation: 1,
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
@@ -213,6 +220,20 @@ impl HostState {
 
     pub fn enter_site_block(&mut self, block: NativeBlockId) {
         self.current_block = Some(block);
+    }
+
+    pub fn next_await_identity(&mut self) -> JitResult<(u64, u64)> {
+        if self.pending_await.is_some() {
+            return Err(JitError::Host(
+                "native invocation already has a pending await".into(),
+            ));
+        }
+        let continuation = self.next_await_continuation;
+        self.next_await_continuation = self
+            .next_await_continuation
+            .checked_add(1)
+            .ok_or_else(|| JitError::Host("native await identity exhausted".into()))?;
+        Ok((continuation, 1))
     }
 
     pub fn enter_exception_handler(
