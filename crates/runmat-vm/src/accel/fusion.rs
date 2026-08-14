@@ -10,10 +10,14 @@ use runmat_accelerate::fusion_exec::{
     execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
     execute_reduction_with_shape, FusionExecutionRequest,
 };
+use runmat_accelerate::placement::{
+    record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
+};
 use runmat_accelerate::InstrSpan;
 use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
 use runmat_runtime::builtins::common::{shape::is_scalar_shape, tensor::scalar_integer_value};
 use runmat_runtime::RuntimeError;
+use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
 use std::collections::HashMap;
 
@@ -162,6 +166,7 @@ pub fn gather_fusion_inputs<'a>(
     stack: &'a mut Vec<Value>,
     vars: &mut [Value],
     context: &mut ExecutionContext,
+    placement: Option<PlacementCorrelationId>,
 ) -> Result<
     (
         StackSliceGuard<'a>,
@@ -170,6 +175,7 @@ pub fn gather_fusion_inputs<'a>(
     ),
     RuntimeError,
 > {
+    let prepare_started = Instant::now();
     if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
         return Err(mex(
             "FusionMissingStackLayout",
@@ -411,9 +417,26 @@ pub fn gather_fusion_inputs<'a>(
 
     Ok((
         stack_guard,
-        FusionExecutionRequest { plan, inputs },
+        FusionExecutionRequest {
+            plan,
+            inputs,
+            placement,
+        },
         consumed_inputs,
     ))
+    .inspect(|_| {
+        if let Some(correlation) = placement {
+            record_event(
+                correlation,
+                PlacementEventKind::Prepare,
+                Some(PlacementVariant::ProviderFusion),
+                Some("gather_runtime_inputs"),
+                Some(duration_ns_saturating(prepare_started.elapsed())),
+                None,
+                &[],
+            );
+        }
+    })
 }
 
 pub fn write_elementwise_materialized_stores(
@@ -1045,9 +1068,10 @@ pub async fn try_execute_fusion_group(
     stack: &mut Vec<Value>,
     vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
+    placement: Option<PlacementCorrelationId>,
 ) -> Result<Value, RuntimeError> {
     let (stack_guard, request, consumed_inputs) =
-        gather_fusion_inputs(plan, graph, stack, vars, context)?;
+        gather_fusion_inputs(plan, graph, stack, vars, context, placement)?;
     if plan.group.kind.is_elementwise()
         && !request.inputs.is_empty()
         && request.inputs.iter().all(is_scalarish_runtime_value)

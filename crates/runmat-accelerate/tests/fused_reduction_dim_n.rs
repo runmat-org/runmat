@@ -192,6 +192,7 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
         let req = FusionExecutionRequest {
             plan: &plan,
             inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
+            placement: None,
         };
         let (reduce_len, num_slices) = if dim_val == 1.0 {
             (rows, cols)

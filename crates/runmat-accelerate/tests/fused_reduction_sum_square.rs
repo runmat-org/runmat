@@ -93,6 +93,7 @@ async fn fused_sum_square_dim0_matches_manual() {
     let request = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone())],
+        placement: None,
     };
 
     let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");

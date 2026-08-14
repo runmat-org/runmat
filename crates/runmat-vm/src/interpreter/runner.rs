@@ -31,9 +31,15 @@ use tracing::{debug, info_span};
 use std::future::Future;
 
 #[cfg(feature = "native-accel")]
+use runmat_accelerate::placement::{
+    begin_trace, fusion_operation_token, PlacementEventKind, PlacementVariant,
+};
+#[cfg(feature = "native-accel")]
 use runmat_accelerate::{
     activate_fusion_plan, active_group_plan_clone, deactivate_fusion_plan, set_current_pc,
 };
+#[cfg(feature = "native-accel")]
+use runmat_time::{duration_ns_saturating, Instant};
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -758,6 +764,24 @@ async fn run_interpreter_inner(
                     kind = ?plan.group.kind
                 )
                 .entered();
+                let fusion_started = Instant::now();
+                let trace = begin_trace(fusion_operation_token(&plan.group.kind), None);
+                trace.event(
+                    PlacementEventKind::Candidate,
+                    Some(PlacementVariant::ProviderFusion),
+                    Some("legacy_fusion_candidate"),
+                    None,
+                    None,
+                    &[],
+                );
+                trace.event(
+                    PlacementEventKind::Candidate,
+                    Some(PlacementVariant::SharedRuntime),
+                    Some("bytecode_fallback_candidate"),
+                    None,
+                    None,
+                    &[],
+                );
                 if !has_barrier {
                     match accel_fusion::try_execute_fusion_group(
                         &plan,
@@ -765,19 +789,42 @@ async fn run_interpreter_inner(
                         &mut stack,
                         &mut vars,
                         &mut context,
+                        Some(trace.correlation()),
                     )
                     .await
                     {
                         Ok(result) => {
+                            trace.complete(
+                                Some(PlacementVariant::ProviderFusion),
+                                Some(duration_ns_saturating(fusion_started.elapsed())),
+                            );
                             stack.push(result);
                             pc = plan.group.span.end + 1;
                             continue;
                         }
                         Err(err) => {
+                            trace.fallback(
+                                Some(PlacementVariant::SharedRuntime),
+                                "fusion_execution_failed",
+                                Some(duration_ns_saturating(fusion_started.elapsed())),
+                            );
                             log::debug!("fusion fallback at pc {}: {}", pc, err);
                         }
                     }
                 } else {
+                    trace.event(
+                        PlacementEventKind::Selected,
+                        Some(PlacementVariant::SharedRuntime),
+                        Some("fusion_vm_barrier"),
+                        None,
+                        None,
+                        &[],
+                    );
+                    trace.fallback(
+                        Some(PlacementVariant::SharedRuntime),
+                        "fusion_vm_barrier",
+                        Some(duration_ns_saturating(fusion_started.elapsed())),
+                    );
                     interp_engine::note_fusion_skip(pc, &span);
                 }
             }

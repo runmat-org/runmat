@@ -20,9 +20,8 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-    ProviderElementType, ProviderFeasibility, ProviderFeasibilityQuery, ProviderLayout,
-    ProviderOperationFamily, ProviderOperationIdentity, ProviderPrecision, ProviderRejectionCode,
-    ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
+    ProviderFeasibility, ProviderFeasibilityQuery, ProviderOperationFamily,
+    ProviderOperationIdentity, ProviderPrecision, ProviderRejectionCode, ProviderWorkload,
 };
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_runtime::builtins::common::{
@@ -30,7 +29,7 @@ use runmat_runtime::builtins::common::{
     tensor::tensor_element_len,
 };
 use runmat_runtime::gather_if_needed_async;
-use runmat_value::{NumericDType, Tensor, Value};
+use runmat_value::{Tensor, Value};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -775,90 +774,6 @@ fn promoted_unary_variant(value: &Value) -> PlacementVariant {
     }
 }
 
-fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
-    match dtype {
-        NumericDType::F64 => ProviderElementType::F64,
-        NumericDType::F32 => ProviderElementType::F32,
-        NumericDType::I8 => ProviderElementType::I8,
-        NumericDType::I16 => ProviderElementType::I16,
-        NumericDType::I32 => ProviderElementType::I32,
-        NumericDType::I64 => ProviderElementType::I64,
-        NumericDType::U8 => ProviderElementType::U8,
-        NumericDType::U16 => ProviderElementType::U16,
-        NumericDType::U32 => ProviderElementType::U32,
-        NumericDType::U64 => ProviderElementType::U64,
-    }
-}
-
-fn provider_representation(
-    value: &Value,
-    provider_precision: ProviderPrecision,
-) -> Option<ProviderRepresentation> {
-    let (element_type, storage, shape, residency) = match value {
-        Value::Tensor(tensor) => (
-            provider_element_type(tensor.numeric_dtype()),
-            ProviderStorage::DenseReal,
-            tensor.shape.clone(),
-            ProviderResidency::Host,
-        ),
-        Value::GpuTensor(handle) => {
-            let element_type = if runmat_accelerate_api::handle_is_logical(handle) {
-                ProviderElementType::Logical
-            } else if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
-                ProviderElementType::from(integer_type)
-            } else {
-                let precision =
-                    runmat_accelerate_api::handle_precision(handle).unwrap_or(provider_precision);
-                match runmat_accelerate_api::handle_storage(handle) {
-                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => {
-                        match precision {
-                            ProviderPrecision::F32 => ProviderElementType::ComplexF32,
-                            ProviderPrecision::F64 => ProviderElementType::ComplexF64,
-                        }
-                    }
-                    _ => ProviderElementType::from(precision),
-                }
-            };
-            let storage = match runmat_accelerate_api::handle_storage(handle) {
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => {
-                    ProviderStorage::DenseComplexInterleaved
-                }
-                _ => ProviderStorage::DenseReal,
-            };
-            (
-                element_type,
-                storage,
-                handle.shape.clone(),
-                ProviderResidency::Device,
-            )
-        }
-        _ => return None,
-    };
-    Some(ProviderRepresentation {
-        element_type,
-        storage,
-        layout: ProviderLayout::ColumnMajorContiguous,
-        shape: shape
-            .into_iter()
-            .map(|extent| u64::try_from(extent).unwrap_or(u64::MAX))
-            .collect(),
-        residency,
-    })
-}
-
-fn provider_rejection_token(code: ProviderRejectionCode) -> &'static str {
-    match code {
-        ProviderRejectionCode::UnsupportedOperation => "provider_operation_unsupported",
-        ProviderRejectionCode::UnsupportedElementType => "provider_element_type_unsupported",
-        ProviderRejectionCode::UnsupportedStorage => "provider_storage_unsupported",
-        ProviderRejectionCode::UnsupportedLayout => "provider_layout_unsupported",
-        ProviderRejectionCode::UnsupportedRank => "provider_rank_unsupported",
-        ProviderRejectionCode::InvalidShape => "provider_shape_invalid",
-        ProviderRejectionCode::ResourceLimit => "provider_resource_limit",
-        ProviderRejectionCode::ProviderUnavailable => "provider_unavailable",
-    }
-}
-
 fn record_provider_rejection(
     trace: &PlacementTraceContext,
     rejection: Option<ProviderRejectionCode>,
@@ -867,7 +782,7 @@ fn record_provider_rejection(
         trace.event(
             PlacementEventKind::Fallback,
             Some(PlacementVariant::SharedRuntime),
-            Some(provider_rejection_token(rejection)),
+            Some(crate::placement::provider_rejection_token(rejection)),
             None,
             None,
             &[],
@@ -1289,7 +1204,9 @@ impl NativeAutoOffload {
         }
         let inputs = values
             .iter()
-            .filter_map(|value| provider_representation(value, self.provider.precision()))
+            .filter_map(|value| {
+                crate::placement::tensor_representation(value, self.provider.precision())
+            })
             .collect();
         let query = ProviderFeasibilityQuery {
             operation: ProviderOperationIdentity::new(operation),

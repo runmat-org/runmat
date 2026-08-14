@@ -177,6 +177,7 @@ fn nlms_two_fused_reductions_integration() {
         let req = FusionExecutionRequest {
             plan: &plan,
             inputs: vec![Value::GpuTensor(x.clone())],
+            placement: None,
         };
         let _d = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*x,1)");
     }
@@ -323,6 +324,7 @@ fn nlms_two_fused_reductions_integration() {
         let req = FusionExecutionRequest {
             plan: &plan,
             inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
+            placement: None,
         };
         let y = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*w,1)");
         match y {
@@ -376,6 +378,7 @@ fn nlms_two_fused_reductions_integration() {
                 Value::GpuTensor(y_handle.clone()),
                 Value::GpuTensor(y_handle.clone()),
             ],
+            placement: None,
         };
         let e_val = execute_elementwise(req).expect("fused elementwise sub");
         match e_val.final_value {
@@ -502,6 +505,7 @@ fn nlms_two_fused_reductions_integration() {
         let req = FusionExecutionRequest {
             plan: &plan,
             inputs: vec![Value::GpuTensor(e_handle.clone())],
+            placement: None,
         };
         let mse = execute_reduction(req, cols, 1, 0).expect("fused mean(all)");
         match mse {

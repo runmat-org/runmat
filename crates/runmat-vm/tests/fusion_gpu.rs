@@ -14,9 +14,12 @@ use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, CorrcoefOptions,
     CovNormalization, CovRows, CovarianceOptions, FspecialRequest, GpuTensorHandle,
     HostTensorOwned, HostTensorView, ImageNormalizeDescriptor, PagefunRequest, PowerStepEpilogue,
-    ProviderCondNorm, ProviderConvMode, ProviderEigResult, ProviderLinsolveOptions,
-    ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions, ProviderPrecision,
-    UniqueOptions, UniqueResult,
+    ProviderCapabilityOperation, ProviderCapabilitySnapshot, ProviderConcurrencyCapabilities,
+    ProviderCondNorm, ProviderConvMode, ProviderEigResult, ProviderElementType,
+    ProviderFeasibility, ProviderFeasibilityQuery, ProviderLinsolveOptions, ProviderLinsolveResult,
+    ProviderNormOrder, ProviderOperationFamily, ProviderOperationIdentity, ProviderPinvOptions,
+    ProviderPrecision, ProviderResourceEstimate, ProviderStorage, UniqueOptions, UniqueResult,
+    PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
 use runmat_gc::gc_test_context;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
@@ -40,7 +43,7 @@ fn interpret_function(
     block_on(interpret_function_async(bytecode, vars))
 }
 use runmat_time::Instant;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
 
@@ -113,6 +116,7 @@ fn fusion_graph_helper_ignores_stale_compile_graph_metadata() {
 struct TestProvider {
     next_id: AtomicU64,
     buffers: Mutex<BufferStore>,
+    reject_fusion: AtomicBool,
 }
 
 impl TestProvider {
@@ -120,6 +124,7 @@ impl TestProvider {
         Self {
             next_id: AtomicU64::new(1),
             buffers: Mutex::new(HashMap::new()),
+            reject_fusion: AtomicBool::new(false),
         }
     }
 
@@ -148,6 +153,76 @@ impl TestProvider {
 }
 
 impl AccelProvider for TestProvider {
+    fn capability_snapshot(&self) -> ProviderCapabilitySnapshot {
+        const OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
+            ("transfer.upload", ProviderOperationFamily::Upload),
+            ("transfer.download", ProviderOperationFamily::Download),
+            ("fusion.elementwise", ProviderOperationFamily::Fusion),
+            ("fusion.reduction", ProviderOperationFamily::Fusion),
+            ("fusion.matmul_epilogue", ProviderOperationFamily::Fusion),
+            ("fusion.centered_gram", ProviderOperationFamily::Fusion),
+            (
+                "fusion.power_step_normalize",
+                ProviderOperationFamily::Fusion,
+            ),
+            ("fusion.explained_variance", ProviderOperationFamily::Fusion),
+            ("fusion.image_normalize", ProviderOperationFamily::Fusion),
+        ];
+        ProviderCapabilitySnapshot {
+            schema_version: PROVIDER_CAPABILITY_SCHEMA_VERSION,
+            revision: 1,
+            device: self.device_info_struct(),
+            operations: OPERATIONS
+                .iter()
+                .map(|(operation, family)| ProviderCapabilityOperation {
+                    identity: ProviderOperationIdentity::new(*operation),
+                    family: *family,
+                })
+                .collect(),
+            element_types: vec![ProviderElementType::F64],
+            max_rank: None,
+            max_allocation_bytes: None,
+            concurrency: ProviderConcurrencyCapabilities {
+                spawn_handles: self.spawn_handle_concurrency(),
+                concurrent_dispatch: false,
+                cancellation: false,
+                transactional_results: true,
+            },
+        }
+    }
+
+    fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
+        if self.reject_fusion.load(Ordering::Relaxed)
+            && query.family == ProviderOperationFamily::Fusion
+        {
+            return ProviderFeasibility::rejected(
+                runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                "test_provider.operation.unsupported",
+            );
+        }
+        let capability = self.capability_snapshot();
+        let supported = capability.supports_operation(&query.operation, query.family)
+            && query.inputs.iter().chain(&query.outputs).all(|value| {
+                value.element_type == ProviderElementType::F64
+                    && value.storage == ProviderStorage::DenseReal
+                    && value.checked_byte_len().is_some()
+            });
+        if supported {
+            ProviderFeasibility::supported(ProviderResourceEstimate {
+                transient_bytes: None,
+                output_bytes: query.outputs.iter().try_fold(0_u64, |total, value| {
+                    total.checked_add(value.checked_byte_len()?)
+                }),
+                dispatches: Some(1),
+            })
+        } else {
+            ProviderFeasibility::rejected(
+                runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                "test_provider.operation.unsupported",
+            )
+        }
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,
@@ -1422,6 +1497,119 @@ fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
     runmat_accelerate_api::set_thread_provider(None);
     runmat_accelerate_api::clear_provider();
     guard
+}
+
+#[test]
+fn fusion_execution_records_one_correlated_provider_lifecycle() {
+    gc_test_context(|| {
+        let _guard = accel_test_lock();
+        ensure_provider_registered();
+        runmat_accelerate::placement::reset();
+
+        let bytecode = compile_semantic(
+            r#"
+            x = [0.25, 0.5, 0.75];
+            y = sin(x) .* x + 2;
+            "#,
+        );
+        interpret(&bytecode).expect("fused execution");
+
+        let report = runmat_accelerate::placement_report();
+        let trace = report
+            .traces
+            .iter()
+            .find(|trace| trace.operation == "fusion.elementwise")
+            .expect("elementwise fusion placement trace");
+        assert!(trace.complete);
+        assert_eq!(trace.dropped_events, 0);
+        let kinds = trace
+            .events
+            .iter()
+            .map(|event| event.kind)
+            .collect::<Vec<_>>();
+        for required in [
+            runmat_accelerate::placement::PlacementEventKind::Candidate,
+            runmat_accelerate::placement::PlacementEventKind::Prepare,
+            runmat_accelerate::placement::PlacementEventKind::Selected,
+            runmat_accelerate::placement::PlacementEventKind::Upload,
+            runmat_accelerate::placement::PlacementEventKind::Compile,
+            runmat_accelerate::placement::PlacementEventKind::Queue,
+            runmat_accelerate::placement::PlacementEventKind::Kernel,
+            runmat_accelerate::placement::PlacementEventKind::Complete,
+        ] {
+            assert!(kinds.contains(&required), "missing {required:?}: {kinds:?}");
+        }
+        let queue = trace
+            .events
+            .iter()
+            .find(|event| event.kind == runmat_accelerate::placement::PlacementEventKind::Queue)
+            .expect("queue event");
+        assert_eq!(queue.reason.as_deref(), Some("host_dispatch"));
+        assert!(queue.duration_ns.is_some());
+        let kernel = trace
+            .events
+            .iter()
+            .find(|event| event.kind == runmat_accelerate::placement::PlacementEventKind::Kernel)
+            .expect("kernel event");
+        assert_eq!(
+            kernel.reason.as_deref(),
+            Some("provider_timing_unavailable")
+        );
+        assert_eq!(kernel.duration_ns, None);
+    });
+}
+
+#[test]
+fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {
+    gc_test_context(|| {
+        let _guard = accel_test_lock();
+        ensure_provider_registered();
+        configure_auto_offload(AutoOffloadOptions {
+            enabled: false,
+            calibrate: false,
+            profile_path: None,
+            log_level: AutoOffloadLogLevel::Trace,
+        });
+        let provider = PROVIDER.get().expect("test provider");
+        provider.reject_fusion.store(true, Ordering::Relaxed);
+        runmat_accelerate::placement::reset();
+
+        let bytecode = compile_semantic(
+            r#"
+            x = [0.25, 0.5, 0.75];
+            y = sin(x) .* x + 2;
+            "#,
+        );
+        interpret(&bytecode).expect("shared-runtime fusion fallback");
+        provider.reject_fusion.store(false, Ordering::Relaxed);
+
+        let report = runmat_accelerate::placement_report();
+        let trace = report
+            .traces
+            .iter()
+            .find(|trace| trace.operation == "fusion.elementwise")
+            .expect("elementwise fusion placement trace");
+        assert!(trace.complete);
+        assert!(trace.events.iter().any(|event| {
+            event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
+                && event.variant
+                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
+                && event.reason.as_deref() == Some("provider_operation_unsupported")
+        }));
+        assert!(trace.events.iter().any(|event| {
+            event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
+                && event.reason.as_deref() == Some("fusion_execution_failed")
+        }));
+        assert!(!trace.events.iter().any(|event| {
+            matches!(
+                event.kind,
+                runmat_accelerate::placement::PlacementEventKind::Upload
+                    | runmat_accelerate::placement::PlacementEventKind::Compile
+                    | runmat_accelerate::placement::PlacementEventKind::Queue
+                    | runmat_accelerate::placement::PlacementEventKind::Kernel
+            )
+        }));
+    });
 }
 
 #[test]
@@ -2734,6 +2922,7 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
         let result = execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(2.0)],
+            placement: None,
         })
         .expect("direct fusion execution");
 
@@ -2770,6 +2959,7 @@ fn direct_execution_of_inverse_hyperbolic_group_returns_gpu_tensor() {
         let result = execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(1.0)],
+            placement: None,
         })
         .expect("direct fusion execution");
 
@@ -2806,6 +2996,7 @@ fn direct_execution_of_mod_and_rem_group_returns_gpu_tensor() {
         let result = execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(2.0), Value::Num(2.0)],
+            placement: None,
         })
         .expect("direct fusion execution");
 

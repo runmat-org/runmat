@@ -6,6 +6,7 @@ use crate::fusion::{
 use crate::fusion_residency;
 use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
+use crate::placement::{FusionPlacementObserver, PlacementCorrelationId};
 use crate::precision::ensure_provider_supports_dtype;
 use log;
 use runmat_accelerate_api::{
@@ -39,6 +40,7 @@ fn mark_fusion_output(handle: &GpuTensorHandle, inputs: &[Value]) {
 pub struct FusionExecutionRequest<'a> {
     pub plan: &'a FusionGroupPlan,
     pub inputs: Vec<Value>,
+    pub placement: Option<PlacementCorrelationId>,
 }
 
 pub struct ElementwiseExecutionResult {
@@ -123,6 +125,7 @@ impl FusionStageTimer {
 fn ensure_gpu_tensor(
     provider: &dyn AccelProvider,
     value: &Value,
+    observer: FusionPlacementObserver,
 ) -> Result<(GpuTensorHandle, Option<GpuTensorHandle>)> {
     reject_native_integer_fusion_values(std::slice::from_ref(value), &[])?;
     match value {
@@ -133,12 +136,47 @@ fn ensure_gpu_tensor(
                 data: &data,
                 shape: &tensor.shape,
             };
+            let started = Instant::now();
             let handle = provider.upload(&view)?;
+            observer.upload(started, host_f64_bytes(data.len()));
             runmat_accelerate_api::mark_handle_automatic(&handle);
             Ok((handle.clone(), Some(handle)))
         }
         _ => Err(anyhow!("fusion: expected tensor input")),
     }
+}
+
+fn host_f64_bytes(len: usize) -> Option<u64> {
+    u64::try_from(len).ok()?.checked_mul(8)
+}
+
+fn fusion_input_elements(values: &[Value]) -> Option<usize> {
+    values
+        .iter()
+        .filter_map(|value| match value {
+            Value::Tensor(tensor) => Some(tensor.len()),
+            Value::GpuTensor(handle) => Some(handle.shape.iter().copied().product::<usize>()),
+            Value::Num(_) => Some(1),
+            _ => None,
+        })
+        .max()
+}
+
+fn select_fusion_provider(
+    request: &FusionExecutionRequest<'_>,
+    provider: &dyn AccelProvider,
+    output_shapes: &[Vec<usize>],
+) -> Result<FusionPlacementObserver> {
+    let observer = FusionPlacementObserver::new(request.placement);
+    observer.select_provider(
+        provider,
+        &request.plan.group.kind,
+        &request.inputs,
+        output_shapes,
+        fusion_input_elements(&request.inputs),
+        None,
+    )?;
+    Ok(observer)
 }
 
 fn scalar_upload_dtype(provider: &dyn AccelProvider) -> NumericDType {
@@ -190,7 +228,7 @@ fn reject_native_integer_fusion_inputs(request: &FusionExecutionRequest<'_>) -> 
     reject_native_integer_fusion_values(&request.inputs, &constants)
 }
 
-fn scalar_from_value(value: &Value) -> Result<f64> {
+fn scalar_from_value(value: &Value, observer: FusionPlacementObserver) -> Result<f64> {
     reject_native_integer_fusion_values(std::slice::from_ref(value), &[])?;
     if let Some(v) = value_to_f64(value) {
         return Ok(v);
@@ -209,8 +247,14 @@ fn scalar_from_value(value: &Value) -> Result<f64> {
             }
         }
         Value::GpuTensor(_) => {
+            let started = Instant::now();
             let gathered = gather_if_needed(value).map_err(|e| anyhow!("image normalize: {e}"))?;
-            scalar_from_value(&gathered)
+            let bytes = match &gathered {
+                Value::Tensor(tensor) => host_f64_bytes(tensor.len()),
+                _ => None,
+            };
+            observer.synchronize(started, bytes);
+            scalar_from_value(&gathered, observer)
         }
         _ => Err(anyhow!(
             "image normalize: expected numeric scalar value, got {:?}",
@@ -223,19 +267,20 @@ fn resolve_image_scalar_value(
     scalar: &ImageScalar,
     plan: &FusionGroupPlan,
     request: &FusionExecutionRequest<'_>,
+    observer: FusionPlacementObserver,
 ) -> Result<f64> {
     match scalar {
         ImageScalar::Constant(v) => Ok(*v),
         ImageScalar::Value(vid) => {
             if let Some(value) = plan.const_values.get(vid) {
-                return scalar_from_value(value);
+                return scalar_from_value(value, observer);
             }
             if let Some(idx) = plan.inputs.iter().position(|id| *id == *vid) {
                 let runtime_value = request
                     .inputs
                     .get(idx)
                     .ok_or_else(|| anyhow!("image normalize: runtime scalar missing"))?;
-                return scalar_from_value(runtime_value);
+                return scalar_from_value(runtime_value, observer);
             }
             Err(anyhow!(
                 "image normalize: scalar input {:?} not materialized in plan",
@@ -329,6 +374,15 @@ fn execute_elementwise_outputs(
         }
     }
     output_shape = normalize_scalar_shape(&output_shape);
+    let observer = FusionPlacementObserver::new(request.placement);
+    observer.select_provider(
+        provider,
+        &request.plan.group.kind,
+        &request.inputs,
+        &vec![output_shape.clone(); output_ids.len()],
+        Some(len),
+        None,
+    )?;
     let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
     let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
     let mut prepared = Vec::with_capacity(request.inputs.len());
@@ -351,7 +405,9 @@ fn execute_elementwise_outputs(
                     data: &data,
                     shape: &t.shape,
                 };
+                let started = Instant::now();
                 let handle = provider.upload(&view)?;
+                observer.upload(started, host_f64_bytes(data.len()));
                 prepared.push(PreparedInput {
                     handle: handle.clone(),
                     owned: Some(handle),
@@ -373,7 +429,9 @@ fn execute_elementwise_outputs(
                     data,
                     shape: &scalar_shape,
                 };
+                let started = Instant::now();
                 let handle = provider.upload(&view)?;
+                observer.upload(started, host_f64_bytes(data.len()));
                 prepared.push(PreparedInput {
                     handle: handle.clone(),
                     owned: Some(handle),
@@ -397,30 +455,41 @@ fn execute_elementwise_outputs(
     if output_ids.len() == 1 {
         // Fast path: single output, use the existing single-dispatch API.
         let output_id = output_ids[0];
+        let started = Instant::now();
         let shader = request
             .plan
             .generate_wgsl_for_output(output_id, scalar_ty)
             .ok_or_else(|| anyhow!("fusion: WGSL generation failed for output {output_id}"))?;
+        observer.compile(started);
         timer.mark("generate_wgsl");
+        let started = Instant::now();
         let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
+        observer.queue(started);
+        observer.kernel_unmeasured();
         mark_fusion_output(&output, &request.inputs);
         outputs.insert(output_id, Value::GpuTensor(output));
     } else {
         // Multi-output path: generate one shader that writes all outputs in a single dispatch,
         // reducing O(N²) GPU work (N full-chain recomputations) to O(N).
+        let started = Instant::now();
         let shader = request
             .plan
             .generate_wgsl_for_outputs(output_ids, scalar_ty)
             .ok_or_else(|| anyhow!("fusion: multi-output WGSL generation failed"))?;
+        observer.compile(started);
         timer.mark("generate_wgsl");
-        match provider.fused_elementwise_multi(
+        let started = Instant::now();
+        let multi_result = provider.fused_elementwise_multi(
             &shader,
             &handles,
             &output_shape,
             len,
             output_ids.len(),
-        ) {
+        );
+        observer.queue(started);
+        match multi_result {
             Ok(out_handles) => {
+                observer.kernel_unmeasured();
                 for (output_id, handle) in output_ids.iter().copied().zip(out_handles) {
                     mark_fusion_output(&handle, &request.inputs);
                     outputs.insert(output_id, Value::GpuTensor(handle));
@@ -429,14 +498,19 @@ fn execute_elementwise_outputs(
             Err(_) => {
                 // Provider does not support multi-output dispatch; fall back to N single dispatches.
                 for output_id in output_ids.iter().copied() {
+                    let started = Instant::now();
                     let single_shader = request
                         .plan
                         .generate_wgsl_for_output(output_id, scalar_ty)
                         .ok_or_else(|| {
                             anyhow!("fusion: WGSL generation failed for output {output_id}")
                         })?;
+                    observer.compile(started);
+                    let started = Instant::now();
                     let output =
                         provider.fused_elementwise(&single_shader, &handles, &output_shape, len)?;
+                    observer.queue(started);
+                    observer.kernel_unmeasured();
                     mark_fusion_output(&output, &request.inputs);
                     outputs.insert(output_id, Value::GpuTensor(output));
                 }
@@ -544,6 +618,15 @@ pub fn execute_reduction_with_shape(
         let constant_shape = request.plan.constant_shape(len);
         normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
+    let observer = FusionPlacementObserver::new(request.placement);
+    observer.select_provider(
+        provider,
+        &request.plan.group.kind,
+        &request.inputs,
+        &[output_shape.to_vec()],
+        Some(len),
+        None,
+    )?;
     let mut timer = FusionStageTimer::new("reduction", request.plan.index, len);
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
@@ -565,7 +648,9 @@ pub fn execute_reduction_with_shape(
                     data: &data,
                     shape: &t.shape,
                 };
+                let started = Instant::now();
                 let handle = provider.upload(&view)?;
+                observer.upload(started, host_f64_bytes(data.len()));
                 prepared.push(PreparedInput {
                     handle: handle.clone(),
                     owned: Some(handle),
@@ -587,7 +672,9 @@ pub fn execute_reduction_with_shape(
                     data,
                     shape: &scalar_shape,
                 };
+                let started = Instant::now();
                 let handle = provider.upload(&view)?;
+                observer.upload(started, host_f64_bytes(data.len()));
                 prepared.push(PreparedInput {
                     handle: handle.clone(),
                     owned: Some(handle),
@@ -614,10 +701,12 @@ pub fn execute_reduction_with_shape(
         ProviderPrecision::F32 => "f32",
         ProviderPrecision::F64 => "f64",
     };
+    let started = Instant::now();
     let shader = request
         .plan
         .generate_reduction_wgsl(scalar_ty)
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
+    observer.compile(started);
     timer.mark("generate_wgsl");
     if std::env::var("RUNMAT_DEBUG_DUMP_FUSED_WGSL").is_ok() {
         println!(
@@ -643,6 +732,7 @@ pub fn execute_reduction_with_shape(
         .plan
         .reduction_flavor
         .unwrap_or(ReductionFlavor::Sum);
+    let started = Instant::now();
     let output = provider.fused_reduction(
         &shader,
         &handles,
@@ -652,6 +742,8 @@ pub fn execute_reduction_with_shape(
         wg,
         flavor,
     )?;
+    observer.queue(started);
+    observer.kernel_unmeasured();
     timer.mark("dispatch");
     mark_fusion_output(&output, &request.inputs);
 
@@ -673,6 +765,7 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let observer = select_fusion_provider(&request, provider, &[])?;
     let (matrix_vid, normalization) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::CenteredGram {
             matrix,
@@ -692,7 +785,7 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
         .get(matrix_index)
         .ok_or_else(|| anyhow!("centered gram: matrix value missing"))?;
 
-    let (matrix_handle, owned_matrix) = ensure_gpu_tensor(provider, matrix_value)?;
+    let (matrix_handle, owned_matrix) = ensure_gpu_tensor(provider, matrix_value, observer)?;
 
     let options = CovarianceOptions {
         normalization,
@@ -700,9 +793,11 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
         has_weight_vector: false,
     };
 
+    observer.queue_unmeasured();
     let output = provider
         .covariance(&matrix_handle, None, None, &options)
         .await?;
+    observer.kernel_unmeasured();
 
     if let Some(temp) = owned_matrix {
         let _ = provider.free(&temp);
@@ -719,6 +814,7 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let observer = select_fusion_provider(&request, provider, &[])?;
     let (lhs_vid, rhs_vid, epsilon) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::PowerStepNormalize { lhs, rhs, epsilon }) => (*lhs, *rhs, *epsilon),
         _ => {
@@ -750,13 +846,15 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
         .get(rhs_index)
         .ok_or_else(|| anyhow!("power-step normalization: rhs value missing"))?;
 
-    let (lhs_handle, lhs_owned) = ensure_gpu_tensor(provider, lhs_value)?;
-    let (rhs_handle, rhs_owned) = ensure_gpu_tensor(provider, rhs_value)?;
+    let (lhs_handle, lhs_owned) = ensure_gpu_tensor(provider, lhs_value, observer)?;
+    let (rhs_handle, rhs_owned) = ensure_gpu_tensor(provider, rhs_value, observer)?;
 
     let desc = PowerStepEpilogue { epsilon };
+    observer.queue_unmeasured();
     let output = provider
         .matmul_power_step(&lhs_handle, &rhs_handle, &desc)
         .await?;
+    observer.kernel_unmeasured();
 
     if let Some(temp) = lhs_owned {
         let _ = provider.free(&temp);
@@ -776,6 +874,7 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let observer = select_fusion_provider(&request, provider, &[])?;
     let (q_vid, g_vid) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ExplainedVariance { q, g }) => (*q, *g),
         _ => return Err(anyhow!("explained variance: missing pattern metadata")),
@@ -799,8 +898,8 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
     let q_value = find_value(q_vid)?;
     let g_value = find_value(g_vid)?;
 
-    let (mut q_handle, q_owned) = ensure_gpu_tensor(provider, q_value)?;
-    let (g_handle, g_owned) = ensure_gpu_tensor(provider, g_value)?;
+    let (mut q_handle, q_owned) = ensure_gpu_tensor(provider, q_value, observer)?;
+    let (g_handle, g_owned) = ensure_gpu_tensor(provider, g_value, observer)?;
 
     let debug_explained = std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok();
     if debug_explained {
@@ -808,7 +907,9 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
             "[explained] initial Q shape {:?}, G shape {:?}",
             q_handle.shape, g_handle.shape
         );
+        let started = Instant::now();
         if let Ok(info) = provider.download(&q_handle).await {
+            observer.synchronize(started, host_f64_bytes(info.data.len()));
             println!(
                 "[explained] Q (sample) len={} first=[{:?}]",
                 info.data.len(),
@@ -835,7 +936,9 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
         return Err(anyhow!("explained variance: G shape mismatch"));
     }
 
+    observer.queue_unmeasured();
     let mut tmp = provider.matmul(&q_handle, &g_handle).await?;
+    observer.kernel_unmeasured();
     let tmp_shape = tmp.shape.clone();
     if tmp_shape.len() < 2 {
         return Err(anyhow!("explained variance: intermediate must be 2-D"));
@@ -859,7 +962,9 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
     transposed_shape.swap(0, 1);
     let q_transposed_view = provider.reshape(&q_handle, &transposed_shape)?;
 
+    observer.queue_unmeasured();
     tmp = provider.matmul(&q_transposed_view, &g_handle).await?;
+    observer.kernel_unmeasured();
 
     if debug_explained {
         println!(
@@ -871,13 +976,18 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
     // Restore Q's original shape before the second multiplication.
     q_handle = provider.reshape(&q_handle, &q_shape)?;
 
+    observer.queue_unmeasured();
     let product = provider.matmul(&tmp, &q_handle).await?;
+    observer.kernel_unmeasured();
 
     if debug_explained {
         println!("[explained] product shape {:?}", product.shape);
     }
 
+    let started = Instant::now();
     let diag = provider.diag_extract(&product, 0)?;
+    observer.queue(started);
+    observer.kernel_unmeasured();
     let diag = match diag.shape.as_slice() {
         [len] => provider.reshape(&diag, &[*len, 1])?,
         [_len, 1] => diag,
@@ -916,6 +1026,7 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let observer = select_fusion_provider(&request, provider, &[])?;
     let pattern = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ImageNormalize(p)) => p,
         _ => return Err(anyhow!("image normalize: missing pattern metadata")),
@@ -944,7 +1055,7 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
     };
 
     let input_value = find_value(pattern.input)?;
-    let (input_handle, input_owned) = ensure_gpu_tensor(provider, input_value)?;
+    let (input_handle, input_owned) = ensure_gpu_tensor(provider, input_value, observer)?;
     let shape = input_handle.shape.clone();
     if shape.len() != 3 {
         return Err(anyhow!(
@@ -956,17 +1067,32 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
     let height = shape[1];
     let width = shape[2];
 
-    let epsilon = resolve_image_scalar_value(&pattern.epsilon, request.plan, &request)?;
+    let epsilon = resolve_image_scalar_value(&pattern.epsilon, request.plan, &request, observer)?;
     let gain = match &pattern.gain {
-        Some(s) => Some(resolve_image_scalar_value(s, request.plan, &request)?),
+        Some(s) => Some(resolve_image_scalar_value(
+            s,
+            request.plan,
+            &request,
+            observer,
+        )?),
         None => None,
     };
     let bias = match &pattern.bias {
-        Some(s) => Some(resolve_image_scalar_value(s, request.plan, &request)?),
+        Some(s) => Some(resolve_image_scalar_value(
+            s,
+            request.plan,
+            &request,
+            observer,
+        )?),
         None => None,
     };
     let gamma = match &pattern.gamma {
-        Some(s) => Some(resolve_image_scalar_value(s, request.plan, &request)?),
+        Some(s) => Some(resolve_image_scalar_value(
+            s,
+            request.plan,
+            &request,
+            observer,
+        )?),
         None => None,
     };
 
@@ -984,7 +1110,9 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
         log::trace!("execute_image_normalize: desc {:?}", desc);
     }
 
+    observer.queue_unmeasured();
     let output = provider.image_normalize(&input_handle, &desc).await?;
+    observer.kernel_unmeasured();
 
     if let Some(temp) = input_owned {
         provider.free(&temp).ok();
@@ -1001,6 +1129,7 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
         return Err(anyhow!("unsupported fusion kind"));
     }
     let prov = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let observer = select_fusion_provider(&request, prov, &[])?;
 
     // Map ValueId -> prepared GpuTensorHandle
     let mut prepared: Vec<(graph::ValueId, GpuTensorHandle, Option<GpuTensorHandle>)> = Vec::new();
@@ -1018,7 +1147,9 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
                     data: &data,
                     shape: &t.shape,
                 };
+                let started = Instant::now();
                 let h = prov.upload(&view)?;
+                observer.upload(started, host_f64_bytes(data.len()));
                 owned.push(h.clone());
                 h
             }
@@ -1221,7 +1352,9 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
         diag_handle = Some((vid, handle));
     }
 
+    observer.queue_unmeasured();
     let out = prov.matmul_epilogue(&a, &b, &ep).await?;
+    observer.kernel_unmeasured();
     for h in owned {
         let _ = prov.free(&h);
     }

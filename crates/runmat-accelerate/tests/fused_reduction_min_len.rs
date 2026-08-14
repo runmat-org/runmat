@@ -106,6 +106,7 @@ fn fused_single_pass_reduce_len_1_no_alias() {
     let req = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x), Value::GpuTensor(w)],
+        placement: None,
     };
     // reduce_len=rows=1, num_slices=cols
     let _ = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*W,1) should run");

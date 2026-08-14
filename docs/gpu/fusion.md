@@ -112,6 +112,8 @@ Fusion is not required for correctness. If a group has a barrier, stack mismatch
 
 Provider feasibility is checked without executing a candidate. Unsupported operation identities, element types, storage/layout combinations, ranks, shapes, and resource requirements produce structured rejection codes. Placement diagnostics retain bounded, correlated events with stable reason tokens so these fallbacks can be inspected without recording source text or runtime values.
 
+Each fusion attempt uses one correlation from the VM gate through input preparation, provider selection, shader generation when applicable, uploads, dispatch, kernel execution, synchronization when a real readback occurs, and completion or fallback. Timing remains stage-specific: synchronous host dispatch can report its measured duration, while providers that do not expose device or asynchronous queue timing emit an explicit unavailable reason instead of attributing the whole provider call to kernel execution. A feasibility rejection is recorded before shader generation, transfer, or dispatch, and ordinary bytecode remains the semantic fallback.
+
 ## Tuning
 
 The acceleration layer exposes runtime knobs for thresholds, calibration, and backend tuning. The exact set is backend-dependent, but the important policy is stable: small or synchronization-heavy work remains on CPU; large elementwise, reduction, matrix, image, and signal workloads are candidates for GPU execution.

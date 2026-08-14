@@ -2,9 +2,10 @@ use runmat_accelerate_api::{
     AccelProvider, ProviderCapabilityOperation, ProviderCapabilitySnapshot,
     ProviderConcurrencyCapabilities, ProviderElementType, ProviderFeasibility,
     ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
-    ProviderRejectionCode, ProviderResourceEstimate, ProviderStorage,
-    PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    ProviderPrecision, ProviderRejectionCode, ProviderRepresentation, ProviderResidency,
+    ProviderResourceEstimate, ProviderStorage, PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
+use runmat_value::{NumericDType, Value};
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ("transfer.upload", ProviderOperationFamily::Upload),
@@ -41,6 +42,112 @@ const WGPU_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ("fusion.explained_variance", ProviderOperationFamily::Fusion),
     ("fusion.image_normalize", ProviderOperationFamily::Fusion),
 ];
+
+pub(crate) fn tensor_representation(
+    value: &Value,
+    provider_precision: ProviderPrecision,
+) -> Option<ProviderRepresentation> {
+    let (element_type, storage, shape, residency) = match value {
+        Value::Tensor(tensor) => (
+            provider_element_type(tensor.numeric_dtype()),
+            ProviderStorage::DenseReal,
+            tensor.shape.clone(),
+            ProviderResidency::Host,
+        ),
+        Value::GpuTensor(handle) => {
+            let element_type = if runmat_accelerate_api::handle_is_logical(handle) {
+                ProviderElementType::Logical
+            } else if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
+                ProviderElementType::from(integer_type)
+            } else {
+                let precision =
+                    runmat_accelerate_api::handle_precision(handle).unwrap_or(provider_precision);
+                match runmat_accelerate_api::handle_storage(handle) {
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => {
+                        match precision {
+                            ProviderPrecision::F32 => ProviderElementType::ComplexF32,
+                            ProviderPrecision::F64 => ProviderElementType::ComplexF64,
+                        }
+                    }
+                    _ => ProviderElementType::from(precision),
+                }
+            };
+            let storage = match runmat_accelerate_api::handle_storage(handle) {
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => {
+                    ProviderStorage::DenseComplexInterleaved
+                }
+                _ => ProviderStorage::DenseReal,
+            };
+            (
+                element_type,
+                storage,
+                handle.shape.clone(),
+                ProviderResidency::Device,
+            )
+        }
+        Value::Num(_) => (
+            ProviderElementType::from(provider_precision),
+            ProviderStorage::DenseReal,
+            Vec::new(),
+            ProviderResidency::Host,
+        ),
+        _ => return None,
+    };
+    Some(ProviderRepresentation {
+        element_type,
+        storage,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: shape
+            .into_iter()
+            .map(|extent| u64::try_from(extent).unwrap_or(u64::MAX))
+            .collect(),
+        residency,
+    })
+}
+
+pub(crate) fn dense_output_representation(
+    provider_precision: ProviderPrecision,
+    shape: &[usize],
+) -> ProviderRepresentation {
+    ProviderRepresentation {
+        element_type: ProviderElementType::from(provider_precision),
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: shape
+            .iter()
+            .map(|&extent| u64::try_from(extent).unwrap_or(u64::MAX))
+            .collect(),
+        residency: ProviderResidency::Device,
+    }
+}
+
+pub(crate) fn provider_rejection_token(code: ProviderRejectionCode) -> &'static str {
+    match code {
+        ProviderRejectionCode::UnsupportedOperation => "provider_operation_unsupported",
+        ProviderRejectionCode::UnsupportedElementType => "provider_element_type_unsupported",
+        ProviderRejectionCode::UnsupportedStorage => "provider_storage_unsupported",
+        ProviderRejectionCode::UnsupportedLayout => "provider_layout_unsupported",
+        ProviderRejectionCode::UnsupportedRank => "provider_rank_unsupported",
+        ProviderRejectionCode::InvalidShape => "provider_shape_invalid",
+        ProviderRejectionCode::ResourceLimit => "provider_resource_limit",
+        ProviderRejectionCode::ProviderUnavailable => "provider_unavailable",
+    }
+}
+
+fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
+    match dtype {
+        NumericDType::F64 => ProviderElementType::F64,
+        NumericDType::F32 => ProviderElementType::F32,
+        NumericDType::I8 => ProviderElementType::I8,
+        NumericDType::I16 => ProviderElementType::I16,
+        NumericDType::I32 => ProviderElementType::I32,
+        NumericDType::I64 => ProviderElementType::I64,
+        NumericDType::U8 => ProviderElementType::U8,
+        NumericDType::U16 => ProviderElementType::U16,
+        NumericDType::U32 => ProviderElementType::U32,
+        NumericDType::U64 => ProviderElementType::U64,
+    }
+}
 
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
