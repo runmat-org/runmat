@@ -91363,6 +91363,193 @@
           "when": "`lsqcurvefit` is called with more than seven requested outputs.",
           "message": "lsqcurvefit: too many output arguments"
         }
+      ],
+      "extensions": [
+        {
+          "id": "lsqcurvefit-integer-x0",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit with a native-class integer initial point is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitIntegerX0Extension"
+        },
+        {
+          "id": "lsqcurvefit-integer-xdata",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit with native-class integer model data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitIntegerXdataExtension"
+        },
+        {
+          "id": "lsqcurvefit-integer-ydata",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit with native-class integer response data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitIntegerYdataExtension"
+        },
+        {
+          "id": "lsqcurvefit-integer-bound",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit with native-class integer bounds is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitIntegerBoundExtension"
+        },
+        {
+          "id": "lsqcurvefit-integer-option",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit with native-class integer numeric options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitIntegerOptionExtension"
+        },
+        {
+          "id": "lsqcurvefit-integer-callback-result",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit with a native-class integer model result is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitIntegerCallbackExtension"
+        },
+        {
+          "id": "lsqcurvefit-logical-numeric",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit with logical solver data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitLogicalNumericExtension"
+        },
+        {
+          "id": "lsqcurvefit-resident-input",
+          "mode": "RunMatOnly",
+          "description": "lsqcurvefit host fallback for explicit gpuArray values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LsqcurvefitResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = lsqcurvefit(fun, integer_x0, xdata, ydata, ___)",
+          "inputs": [
+            {
+              "name": "x0",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer initial points are gated before gather and cross only an exact binary64 solver boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The host nonlinear solver works in double and rejects any integer initial point that cannot cross exactly."
+        },
+        {
+          "form": "x = lsqcurvefit(fun, x0, integer_xdata, ydata, ___)",
+          "inputs": [
+            {
+              "name": "xdata",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer model data remains exact callback payload rather than being eagerly materialized as double."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "RunMat passes exact integer model data to the callback unchanged, including supported resident payloads."
+        },
+        {
+          "form": "x = lsqcurvefit(fun, x0, xdata, integer_ydata, ___)",
+          "inputs": [
+            {
+              "name": "ydata or fun result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer response and model values are independently gated and must be exact at residual subtraction."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Response data and callback results enter double residual arithmetic only after exact representability checks."
+        },
+        {
+          "form": "x = lsqcurvefit(fun, x0, xdata, ydata, integer_lb, integer_ub, ___)",
+          "inputs": [
+            {
+              "name": "lb or ub",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer bounds are gated before gather and must be exactly representable in the double solver domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer bounds are a RunMat-only extension and cross the double bound projection boundary exactly."
+        },
+        {
+          "form": "x = lsqcurvefit(___, options_with_integer_field)",
+          "inputs": [
+            {
+              "name": "numeric option field",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed MaxIter and MaxFunEvals are parsed structurally; typed tolerances cross a checked binary64 boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Integer option fields are gated before recursive gather; counts remain exact structural controls and tolerances convert exactly."
+        }
       ]
     },
     {
@@ -109591,7 +109778,7 @@
           ]
         },
         {
-          "label": "Z = null(A, \"r\")",
+          "label": "Z = null(A, \"rational\")",
           "inputs": [
             {
               "name": "A",
@@ -109605,7 +109792,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": null,
-              "description": "`\"r\"` requests a row-reduction basis."
+              "description": "`\"rational\"` requests a row-reduction basis; `\"r\"` is a legacy alias."
             }
           ],
           "outputs": [
@@ -109637,6 +109824,82 @@
           "identifier": "RunMat:null:Internal",
           "when": "Runtime fails while computing the null space or executing fallback/upload paths.",
           "message": "null: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "null-integer-matrix",
+          "mode": "RunMatOnly",
+          "description": "null with a native-class integer matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NullIntegerMatrixExtension"
+        },
+        {
+          "id": "null-logical-matrix",
+          "mode": "RunMatOnly",
+          "description": "null with a logical matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NullLogicalMatrixExtension"
+        },
+        {
+          "id": "null-resident-tolerance",
+          "mode": "RunMatOnly",
+          "description": "null with an explicit gpuArray tolerance is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NullResidentToleranceExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Z = null(integer_A, ___)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double A; RunMat gates integer matrices and checks the binary64 null-space boundary before materialization."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer A is a RunMat-only extension; exact host or resident values enter double SVD/RREF computation and return double bases."
+        },
+        {
+          "form": "Z = null(A, integer_tol)",
+          "inputs": [
+            {
+              "name": "tol",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented real numeric scalar tolerance accepts native integer scalars and converts only when exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Integer tolerance values are parsed exactly before the floating rank threshold; resident tolerance controls are a separately gated extension."
         }
       ]
     },
@@ -110261,6 +110524,154 @@
           "when": "Internal output materialization fails.",
           "message": "ode15s: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ode15s-integer-tspan",
+          "mode": "RunMatOnly",
+          "description": "ode15s with native-class integer tspan is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode15sIntegerTspanExtension"
+        },
+        {
+          "id": "ode15s-integer-y0",
+          "mode": "RunMatOnly",
+          "description": "ode15s with native-class integer y0 is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode15sIntegerY0Extension"
+        },
+        {
+          "id": "ode15s-integer-option",
+          "mode": "RunMatOnly",
+          "description": "ode15s with native-class integer numeric options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode15sIntegerOptionExtension"
+        },
+        {
+          "id": "ode15s-integer-callback-result",
+          "mode": "RunMatOnly",
+          "description": "ode15s with a native-class integer derivative result is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode15sIntegerCallbackExtension"
+        },
+        {
+          "id": "ode15s-logical-numeric",
+          "mode": "RunMatOnly",
+          "description": "ode15s with logical solver data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode15sLogicalNumericExtension"
+        },
+        {
+          "id": "ode15s-resident-input",
+          "mode": "RunMatOnly",
+          "description": "ode15s host fallback for explicit gpuArray values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode15sResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[t,y] = ode15s(odefun, integer_tspan, y0, ___)",
+          "inputs": [
+            {
+              "name": "tspan",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer time points are a checked RunMat-only input to the host double integration loop."
+        },
+        {
+          "form": "[t,y] = ode15s(odefun, tspan, integer_y0, ___)",
+          "inputs": [
+            {
+              "name": "y0",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer initial states are a checked RunMat-only input and produce floating solver outputs."
+        },
+        {
+          "form": "[t,y] = ode15s(___, options_with_integer_field)",
+          "inputs": [
+            {
+              "name": "numeric option field",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed numeric ODE option fields are gated before recursive gather; floating controls convert only when exact and MaxSteps remains structural."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Integer option fields are independently gated; tolerances and step sizes cross exactly while the RunMat MaxSteps extension remains an exact count."
+        },
+        {
+          "form": "[t,y] = ode15s(integer_returning_odefun, ___)",
+          "inputs": [
+            {
+              "name": "odefun result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer derivative values are a RunMat-only callback extension and enter the solver only after exact representability checks."
+        }
       ]
     },
     {
@@ -110456,6 +110867,154 @@
           "when": "Internal output materialization fails.",
           "message": "ode23: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ode23-integer-tspan",
+          "mode": "RunMatOnly",
+          "description": "ode23 with native-class integer tspan is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode23IntegerTspanExtension"
+        },
+        {
+          "id": "ode23-integer-y0",
+          "mode": "RunMatOnly",
+          "description": "ode23 with native-class integer y0 is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode23IntegerY0Extension"
+        },
+        {
+          "id": "ode23-integer-option",
+          "mode": "RunMatOnly",
+          "description": "ode23 with native-class integer numeric options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode23IntegerOptionExtension"
+        },
+        {
+          "id": "ode23-integer-callback-result",
+          "mode": "RunMatOnly",
+          "description": "ode23 with a native-class integer derivative result is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode23IntegerCallbackExtension"
+        },
+        {
+          "id": "ode23-logical-numeric",
+          "mode": "RunMatOnly",
+          "description": "ode23 with logical solver data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode23LogicalNumericExtension"
+        },
+        {
+          "id": "ode23-resident-input",
+          "mode": "RunMatOnly",
+          "description": "ode23 host fallback for explicit gpuArray values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode23ResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[t,y] = ode23(odefun, integer_tspan, y0, ___)",
+          "inputs": [
+            {
+              "name": "tspan",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer time points are a checked RunMat-only input to the host double integration loop."
+        },
+        {
+          "form": "[t,y] = ode23(odefun, tspan, integer_y0, ___)",
+          "inputs": [
+            {
+              "name": "y0",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer initial states are a checked RunMat-only input and produce floating solver outputs."
+        },
+        {
+          "form": "[t,y] = ode23(___, options_with_integer_field)",
+          "inputs": [
+            {
+              "name": "numeric option field",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed numeric ODE option fields are gated before recursive gather; floating controls convert only when exact and MaxSteps remains structural."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Integer option fields are independently gated; tolerances and step sizes cross exactly while the RunMat MaxSteps extension remains an exact count."
+        },
+        {
+          "form": "[t,y] = ode23(integer_returning_odefun, ___)",
+          "inputs": [
+            {
+              "name": "odefun result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer derivative values are a RunMat-only callback extension and enter the solver only after exact representability checks."
+        }
       ]
     },
     {
@@ -110650,6 +111209,154 @@
           "identifier": "RunMat:ode45:Internal",
           "when": "Internal output materialization fails.",
           "message": "ode45: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ode45-integer-tspan",
+          "mode": "RunMatOnly",
+          "description": "ode45 with native-class integer tspan is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode45IntegerTspanExtension"
+        },
+        {
+          "id": "ode45-integer-y0",
+          "mode": "RunMatOnly",
+          "description": "ode45 with native-class integer y0 is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode45IntegerY0Extension"
+        },
+        {
+          "id": "ode45-integer-option",
+          "mode": "RunMatOnly",
+          "description": "ode45 with native-class integer numeric options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode45IntegerOptionExtension"
+        },
+        {
+          "id": "ode45-integer-callback-result",
+          "mode": "RunMatOnly",
+          "description": "ode45 with a native-class integer derivative result is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode45IntegerCallbackExtension"
+        },
+        {
+          "id": "ode45-logical-numeric",
+          "mode": "RunMatOnly",
+          "description": "ode45 with logical solver data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode45LogicalNumericExtension"
+        },
+        {
+          "id": "ode45-resident-input",
+          "mode": "RunMatOnly",
+          "description": "ode45 host fallback for explicit gpuArray values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ode45ResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[t,y] = ode45(odefun, integer_tspan, y0, ___)",
+          "inputs": [
+            {
+              "name": "tspan",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer time points are a checked RunMat-only input to the host double integration loop."
+        },
+        {
+          "form": "[t,y] = ode45(odefun, tspan, integer_y0, ___)",
+          "inputs": [
+            {
+              "name": "y0",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer initial states are a checked RunMat-only input and produce floating solver outputs."
+        },
+        {
+          "form": "[t,y] = ode45(___, options_with_integer_field)",
+          "inputs": [
+            {
+              "name": "numeric option field",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed numeric ODE option fields are gated before recursive gather; floating controls convert only when exact and MaxSteps remains structural."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Integer option fields are independently gated; tolerances and step sizes cross exactly while the RunMat MaxSteps extension remains an exact count."
+        },
+        {
+          "form": "[t,y] = ode45(integer_returning_odefun, ___)",
+          "inputs": [
+            {
+              "name": "odefun result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer derivative values are a RunMat-only callback extension and enter the solver only after exact representability checks."
         }
       ]
     },
@@ -111668,7 +112375,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Solver name, such as fminbnd, fminunc, fzero, fsolve, or lsqcurvefit."
+              "description": "Solver name, such as coneprog, fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin."
             }
           ],
           "outputs": [
@@ -111689,7 +112396,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Solver name, such as fminbnd, fminunc, fzero, fsolve, or lsqcurvefit."
+              "description": "Solver name, such as coneprog, fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin."
             },
             {
               "name": "name",
@@ -111795,6 +112502,76 @@
           "when": "Nested flow fails while gathering input values.",
           "message": "optimoptions: flow failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "optimoptions-integer-option",
+          "mode": "RunMatOnly",
+          "description": "optimoptions with native-class integer option values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OptimoptionsIntegerOptionExtension"
+        },
+        {
+          "id": "optimoptions-resident-option",
+          "mode": "RunMatOnly",
+          "description": "optimoptions with explicit gpuArray option values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OptimoptionsResidentOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "options = optimoptions(___, floating_name, integer_value, ___)",
+          "inputs": [
+            {
+              "name": "floating option value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Optimization tolerances are documented in floating classes; typed integers are gated and must convert exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat's supported compatibility subset normalizes accepted integer tolerances to double only after an exact representability check."
+        },
+        {
+          "form": "options = optimoptions(___, structural_name, integer_value, ___)",
+          "inputs": [
+            {
+              "name": "count or logical option value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed iteration counts and logical flags are RunMat-only option-builder inputs parsed exactly before normalized storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Counts use exact integer-to-usize parsing and 0/1 logical controls become logical fields; current RunMat returns a struct rather than MATLAB's options object."
+        }
       ]
     },
     {
@@ -111891,6 +112668,49 @@
           "identifier": "RunMat:optimset:InvalidInput",
           "when": "Option field names are not valid string scalars.",
           "message": "optimset: invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "optimset-integer-option",
+          "mode": "RunMatOnly",
+          "description": "optimset with native-class integer option payloads is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OptimsetIntegerOptionExtension"
+        },
+        {
+          "id": "optimset-resident-option",
+          "mode": "RunMatOnly",
+          "description": "optimset preserving explicit gpuArray option payloads is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OptimsetResidentOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "options = optimset(___, name, integer_value, ___)",
+          "inputs": [
+            {
+              "name": "option value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented numeric optimset options use single or double; RunMat can preserve exact native integer payloads in its struct extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer payloads are gated and retained exactly in the RunMat options struct; automatic resident payloads gather while explicit resident preservation is separately gated."
         }
       ]
     },
@@ -120894,6 +121714,175 @@
           "identifier": "RunMat:quad:TooManyOutputs",
           "when": "`quad` is called with more than two requested output arguments.",
           "message": "quad: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "quad-integer-bound",
+          "mode": "RunMatOnly",
+          "description": "quad with native-class integer integration bounds is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QuadIntegerBoundExtension"
+        },
+        {
+          "id": "quad-integer-tolerance",
+          "mode": "RunMatOnly",
+          "description": "quad with a native-class integer tolerance is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QuadIntegerToleranceExtension"
+        },
+        {
+          "id": "quad-integer-callback-result",
+          "mode": "RunMatOnly",
+          "description": "quad with a native-class integer integrand result is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QuadIntegerCallbackExtension"
+        },
+        {
+          "id": "quad-logical-numeric",
+          "mode": "RunMatOnly",
+          "description": "quad with logical bounds, tolerance, or integrand values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QuadLogicalNumericExtension"
+        },
+        {
+          "id": "quad-resident-input",
+          "mode": "RunMatOnly",
+          "description": "quad host fallback for explicit gpuArray values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QuadResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "q = quad(fun, integer_a, integer_b, ___)",
+          "inputs": [
+            {
+              "name": "a or b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double finite limits; typed integer bounds are gated and cross binary64 exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer limits are RunMat-only and enter adaptive Simpson arithmetic only after exact checked conversion."
+        },
+        {
+          "form": "q = quad(fun, a, b, integer_tol, ___)",
+          "inputs": [
+            {
+              "name": "tol",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double tolerance; typed integer tolerance is a checked RunMat extension."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Integer tolerance is a RunMat-only checked floating control."
+        },
+        {
+          "form": "q = quad(fun, a, b, tol, integer_trace, ___)",
+          "inputs": [
+            {
+              "name": "trace",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonzero trace toggle reads integer scalars structurally without floating conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Trace compares exact integer zero/nonzero state and never materializes the selector as floating point."
+        },
+        {
+          "form": "q = quad(fun, a, b, tol, trace, integer_p1, ___)",
+          "inputs": [
+            {
+              "name": "p1, p2, ...",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Additional parameterized-function arguments are passed to the integrand unchanged and retain exact native integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Parameter arguments are callback payload and preserve native integer class/storage exactly."
+        },
+        {
+          "form": "q = quad(integer_returning_fun, a, b, ___)",
+          "inputs": [
+            {
+              "name": "fun result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer integrand results are gated and must cross the quadrature's binary64 boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer integrand results convert exactly before quadrature arithmetic."
         }
       ]
     },

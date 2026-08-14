@@ -11,12 +11,15 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::ode::common::{
-    build_ode_output, ode_options_from_struct, parse_ode_input, parse_options, solve_ode, OdeMethod,
+    build_ode_output, define_ode_integer_contract, ode_options_from_struct, parse_ode_input,
+    parse_options, prepare_ode_options, solve_ode, OdeMethod,
 };
 use crate::builtins::math::ode::type_resolvers::ode_solution_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ode15s";
+
+define_ode_integer_contract!("ode15s", "Ode15s");
 
 const ODE15S_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "y",
@@ -215,6 +218,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(ode_solution_type),
     descriptor(crate::builtins::math::ode::ode15s::ODE15S_DESCRIPTOR),
+    extensions(crate::builtins::math::ode::ode15s::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::ode::ode15s::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::ode::ode15s"
 )]
 async fn ode15s_builtin(
@@ -231,9 +236,12 @@ async fn ode15s_builtin(
     }
     let options = parse_options(NAME, rest.first())
         .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
+    let options = prepare_ode_options(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
+        .await
+        .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
     let opts = ode_options_from_struct(NAME, options.as_ref())
         .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
-    let input = parse_ode_input(NAME, tspan, y0)
+    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS)
         .await
         .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_INPUT))?;
     let result = solve_ode(NAME, OdeMethod::Ode15s, &function, &input, &opts)

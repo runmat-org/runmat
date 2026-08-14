@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The stiff integrator runs on the host. RHS callback functions may still call GPU-aware builtins."
+    "notes": "The stiff integrator runs on the host. Automatic residency gathers transparently; explicit gpuArray host fallback is a gated RunMat extension. RHS callback functions may still call GPU-aware builtins."
   },
   "fusion": {
     "elementwise": false,
@@ -30,6 +30,10 @@
   "behaviors": [
     "Supports scalar, vector, and matrix-valued initial conditions.",
     "Accepts options as a struct, including `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep`.",
+    "The documented tspan, y0, and derivative domains are single or double. Native integer and logical solver values are independently gated RunMat extensions, and every integer-to-double solver boundary requires exact representability.",
+    "Typed integer `MaxSteps` is parsed as an exact structural count; integer floating controls are checked before conversion.",
+    "The current RunMat integration loop and outputs are double even when all floating inputs are single; native-single output propagation remains a general compatibility gap rather than an integer extension.",
+    "Event outputs and solution-structure forms are not implemented by the current core solver surface.",
     "When `tspan` has more than two points, the solver returns values at each requested time.",
     "With one output, returns only the `y` trajectory matrix."
   ],

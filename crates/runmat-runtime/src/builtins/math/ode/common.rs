@@ -1,5 +1,5 @@
 use nalgebra::{DMatrix, DVector};
-use runmat_builtins::{StructValue, Tensor, Value};
+use runmat_builtins::{BuiltinExtensionDescriptor, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, lookup_option, value_to_real_vector};
@@ -10,6 +10,119 @@ const DEFAULT_ABS_TOL: f64 = 1.0e-6;
 const DEFAULT_MAX_STEPS: usize = 100_000;
 const ODE15S_NEWTON_MAX_ITERS: usize = 8;
 const ODE15S_NEWTON_DAMPING_TRIES: usize = 6;
+
+macro_rules! define_ode_integer_contract {
+    ($builtin:literal, $identifier:literal) => {
+        const INTEGER_TSPAN_EXTENSION: runmat_builtins::BuiltinExtensionDescriptor =
+            runmat_builtins::BuiltinExtensionDescriptor {
+                id: concat!($builtin, "-integer-tspan"),
+                mode: runmat_builtins::BuiltinExtensionMode::RunMatOnly,
+                description: concat!($builtin, " with native-class integer tspan is a RunMat extension"),
+                error_identifier: Some(concat!("RunMat:compatibility:", $identifier, "IntegerTspanExtension")),
+            };
+        const INTEGER_Y0_EXTENSION: runmat_builtins::BuiltinExtensionDescriptor =
+            runmat_builtins::BuiltinExtensionDescriptor {
+                id: concat!($builtin, "-integer-y0"),
+                mode: runmat_builtins::BuiltinExtensionMode::RunMatOnly,
+                description: concat!($builtin, " with native-class integer y0 is a RunMat extension"),
+                error_identifier: Some(concat!("RunMat:compatibility:", $identifier, "IntegerY0Extension")),
+            };
+        const INTEGER_OPTION_EXTENSION: runmat_builtins::BuiltinExtensionDescriptor =
+            runmat_builtins::BuiltinExtensionDescriptor {
+                id: concat!($builtin, "-integer-option"),
+                mode: runmat_builtins::BuiltinExtensionMode::RunMatOnly,
+                description: concat!($builtin, " with native-class integer numeric options is a RunMat extension"),
+                error_identifier: Some(concat!("RunMat:compatibility:", $identifier, "IntegerOptionExtension")),
+            };
+        const INTEGER_CALLBACK_EXTENSION: runmat_builtins::BuiltinExtensionDescriptor =
+            runmat_builtins::BuiltinExtensionDescriptor {
+                id: concat!($builtin, "-integer-callback-result"),
+                mode: runmat_builtins::BuiltinExtensionMode::RunMatOnly,
+                description: concat!($builtin, " with a native-class integer derivative result is a RunMat extension"),
+                error_identifier: Some(concat!("RunMat:compatibility:", $identifier, "IntegerCallbackExtension")),
+            };
+        const LOGICAL_NUMERIC_EXTENSION: runmat_builtins::BuiltinExtensionDescriptor =
+            runmat_builtins::BuiltinExtensionDescriptor {
+                id: concat!($builtin, "-logical-numeric"),
+                mode: runmat_builtins::BuiltinExtensionMode::RunMatOnly,
+                description: concat!($builtin, " with logical solver data is a RunMat extension"),
+                error_identifier: Some(concat!("RunMat:compatibility:", $identifier, "LogicalNumericExtension")),
+            };
+        const RESIDENT_INPUT_EXTENSION: runmat_builtins::BuiltinExtensionDescriptor =
+            runmat_builtins::BuiltinExtensionDescriptor {
+                id: concat!($builtin, "-resident-input"),
+                mode: runmat_builtins::BuiltinExtensionMode::RunMatOnly,
+                description: concat!($builtin, " host fallback for explicit gpuArray values is a RunMat extension"),
+                error_identifier: Some(concat!("RunMat:compatibility:", $identifier, "ResidentInputExtension")),
+            };
+        pub const EXTENSIONS: [runmat_builtins::BuiltinExtensionDescriptor; 6] = [
+            INTEGER_TSPAN_EXTENSION,
+            INTEGER_Y0_EXTENSION,
+            INTEGER_OPTION_EXTENSION,
+            INTEGER_CALLBACK_EXTENSION,
+            LOGICAL_NUMERIC_EXTENSION,
+            RESIDENT_INPUT_EXTENSION,
+        ];
+        const INTEGER_TSPAN_INPUT: [runmat_builtins::BuiltinIntegerInputCapability; 1] =
+            [runmat_builtins::BuiltinIntegerInputCapability {
+                name: "tspan",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly.",
+            }];
+        const INTEGER_Y0_INPUT: [runmat_builtins::BuiltinIntegerInputCapability; 1] =
+            [runmat_builtins::BuiltinIntegerInputCapability {
+                name: "y0",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly.",
+            }];
+        const INTEGER_OPTION_INPUT: [runmat_builtins::BuiltinIntegerInputCapability; 1] =
+            [runmat_builtins::BuiltinIntegerInputCapability {
+                name: "numeric option field",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "Typed numeric ODE option fields are gated before recursive gather; floating controls convert only when exact and MaxSteps remains structural.",
+            }];
+        const INTEGER_CALLBACK_INPUT: [runmat_builtins::BuiltinIntegerInputCapability; 1] =
+            [runmat_builtins::BuiltinIntegerInputCapability {
+                name: "odefun result",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion.",
+            }];
+        pub const INTEGER_CAPABILITIES: [runmat_builtins::BuiltinIntegerCapabilityDescriptor; 4] = [
+            runmat_builtins::BuiltinIntegerCapabilityDescriptor { form: concat!("[t,y] = ", $builtin, "(odefun, integer_tspan, y0, ___)"), inputs: &INTEGER_TSPAN_INPUT, computation_domain: runmat_builtins::BuiltinIntegerComputationDomain::FloatingPoint, output_class: runmat_builtins::BuiltinIntegerOutputClassRule::Double, overflow: runmat_builtins::BuiltinIntegerOverflowRule::Error, backend: runmat_builtins::BuiltinIntegerBackendRule::GatherFallback, overload: runmat_builtins::BuiltinIntegerOverloadKind::Multiple, notes: "Integer time points are a checked RunMat-only input to the host double integration loop." },
+            runmat_builtins::BuiltinIntegerCapabilityDescriptor { form: concat!("[t,y] = ", $builtin, "(odefun, tspan, integer_y0, ___)"), inputs: &INTEGER_Y0_INPUT, computation_domain: runmat_builtins::BuiltinIntegerComputationDomain::FloatingPoint, output_class: runmat_builtins::BuiltinIntegerOutputClassRule::Double, overflow: runmat_builtins::BuiltinIntegerOverflowRule::Error, backend: runmat_builtins::BuiltinIntegerBackendRule::GatherFallback, overload: runmat_builtins::BuiltinIntegerOverloadKind::Multiple, notes: "Integer initial states are a checked RunMat-only input and produce floating solver outputs." },
+            runmat_builtins::BuiltinIntegerCapabilityDescriptor { form: concat!("[t,y] = ", $builtin, "(___, options_with_integer_field)"), inputs: &INTEGER_OPTION_INPUT, computation_domain: runmat_builtins::BuiltinIntegerComputationDomain::FunctionSpecific, output_class: runmat_builtins::BuiltinIntegerOutputClassRule::Double, overflow: runmat_builtins::BuiltinIntegerOverflowRule::Error, backend: runmat_builtins::BuiltinIntegerBackendRule::GatherFallback, overload: runmat_builtins::BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer option fields are independently gated; tolerances and step sizes cross exactly while the RunMat MaxSteps extension remains an exact count." },
+            runmat_builtins::BuiltinIntegerCapabilityDescriptor { form: concat!("[t,y] = ", $builtin, "(integer_returning_odefun, ___)"), inputs: &INTEGER_CALLBACK_INPUT, computation_domain: runmat_builtins::BuiltinIntegerComputationDomain::FloatingPoint, output_class: runmat_builtins::BuiltinIntegerOutputClassRule::Double, overflow: runmat_builtins::BuiltinIntegerOverflowRule::Error, backend: runmat_builtins::BuiltinIntegerBackendRule::GatherFallback, overload: runmat_builtins::BuiltinIntegerOverloadKind::Multiple, notes: "Integer derivative values are a RunMat-only callback extension and enter the solver only after exact representability checks." },
+        ];
+        pub(crate) const ODE_COMPATIBILITY_EXTENSIONS: crate::builtins::math::ode::common::OdeCompatibilityExtensions =
+            crate::builtins::math::ode::common::OdeCompatibilityExtensions {
+                integer_tspan: &INTEGER_TSPAN_EXTENSION,
+                integer_y0: &INTEGER_Y0_EXTENSION,
+                integer_option: &INTEGER_OPTION_EXTENSION,
+                integer_callback: &INTEGER_CALLBACK_EXTENSION,
+                logical_numeric: &LOGICAL_NUMERIC_EXTENSION,
+                resident_input: &RESIDENT_INPUT_EXTENSION,
+            };
+    };
+}
+pub(crate) use define_ode_integer_contract;
+
+#[derive(Clone, Copy)]
+pub(crate) struct OdeCompatibilityExtensions {
+    pub(crate) integer_tspan: &'static BuiltinExtensionDescriptor,
+    pub(crate) integer_y0: &'static BuiltinExtensionDescriptor,
+    pub(crate) integer_option: &'static BuiltinExtensionDescriptor,
+    pub(crate) integer_callback: &'static BuiltinExtensionDescriptor,
+    pub(crate) logical_numeric: &'static BuiltinExtensionDescriptor,
+    pub(crate) resident_input: &'static BuiltinExtensionDescriptor,
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum OdeMethod {
@@ -44,6 +157,7 @@ pub(crate) struct OdeInput {
     pub y0: Vec<f64>,
     pub y_shape: Vec<usize>,
     pub scalar_state: bool,
+    extensions: OdeCompatibilityExtensions,
 }
 
 pub(crate) struct OdeResult {
@@ -99,29 +213,72 @@ pub(crate) fn ode_options_from_struct(
         }
     }
 
-    let max_steps = option_f64(name, options, "MaxSteps", DEFAULT_MAX_STEPS as f64)?;
-    if max_steps < 1.0 {
-        return Err(ode_error(
-            name,
-            format!("{name}: MaxSteps must be at least 1"),
-        ));
-    }
+    let max_steps = option_usize(name, options, "MaxSteps", DEFAULT_MAX_STEPS)?.max(1);
 
     Ok(OdeOptions {
         rel_tol,
         abs_tol,
         initial_step,
         max_step,
-        max_steps: max_steps.floor() as usize,
+        max_steps,
     })
+}
+
+pub(crate) async fn prepare_ode_options(
+    name: &str,
+    options: Option<StructValue>,
+    extensions: OdeCompatibilityExtensions,
+) -> BuiltinResult<Option<StructValue>> {
+    let Some(options) = options else {
+        return Ok(None);
+    };
+    let value = Value::Struct(options);
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extensions.resident_input, name)?;
+    }
+    if let Value::Struct(options) = &value {
+        for field in ["RelTol", "AbsTol", "InitialStep", "MaxStep", "MaxSteps"] {
+            let Some(field_value) = lookup_option(options, field) else {
+                continue;
+            };
+            if crate::builtins::common::validation::value_contains_native_integer_class(field_value)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    extensions.integer_option,
+                    name,
+                )?;
+                if field != "MaxSteps"
+                    && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(
+                        field_value,
+                    )
+                    .await?
+                {
+                    return Err(ode_error(
+                        name,
+                        format!(
+                            "{name}: integer option {field} must be exactly representable as double"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
+    let Value::Struct(options) = gathered else {
+        unreachable!("gather preserves struct shape")
+    };
+    Ok(Some(options))
 }
 
 pub(crate) async fn parse_ode_input(
     name: &str,
     tspan: Value,
     y0: Value,
+    extensions: OdeCompatibilityExtensions,
 ) -> BuiltinResult<OdeInput> {
-    let tspan_value = crate::dispatcher::gather_if_needed_async(&tspan).await?;
+    let tspan_value =
+        prepare_ode_numeric_value(name, "tspan", tspan, extensions.integer_tspan, extensions)
+            .await?;
     let tspan = value_to_real_vector(name, tspan_value).await?;
     if tspan.len() < 2 {
         return Err(ode_error(
@@ -143,7 +300,8 @@ pub(crate) async fn parse_ode_input(
         ));
     }
 
-    let y0_value = crate::dispatcher::gather_if_needed_async(&y0).await?;
+    let y0_value =
+        prepare_ode_numeric_value(name, "y0", y0, extensions.integer_y0, extensions).await?;
     let (y0, y_shape, scalar_state) = match y0_value {
         Value::Num(n) => (vec![n], vec![1, 1], true),
         Value::Int(i) => (vec![i.to_f64()], vec![1, 1], true),
@@ -186,7 +344,37 @@ pub(crate) async fn parse_ode_input(
         y0,
         y_shape,
         scalar_state,
+        extensions,
     })
+}
+
+async fn prepare_ode_numeric_value(
+    name: &str,
+    role: &str,
+    value: Value,
+    integer_extension: &'static BuiltinExtensionDescriptor,
+    extensions: OdeCompatibilityExtensions,
+) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(integer_extension, name)?;
+        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+        {
+            return Err(ode_error(
+                name,
+                format!("{name}: integer {role} must be exactly representable as double"),
+            ));
+        }
+    }
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(extensions.logical_numeric, name)?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extensions.resident_input, name)?;
+    }
+    crate::dispatcher::gather_if_needed_async(&value).await
 }
 
 pub(crate) async fn solve_ode(
@@ -674,6 +862,36 @@ async fn eval_rhs(
         )
     };
     let value = call_function(function, vec![Value::Num(t), y_arg]).await?;
+    if crate::builtins::common::validation::value_contains_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            input.extensions.integer_callback,
+            name,
+        )?;
+        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+        {
+            return Err(ode_error(
+                name,
+                format!(
+                    "{name}: integer derivative values must be exactly representable as double"
+                ),
+            ));
+        }
+    }
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            input.extensions.logical_numeric,
+            name,
+        )?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            input.extensions.resident_input,
+            name,
+        )?;
+    }
     let rhs = value_to_real_vector(name, value).await?;
     if rhs.len() != y.len() {
         return Err(ode_error(
@@ -800,6 +1018,49 @@ fn option_optional_f64(
     }
 }
 
+fn option_usize(
+    name: &str,
+    options: Option<&StructValue>,
+    field: &str,
+    default: usize,
+) -> BuiltinResult<usize> {
+    let Some(options) = options else {
+        return Ok(default);
+    };
+    let Some(value) = lookup_option(options, field) else {
+        return Ok(default);
+    };
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value >= 1)
+            .ok_or_else(|| ode_error(name, format!("{name}: option {field} must be at least 1")));
+    }
+    let parsed = match value {
+        Value::Num(value) => *value,
+        Value::Tensor(value) if tensor::is_scalar_tensor(value) => {
+            tensor::tensor_value_f64(value, 0)
+        }
+        other => {
+            return Err(ode_error(
+                name,
+                format!("{name}: option {field} must be numeric, got {other:?}"),
+            ))
+        }
+    };
+    if !parsed.is_finite()
+        || parsed < 1.0
+        || parsed.fract() != 0.0
+        || parsed >= 2f64.powi(usize::BITS as i32)
+    {
+        return Err(ode_error(
+            name,
+            format!("{name}: option {field} must be a supported positive integer"),
+        ));
+    }
+    Ok(parsed as usize)
+}
+
 pub(crate) fn build_ode_output(name: &str, result: OdeResult) -> BuiltinResult<Value> {
     let t = Tensor::new(result.t.clone(), vec![result.t.len(), 1])
         .map(Value::Tensor)
@@ -855,6 +1116,7 @@ mod tests {
 
     #[test]
     fn parse_ode_input_reads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tspan = Tensor::new_integer(IntegerStorage::U16(vec![0, 2]), vec![1, 2]).unwrap();
         let y0 = Tensor::new_integer(IntegerStorage::I16(vec![3, -4]), vec![2, 1]).unwrap();
 
@@ -862,6 +1124,7 @@ mod tests {
             "ode_test",
             Value::Tensor(tspan),
             Value::Tensor(y0),
+            super::super::ode45::ODE_COMPATIBILITY_EXTENSIONS,
         ))
         .unwrap();
 
@@ -869,6 +1132,27 @@ mod tests {
         assert_eq!(input.y0, vec![3.0, -4.0]);
         assert_eq!(input.y_shape, vec![2, 1]);
         assert!(!input.scalar_state);
+    }
+
+    #[test]
+    fn ode_integer_metadata_covers_every_shared_role_for_each_solver() {
+        let capability_sets = [
+            &super::super::ode15s::INTEGER_CAPABILITIES,
+            &super::super::ode23::INTEGER_CAPABILITIES,
+            &super::super::ode45::INTEGER_CAPABILITIES,
+        ];
+        for capabilities in capability_sets {
+            assert_eq!(capabilities.len(), 4);
+            for input in capabilities.iter().flat_map(|capability| capability.inputs) {
+                assert_eq!(
+                    input.availability,
+                    runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly
+                );
+            }
+            assert!(capabilities.iter().all(|capability| {
+                capability.backend == runmat_builtins::BuiltinIntegerBackendRule::GatherFallback
+            }));
+        }
     }
 
     #[test]
@@ -917,6 +1201,7 @@ mod tests {
             y0: vec![1.0],
             y_shape: vec![1, 1],
             scalar_state: true,
+            extensions: super::super::ode15s::ODE_COMPATIBILITY_EXTENSIONS,
         };
 
         let (next, err) = block_on(step_ode15s(

@@ -1566,6 +1566,43 @@ pub fn value_has_native_integer_class(value: &Value) -> bool {
     }
 }
 
+/// Returns whether `value`, including aggregate payloads, contains a native
+/// integer class. Use this at compatibility boundaries before a recursive
+/// gather can erase resident class metadata.
+pub fn value_contains_native_integer_class(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(value_contains_native_integer_class),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .any(value_contains_native_integer_class),
+        Value::Object(value) => value
+            .properties
+            .values()
+            .any(value_contains_native_integer_class),
+        Value::Closure(value) => value
+            .captures
+            .iter()
+            .any(value_contains_native_integer_class),
+        Value::OutputList(values) => values.iter().any(value_contains_native_integer_class),
+        _ => value_has_native_integer_class(value),
+    }
+}
+
+/// Returns whether `value`, including aggregate payloads, contains a handle
+/// created through explicit `gpuArray` intent rather than automatic residency.
+pub fn value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
+        _ => false,
+    }
+}
+
 pub fn value_has_logical_class(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::LogicalArray(_))
         || matches!(value, Value::GpuTensor(handle) if handle_is_logical(handle))
