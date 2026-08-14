@@ -1570,6 +1570,26 @@ pub trait AccelProvider: Send + Sync {
         None
     }
 
+    /// Returns a side-effect-free resource snapshot for placement admission.
+    /// Providers with allocator/queue telemetry should override this default;
+    /// the conservative snapshot exposes declared capacity when available,
+    /// leaves unknown queue state explicit, and never probes the device.
+    fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
+        let info = self.device_info_struct();
+        let capacity = info.memory_bytes;
+        runmat_execution::ProviderResourceSnapshot {
+            device_id: self.device_id(),
+            capacity_bytes: capacity,
+            live_bytes: 0,
+            reclaimable_bytes: 0,
+            scratch_available_bytes: capacity,
+            queue_depth: None,
+            queue_limit: None,
+            lost: false,
+            epoch: 0,
+        }
+    }
+
     /// Export a shared GPU context handle, allowing downstream systems (plotting, visualization)
     /// to reuse the same device/queue without copying tensor data back to the host.
     fn export_context(&self, _kind: AccelContextKind) -> Option<AccelContextHandle> {

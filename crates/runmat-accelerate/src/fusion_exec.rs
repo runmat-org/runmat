@@ -8,8 +8,8 @@ use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
 use crate::placement::{
     dense_output_representation, fusion_operation_token, plan_local, FusionPlacementObserver,
-    LocalPlacementOutcome, LocalPlacementRequest, PlacementCorrelationId, PlacementPolicy,
-    PlacementVariant,
+    LocalPlacementFeedback, LocalPlacementOutcome, LocalPlacementRequest, PlacementCorrelationId,
+    PlacementPolicy, PlacementVariant,
 };
 use crate::precision::ensure_provider_supports_dtype;
 use log;
@@ -19,9 +19,9 @@ use runmat_accelerate_api::{
     ProviderWorkload, ReductionFlavor,
 };
 use runmat_execution::{
-    CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
-    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
-    ExecutionCostEstimate,
+    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
+    EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    ExecutionCostComponents, ExecutionCostEstimate,
 };
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::gather_if_needed;
@@ -51,6 +51,7 @@ pub struct FusionExecutionRequest<'a> {
     pub plan: &'a FusionGroupPlan,
     pub inputs: Vec<Value>,
     pub placement: Option<PlacementCorrelationId>,
+    pub runtime: Option<runmat_runtime::context::RuntimeContext>,
 }
 
 pub struct ElementwiseExecutionResult {
@@ -172,11 +173,43 @@ fn fusion_input_elements(values: &[Value]) -> Option<usize> {
         .max()
 }
 
+struct FusionPlacementSelection {
+    observer: FusionPlacementObserver,
+    feedback: Option<LocalPlacementFeedback>,
+    started: Instant,
+    succeeded: bool,
+}
+
+impl FusionPlacementSelection {
+    fn complete(mut self) {
+        self.succeeded = true;
+    }
+}
+
+impl Drop for FusionPlacementSelection {
+    fn drop(&mut self) {
+        let Some(feedback) = &self.feedback else {
+            return;
+        };
+        let Some(service) = feedback.runtime.service_ports().placement() else {
+            return;
+        };
+        // This records provider completion only. The result remains staged;
+        // the VM owns the later stack/workspace commit transaction.
+        let _ = service.observe(runmat_execution::PlacementFeedback {
+            signature: feedback.signature.clone(),
+            candidate: feedback.candidate.clone(),
+            total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed()),
+            succeeded: self.succeeded,
+        });
+    }
+}
+
 fn select_fusion_provider(
     request: &FusionExecutionRequest<'_>,
     provider: &dyn AccelProvider,
     output_shapes: &[Vec<usize>],
-) -> Result<FusionPlacementObserver> {
+) -> Result<FusionPlacementSelection> {
     let observer = FusionPlacementObserver::new(request.placement);
     let elements = fusion_input_elements(&request.inputs);
     if request.placement.is_none() {
@@ -189,7 +222,12 @@ fn select_fusion_provider(
             None,
         )?;
         observer.selected(PlacementVariant::ProviderFusion, "direct_request", None);
-        return Ok(observer);
+        return Ok(FusionPlacementSelection {
+            observer,
+            feedback: None,
+            started: Instant::now(),
+            succeeded: false,
+        });
     }
 
     let operation = fusion_operation_token(&request.plan.group.kind);
@@ -207,6 +245,7 @@ fn select_fusion_provider(
         identity: format!("cpu.shared.{operation}"),
         region: None,
         kind: ExecutionCandidateKind::SharedRuntime,
+        execution_location: CandidateExecutionLocation::Host,
         preparation: CandidatePreparationState::Ready,
         cost: cpu_cost,
         output_residency: CandidateOutputResidency::Host,
@@ -247,16 +286,18 @@ fn select_fusion_provider(
             required_download_bytes: 0,
             downstream_materialization: false,
             compare_profitability: true,
+            runtime: request.runtime.as_ref(),
         },
         PlacementPolicy::default(),
-    ) {
+    )? {
         LocalPlacementOutcome::ProviderRejected { code, .. } => {
             observer.provider_rejected(code);
-            return Err(anyhow!("fusion provider rejected operation"));
+            Err(anyhow!("fusion provider rejected operation"))
         }
         LocalPlacementOutcome::Selected {
             selected,
             provider_cost,
+            feedback,
             ..
         } if selected.kind.is_provider() => {
             observer.provider_candidate();
@@ -265,6 +306,12 @@ fn select_fusion_provider(
                 "complete_cost",
                 provider_cost.checked_total_ns(),
             );
+            Ok(FusionPlacementSelection {
+                observer,
+                feedback: feedback.map(|feedback| *feedback),
+                started: Instant::now(),
+                succeeded: false,
+            })
         }
         LocalPlacementOutcome::Selected { cpu_cost, .. } => {
             observer.provider_candidate();
@@ -273,10 +320,9 @@ fn select_fusion_provider(
                 "complete_cost",
                 cpu_cost.checked_total_ns(),
             );
-            return Err(anyhow!("fusion placement selected shared runtime"));
+            Err(anyhow!("fusion placement selected shared runtime"))
         }
     }
-    Ok(observer)
 }
 
 fn scalar_upload_dtype(provider: &dyn AccelProvider) -> NumericDType {
@@ -474,11 +520,12 @@ fn execute_elementwise_outputs(
         }
     }
     output_shape = normalize_scalar_shape(&output_shape);
-    let observer = select_fusion_provider(
+    let selection = select_fusion_provider(
         request,
         provider,
         &vec![output_shape.clone(); output_ids.len()],
     )?;
+    let observer = selection.observer;
     let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
     let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
     let mut prepared = Vec::with_capacity(request.inputs.len());
@@ -624,6 +671,7 @@ fn execute_elementwise_outputs(
     timer.mark("cleanup");
     timer.finish();
 
+    selection.complete();
     Ok(outputs)
 }
 
@@ -714,7 +762,8 @@ pub fn execute_reduction_with_shape(
         let constant_shape = request.plan.constant_shape(len);
         normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
-    let observer = select_fusion_provider(&request, provider, &[output_shape.to_vec()])?;
+    let selection = select_fusion_provider(&request, provider, &[output_shape.to_vec()])?;
+    let observer = selection.observer;
     let mut timer = FusionStageTimer::new("reduction", request.plan.index, len);
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
@@ -843,6 +892,7 @@ pub fn execute_reduction_with_shape(
     timer.mark("cleanup");
     timer.finish();
 
+    selection.complete();
     Ok(Value::GpuTensor(output))
 }
 
@@ -853,7 +903,8 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let observer = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, provider, &[])?;
+    let observer = selection.observer;
     let (matrix_vid, normalization) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::CenteredGram {
             matrix,
@@ -892,6 +943,7 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
     }
 
     mark_fusion_output(&output, &request.inputs);
+    selection.complete();
     Ok(Value::GpuTensor(output))
 }
 
@@ -902,7 +954,8 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let observer = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, provider, &[])?;
+    let observer = selection.observer;
     let (lhs_vid, rhs_vid, epsilon) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::PowerStepNormalize { lhs, rhs, epsilon }) => (*lhs, *rhs, *epsilon),
         _ => {
@@ -952,6 +1005,7 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
     }
 
     mark_fusion_output(&output, &request.inputs);
+    selection.complete();
     Ok(Value::GpuTensor(output))
 }
 
@@ -962,7 +1016,8 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let observer = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, provider, &[])?;
+    let observer = selection.observer;
     let (q_vid, g_vid) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ExplainedVariance { q, g }) => (*q, *g),
         _ => return Err(anyhow!("explained variance: missing pattern metadata")),
@@ -1104,6 +1159,7 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
     }
 
     mark_fusion_output(&diag, &request.inputs);
+    selection.complete();
     Ok(Value::GpuTensor(diag))
 }
 
@@ -1114,7 +1170,8 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let observer = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, provider, &[])?;
+    let observer = selection.observer;
     let pattern = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ImageNormalize(p)) => p,
         _ => return Err(anyhow!("image normalize: missing pattern metadata")),
@@ -1207,6 +1264,7 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
     }
 
     mark_fusion_output(&output, &request.inputs);
+    selection.complete();
     Ok(Value::GpuTensor(output))
 }
 
@@ -1217,7 +1275,8 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
         return Err(anyhow!("unsupported fusion kind"));
     }
     let prov = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let observer = select_fusion_provider(&request, prov, &[])?;
+    let selection = select_fusion_provider(&request, prov, &[])?;
+    let observer = selection.observer;
 
     // Map ValueId -> prepared GpuTensorHandle
     let mut prepared: Vec<(graph::ValueId, GpuTensorHandle, Option<GpuTensorHandle>)> = Vec::new();
@@ -1468,6 +1527,7 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
     }
 
     mark_fusion_output(&result, &request.inputs);
+    selection.complete();
     Ok(Value::GpuTensor(result))
 }
 

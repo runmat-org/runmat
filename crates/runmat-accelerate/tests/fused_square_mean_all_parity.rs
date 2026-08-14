@@ -154,6 +154,7 @@ async fn fused_square_mean_all_matches_cpu() {
         plan: &plan,
         inputs: vec![runmat_value::Value::GpuTensor(x.clone())],
         placement: None,
+        runtime: None,
     };
     let result = execute_reduction(req, n, 1, 0).expect("fused mean(all) of square");
     let gpu_scalar = match result {

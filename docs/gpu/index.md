@@ -52,7 +52,7 @@ flowchart TD
 | `runmat-accelerate/src/fusion.rs` | Graph-level fusion-group detection and fusion pattern classification. |
 | `runmat-accelerate/src/fusion_exec.rs` | Execution of fusion plans through the active provider. |
 | `runmat-accelerate/src/native_auto.rs` | Automatic-offload calibration and compatibility inputs to placement. |
-| `runmat-accelerate/src/placement` | Feasibility normalization, residency/coherency accounting, complete-cost selection, and bounded placement observations. |
+| `runmat-accelerate/src/placement` | Feasibility normalization, residency/coherency accounting, bounded graph partitioning, resource admission, adaptive session policy, and placement observations. |
 | `runmat-accelerate/src/backend/wgpu` | Concrete provider implementation backed by `wgpu`, WGSL shaders, pipeline caches, and buffer residency. |
 | `runmat-accelerate/src/simple_provider.rs` | Host-side fallback/reference provider for unsupported or unavailable GPU paths. |
 
@@ -66,6 +66,10 @@ flowchart TD
 Before a candidate executes, placement asks the active provider whether the exact operation family and value representations are feasible. The query is side-effect-free: it cannot allocate, compile, transfer, or dispatch work. A structured rejection keeps execution on the shared runtime path without probing the provider by execution.
 
 Feasible CPU and provider candidates are compared using complete component costs: preparation, upload, allocation, queueing, execution, synchronization, download, and required downstream materialization. Provider residency, fusion opportunities, calibrated thresholds, and workload profiles contribute evidence and priors; none bypasses the common decision. Uncertain estimates are risk-adjusted, and a provider must clear both absolute and relative improvement margins before displacing CPU execution. This keeps small host-resident work on CPU while allowing a resident chain to remain on the provider when its total cost wins.
+
+For multi-region work, the same planner partitions a bounded, topologically ordered candidate graph and includes transfer costs between each producer's output residency and each consumer's execution location. Admission accounts for simultaneously live intermediates, scratch memory, reclaimable allocations, known queue capacity, cancellation, and the host allocation supplied by the execution scheduler. Search limits fail safely to a legal local plan. Repeated decisions and timing feedback are owned by one `RunMatSession`, use exact program/provider/policy/runtime-fact and resource snapshots, and apply confidence, variance, hysteresis, and optional bounded transactional exploration without sharing mutable policy between sessions.
+
+Embedding hosts can explicitly snapshot and restore the session's bounded placement profile. The portable profile contains only digests, candidate identities, aggregate timings, counts, and logical ticks; it contains no source text, paths, tensor contents, user identity, or wall-clock timestamp, and RunMat does not persist or transmit it implicitly.
 
 The Rust API exposes `placement_report()` for local diagnostics. Reports correlate candidate, selection, transfer, completion, and fallback events, retain bounded histories, and use stable reason tokens and numeric attributes. They do not include source text, paths, tensor contents, user identifiers, or arbitrary provider error messages.
 

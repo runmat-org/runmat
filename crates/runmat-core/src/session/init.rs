@@ -42,6 +42,9 @@ impl RunMatSession {
                 runmat_runtime::builtins::common::path_state::current_path_string(),
             ),
         );
+        let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
+            .with_placement(placement.clone());
         let session = Self {
             #[cfg(feature = "jit")]
             jit_engine,
@@ -64,7 +67,9 @@ impl RunMatSession {
                 std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
                 Arc::clone(&interrupt_flag),
             )
-            .with_search_path(search_path),
+            .with_search_path(search_path)
+            .with_service_ports(runtime_services),
+            placement_session: placement,
             is_executing: false,
             async_input_handler: None,
             callstack_limit: runmat_runtime::context::DEFAULT_CALLSTACK_LIMIT,

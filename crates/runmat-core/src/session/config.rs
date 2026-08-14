@@ -25,6 +25,39 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_execution(services);
     }
 
+    /// Install the host's parallel/resource authority. Placement consumes the
+    /// service's current allocation lease; it does not reserve or schedule
+    /// work independently of that authority.
+    pub fn install_parallel_service(
+        &mut self,
+        service: std::rc::Rc<dyn runmat_runtime::context::RuntimeParallelService>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_parallel(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
+    /// Return the bounded, portable feedback profile owned by this session.
+    /// The profile contains operation/candidate identities, digests, and
+    /// aggregate counts/timings only; persistence remains an explicit host
+    /// decision.
+    pub fn placement_profile_snapshot(
+        &self,
+    ) -> runmat_accelerate::placement::PlacementProfileSnapshot {
+        self.placement_session.profile_snapshot()
+    }
+
+    /// Restore a compatible bounded placement profile into this session.
+    pub fn restore_placement_profile(
+        &self,
+        profile: runmat_accelerate::placement::PlacementProfileSnapshot,
+    ) -> Result<(), runmat_accelerate::placement::PlacementPlanError> {
+        self.placement_session.restore_profile(profile)
+    }
+
     /// Install an async stdin handler (Phase 2). This is the preferred input path for
     /// poll-driven execution (`ExecuteFuture`).
     ///
@@ -168,5 +201,49 @@ impl RunMatSession {
     #[cfg(not(feature = "jit"))]
     pub(crate) fn has_jit(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use runmat_runtime::context::{
+        ParallelCapability, RuntimeParallelResources, RuntimeParallelService,
+    };
+
+    use super::RunMatSession;
+
+    struct FixedAllocation;
+
+    impl RuntimeParallelService for FixedAllocation {
+        fn supports(&self, _capability: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            RuntimeParallelResources {
+                cpu_millicores_available: 250,
+                memory_available_bytes: Some(4_096),
+                epoch: 7,
+            }
+        }
+    }
+
+    #[test]
+    fn session_exposes_explicit_profile_and_scheduler_composition() {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        assert!(session.placement_profile_snapshot().feedback.is_empty());
+
+        session.install_parallel_service(Rc::new(FixedAllocation));
+        let resources = session
+            .runtime_context()
+            .service_ports()
+            .parallel()
+            .unwrap()
+            .placement_resources();
+        assert_eq!(resources.cpu_millicores_available, 250);
+        assert_eq!(resources.memory_available_bytes, Some(4_096));
+        assert_eq!(resources.epoch, 7);
     }
 }

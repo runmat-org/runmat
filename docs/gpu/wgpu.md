@@ -107,6 +107,8 @@ Both calls are observational. Providers must not allocate buffers, compile pipel
 
 `estimate_cost()` is also observational. For an operation already proven feasible, it can report cold or warm preparation, transfer, allocation, queue, execution, synchronization, download, downstream, and scratch-memory estimates. WGPU uses observed dispatch averages when trustworthy telemetry exists and otherwise returns explicit low-confidence priors. Placement accounts for uncertainty and supplies a bounded fallback when a provider returns no estimate; it never runs a probe operation to discover cost.
 
+`placement_resources()` is the corresponding side-effect-free admission snapshot. It reports live allocations, pooled allocations that may be reclaimed, scratch and queue availability when known, loss state, and a resource epoch without allocating or polling by execution. WebGPU does not expose a trustworthy total device-memory budget or queue backlog, so the WGPU provider leaves total capacity, scratch availability, and queue occupancy explicitly unknown while still reporting observed allocation pressure; placement never substitutes the maximum single-buffer size as total VRAM or fabricates queue telemetry.
+
 ## Operation Categories
 
 | Category | Examples |

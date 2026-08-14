@@ -33,6 +33,7 @@ use runmat_vm::{
     interpret as interpret_async, interpret_function as interpret_function_async, Instr,
 };
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
 fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
@@ -1585,6 +1586,42 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
 }
 
 #[test]
+fn fusion_execution_updates_the_session_owned_placement_profile() {
+    gc_test_context(|| {
+        let _guard = accel_test_lock();
+        ensure_provider_registered();
+        let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default()
+                .with_placement(placement.clone()),
+        );
+        let bytecode = compile_semantic(
+            r#"
+            x = (1:4096) ./ 4096;
+            y = sin(x) .* x + 2;
+            "#,
+        );
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        block_on(runmat_vm::interpret_with_vars_in_context(
+            &bytecode, &mut vars, None, runtime,
+        ))
+        .expect("session-owned fusion execution");
+
+        let profile = placement.profile_snapshot();
+        let provider = profile
+            .feedback
+            .iter()
+            .find(|series| series.candidate.contains("fusion.elementwise"))
+            .expect("provider feedback series");
+        assert_eq!(provider.samples, 1);
+        assert_eq!(provider.failures, 0);
+    });
+}
+
+#[test]
 fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
     gc_test_context(|| {
         let _guard = accel_test_lock();
@@ -2986,6 +3023,7 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(2.0)],
             placement: None,
+            runtime: None,
         })
         .expect("direct fusion execution");
 
@@ -3023,6 +3061,7 @@ fn direct_execution_of_inverse_hyperbolic_group_returns_gpu_tensor() {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(1.0)],
             placement: None,
+            runtime: None,
         })
         .expect("direct fusion execution");
 
@@ -3060,6 +3099,7 @@ fn direct_execution_of_mod_and_rem_group_returns_gpu_tensor() {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(2.0), Value::Num(2.0)],
             placement: None,
+            runtime: None,
         })
         .expect("direct fusion execution");
 

@@ -1,7 +1,7 @@
 use runmat_execution::{
-    CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
-    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
-    ExecutionCostEstimate,
+    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
+    EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    ExecutionCostComponents, ExecutionCostEstimate,
 };
 use runmat_types::{RegionContract, RegionId};
 
@@ -52,6 +52,7 @@ impl GenericExecutor {
             identity: format!("cpu.generic.f{}.r{}", region.function.0, region.ordinal),
             region: Some(region),
             kind: ExecutionCandidateKind::GenericNativeCpu,
+            execution_location: CandidateExecutionLocation::Host,
             preparation: CandidatePreparationState::Warm,
             cost: ExecutionCostEstimate {
                 components: ExecutionCostComponents {

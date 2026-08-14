@@ -421,6 +421,7 @@ pub fn gather_fusion_inputs<'a>(
             plan,
             inputs,
             placement,
+            runtime: Some(context.runtime.clone()),
         },
         consumed_inputs,
     ))
@@ -1108,7 +1109,7 @@ pub async fn try_execute_fusion_group(
 mod tests {
     use super::{
         fused_reduction_output_shape, validate_fused_reduction_domain,
-        write_elementwise_materialized_stores,
+        write_elementwise_materialized_stores, StackSliceGuard,
     };
     use crate::bytecode::program::ExecutionContext;
     use runmat_accelerate::fusion::FusionStoreMaterialization;
@@ -1207,5 +1208,27 @@ mod tests {
         assert!(fusion_residency::is_resident(&shared));
         assert!(!fusion_residency::is_resident(&old_only));
         fusion_residency::clear(&shared);
+    }
+
+    #[test]
+    fn fusion_stack_transaction_restores_before_commit_and_never_replays_after_commit() {
+        let mut failed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        {
+            let guard = StackSliceGuard::new(&mut failed, 1);
+            assert_eq!(guard.slice(), &[Value::Num(2.0), Value::Num(3.0)]);
+            // A provider/placement failure drops the guard without publishing
+            // outputs; the original VM operands are restored exactly once.
+        }
+        assert_eq!(
+            failed,
+            vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]
+        );
+
+        let mut completed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        {
+            let guard = StackSliceGuard::new(&mut completed, 1);
+            guard.commit();
+        }
+        assert_eq!(completed, vec![Value::Num(1.0)]);
     }
 }

@@ -55,8 +55,9 @@ pub(crate) fn select_candidate(
 #[cfg(test)]
 mod tests {
     use runmat_execution::{
-        CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
-        ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate,
+        CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
+        EstimateConfidence, EstimateSource, ExecutionCandidateKind, ExecutionCostComponents,
+        ExecutionCostEstimate,
     };
 
     use super::*;
@@ -71,6 +72,11 @@ mod tests {
             identity: identity.into(),
             region: None,
             kind,
+            execution_location: if kind.is_provider() {
+                CandidateExecutionLocation::Provider { device_id: 1 }
+            } else {
+                CandidateExecutionLocation::Host
+            },
             preparation: CandidatePreparationState::Warm,
             cost: ExecutionCostEstimate {
                 components: ExecutionCostComponents {

@@ -152,6 +152,7 @@ fn fused_single_pass_sum_mul_no_alias() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x), Value::GpuTensor(w)],
         placement: None,
+        runtime: None,
     };
     // reduce_len = rows, num_slices = cols; single-pass expected
     let out = execute_reduction(req, rows, cols, 0).expect("fused single-pass reduction");

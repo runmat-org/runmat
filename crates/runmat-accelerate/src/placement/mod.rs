@@ -3,12 +3,14 @@
 mod event;
 mod fusion;
 mod local;
+mod partition;
 mod planner;
 mod provider_contract;
 #[cfg(feature = "wgpu")]
 mod provider_cost;
 mod recorder;
 mod residency;
+mod session;
 
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::wgpu_capability_snapshot;
@@ -21,7 +23,13 @@ pub(crate) use provider_cost::wgpu_cost_estimate;
 
 pub use fusion::fusion_operation_token;
 pub(crate) use fusion::FusionPlacementObserver;
-pub(crate) use local::{plan_local, LocalPlacementOutcome, LocalPlacementRequest};
+pub(crate) use local::{
+    plan_local, LocalPlacementFeedback, LocalPlacementOutcome, LocalPlacementRequest,
+};
+pub use session::{
+    ExplorationMode, PlacementFeedbackSeries, PlacementPlanError, PlacementProfileSnapshot,
+    PlacementSession, PlacementSessionConfig, PLACEMENT_PROFILE_SCHEMA_VERSION,
+};
 
 pub use event::{
     PlacementAttribute, PlacementCorrelationId, PlacementEvent, PlacementEventKind,

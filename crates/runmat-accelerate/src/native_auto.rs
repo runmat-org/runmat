@@ -27,9 +27,9 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_execution::{
-    CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
-    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
-    ExecutionCostEstimate,
+    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
+    EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    ExecutionCostComponents, ExecutionCostEstimate,
 };
 use runmat_runtime::builtins::common::{
     spec::{builtin_residency_policy, ResidencyPolicy},
@@ -1266,6 +1266,7 @@ impl NativeAutoOffload {
             identity: format!("cpu.shared.{operation}"),
             region: None,
             kind: ExecutionCandidateKind::SharedRuntime,
+            execution_location: CandidateExecutionLocation::Host,
             preparation: CandidatePreparationState::Ready,
             cost: cpu_cost,
             output_residency: CandidateOutputResidency::Host,
@@ -1292,24 +1293,31 @@ impl NativeAutoOffload {
                 required_download_bytes: 0,
                 downstream_materialization: false,
                 compare_profitability: true,
+                runtime: None,
             },
             PlacementPolicy::default(),
         ) {
-            LocalPlacementOutcome::ProviderRejected { code, cpu_cost } => {
+            Ok(LocalPlacementOutcome::ProviderRejected { code, cpu_cost }) => {
                 evaluation.recommend_gpu = false;
                 evaluation.reason = DecisionReason::ProviderRejected;
                 evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
                 (evaluation, Some(code))
             }
-            LocalPlacementOutcome::Selected {
+            Ok(LocalPlacementOutcome::Selected {
                 selected,
                 cpu_cost,
                 provider_cost,
-            } => {
+                feedback: _,
+            }) => {
                 evaluation.recommend_gpu = selected.kind.is_provider();
                 evaluation.reason = DecisionReason::CostModel;
                 evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
                 evaluation.gpu_secs = provider_cost.checked_total_ns().map(ns_to_seconds);
+                (evaluation, None)
+            }
+            Err(_) => {
+                evaluation.recommend_gpu = false;
+                evaluation.reason = DecisionReason::Disabled;
                 (evaluation, None)
             }
         }

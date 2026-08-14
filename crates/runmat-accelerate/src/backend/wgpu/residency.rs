@@ -124,4 +124,20 @@ impl BufferResidency {
             }
         }
     }
+
+    pub fn pooled_bytes(&self, element_size: usize) -> u64 {
+        self.pools
+            .lock()
+            .map(|pools| {
+                pools.iter().fold(0_u64, |total, (key, buffers)| {
+                    let bytes_each = u64::try_from(key.len)
+                        .unwrap_or(u64::MAX)
+                        .saturating_mul(u64::try_from(element_size).unwrap_or(u64::MAX));
+                    total.saturating_add(
+                        bytes_each.saturating_mul(u64::try_from(buffers.len()).unwrap_or(u64::MAX)),
+                    )
+                })
+            })
+            .unwrap_or(0)
+    }
 }

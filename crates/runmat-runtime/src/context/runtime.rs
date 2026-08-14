@@ -83,6 +83,15 @@ impl RuntimeContext {
         mut self,
         revision: Option<runmat_execution::ProgramRevision>,
     ) -> Self {
+        if self.program_revision != revision {
+            if let (Some(service), Some(previous)) =
+                (self.services.placement(), self.program_revision.clone())
+            {
+                service.invalidate(runmat_execution::PlacementInvalidation::Program {
+                    revision: previous,
+                });
+            }
+        }
         self.program_revision = revision;
         self
     }

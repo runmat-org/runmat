@@ -25,8 +25,12 @@ pub use handle::{FutureHandle, JobHandle, OutputContract, PoolHandle, TaskHandle
 pub use identity::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
 pub use identity::{ExecutionScopeId, FutureId, JobId, PoolId, RunId, TaskId};
 pub use placement::{
-    CandidateOutputResidency, CandidatePreparationState, EstimateConfidence, EstimateSource,
-    ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
-    ExecutionCostEstimate,
+    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
+    CandidateResourceDemand, EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor,
+    ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate, PlacementDecision,
+    PlacementFeedback, PlacementGraph, PlacementGraphCandidate, PlacementGraphEdge,
+    PlacementGraphLimits, PlacementGraphNode, PlacementInvalidation, PlacementPlanRequest,
+    PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
+    SelectedExecutionCandidate,
 };
 pub use state::CancellationReason;

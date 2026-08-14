@@ -176,6 +176,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(e)],
         placement: None,
+        runtime: None,
     };
     let out = execute_reduction(req, rows, 1, 0).expect("execute fused mean(all)");
     match out {

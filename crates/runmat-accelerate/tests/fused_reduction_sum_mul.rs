@@ -105,6 +105,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
         placement: None,
+        runtime: None,
     };
 
     // reduce_len = rows, num_slices = cols, workgroup_size = default(0)
@@ -201,6 +202,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
         placement: None,
+        runtime: None,
     };
     let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");
     let out_handle = match result {
@@ -296,6 +298,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
         placement: None,
+        runtime: None,
     };
 
     // reduce_len = cols, num_slices = rows

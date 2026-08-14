@@ -76,6 +76,20 @@ pub trait RuntimeAccelerationService {
     fn supports_operation(&self, operation: &str) -> bool;
 }
 
+/// Session-owned execution-placement authority. The runtime exposes only
+/// executor-neutral contracts; candidate generation and policy remain in their
+/// owning executor/acceleration crates.
+pub trait RuntimePlacementService {
+    fn plan(
+        &self,
+        request: runmat_execution::PlacementPlanRequest,
+    ) -> Result<runmat_execution::PlacementDecision, RuntimeError>;
+
+    fn observe(&self, feedback: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError>;
+
+    fn invalidate(&self, invalidation: runmat_execution::PlacementInvalidation);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeCapability {
     SharedLibrary,
@@ -108,8 +122,32 @@ pub enum ParallelCapability {
     Collectives,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeParallelResources {
+    pub cpu_millicores_available: u32,
+    pub memory_available_bytes: Option<u64>,
+    pub epoch: u64,
+}
+
+impl Default for RuntimeParallelResources {
+    fn default() -> Self {
+        Self {
+            cpu_millicores_available: 1_000,
+            memory_available_bytes: None,
+            epoch: 0,
+        }
+    }
+}
+
 pub trait RuntimeParallelService {
     fn supports(&self, capability: ParallelCapability) -> bool;
+
+    /// Side-effect-free scheduler capacity for placement admission. A future
+    /// RM-1067 pool/scheduler adapter overrides this with its current lease;
+    /// absence preserves the single-core local runtime budget.
+    fn placement_resources(&self) -> RuntimeParallelResources {
+        RuntimeParallelResources::default()
+    }
 }
 
 /// Narrow, typed ports composed by the host. An absent port is meaningful and
@@ -123,6 +161,7 @@ pub struct RuntimeServicePorts {
     host: Option<Rc<dyn RuntimeHostService>>,
     error: Option<Rc<dyn RuntimeErrorService>>,
     acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
+    placement: Option<Rc<dyn RuntimePlacementService>>,
     native: Option<Rc<dyn RuntimeNativeService>>,
     foreign: Option<Rc<dyn RuntimeForeignService>>,
     parallel: Option<Rc<dyn RuntimeParallelService>>,
@@ -138,6 +177,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("host", &self.host.is_some())
             .field("error", &self.error.is_some())
             .field("acceleration", &self.acceleration.is_some())
+            .field("placement", &self.placement.is_some())
             .field("native", &self.native.is_some())
             .field("foreign", &self.foreign.is_some())
             .field("parallel", &self.parallel.is_some())
@@ -217,6 +257,14 @@ impl RuntimeServicePorts {
         Acceleration
     );
     port_accessors!(
+        with_placement,
+        placement,
+        require_placement,
+        placement,
+        RuntimePlacementService,
+        Placement
+    );
+    port_accessors!(
         with_native,
         native,
         require_native,
@@ -262,6 +310,7 @@ mod tests {
             missing(ports.require_host("console write")),
             missing(ports.require_error("report error")),
             missing(ports.require_acceleration("resident operation")),
+            missing(ports.require_placement("placement plan")),
             missing(ports.require_native("load library")),
             missing(ports.require_foreign("foreign call")),
             missing(ports.require_parallel("parfor")),
@@ -278,6 +327,7 @@ mod tests {
                 RuntimeCapability::Host,
                 RuntimeCapability::Error,
                 RuntimeCapability::Acceleration,
+                RuntimeCapability::Placement,
                 RuntimeCapability::Native,
                 RuntimeCapability::Foreign,
                 RuntimeCapability::Parallel,

@@ -2,7 +2,7 @@
 title: "Execution"
 category: "Execution"
 section: "12.0"
-last_updated: "May 28, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # Execution
@@ -50,6 +50,8 @@ flowchart TD
 | Outcome assembly | `runmat-core` session | Converts final value, workspace state, streams, diagnostics, figures, profiling, and fusion metadata into host ABI values. |
 
 The session prevents concurrent execution on a single `RunMatSession`. Hosts that need concurrent execution should use separate sessions or serialize requests through one session.
+
+Execution placement follows the same session boundary. Each `RunMatSession` owns its guarded decision cache and bounded aggregate feedback; separate sessions cannot change one another's placement state. The runtime exposes one executor-neutral graph, signature, feedback, invalidation, and resource contract so VM, JIT, and AOT execution paths can share policy without moving provider scheduling into the runtime. A host scheduler remains authoritative for its allocation and can install that allocation as the CPU/memory budget placement must obey. Profile snapshot and restore are explicit host operations and use a portable data-only format suitable for native and WebAssembly hosts.
 
 ## Outcome Contract
 

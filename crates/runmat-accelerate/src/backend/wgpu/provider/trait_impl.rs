@@ -47,6 +47,34 @@ impl AccelProvider for WgpuProvider {
         Some(crate::placement::wgpu_cost_estimate(self, query))
     }
 
+    fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
+        // WebGPU exposes a maximum single-buffer size, not a trustworthy total
+        // device-memory budget. Keep total capacity unknown rather than
+        // misclassifying several legal buffers as overcommitted.
+        let live_bytes = self
+            .buffers
+            .lock()
+            .map(|buffers| {
+                buffers.values().fold(0_u64, |total, entry| {
+                    total.saturating_add(entry.allocated_bytes)
+                })
+            })
+            .unwrap_or(u64::MAX);
+        let reclaimable_bytes = self.buffer_residency.pooled_bytes(self.element_size);
+        let allocated_bytes = live_bytes.saturating_add(reclaimable_bytes);
+        runmat_execution::ProviderResourceSnapshot {
+            device_id: self.runtime_device_id,
+            capacity_bytes: None,
+            live_bytes: allocated_bytes,
+            reclaimable_bytes,
+            scratch_available_bytes: None,
+            queue_depth: None,
+            queue_limit: None,
+            lost: false,
+            epoch: allocated_bytes ^ reclaimable_bytes.rotate_left(32),
+        }
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,

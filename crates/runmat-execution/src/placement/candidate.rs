@@ -30,6 +30,13 @@ impl ExecutionCandidateKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CandidateExecutionLocation {
+    Host,
+    Provider { device_id: u32 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidatePreparationState {
     Ready,
@@ -53,6 +60,7 @@ pub struct ExecutionCandidateDescriptor {
     pub identity: String,
     pub region: Option<RegionId>,
     pub kind: ExecutionCandidateKind,
+    pub execution_location: CandidateExecutionLocation,
     pub preparation: CandidatePreparationState,
     pub cost: ExecutionCostEstimate,
     pub output_residency: CandidateOutputResidency,
@@ -69,6 +77,14 @@ impl ExecutionCandidateDescriptor {
         }
         if self.cost.checked_total_ns().is_none() {
             return Err("candidate cost components overflow u64");
+        }
+        if self.kind.is_provider()
+            != matches!(
+                self.execution_location,
+                CandidateExecutionLocation::Provider { .. }
+            )
+        {
+            return Err("candidate kind and execution location are inconsistent");
         }
         if self.guards.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err("candidate guards must be sorted and unique");
