@@ -34,6 +34,7 @@ pub mod operations;
 pub mod callsite;
 pub mod class_registry;
 pub mod compatibility;
+pub mod condition;
 pub mod console;
 pub mod context;
 pub mod data;

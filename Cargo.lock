@@ -6577,6 +6577,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-jit"
+version = "0.6.1"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native",
+ "futures",
+ "runmat-execution",
+ "runmat-hir",
+ "runmat-mir",
+ "runmat-native-codegen",
+ "runmat-runtime",
+ "runmat-types",
+ "runmat-value",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-lexer"
 version = "0.6.1"
 dependencies = [

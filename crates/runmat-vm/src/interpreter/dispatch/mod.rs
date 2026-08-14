@@ -13,10 +13,6 @@ use crate::runtime::workspace::{
     refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
 };
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_runtime::builtins::common::tensor::{
-    is_scalar_tensor, tensor_element_len, tensor_value_f64,
-};
-use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use std::collections::{HashMap, HashSet};
@@ -34,6 +30,7 @@ pub use calls::{
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
+pub use runmat_runtime::condition::logical_truth_from_value;
 pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
     load_string, load_var, store_local, store_var,
@@ -83,40 +80,6 @@ pub struct DispatchHooks<'a> {
     pub store_local_before_var_overwrite: &'a mut dyn FnMut(&Value, &Value),
     pub store_local_after_store: &'a mut dyn FnMut(usize, &Value),
     pub store_local_after_fallback_store: &'a mut dyn FnMut(&str, usize, &Value),
-}
-
-pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool, RuntimeError> {
-    match value {
-        Value::Bool(flag) => Ok(*flag),
-        Value::Int(i) => Ok(!i.is_zero()),
-        Value::Num(n) => Ok(*n != 0.0),
-        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
-        Value::LogicalArray(array) => Err(crate::interpreter::errors::mex(
-            "InvalidConditionType",
-            &format!(
-                "{label}: expected scalar logical or numeric value, got logical array with {} elements",
-                array.data.len()
-            ),
-        )),
-        Value::Tensor(tensor) if is_scalar_tensor(tensor) => Ok(tensor_value_f64(tensor, 0) != 0.0),
-        Value::Tensor(tensor) => Err(crate::interpreter::errors::mex(
-            "InvalidConditionType",
-            &format!(
-                "{label}: expected scalar logical or numeric value, got numeric array with {} elements",
-                tensor_element_len(tensor)
-            ),
-        )),
-        Value::GpuTensor(_) => {
-            let gathered = gather_if_needed_async(value)
-                .await
-                .map_err(|e| format!("{label}: {e}"))?;
-            Box::pin(logical_truth_from_value(&gathered, label)).await
-        }
-        other => Err(crate::interpreter::errors::mex(
-            "InvalidConditionType",
-            &format!("{label}: expected scalar logical or numeric value, got {other:?}"),
-        )),
-    }
 }
 
 fn requested_outputs_from_slot(vars: &[Value], slot: usize) -> Result<usize, RuntimeError> {
