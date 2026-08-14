@@ -1,7 +1,11 @@
 //! MATLAB-compatible `strfind` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, Tensor, Value,
 };
@@ -190,6 +194,57 @@ pub const STRFIND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRFIND_ERRORS,
 };
 
+const STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "strfind-typed-force-cell-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "strfind with a typed-integer ForceCellOutput value is an evidence-open RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StrfindTypedForceCellOutputExtension"),
+    };
+
+const STRFIND_NONBINARY_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "strfind-nonbinary-force-cell-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "strfind with a numeric ForceCellOutput value other than zero or one is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StrfindNonbinaryForceCellOutputExtension"),
+    };
+
+const STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "strfind-resident-force-cell-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "strfind with a resident ForceCellOutput value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StrfindResidentForceCellOutputExtension"),
+    };
+
+pub const STRFIND_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION,
+    STRFIND_NONBINARY_FORCE_CELL_OUTPUT_EXTENSION,
+    STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
+];
+
+const STRFIND_INTEGER_FORCE_CELL_OUTPUT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "cellOutput",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "[integer-audit-open] R2026a explicitly documents false, true, 0, and 1 but does not enumerate typed integer storage classes. RunMat mode accepts every exact scalar integer class; MATLAB-compatible mode retains only logical and double zero/one.",
+    }];
+
+pub const STRFIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "k = strfind(str, pat, 'ForceCellOutput', integer_cellOutput)",
+        inputs: &STRFIND_INTEGER_FORCE_CELL_OUTPUT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "[integer-audit-open] The typed integer flag controls only whether double index vectors are wrapped in cells. Typed storage acceptance remains conservatively mode-gated because the public page lists numeric literals but no storage classes.",
+    }];
+
 fn strfind_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -213,6 +268,8 @@ fn remap_strfind_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(text_search_indices_type),
     descriptor(crate::builtins::strings::search::strfind::STRFIND_DESCRIPTOR),
+    extensions(crate::builtins::strings::search::strfind::STRFIND_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::search::strfind::STRFIND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
 async fn strfind_builtin(
@@ -220,6 +277,15 @@ async fn strfind_builtin(
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&text)
+        || crate::dispatcher::value_contains_gpu(&pattern)
+    {
+        return Err(strfind_error_with_message(
+            STRFIND_ERROR_INVALID_INPUT.message,
+            &STRFIND_ERROR_INVALID_INPUT,
+        ));
+    }
+    let rest = validate_force_cell_output_extensions(rest).await?;
     let text = gather_if_needed_async(&text)
         .await
         .map_err(remap_strfind_flow)?;
@@ -238,6 +304,104 @@ async fn strfind_builtin(
     })?;
 
     evaluate_strfind(&subject, &patterns, force_cell_output)
+}
+
+async fn validate_force_cell_output_extensions(rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+    if rest.is_empty() {
+        return Ok(rest);
+    }
+    if rest.len() != 2 {
+        return Err(strfind_error_with_message(
+            "strfind: name-value pairs must be complete; expected exactly one 'ForceCellOutput' name-value pair",
+            &STRFIND_ERROR_INVALID_OPTION,
+        ));
+    }
+    let name = value_to_owned_string(&rest[0]).ok_or_else(|| {
+        strfind_error_with_message(
+            "strfind: option names must be text scalars",
+            &STRFIND_ERROR_INVALID_OPTION,
+        )
+    })?;
+    if !name.eq_ignore_ascii_case("ForceCellOutput") {
+        return Err(strfind_error_with_message(
+            format!("strfind: unknown option '{name}'; supported option is 'ForceCellOutput'"),
+            &STRFIND_ERROR_INVALID_OPTION,
+        ));
+    }
+    let value = &rest[1];
+    validate_force_cell_output_shape(value)?;
+    if is_typed_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if is_nonbinary_numeric_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRFIND_NONBINARY_FORCE_CELL_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if crate::dispatcher::value_contains_gpu(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let mut host = Vec::with_capacity(rest.len());
+    for value in rest {
+        host.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(remap_strfind_flow)?,
+        );
+    }
+    Ok(host)
+}
+
+fn validate_force_cell_output_shape(value: &Value) -> BuiltinResult<()> {
+    let len = match value {
+        Value::GpuTensor(handle) => tensor::element_count(&handle.shape),
+        Value::Tensor(value) => value.len(),
+        Value::LogicalArray(value) => value.data.len(),
+        _ => 1,
+    };
+    if len == 1 {
+        Ok(())
+    } else {
+        Err(strfind_error_with_message(
+            "strfind: ForceCellOutput must be a scalar",
+            &STRFIND_ERROR_INVALID_OPTION,
+        ))
+    }
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(value) => value.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
+}
+
+fn is_nonbinary_numeric_value(value: &Value) -> bool {
+    match value {
+        Value::Num(value) => *value != 0.0 && *value != 1.0,
+        Value::Int(value) => !value.is_zero() && value.try_to_usize() != Some(1),
+        Value::Tensor(value) if value.len() == 1 => {
+            if let Some(integer) = value
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                !integer.is_zero() && integer.try_to_usize() != Some(1)
+            } else {
+                let value = tensor::tensor_value_f64(value, 0);
+                value != 0.0 && value != 1.0
+            }
+        }
+        _ => false,
+    }
 }
 
 fn evaluate_strfind(
@@ -686,6 +850,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strfind_force_cell_output_typed_integer_tensor_reads_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let flag =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer tensor");
         let result = run_strfind(

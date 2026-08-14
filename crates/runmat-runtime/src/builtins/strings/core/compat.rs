@@ -499,18 +499,6 @@ pub const DIGITS_PATTERN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescript
         notes: "The inclusive bounds are structural controls, min must not exceed max, and the returned pattern greedily matches toward max.",
     },
 ];
-descriptor!(
-    LETTERS_PATTERN_DESCRIPTOR,
-    "pat = lettersPattern(N)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
-descriptor!(
-    WILDCARD_PATTERN_DESCRIPTOR,
-    "pat = wildcardPattern",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
 const TEXT_BOUNDARY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "pat = textBoundary",
@@ -1022,9 +1010,16 @@ async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::PATTERN_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::patterns::PATTERN_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn pattern_builtin(text: Value) -> BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&text) {
+        return Err(compat_error(
+            "pattern",
+            "pattern: expected a host text scalar",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("pattern"))?;
@@ -1041,9 +1036,16 @@ async fn pattern_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::REGEXP_PATTERN_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::patterns::REGEXP_PATTERN_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn regexp_pattern_builtin(text: Value) -> BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&text) {
+        return Err(compat_error(
+            "regexpPattern",
+            "regexpPattern: expected a host text scalar",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("regexpPattern"))?;
@@ -1145,11 +1147,21 @@ fn is_positive_infinity_scalar(value: &Value) -> bool {
     keywords = "lettersPattern,pattern,letters,text",
     accel = "metadata",
     type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::compat::LETTERS_PATTERN_DESCRIPTOR),
+    descriptor(crate::builtins::strings::core::patterns::LETTERS_PATTERN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::patterns::LETTERS_PATTERN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn letters_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    bounded_pattern(rest, r"\p{Alphabetic}", "lettersPattern").await
+    let regex = crate::builtins::strings::core::patterns::bounded_regex(
+        rest,
+        r"\p{Alphabetic}",
+        "lettersPattern",
+        false,
+    )
+    .await?;
+    Ok(pattern_object(&regex))
 }
 
 #[runtime_builtin(
@@ -1159,14 +1171,17 @@ async fn letters_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "wildcardPattern,pattern,wildcard,text",
     accel = "metadata",
     type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::compat::WILDCARD_PATTERN_DESCRIPTOR),
+    descriptor(crate::builtins::strings::core::patterns::WILDCARD_PATTERN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::patterns::WILDCARD_PATTERN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn wildcard_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    if rest.is_empty() {
-        return Ok(pattern_object(".*"));
-    }
-    bounded_pattern(rest, ".", "wildcardPattern").await
+    let regex =
+        crate::builtins::strings::core::patterns::bounded_regex(rest, ".", "wildcardPattern", true)
+            .await?;
+    Ok(pattern_object(&regex))
 }
 
 #[runtime_builtin(
@@ -2329,23 +2344,6 @@ fn scan_size_dim(value: f64) -> BuiltinResult<usize> {
     nonnegative_platform_usize(value).ok_or_else(scan_size_error)
 }
 
-async fn bounded_pattern(
-    rest: Vec<Value>,
-    atom: &str,
-    fn_name: &'static str,
-) -> BuiltinResult<Value> {
-    let regex = if let Some(value) = rest.first() {
-        let value = gather_if_needed_async(value)
-            .await
-            .map_err(map_flow(fn_name))?;
-        let n = parse_nonnegative_usize(&value, fn_name)?;
-        format!("{atom}{{{n}}}")
-    } else {
-        format!("{atom}+")
-    };
-    Ok(pattern_object(&regex))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2980,7 +2978,7 @@ mod tests {
                 "test"
             )
             .unwrap(),
-            ".*"
+            ".*?"
         );
         assert_eq!(
             pattern_regex(&block(text_boundary_builtin(Vec::new())).unwrap(), "test").unwrap(),

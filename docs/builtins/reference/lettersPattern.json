@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "The returned pattern is host metadata. Automatically resident numeric count controls gather transparently; explicit gpuArray count controls are unsupported."
   },
   "fusion": {
     "elementwise": false,
@@ -28,40 +28,75 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "pat = lettersPattern(N) - Create a pattern matching letter characters.",
+  "description": "`lettersPattern` creates a greedy pattern for one or more Unicode letters by default, or for an exact or inclusive bounded count.",
   "signatures": [
+    {
+      "label": "pat = lettersPattern",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "pat",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Host pattern object."
+        }
+      ]
+    },
     {
       "label": "pat = lettersPattern(N)",
       "inputs": [
         {
-          "name": "text",
-          "ty": "Any",
+          "name": "N",
+          "ty": "NumericScalar",
           "arity": "Required",
           "default": null,
-          "description": "Input text."
-        },
-        {
-          "name": "arg",
-          "ty": "Any",
-          "arity": "Variadic",
-          "default": null,
-          "description": "Additional arguments."
+          "description": "Exact nonnegative number of letters to match."
         }
       ],
       "outputs": [
         {
-          "name": "out",
+          "name": "pat",
           "ty": "Any",
           "arity": "Required",
           "default": null,
-          "description": "Output value."
+          "description": "Host pattern object."
+        }
+      ]
+    },
+    {
+      "label": "pat = lettersPattern(minCharacters, maxCharacters)",
+      "inputs": [
+        {
+          "name": "minCharacters",
+          "ty": "NumericScalar",
+          "arity": "Required",
+          "default": null,
+          "description": "Inclusive nonnegative minimum."
+        },
+        {
+          "name": "maxCharacters",
+          "ty": "NumericScalar",
+          "arity": "Required",
+          "default": null,
+          "description": "Inclusive nonnegative maximum, or positive infinity."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pat",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Host pattern object."
         }
       ]
     }
   ],
   "behaviors": [
-    "Create a pattern matching letter characters.",
-    "Creates a regular-expression-backed pattern for Unicode alphabetic runs, with optional exact count."
+    "Without a count, the greedy pattern matches one or more Unicode alphabetic characters.",
+    "Exact and bounded counts accept single, double, and all eight integer classes without routing typed values through floating compatibility storage.",
+    "The bounded form accepts positive infinity as the maximum and rejects negative, fractional, nonscalar, reversed, or platform-oversized counts."
   ],
   "examples": [
     "startsWith(\"abc1\", lettersPattern) can match the leading letters."

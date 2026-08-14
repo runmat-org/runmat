@@ -1,9 +1,10 @@
 //! MATLAB-compatible `lower` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
+    StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -103,6 +104,12 @@ pub const LOWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &LOWER_ERRORS,
 };
 
+pub const LOWER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "lower accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
+};
+
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -130,9 +137,13 @@ fn lower_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "sink",
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::lower::LOWER_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::lower::LOWER_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
 async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&value) {
+        return Err(lower_error(&LOWER_ERROR_INVALID_INPUT));
+    }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),

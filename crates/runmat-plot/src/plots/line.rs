@@ -15,6 +15,8 @@ use glam::{Vec3, Vec4};
 use log::{trace, warn};
 use runmat_builtins::NumericStorage;
 
+pub type HostLineData = (Vec<f64>, Vec<f64>);
+
 /// High-performance GPU-accelerated line plot
 #[derive(Debug, Clone)]
 pub struct LinePlot {
@@ -457,7 +459,7 @@ impl LinePlot {
         (self.source_x.as_ref(), self.source_y.as_ref())
     }
 
-    pub fn host_xy_f64(&self) -> Result<Option<(Vec<f64>, Vec<f64>)>, String> {
+    pub fn host_xy_f64(&self) -> Result<Option<HostLineData>, String> {
         match (&self.source_x, &self.source_y) {
             (Some(x), Some(y)) if x.len() == y.len() => {
                 Ok(Some((x.materialize_f64(), y.materialize_f64())))

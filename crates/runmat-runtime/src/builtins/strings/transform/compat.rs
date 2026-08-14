@@ -132,6 +132,11 @@ pub const APPEND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
     notes: "append combines string arrays, character vectors, or cell arrays of character vectors. Numeric and integer values are not text inputs; all eight integer classes and resident numeric handles reject without implicit string conversion or provider gather.",
 };
 descriptor!(REVERSE_DESCRIPTOR, "s = reverse(text)", &IN_TEXT, &OUT_ANY);
+pub const REVERSE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "reverse accepts string arrays, character vectors, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
+};
 descriptor!(DEBLANK_DESCRIPTOR, "s = deblank(text)", &IN_TEXT, &OUT_ANY);
 pub const DEBLANK_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
@@ -581,6 +586,11 @@ descriptor!(
     &IN_TEXT_REST,
     &OUT_BOOL
 );
+pub const MATCHES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "matches accepts text or pattern inputs and a logical IgnoreCase option. Numeric and integer data has no documented role and rejects without implicit text conversion or provider access.",
+};
 
 fn any_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
@@ -775,9 +785,16 @@ fn append_output(
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::REVERSE_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::compat::REVERSE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn reverse_builtin(text: Value) -> BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&text) {
+        return Err(transform_error(
+            "reverse",
+            "reverse: expected string, character array, or cell array of character vectors",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("reverse"))?;
@@ -1148,9 +1165,18 @@ fn is_cellstr_element(value: &Value) -> bool {
     accel = "sink",
     type_resolver(bool_type),
     descriptor(crate::builtins::strings::transform::compat::MATCHES_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::compat::MATCHES_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn matches_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&text)
+        || crate::dispatcher::value_contains_gpu(&pattern)
+    {
+        return Err(transform_error(
+            "matches",
+            "matches: expected host text or pattern inputs",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("matches"))?;

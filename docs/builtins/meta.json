@@ -87196,35 +87196,160 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "pat = lettersPattern(N)",
-          "inputs": [
+          "label": "pat = lettersPattern",
+          "inputs": [],
+          "outputs": [
             {
-              "name": "text",
+              "name": "pat",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
-            },
+              "description": "Host pattern object."
+            }
+          ]
+        },
+        {
+          "label": "pat = lettersPattern(N)",
+          "inputs": [
             {
-              "name": "arg",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Exact nonnegative number of characters to match."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "pat",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Output value."
+              "description": "Host pattern object."
+            }
+          ]
+        },
+        {
+          "label": "pat = lettersPattern(minCharacters, maxCharacters)",
+          "inputs": [
+            {
+              "name": "minCharacters",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum nonnegative number of characters to match."
+            },
+            {
+              "name": "maxCharacters",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum nonnegative count, or positive infinity for no upper bound."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "pat",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Host pattern object."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.LETTERS_PATTERN.ARGUMENT_COUNT",
+          "identifier": "RunMat:lettersPattern:ArgumentCount",
+          "when": "More than two count arguments are supplied.",
+          "message": "lettersPattern: expected zero, one, or two input arguments"
+        },
+        {
+          "code": "RM.LETTERS_PATTERN.INVALID_COUNT",
+          "identifier": "RunMat:lettersPattern:InvalidCount",
+          "when": "A count is not a host or automatically resident nonnegative numeric integer scalar, or positive infinity in the maximum position.",
+          "message": "lettersPattern: invalid character count"
+        },
+        {
+          "code": "RM.LETTERS_PATTERN.INVALID_RANGE",
+          "identifier": "RunMat:lettersPattern:InvalidRange",
+          "when": "minCharacters exceeds maxCharacters.",
+          "message": "lettersPattern: minCharacters must not exceed maxCharacters"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "pat = lettersPattern(integer_N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every built-in integer class plus integer-valued host single or double can specify the exact nonnegative character count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "N controls only the exact repetition bound of the returned host pattern object; explicit interactive GPU input is not documented, while automatic residency may gather transparently."
+        },
+        {
+          "form": "pat = lettersPattern(integer_minCharacters, integer_maxCharacters)",
+          "inputs": [
+            {
+              "name": "minCharacters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The inclusive lower bound is read exactly from every built-in integer class."
+            },
+            {
+              "name": "maxCharacters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The inclusive upper bound is read exactly from every built-in integer class; positive host floating infinity separately denotes an unbounded maximum."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The inclusive bounds are structural controls, min must not exceed max, and letter matching is greedy toward the maximum bound."
+        }
+      ]
     },
     {
       "name": "lhsdesign",
@@ -90393,7 +90518,11 @@
           "when": "Internal output container construction failed.",
           "message": "lower: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "lower accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access."
+      }
     },
     {
       "name": "ls",
@@ -92080,7 +92209,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "matches accepts text or pattern inputs and a logical IgnoreCase option. Numeric and integer data has no documented role and rejects without implicit text conversion or provider access."
+      }
     },
     {
       "name": "matlab.metadata.DynamicProperty.delete",
@@ -110590,6 +110723,35 @@
           "when": "Internal output container construction failed.",
           "message": "pad: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = pad(str, integer_numberOfCharacters, side?, padCharacter?)",
+          "inputs": [
+            {
+              "name": "numberOfCharacters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly documents single, double, and every built-in integer class for the nonnegative scalar output length."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact integer controls only target text length; output preserves the input text container. Explicit interactive GPU length input is unsupported, while automatic residency may gather transparently."
+        }
       ]
     },
     {
@@ -111461,7 +111623,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "pattern constructs a literal pattern only from text. Numeric and integer inputs reject without implicit text conversion or provider access."
+      }
     },
     {
       "name": "pause",
@@ -123199,7 +123365,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "regexpPattern constructs a regular-expression pattern only from text. Numeric and integer inputs reject without implicit text conversion or provider access."
+      }
     },
     {
       "name": "regexpi",
@@ -125389,7 +125559,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "reverse accepts string arrays, character vectors, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access."
+      }
     },
     {
       "name": "rgb2gray",
@@ -133904,7 +134078,7 @@
     },
     {
       "name": "split",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -133924,7 +134098,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "String array containing split tokens."
+              "description": "String or cell array containing split tokens."
+            },
+            {
+              "name": "match",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "String or cell array containing the delimiters at which splitting occurred."
             }
           ]
         },
@@ -133952,7 +134133,56 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "String array containing split tokens."
+              "description": "String or cell array containing split tokens."
+            },
+            {
+              "name": "match",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "String or cell array containing the delimiters at which splitting occurred."
+            }
+          ]
+        },
+        {
+          "label": "[newStr, match] = split(str, delimiter, dim)",
+          "inputs": [
+            {
+              "name": "str",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text scalar/array/cell to split."
+            },
+            {
+              "name": "delimiter",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Delimiter scalar/array/cell."
+            },
+            {
+              "name": "dim",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive dimension along which output substrings are oriented."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "newStr",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String or cell array containing split tokens."
+            },
+            {
+              "name": "match",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "String or cell array containing the delimiters at which splitting occurred."
             }
           ]
         },
@@ -133994,7 +134224,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "String array containing split tokens."
+              "description": "String or cell array containing split tokens."
+            },
+            {
+              "name": "match",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "String or cell array containing the delimiters at which splitting occurred."
             }
           ]
         },
@@ -134029,7 +134266,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "String array containing split tokens."
+              "description": "String or cell array containing split tokens."
+            },
+            {
+              "name": "match",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "String or cell array containing the delimiters at which splitting occurred."
             }
           ]
         }
@@ -134078,10 +134322,65 @@
           "message": "split: option values must be logical true or false"
         },
         {
+          "code": "RM.SPLIT.DIMENSION",
+          "identifier": "RunMat:split:Dimension",
+          "when": "The dimension argument is not a positive integer scalar in RunMat's supported rank range of 1 through 1024.",
+          "message": "split: dimension must be a positive integer scalar no greater than 1024"
+        },
+        {
           "code": "RM.SPLIT.INTERNAL",
           "identifier": "RunMat:split:InternalError",
           "when": "Internal output container construction failed.",
           "message": "split: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "split-typed-dimension",
+          "mode": "RunMatOnly",
+          "description": "split with a typed-integer dimension is an evidence-open RunMat extension",
+          "error_identifier": "RunMat:compatibility:SplitTypedDimensionExtension"
+        },
+        {
+          "id": "split-resident-dimension",
+          "mode": "RunMatOnly",
+          "description": "split with an explicitly GPU-resident dimension is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SplitResidentDimensionExtension"
+        },
+        {
+          "id": "split-advanced-options",
+          "mode": "RunMatOnly",
+          "description": "split CollapseDelimiters and IncludeDelimiters options are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:SplitAdvancedOptionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[newStr, match] = split(str, delimiter, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] R2026a specifies a positive integer dimension but does not enumerate typed storage classes. RunMat accepts every exact integer class behind a compatibility gate; ordinary host double integer dimensions remain documented behavior."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "EvidenceOpen",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] The exact one-based dimension controls only output orientation. Explicit resident dimensions are separately gated before gather; automatic residency may gather transparently."
         }
       ]
     },
@@ -135809,6 +136108,88 @@
           "identifier": "RunMat:startsWith:InternalError",
           "when": "Internal logical result assembly failed.",
           "message": "startsWith: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "startswith-positional-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "startsWith with a positional IgnoreCase flag is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StartsWithPositionalIgnoreCaseExtension"
+        },
+        {
+          "id": "startswith-numeric-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "startsWith with a numeric IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StartsWithNumericIgnoreCaseExtension"
+        },
+        {
+          "id": "startswith-text-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "startsWith with a textual IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StartsWithTextIgnoreCaseExtension"
+        },
+        {
+          "id": "startswith-resident-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "startsWith with a resident IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StartsWithResidentIgnoreCaseExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = startsWith(str, pat, 'IgnoreCase', integer_value)",
+          "inputs": [
+            {
+              "name": "IgnoreCase",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Integer flags are compatibility-gated controls. Subject and pattern remain host text, multiple patterns are alternatives, and output has the subject shape."
+        },
+        {
+          "form": "tf = startsWith(str, pat, integer_ignore_case)",
+          "inputs": [
+            {
+              "name": "IgnoreCase",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The positional integer flag requires both positional and numeric RunMat extension gates; a resident flag additionally requires the resident-control gate before gather."
         }
       ]
     },
@@ -138146,6 +138527,55 @@
           "identifier": "RunMat:strfind:InternalError",
           "when": "Internal output assembly failed.",
           "message": "strfind: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "strfind-typed-force-cell-output",
+          "mode": "RunMatOnly",
+          "description": "strfind with a typed-integer ForceCellOutput value is an evidence-open RunMat extension",
+          "error_identifier": "RunMat:compatibility:StrfindTypedForceCellOutputExtension"
+        },
+        {
+          "id": "strfind-nonbinary-force-cell-output",
+          "mode": "RunMatOnly",
+          "description": "strfind with a numeric ForceCellOutput value other than zero or one is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StrfindNonbinaryForceCellOutputExtension"
+        },
+        {
+          "id": "strfind-resident-force-cell-output",
+          "mode": "RunMatOnly",
+          "description": "strfind with a resident ForceCellOutput value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StrfindResidentForceCellOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "k = strfind(str, pat, 'ForceCellOutput', integer_cellOutput)",
+          "inputs": [
+            {
+              "name": "cellOutput",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] R2026a explicitly documents false, true, 0, and 1 but does not enumerate typed integer storage classes. RunMat mode accepts every exact scalar integer class; MATLAB-compatible mode retains only logical and double zero/one."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Double",
+          "overflow": "EvidenceOpen",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "[integer-audit-open] The typed integer flag controls only whether double index vectors are wrapped in cells. Typed storage acceptance remains conservatively mode-gated because the public page lists numeric literals but no storage classes."
         }
       ]
     },
@@ -148688,7 +149118,11 @@
           "when": "Internal output container construction failed.",
           "message": "upper: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "upper accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access."
+      }
     },
     {
       "name": "upsample",
@@ -152136,34 +152570,159 @@
       "signatures": [
         {
           "label": "pat = wildcardPattern",
-          "inputs": [
+          "inputs": [],
+          "outputs": [
             {
-              "name": "text",
+              "name": "pat",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
-            },
+              "description": "Host pattern object."
+            }
+          ]
+        },
+        {
+          "label": "pat = wildcardPattern(N)",
+          "inputs": [
             {
-              "name": "arg",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Exact nonnegative number of characters to match."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "pat",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Output value."
+              "description": "Host pattern object."
+            }
+          ]
+        },
+        {
+          "label": "pat = wildcardPattern(minCharacters, maxCharacters)",
+          "inputs": [
+            {
+              "name": "minCharacters",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum nonnegative number of characters to match."
+            },
+            {
+              "name": "maxCharacters",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum nonnegative count, or positive infinity for no upper bound."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "pat",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Host pattern object."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.WILDCARD_PATTERN.ARGUMENT_COUNT",
+          "identifier": "RunMat:wildcardPattern:ArgumentCount",
+          "when": "More than two count arguments are supplied.",
+          "message": "wildcardPattern: expected zero, one, or two count arguments"
+        },
+        {
+          "code": "RM.WILDCARD_PATTERN.INVALID_COUNT",
+          "identifier": "RunMat:wildcardPattern:InvalidCount",
+          "when": "A count is not a host or automatically resident nonnegative numeric integer scalar, or positive infinity in the maximum position.",
+          "message": "wildcardPattern: invalid character count"
+        },
+        {
+          "code": "RM.WILDCARD_PATTERN.INVALID_RANGE",
+          "identifier": "RunMat:wildcardPattern:InvalidRange",
+          "when": "minCharacters exceeds maxCharacters.",
+          "message": "wildcardPattern: minCharacters must not exceed maxCharacters"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "pat = wildcardPattern(integer_N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every built-in integer class plus integer-valued host single or double can specify the exact nonnegative character count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "N controls only the exact repetition bound of the returned host pattern object; explicit interactive GPU input is not documented, while automatic residency may gather transparently."
+        },
+        {
+          "form": "pat = wildcardPattern(integer_minCharacters, integer_maxCharacters)",
+          "inputs": [
+            {
+              "name": "minCharacters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The inclusive lower bound is read exactly from every built-in integer class."
+            },
+            {
+              "name": "maxCharacters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The inclusive upper bound is read exactly from every built-in integer class; positive host floating infinity separately denotes an unbounded maximum."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The inclusive bounds are structural controls, min must not exceed max, and wildcard matching is lazy toward the minimum bound."
+        }
+      ]
     },
     {
       "name": "winqueryreg",

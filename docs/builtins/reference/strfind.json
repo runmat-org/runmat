@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Executes on the CPU. When inputs reside on the GPU, RunMat gathers them automatically before searching."
+    "notes": "Text and pattern inputs are host-only. A resident ForceCellOutput scalar is a RunMat extension and is gated before gather."
   },
   "fusion": {
     "elementwise": false,
@@ -25,7 +25,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::strings::search::strfind::tests",
-    "integration": "builtins::strings::search::strfind::tests::strfind_subject_cell_scalar_returns_cell"
+    "integration": "integer_pattern_and_string_transform_semantics"
   },
   "description": "`k = strfind(str, pattern)` returns starting positions of each occurrence of `pattern` within `str`. It follows MATLAB-compatible behavior across character vectors, strings, and cell arrays of character vectors.",
   "behaviors": [
@@ -34,7 +34,8 @@
     "Returns a numeric row vector when both inputs are scalar text (character vectors or string scalars) and `'ForceCellOutput'` is `false`. If either input is a cell array or the broadcasted result contains multiple elements, the output is a cell array with the broadcasted shape, and each cell contains a row vector of double indices.",
     "Pattern matches are case-sensitive and may overlap. For example, `strfind(\"aaaa\",\"aa\")` yields `[1 2 3]`.",
     "An empty pattern matches the boundaries between characters, producing indices `1:length(str)+1`. Missing strings (`<missing>`) never match any pattern.",
-    "Specify `'ForceCellOutput', true` to always obtain a cell array, even for scalar inputs."
+    "Specify `'ForceCellOutput', true` or double 1 to always obtain a cell array, even for scalar inputs.",
+    "Typed integer ForceCellOutput values remain evidence-open because the public page documents false, true, 0, and 1 without enumerating storage classes. RunMat mode accepts every exact integer class behind a compatibility gate; MATLAB-compatible mode retains logical and double zero/one."
   ],
   "examples": [
     {
@@ -116,8 +117,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/search/strfind.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/strfind.rs"
   },
-  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\n`strfind` always executes on the host, but if you pass in GPU-resident values RunMat gathers them automatically before performing the search. This keeps the results identical to MATLAB while still allowing upstream computations to benefit from acceleration.",
+  "gpu_residency": "`strfind` executes on host text. Numeric resident values in text roles reject without provider access; a resident ForceCellOutput scalar is a separately gated RunMat extension.",
   "gpu_behavior": [
-    "`strfind` performs substring searches on the host CPU. When its inputs currently live on the GPU (for example, after other accelerated operations), RunMat gathers them automatically before executing the search so the behaviour matches MATLAB exactly. No provider hooks are required."
+    "`strfind` performs substring searches on the host CPU. Compatibility and shape gates run before any admitted resident control is gathered."
   ]
 }

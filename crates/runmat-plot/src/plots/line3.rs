@@ -16,6 +16,8 @@ use runmat_builtins::NumericStorage;
 const POINTS_TO_PX: f32 = 96.0 / 72.0;
 const TUBE_RADIAL_SEGMENTS: usize = 8;
 
+pub type HostLine3Data = (Vec<f64>, Vec<f64>, Vec<f64>);
+
 #[derive(Debug, Clone)]
 pub struct Line3Plot {
     source_x: Option<NumericPlotData>,
@@ -284,7 +286,7 @@ impl Line3Plot {
         )
     }
 
-    pub fn host_xyz_f64(&self) -> Result<Option<(Vec<f64>, Vec<f64>, Vec<f64>)>, String> {
+    pub fn host_xyz_f64(&self) -> Result<Option<HostLine3Data>, String> {
         match (&self.source_x, &self.source_y, &self.source_z) {
             (Some(x), Some(y), Some(z)) if x.len() == y.len() && x.len() == z.len() => Ok(Some((
                 x.materialize_f64(),
