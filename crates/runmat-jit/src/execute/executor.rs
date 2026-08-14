@@ -16,6 +16,7 @@ pub struct GenericExecutor {
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub(super) regions: Vec<runmat_types::RegionContract>,
     pub(super) compile_duration_ns: u64,
+    entry_profile: Option<crate::tiering::RepresentationProfile>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -41,9 +42,36 @@ impl GenericExecutor {
         program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     ) -> JitResult<Self> {
+        Self::compile_product(assembly, program_capture, interpreter_resume_points, None)
+    }
+
+    pub fn compile_specialized_with_resume_points(
+        assembly: runmat_native_codegen::NativeAssembly,
+        program_capture: Option<Vec<u8>>,
+        interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+        profile: crate::tiering::RepresentationProfile,
+    ) -> JitResult<Self> {
+        Self::compile_product(
+            assembly,
+            program_capture,
+            interpreter_resume_points,
+            Some(profile),
+        )
+    }
+
+    fn compile_product(
+        assembly: runmat_native_codegen::NativeAssembly,
+        program_capture: Option<Vec<u8>>,
+        interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+        entry_profile: Option<crate::tiering::RepresentationProfile>,
+    ) -> JitResult<Self> {
         let regions = assembly.requirements.regions.clone();
         let compile_started = std::time::Instant::now();
-        let compiled = GenericCompiler::compile(&assembly)?;
+        let compiled = if entry_profile.is_some() {
+            GenericCompiler::compile_specialized(&assembly)?
+        } else {
+            GenericCompiler::compile(&assembly)?
+        };
         let compile_duration_ns = runmat_time::duration_ns_saturating(compile_started.elapsed());
         Ok(Self {
             functions: Arc::new(assembly.functions),
@@ -52,11 +80,16 @@ impl GenericExecutor {
             interpreter_resume_points,
             regions,
             compile_duration_ns,
+            entry_profile,
         })
     }
 
     pub fn retained_code_bytes(&self) -> u64 {
         self.compiled.retained_code_bytes()
+    }
+
+    pub fn entry_profile(&self) -> Option<&crate::tiering::RepresentationProfile> {
+        self.entry_profile.as_ref()
     }
 
     pub fn invoke(
@@ -172,6 +205,19 @@ impl GenericExecutor {
         runtime: RuntimeContext,
         deoptimization: DeoptimizationPolicy,
     ) -> JitResult<GenericInvocation> {
+        if let Some(profile) = &self.entry_profile {
+            let actual = arguments
+                .iter()
+                .map(runmat_runtime::value_fact::value_fact)
+                .collect::<Vec<_>>();
+            let actual = crate::tiering::RepresentationProfile::from_facts(actual, usize::MAX)
+                .map_err(|error| JitError::Host(error.into()))?;
+            if actual.digest != profile.digest || actual.facts != profile.facts {
+                return Err(JitError::Host(
+                    "specialized native entry representation guard failed".into(),
+                ));
+            }
+        }
         let function_ir = self
             .functions
             .iter()

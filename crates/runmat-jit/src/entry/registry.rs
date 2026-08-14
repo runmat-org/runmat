@@ -120,6 +120,50 @@ impl EntryRegistry {
         }
     }
 
+    /// Retire replaceable specialized products to admit one completed
+    /// replacement. The generic continuation is never retired.
+    pub fn make_room_for_specialized(
+        &mut self,
+        key: &EntryKey,
+        current: &DependencySnapshot,
+        additional_bytes: u64,
+        max_versions_per_entry: usize,
+        max_code_bytes: u64,
+    ) -> Result<usize, &'static str> {
+        if max_versions_per_entry < 2 || max_code_bytes == 0 {
+            return Err("specialized publication requires generic and specialized capacity");
+        }
+        let mut retired = 0;
+        if let Some(cell) = self.cells.get(key) {
+            while cell.retained_versions(current) + 1 > max_versions_per_entry {
+                if cell.retire_oldest_specialized().is_none() {
+                    return Err("generic native entry leaves no specialized version capacity");
+                }
+                retired += 1;
+            }
+        }
+        while self
+            .retained_code_bytes(current)
+            .checked_add(additional_bytes)
+            .is_none_or(|total| total > max_code_bytes)
+        {
+            let oldest = self
+                .cells
+                .iter()
+                .filter_map(|(candidate, cell)| {
+                    cell.oldest_specialized_publication()
+                        .map(|publication| (publication, candidate.clone()))
+                })
+                .min();
+            let Some((_, candidate)) = oldest else {
+                return Err("generic native code and replacement exceed the code-memory budget");
+            };
+            self.cells[&candidate].retire_oldest_specialized();
+            retired += 1;
+        }
+        Ok(retired)
+    }
+
     pub fn invalidate(&mut self, current: &DependencySnapshot) -> usize {
         self.cells
             .values()
@@ -142,5 +186,12 @@ impl EntryRegistry {
         self.cells.values().fold(0_u64, |total, cell| {
             total.saturating_add(cell.retained_code_bytes(current))
         })
+    }
+
+    pub fn specialized_version_count(&self, current: &DependencySnapshot) -> usize {
+        self.cells
+            .values()
+            .map(|cell| cell.specialized_version_count(current))
+            .sum()
     }
 }

@@ -18,6 +18,11 @@ impl RunMatSession {
     }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn specialized_native_version_count_for_testing(&self) -> usize {
+        self.generic_native_cache.specialized_version_count()
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn generic_native_cache_counts(&self) -> (usize, usize) {
         (
             self.generic_native_cache.compilation_count(),
@@ -61,7 +66,9 @@ impl RunMatSession {
             return self.invoke_entrypoint_interpreted(unit).await;
         };
         let started = std::time::Instant::now();
-        let published = self.generic_native_cache.resolve_or_schedule(unit, None)?;
+        let published = self
+            .generic_native_cache
+            .resolve_or_schedule(unit, None, &profile)?;
         let result = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
@@ -113,9 +120,9 @@ impl RunMatSession {
                 .await;
         };
         let started = std::time::Instant::now();
-        let published = self
-            .generic_native_cache
-            .resolve_or_schedule(unit, Some(name))?;
+        let published =
+            self.generic_native_cache
+                .resolve_or_schedule(unit, Some(name), &profile)?;
         let result = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;

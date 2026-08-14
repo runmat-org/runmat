@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
+use runmat_execution::Digest;
 use runmat_hir::FunctionId;
 use runmat_jit::{
     entry::{EntryKey, EntryRegistry, PublishedEntry},
@@ -19,8 +20,8 @@ pub(crate) struct GenericNativeCache {
     dependencies: DependencyTracker,
     project_scope_revision: String,
     tiering: TieringSession,
-    pending: BTreeMap<EntryKey, PendingCompilation>,
-    failed_compilations: BTreeSet<EntryKey>,
+    pending: BTreeMap<CompilationKey, PendingCompilation>,
+    failed_compilations: BTreeSet<CompilationKey>,
     #[cfg(test)]
     compilations: usize,
 }
@@ -28,6 +29,18 @@ pub(crate) struct GenericNativeCache {
 struct PendingCompilation {
     dependencies: runmat_jit::invalidation::DependencySnapshot,
     receiver: Receiver<Result<super::compile::BackgroundCompiledGenericUnit, String>>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct CompilationKey {
+    entry: EntryKey,
+    tier: CompilationTier,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum CompilationTier {
+    Generic,
+    Specialized(Digest),
 }
 
 impl Default for GenericNativeCache {
@@ -92,6 +105,7 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
+        invocation_profile: &RepresentationProfile,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
@@ -104,12 +118,21 @@ impl GenericNativeCache {
         match self.tiering.decide(&site, &availability) {
             TierDecision::Interpret => Ok(None),
             TierDecision::ExecuteGeneric => Ok(self.entries.resolve(&key, &current)),
-            TierDecision::ExecuteSpecialized { profile } => Ok(self
-                .entries
-                .resolve_specialized(&key, profile, &current)
-                .or_else(|| self.entries.resolve(&key, &current))),
+            TierDecision::ExecuteSpecialized { profile }
+                if profile == invocation_profile.digest =>
+            {
+                Ok(self
+                    .entries
+                    .resolve_specialized(&key, profile, &current)
+                    .or_else(|| self.entries.resolve(&key, &current)))
+            }
+            TierDecision::ExecuteSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
             TierDecision::CompileGeneric { mode } => {
-                if self.failed_compilations.contains(&key) {
+                let compilation = CompilationKey {
+                    entry: key.clone(),
+                    tier: CompilationTier::Generic,
+                };
+                if self.failed_compilations.contains(&compilation) {
                     return Ok(None);
                 }
                 match mode {
@@ -118,14 +141,14 @@ impl GenericNativeCache {
                             Ok(compiled) => compiled,
                             Err(error) => {
                                 log::warn!("adaptive native compilation failed: {error}");
-                                self.failed_compilations.insert(key);
+                                self.failed_compilations.insert(compilation);
                                 return Ok(None);
                             }
                         };
                         if !self
                             .code_budget_admits(compiled.executor.retained_code_bytes(), &current)
                         {
-                            self.failed_compilations.insert(key);
+                            self.failed_compilations.insert(compilation);
                             return Ok(None);
                         }
                         #[cfg(test)]
@@ -142,18 +165,82 @@ impl GenericNativeCache {
                         if let Err(error) = self.schedule_background(
                             unit,
                             preferred_function,
-                            key.clone(),
+                            compilation.clone(),
+                            None,
                             self.dependencies.snapshot(dependency_keys.iter()),
                         ) {
                             log::warn!("adaptive native compilation was not scheduled: {error}");
-                            self.failed_compilations.insert(key);
+                            self.failed_compilations.insert(compilation);
                         }
                         Ok(None)
                     }
                 }
             }
-            // Specialized code publication is enabled only after the optimized
-            // code generator can consume and enforce this exact profile.
+            TierDecision::CompileSpecialized { profile, mode }
+                if profile == invocation_profile.digest =>
+            {
+                let compilation = CompilationKey {
+                    entry: key.clone(),
+                    tier: CompilationTier::Specialized(profile),
+                };
+                if self.failed_compilations.contains(&compilation) {
+                    return Ok(self.entries.resolve(&key, &current));
+                }
+                let compile = |this: &mut Self| {
+                    let compiled = super::compile::compile_prepared(super::compile::prepare(
+                        unit,
+                        preferred_function,
+                        Some(invocation_profile.clone()),
+                    )?)?;
+                    if this
+                        .entries
+                        .make_room_for_specialized(
+                            &key,
+                            &current,
+                            compiled.executor.retained_code_bytes(),
+                            this.tiering.config().max_versions_per_entry,
+                            this.tiering.config().max_code_bytes,
+                        )
+                        .is_err()
+                    {
+                        this.failed_compilations.insert(compilation.clone());
+                        return Ok(None);
+                    }
+                    #[cfg(test)]
+                    {
+                        this.compilations += 1;
+                    }
+                    let snapshot = this.dependencies.snapshot(dependency_keys.iter());
+                    this.entries
+                        .publish_specialized(
+                            key.clone(),
+                            profile,
+                            Rc::new(compiled.executor),
+                            compiled.entrypoint,
+                            snapshot,
+                        )
+                        .map(Some)
+                        .map_err(|error| super::error::stage("NativePublication", error))
+                };
+                match mode {
+                    CompilationMode::DeterministicSynchronous => compile(self),
+                    CompilationMode::Background => {
+                        if let Err(error) = self.schedule_background(
+                            unit,
+                            preferred_function,
+                            compilation.clone(),
+                            Some(invocation_profile.clone()),
+                            self.dependencies.snapshot(dependency_keys.iter()),
+                        ) {
+                            log::warn!(
+                                "adaptive specialized compilation was not scheduled: {error}"
+                            );
+                            self.failed_compilations.insert(compilation);
+                        }
+                        Ok(self.entries.resolve(&key, &current))
+                    }
+                }
+            }
             TierDecision::CompileSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
         }
     }
@@ -181,13 +268,14 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        key: EntryKey,
+        key: CompilationKey,
+        specialization: Option<RepresentationProfile>,
         dependencies: runmat_jit::invalidation::DependencySnapshot,
     ) -> Result<(), runmat_runtime::RuntimeError> {
         if self.pending.contains_key(&key) {
             return Ok(());
         }
-        let prepared = super::compile::prepare(unit, preferred_function)?;
+        let prepared = super::compile::prepare(unit, preferred_function, specialization)?;
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("runmat-jit-compile".into())
@@ -229,23 +317,48 @@ impl GenericNativeCache {
                 self.failed_compilations.insert(key);
                 continue;
             };
-            if !pending.dependencies.is_satisfied_by(current)
-                || !self.code_budget_admits(compiled.executor.retained_code_bytes(), current)
-            {
+            if !pending.dependencies.is_satisfied_by(current) {
+                continue;
+            }
+            let admitted = match key.tier {
+                CompilationTier::Generic => {
+                    self.code_budget_admits(compiled.executor.retained_code_bytes(), current)
+                }
+                CompilationTier::Specialized(_) => self
+                    .entries
+                    .make_room_for_specialized(
+                        &key.entry,
+                        current,
+                        compiled.executor.retained_code_bytes(),
+                        self.tiering.config().max_versions_per_entry,
+                        self.tiering.config().max_code_bytes,
+                    )
+                    .is_ok(),
+            };
+            if !admitted {
+                self.failed_compilations.insert(key);
                 continue;
             }
             #[cfg(test)]
             {
                 self.compilations += 1;
             }
-            self.entries
-                .publish(
-                    key,
+            let published = match key.tier {
+                CompilationTier::Generic => self.entries.publish(
+                    key.entry,
                     Rc::new(compiled.executor),
                     compiled.entrypoint,
                     pending.dependencies,
-                )
-                .map_err(|error| super::error::stage("NativePublication", error))?;
+                ),
+                CompilationTier::Specialized(profile) => self.entries.publish_specialized(
+                    key.entry,
+                    profile,
+                    Rc::new(compiled.executor),
+                    compiled.entrypoint,
+                    pending.dependencies,
+                ),
+            };
+            published.map_err(|error| super::error::stage("NativePublication", error))?;
         }
         Ok(())
     }
@@ -379,6 +492,12 @@ impl GenericNativeCache {
     #[cfg(test)]
     pub(crate) fn compilation_count(&self) -> usize {
         self.compilations
+    }
+
+    #[cfg(test)]
+    pub(crate) fn specialized_version_count(&self) -> usize {
+        self.entries
+            .specialized_version_count(&self.dependencies.snapshot_all())
     }
 }
 

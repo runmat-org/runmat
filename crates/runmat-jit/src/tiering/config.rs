@@ -43,7 +43,7 @@ impl TieringConfig {
             || self.max_sites == 0
             || self.max_profiles_per_site == 0
             || self.max_profile_bytes == 0
-            || self.max_versions_per_entry == 0
+            || self.max_versions_per_entry < 2
             || self.max_pending_compilations == 0
             || self.max_code_bytes == 0
         {

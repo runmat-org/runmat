@@ -182,6 +182,15 @@ impl EntryCell {
             .collect()
     }
 
+    pub(crate) fn specialized_version_count(&self, current: &DependencySnapshot) -> usize {
+        self.state
+            .borrow()
+            .specialized
+            .values()
+            .filter(|target| target.dependencies.is_satisfied_by(current))
+            .count()
+    }
+
     pub(crate) fn retire_oldest_specialized(&self) -> Option<(u64, u64)> {
         let mut state = self.state.borrow_mut();
         let (profile, publication, bytes) = state

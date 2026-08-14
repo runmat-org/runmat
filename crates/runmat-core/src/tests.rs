@@ -14312,6 +14312,54 @@ fn background_native_tiering_publishes_once_without_blocking_the_hot_invocation(
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 3,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-specialized-tier-test@1",
+            "specializedTier.m",
+            "function y = specializedTier(x)\ny = x + 1;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile specialization fixture");
+    let invoke = |session: &mut RunMatSession, value| {
+        block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("specializedTier".into()),
+                arguments: vec![value],
+                requested_outputs: 1,
+            },
+            &InvocationControl::default(),
+        ))
+    };
+
+    for _ in 0..4 {
+        assert_eq!(
+            invoke(&mut session, runmat_value::Value::Num(4.0)).unwrap(),
+            runmat_value::Value::Num(5.0)
+        );
+    }
+    assert_eq!(session.generic_native_cache_counts(), (2, 1));
+    assert_eq!(session.specialized_native_version_count_for_testing(), 1);
+
+    // A different current representation must use the generic continuation;
+    // it cannot enter the dominant scalar-double specialization.
+    let result = invoke(&mut session, runmat_value::Value::Bool(true));
+    assert!(result.is_ok(), "generic continuation failed: {result:?}");
+    assert_eq!(session.generic_native_cache_counts(), (2, 1));
+    assert_eq!(session.specialized_native_version_count_for_testing(), 1);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = ExecutableSource::new(

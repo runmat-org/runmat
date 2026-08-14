@@ -20,6 +20,7 @@ pub(super) struct PreparedGenericUnit {
     program_capture: Vec<u8>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     entrypoint: ProgramFunctionId,
+    specialization: Option<runmat_jit::tiering::RepresentationProfile>,
 }
 
 pub(super) struct BackgroundCompiledGenericUnit {
@@ -33,7 +34,7 @@ pub(super) fn compile(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
 ) -> Result<CompiledGenericUnit, runmat_runtime::RuntimeError> {
-    let compiled = compile_prepared(prepare(unit, preferred_function)?)?;
+    let compiled = compile_prepared(prepare(unit, preferred_function, None)?)?;
     Ok(CompiledGenericUnit {
         executor: Rc::new(compiled.executor),
         entrypoint: compiled.entrypoint,
@@ -45,6 +46,7 @@ pub(super) fn compile(
 pub(super) fn prepare(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
+    specialization: Option<runmat_jit::tiering::RepresentationProfile>,
 ) -> Result<PreparedGenericUnit, runmat_runtime::RuntimeError> {
     let envelope = unit
         .portable_envelope_for(preferred_function)
@@ -84,6 +86,7 @@ pub(super) fn prepare(
         program_capture,
         interpreter_resume_points,
         entrypoint,
+        specialization,
     })
 }
 
@@ -118,11 +121,19 @@ pub(super) fn compile_prepared(
             (function.id, points)
         })
         .collect();
-    let executor = runmat_jit::GenericExecutor::compile_with_resume_points(
-        assembly,
-        Some(prepared.program_capture),
-        prepared.interpreter_resume_points,
-    )
+    let executor = match prepared.specialization {
+        Some(profile) => runmat_jit::GenericExecutor::compile_specialized_with_resume_points(
+            assembly,
+            Some(prepared.program_capture),
+            prepared.interpreter_resume_points,
+            profile,
+        ),
+        None => runmat_jit::GenericExecutor::compile_with_resume_points(
+            assembly,
+            Some(prepared.program_capture),
+            prepared.interpreter_resume_points,
+        ),
+    }
     .map_err(super::error::from_jit_error)?;
     Ok(BackgroundCompiledGenericUnit {
         executor,

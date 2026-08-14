@@ -12,6 +12,19 @@ impl GenericCompiler {
     pub fn compile(
         assembly: &runmat_native_codegen::NativeAssembly,
     ) -> JitResult<CompiledExecutable> {
+        Self::compile_with_optimization(assembly, false)
+    }
+
+    pub fn compile_specialized(
+        assembly: &runmat_native_codegen::NativeAssembly,
+    ) -> JitResult<CompiledExecutable> {
+        Self::compile_with_optimization(assembly, true)
+    }
+
+    fn compile_with_optimization(
+        assembly: &runmat_native_codegen::NativeAssembly,
+        specialized: bool,
+    ) -> JitResult<CompiledExecutable> {
         assembly.verify()?;
         let mut flags = cranelift_codegen::settings::builder();
         flags
@@ -19,6 +32,9 @@ impl GenericCompiler {
             .map_err(module_error)?;
         flags.set("is_pic", "false").map_err(module_error)?;
         flags.set("enable_verifier", "true").map_err(module_error)?;
+        if specialized {
+            flags.set("opt_level", "speed").map_err(module_error)?;
+        }
         let isa = cranelift_native::builder()
             .map_err(|error| JitError::Module(error.to_string()))?
             .finish(cranelift_codegen::settings::Flags::new(flags))

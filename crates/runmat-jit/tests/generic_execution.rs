@@ -145,6 +145,48 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
 }
 
 #[test]
+fn completed_specialization_retires_only_replaceable_code_to_make_room() {
+    let mut dependencies = DependencyTracker::default();
+    let program = DependencyKey::Program("replacement".into());
+    dependencies.observe(program.clone(), "revision-a").unwrap();
+    let current = dependencies.snapshot_all();
+    let key = EntryKey("replacement/main".into());
+    let mut registry = EntryRegistry::default();
+    registry
+        .publish(
+            key.clone(),
+            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            ProgramFunctionId(0),
+            dependencies.snapshot([&program]),
+        )
+        .unwrap();
+    registry
+        .publish_specialized(
+            key.clone(),
+            Digest::sha256(b"old"),
+            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            ProgramFunctionId(0),
+            dependencies.snapshot([&program]),
+        )
+        .unwrap();
+    let replacement = GenericExecutor::compile(fixture()).unwrap();
+    assert_eq!(
+        registry
+            .make_room_for_specialized(
+                &key,
+                &current,
+                replacement.retained_code_bytes(),
+                2,
+                u64::MAX,
+            )
+            .unwrap(),
+        1
+    );
+    assert!(registry.resolve(&key, &current).is_some());
+    assert_eq!(registry.specialized_version_count(&current), 0);
+}
+
+#[test]
 fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
     let executor = GenericExecutor::compile(fixture()).unwrap();
     assert!(executor.retained_code_bytes() > 0);

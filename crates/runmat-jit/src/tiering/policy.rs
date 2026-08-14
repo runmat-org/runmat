@@ -49,14 +49,15 @@ pub(super) fn decide(
     if let Some(profile) = specialized_ready {
         return TierDecision::ExecuteSpecialized { profile };
     }
-    let within_compile_budget = availability.pending_compilations < config.max_pending_compilations
+    let within_pending_budget = availability.pending_compilations < config.max_pending_compilations;
+    let within_compile_budget = within_pending_budget
         && availability.retained_versions < config.max_versions_per_entry
         && availability.retained_code_bytes < config.max_code_bytes;
     if availability.generic_ready {
         let specialization_hot = dominant_profile.is_some_and(|(_, samples, failures)| {
             samples >= config.specialized_hot_threshold && failures < 2
         });
-        if specialization_hot && within_compile_budget {
+        if specialization_hot && within_pending_budget {
             let profile = dominant_profile
                 .expect("hot specialization has a dominant profile")
                 .0;
@@ -131,5 +132,28 @@ mod tests {
                 TierDecision::Interpret
             );
         }
+    }
+
+    #[test]
+    fn hot_new_profile_can_replace_an_old_specialization_at_the_version_cap() {
+        let profile = digest(2);
+        let config = TieringConfig {
+            specialized_hot_threshold: 2,
+            max_versions_per_entry: 2,
+            ..TieringConfig::default()
+        };
+        let availability = TierAvailability {
+            generic_ready: true,
+            retained_versions: 2,
+            retained_code_bytes: config.max_code_bytes,
+            ..TierAvailability::default()
+        };
+        assert_eq!(
+            decide(config, 10, 0, Some((profile, 2, 0)), &availability),
+            TierDecision::CompileSpecialized {
+                profile,
+                mode: CompilationMode::Background,
+            }
+        );
     }
 }
