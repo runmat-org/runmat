@@ -41,7 +41,8 @@
     "Logical and character inputs are promoted to double precision before powering (`'A'.^2` uses the Unicode code points of the characters).",
     "Complex bases and/or exponents follow the analytic identity `z.^w = exp(w * log(z))`, so negative bases with fractional exponents return complex results instead of `NaN`.",
     "Empty tensors propagate emptiness; the result uses the broadcasted size.",
-    "The optional `'like', prototype` arguments mirror the numeric flavour and residency (host vs gpuArray) of `prototype`, just like MATLAB."
+    "Integer bases preserve their class, require nonnegative integer-valued exponents, and use saturating exponentiation; scalar-double compatibility follows the exact 64-bit rule.",
+    "In RunMat compatibility mode, the RunMat-only optional `'like', prototype` arguments mirror the prototype's numeric flavour and residency. MATLAB-compatible mode rejects this extension before dispatch."
   ],
   "examples": [
     {
@@ -82,7 +83,7 @@
     },
     {
       "question": "What numeric type does `power` return?",
-      "answer": "Real inputs produce doubles. Results promote to complex doubles whenever the exponentiation would leave the real line (for example `(-2).^0.5` or complex exponents)."
+      "answer": "Ordinary real inputs produce double, and results promote to complex double when exponentiation leaves the real line. Integer bases preserve their class, accept only nonnegative integer-valued exponents, and saturate overflow."
     },
     {
       "question": "Can I mix scalars and arrays?",

@@ -1,7 +1,11 @@
 //! MATLAB-compatible logical `or` builtin with GPU support.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, Tensor, Value,
 };
@@ -14,6 +18,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::bit::resident::{self, LogicalBinaryOp};
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -33,7 +38,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Falls back to host execution when the provider does not implement logical_or; non-zero (including NaN) inputs map to true.",
+    notes: "Uses logical_or only for ownership-validated floating real handles. Native integer handles gather through exact typed storage; explicit gpuArray fallback restores a validated logical result while automatic residency may remain on host.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::bit::or")]
@@ -67,6 +72,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "or";
+
+const OR_COMPLEX_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "or-complex-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "or with a complex operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OrComplexInputExtension"),
+};
+const OR_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "or-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "or with a character-array operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OrCharacterInputExtension"),
+};
+pub const OR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [OR_COMPLEX_INPUT_EXTENSION, OR_CHARACTER_INPUT_EXTENSION];
+
+const OR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Every integer class uses exact zero/nonzero truth semantics and may be paired with numeric or logical data." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Compatible dimensions expand implicitly; zero is false and every nonzero integer is true." },
+];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "tf = or(integer_A, integer_B)", inputs: &OR_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "The function form and element-wise | operator share exact zero/nonzero truth semantics. Resident integers bypass floating logical hooks, gather through authoritative typed storage, and restore only explicit gpuArray output residency." }];
 
 const OR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -129,18 +156,46 @@ pub const OR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "logical,or,elementwise,boolean,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),
+    extensions(crate::builtins::logical::bit::or::OR_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::or::INTEGER_CAPABILITIES),
     descriptor(crate::builtins::logical::bit::or::OR_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::or"
 )]
 async fn or_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if [&lhs, &rhs].into_iter().any(is_complex_operand) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &OR_COMPLEX_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if [&lhs, &rhs]
+        .into_iter()
+        .any(|value| matches!(value, Value::CharArray(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &OR_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let output_source = resident::select_output_source([&lhs, &rhs], BUILTIN_NAME)?;
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(handle) = provider.logical_or(a, b) {
-                return Ok(gpu_helpers::logical_gpu_value(handle));
-            }
+        if let Some(value) = resident::try_binary_hook(a, b, BUILTIN_NAME, LogicalBinaryOp::Or) {
+            return Ok(value);
         }
     }
-    or_host(lhs, rhs).await
+    let result = or_host(lhs, rhs).await?;
+    resident::restore_explicit_logical_result(result, output_source.as_ref(), BUILTIN_NAME)
+}
+
+fn is_complex_operand(value: &Value) -> bool {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => true,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        }
+        _ => false,
+    }
 }
 
 async fn or_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -404,9 +459,57 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn or_accepts_every_integer_class_without_floating_truth_conversion() {
+        let cases = [
+            IntegerStorage::I8(vec![0, i8::MIN]),
+            IntegerStorage::I16(vec![0, i16::MIN]),
+            IntegerStorage::I32(vec![0, i32::MIN]),
+            IntegerStorage::I64(vec![0, i64::MIN]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![0, u64::MAX]),
+        ];
+        for storage in cases {
+            let input = Tensor::new_integer(storage, vec![1, 2]).expect("integer input");
+            let result = run_or(Value::Tensor(input), Value::Bool(false)).expect("or");
+            let Value::LogicalArray(output) = result else {
+                panic!("expected logical array");
+            };
+            assert_eq!(output.data, vec![0, 1]);
+        }
+    }
+
+    #[test]
+    fn or_explicit_resident_integer_fallback_is_exact_and_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 3],
+            )
+            .expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let result = run_or(Value::GpuTensor(handle), Value::Bool(false)).expect("or");
+            let Value::GpuTensor(output) = &result else {
+                panic!("explicit gpuArray result must remain resident");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output));
+            assert!(runmat_accelerate_api::handle_is_logical(output));
+            assert_eq!(
+                test_support::gather(result)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![0.0, 1.0, 1.0]
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn or_char_arrays() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
         let rhs = CharArray::new(vec!['R', '\0', 'n'], 1, 3).unwrap();
         let result = run_or(Value::CharArray(lhs), Value::CharArray(rhs)).expect("or char arrays");
@@ -429,6 +532,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn or_complex_inputs() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = run_or(Value::Complex(0.0, 0.0), Value::Complex(0.0, 0.0)).unwrap();
         assert_eq!(result, Value::Bool(false));
 
@@ -501,6 +605,35 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
         });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn or_wgpu_integer_handle_uses_exact_fallback_and_preserves_explicit_residency() {
+        let _accel_guard = test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("actual WGPU provider");
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 3],
+        )
+        .expect("integer input");
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let result = run_or(Value::GpuTensor(handle), Value::Bool(false)).expect("or");
+        let Value::GpuTensor(output) = &result else {
+            panic!("explicit gpuArray result must remain resident");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(output));
+        assert_eq!(
+            test_support::gather(result)
+                .expect("gather")
+                .materialize_f64(),
+            vec![0.0, 1.0, 1.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

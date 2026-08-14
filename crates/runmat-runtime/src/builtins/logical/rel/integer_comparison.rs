@@ -26,6 +26,95 @@ pub enum IntegerComparisonError {
     Internal,
 }
 
+pub(crate) async fn try_gpu_equality_comparison(
+    lhs: &GpuTensorHandle,
+    rhs: &GpuTensorHandle,
+    operation: IntegerComparisonOp,
+) -> Option<crate::BuiltinResult<Value>> {
+    if lhs.device_id != rhs.device_id {
+        return None;
+    }
+    let provider = resolved_actual_owner(lhs)?;
+    let rhs_owner = resolved_actual_owner(rhs)?;
+    if !std::ptr::eq(provider, rhs_owner)
+        || runmat_accelerate_api::handle_precision(lhs)
+            != runmat_accelerate_api::handle_precision(rhs)
+    {
+        return None;
+    }
+    let result = match operation {
+        IntegerComparisonOp::Eq => provider.elem_eq(lhs, rhs).await,
+        IntegerComparisonOp::Ne => provider.elem_ne(lhs, rhs).await,
+        _ => unreachable!("equality helper only supports eq and ne"),
+    };
+    match result {
+        Ok(handle) if valid_equality_output(&handle, lhs, rhs, provider) => {
+            let provenance = [lhs, rhs]
+                .into_iter()
+                .filter_map(runmat_accelerate_api::handle_provenance)
+                .find(|provenance| {
+                    *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit
+                })
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            runmat_accelerate_api::set_handle_provenance(&handle, provenance);
+            Some(Ok(gpu_helpers::logical_gpu_value(handle)))
+        }
+        Ok(handle) => {
+            free_rejected_gpu_handle(&handle, &[lhs, rhs]);
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+pub(crate) fn select_comparison_output_source(
+    lhs: &Value,
+    rhs: &Value,
+    builtin: &str,
+) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
+    gpu_helpers::select_resident_output_source(
+        [lhs, rhs].into_iter().filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        builtin,
+    )
+}
+
+pub(crate) fn restore_explicit_comparison_result(
+    value: Value,
+    source: Option<&GpuTensorHandle>,
+    builtin: &str,
+) -> crate::BuiltinResult<Value> {
+    let Some(source) = source.filter(|handle| runmat_accelerate_api::handle_is_explicit(handle))
+    else {
+        return Ok(value);
+    };
+    let value = match value {
+        Value::Bool(bit) => Value::LogicalArray(
+            LogicalArray::new(vec![u8::from(bit)], vec![1, 1]).map_err(|error| {
+                crate::build_runtime_error(format!(
+                    "{builtin}: invalid scalar logical result: {error}"
+                ))
+                .with_builtin(builtin)
+                .build()
+            })?,
+        ),
+        value => value,
+    };
+    let restored = gpu_helpers::restore_class_preserving_value(source, value, builtin)?;
+    if !matches!(restored, Value::GpuTensor(_)) {
+        return Err(crate::build_runtime_error(format!(
+            "{builtin}: provider cannot preserve explicit gpuArray output residency"
+        ))
+        .with_builtin(builtin)
+        .with_identifier(format!("RunMat:{builtin}:GpuUploadFailed"))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    Ok(restored)
+}
+
 /// Executes a resident ordering comparison, extracting real lanes first when
 /// either input is complex-interleaved. The logical result remains resident.
 pub(crate) async fn try_gpu_ordering_comparison(
@@ -158,6 +247,24 @@ fn valid_real_projection(
 }
 
 fn valid_ordering_output(
+    output: &GpuTensorHandle,
+    lhs: &GpuTensorHandle,
+    rhs: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let expected_shape = broadcast_shapes("comparison", &lhs.shape, &rhs.shape).ok();
+    expected_shape.as_deref() == Some(output.shape.as_slice())
+        && output.device_id == lhs.device_id
+        && !gpu_handles_alias(output, lhs)
+        && !gpu_handles_alias(output, rhs)
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(lhs)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && resolved_actual_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn valid_equality_output(
     output: &GpuTensorHandle,
     lhs: &GpuTensorHandle,
     rhs: &GpuTensorHandle,

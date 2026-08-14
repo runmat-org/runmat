@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexStorage, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
 };
@@ -65,6 +69,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "power";
+
+pub const POWER_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "power-like-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "power with a 'like' output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PowerLikePrototypeExtension"),
+};
+pub const POWER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [POWER_LIKE_EXTENSION];
+const POWER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer bases preserve their class, reject complex integer storage, and require a nonnegative integer-valued exponent." },
+    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer exponents are validated exactly before exponentiation and compatible dimensions expand implicitly." },
+];
+pub const POWER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "C = power(A, B)", inputs: &POWER_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Integer powers use exact exponent validation and saturating exponentiation in the preserved integer class. Resident integer values gather authoritatively before the exact host path rather than entering floating provider pow." }];
 
 const POWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -209,6 +226,8 @@ fn power_error_with_detail(
     keywords = "power,element-wise,.^,gpu,broadcast",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    extensions(POWER_EXTENSIONS),
+    integer_capabilities(POWER_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::elementwise::power::POWER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::power"
 )]
@@ -223,6 +242,12 @@ async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     }
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
     let template = parse_output_template(&rest)?;
+    if matches!(template, OutputTemplate::Like(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &POWER_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let base_result = match (lhs, rhs) {
         (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb).await,
         (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs).await,
@@ -1591,6 +1616,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_complex_promotes_output() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let base = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
         let result = power_builtin(
             Value::Tensor(base),
@@ -1610,6 +1636,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn power_like_gpu_residency() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let base = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let exp = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();

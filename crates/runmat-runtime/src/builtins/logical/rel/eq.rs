@@ -1,6 +1,5 @@
 //! MATLAB-compatible `eq` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -19,7 +18,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    integer_f64_order, try_complex_integer_equality_comparison, try_integer_comparison,
+    integer_f64_order, restore_explicit_comparison_result, select_comparison_output_source,
+    try_complex_integer_equality_comparison, try_gpu_equality_comparison, try_integer_comparison,
     IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
@@ -174,13 +174,15 @@ fn eq_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 )]
 async fn eq_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(result) = try_eq_gpu(a, b).await {
+        if let Some(result) = try_gpu_equality_comparison(a, b, IntegerComparisonOp::Eq).await {
             return result;
         }
     }
+    let output_source = select_comparison_output_source(&lhs, &rhs, BUILTIN_NAME)?;
     let lhs = gather_eq_operand(lhs).await?;
     let rhs = gather_eq_operand(rhs).await?;
-    eq_host(lhs, rhs).await
+    let result = eq_host(lhs, rhs).await?;
+    restore_explicit_comparison_result(result, output_source.as_ref(), BUILTIN_NAME)
 }
 
 async fn gather_eq_operand(value: Value) -> crate::BuiltinResult<Value> {
@@ -190,75 +192,6 @@ async fn gather_eq_operand(value: Value) -> crate::BuiltinResult<Value> {
             .map_err(|_| eq_error(&EQ_ERROR_INVALID_INPUT))
     } else {
         Ok(value)
-    }
-}
-
-async fn try_eq_gpu(
-    a: &GpuTensorHandle,
-    b: &GpuTensorHandle,
-) -> Option<crate::BuiltinResult<Value>> {
-    if a.device_id != b.device_id {
-        return None;
-    }
-    let provider = resolved_actual_eq_owner(a)?;
-    let rhs_owner = resolved_actual_eq_owner(b)?;
-    if !std::ptr::eq(provider, rhs_owner) {
-        return None;
-    }
-    match provider.elem_eq(a, b).await {
-        Ok(handle) if valid_eq_gpu_output(&handle, a, b, provider) => {
-            Some(Ok(gpu_helpers::logical_gpu_value(handle)))
-        }
-        Ok(handle) => {
-            free_rejected_eq_handle(&handle, &[a, b]);
-            None
-        }
-        Err(err) => {
-            drop(err);
-            None
-        }
-    }
-}
-
-fn resolved_actual_eq_owner(
-    handle: &GpuTensorHandle,
-) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
-    runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
-}
-
-fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
-}
-
-fn valid_eq_gpu_output(
-    output: &GpuTensorHandle,
-    lhs: &GpuTensorHandle,
-    rhs: &GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    let expected_shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape).ok();
-    expected_shape.as_deref() == Some(output.shape.as_slice())
-        && output.device_id == lhs.device_id
-        && !gpu_handles_alias(output, lhs)
-        && !gpu_handles_alias(output, rhs)
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(output)
-            == runmat_accelerate_api::handle_precision(lhs)
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && resolved_actual_eq_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_eq_handle(handle: &GpuTensorHandle, protected: &[&GpuTensorHandle]) {
-    if protected
-        .iter()
-        .any(|protected| gpu_handles_alias(handle, protected))
-    {
-        return;
-    }
-    if let Some(owner) = resolved_actual_eq_owner(handle) {
-        let _ = owner.free(handle);
     }
 }
 

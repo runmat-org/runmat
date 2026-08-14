@@ -1025,6 +1025,7 @@ mod tests {
             ("maxk", "maxk-gpu-input"),
             ("meshgrid", "meshgrid-complex-axes"),
             ("meshgrid", "meshgrid-like"),
+            ("minus", "minus-like-prototype"),
             ("mink", "mink-gpu-input"),
             ("movmad", "movmad-gpu-large-window"),
             ("movmax", "movmax-gpu-sample-points"),
@@ -1054,8 +1055,12 @@ mod tests {
             ("nearestNeighbor", "delaunaytri-integer-coordinates"),
             ("ones", "ones-column-size-vector"),
             ("ones", "ones-resident-size-control"),
+            ("or", "or-character-input"),
+            ("or", "or-complex-input"),
             ("pagefun", "pagefun-host-inputs"),
             ("pagefun", "pagefun-text-callable"),
+            ("plus", "plus-like-prototype"),
+            ("power", "power-like-prototype"),
             ("pskmod", "pskmod-integer-custom-order"),
             ("pskmod", "pskmod-integer-modulation-order"),
             ("pskmod", "pskmod-integer-phase-offset"),
@@ -1079,6 +1084,7 @@ mod tests {
             ("range", "range-gpu-all-or-vecdim"),
             ("range", "range-integer-data"),
             ("range", "range-typed-integer-control"),
+            ("rdivide", "rdivide-like-prototype"),
             ("sawtooth", "sawtooth-gpu-input"),
             ("sawtooth", "sawtooth-nondouble-input"),
             ("sinc", "sinc-nonfloating-input"),
@@ -1091,6 +1097,7 @@ mod tests {
             ("std", "std-typed-integer-control"),
             ("tabulate", "tabulate-gpu-input"),
             ("tabulate", "tabulate-integer-data"),
+            ("times", "times-like-prototype"),
             ("tiedrank", "tiedrank-integer-data"),
             ("trnd", "trnd-integer-degrees-of-freedom"),
             ("trnd", "trnd-integer-size"),
@@ -1099,6 +1106,8 @@ mod tests {
             ("uint64.empty", "empty-resident-size"),
             ("uint8.empty", "empty-resident-size"),
             ("var", "var-typed-integer-control"),
+            ("xor", "xor-character-input"),
+            ("xor", "xor-complex-input"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -1125,6 +1134,58 @@ mod tests {
                     extension.id
                 );
             }
+        }
+    }
+
+    #[test]
+    fn core_operator_extensions_reject_before_semantic_dispatch_in_matlab_mode() {
+        let _matlab_mode = push_runmat_extensions_enabled(false);
+        let like_cases = [
+            ("plus", "RunMat:compatibility:PlusLikePrototypeExtension"),
+            ("minus", "RunMat:compatibility:MinusLikePrototypeExtension"),
+            ("times", "RunMat:compatibility:TimesLikePrototypeExtension"),
+            (
+                "rdivide",
+                "RunMat:compatibility:RdivideLikePrototypeExtension",
+            ),
+            ("power", "RunMat:compatibility:PowerLikePrototypeExtension"),
+        ];
+        for (name, identifier) in like_cases {
+            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
+            let args = [
+                Value::Num(2.0),
+                Value::Num(1.0),
+                Value::String("like".to_string()),
+                Value::Num(0.0),
+            ];
+            let error = futures::executor::block_on((builtin.implementation)(&args))
+                .expect_err("MATLAB mode must reject RunMat-only like prototype");
+            assert_eq!(error.identifier(), Some(identifier), "{name}");
+        }
+
+        for (name, identifier) in [
+            ("or", "RunMat:compatibility:OrComplexInputExtension"),
+            ("xor", "RunMat:compatibility:XorComplexInputExtension"),
+        ] {
+            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
+            let args = [Value::Complex(0.0, 1.0), Value::Bool(false)];
+            let error = futures::executor::block_on((builtin.implementation)(&args))
+                .expect_err("MATLAB mode must reject RunMat-only complex logical input");
+            assert_eq!(error.identifier(), Some(identifier), "{name}");
+        }
+
+        for (name, identifier) in [
+            ("or", "RunMat:compatibility:OrCharacterInputExtension"),
+            ("xor", "RunMat:compatibility:XorCharacterInputExtension"),
+        ] {
+            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
+            let args = [
+                Value::CharArray(runmat_builtins::CharArray::new_row("A")),
+                Value::Bool(false),
+            ];
+            let error = futures::executor::block_on((builtin.implementation)(&args))
+                .expect_err("MATLAB mode must reject RunMat-only character logical input");
+            assert_eq!(error.identifier(), Some(identifier), "{name}");
         }
     }
 

@@ -69,6 +69,50 @@ fn elementwise_and_accepts_all_integer_classes_through_vm_dispatch() {
 }
 
 #[test]
+fn not_or_and_xor_accept_all_integer_classes_through_vm_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source =
+            format!("a={constructor}([0 1]); neg=not(a); dis=or(a,false); exclusive=xor(a,true);");
+        let vars = execute_source(&source).unwrap_or_else(|error| {
+            panic!("{constructor}: compiled logical calls failed: {error}")
+        });
+        assert!(vars.iter().any(|value| matches!(
+            value,
+            Value::LogicalArray(array) if array.data == vec![0, 1]
+        )));
+        assert!(
+            vars.iter()
+                .filter(|value| matches!(
+                    value,
+                    Value::LogicalArray(array) if array.data == vec![1, 0]
+                ))
+                .count()
+                >= 2,
+            "{constructor}: {vars:?}"
+        );
+    }
+
+    let vars = execute_source(
+        "wide=uint64([0 9007199254740993 18446744073709551615]); neg=not(wide); dis=or(wide,false); exclusive=xor(wide,true);",
+    )
+    .expect("wide integer logical calls");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![1, 0, 0]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![0, 1, 1]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![1, 0, 0]
+    )));
+}
+
+#[test]
 fn angle_rejects_all_real_and_componentwise_complex_integer_classes_through_vm_dispatch() {
     for constructor in [
         "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",

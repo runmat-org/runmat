@@ -83,6 +83,27 @@ fn direct_relational_builtins_keep_uint64_comparisons_exact() {
 }
 
 #[test]
+fn direct_ne_keeps_wide_integer_comparisons_exact() {
+    let vars = execute_source(
+        r#"
+        base = uint64(9007199254740992);
+        values = base + uint64([0 1 2]);
+        scalar = ne(values, 9007199254740992);
+        mixed = ne(uint64([0 18446744073709551615]), int64([0 9223372036854775807]));
+        "#,
+    )
+    .expect("direct exact inequality");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![0, 1, 1]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![0, 1]
+    )));
+}
+
+#[test]
 fn vm_power_paths_keep_uint64_integer_results_exact() {
     let vars = execute_source(
         r#"

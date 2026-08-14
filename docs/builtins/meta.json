@@ -96789,6 +96789,59 @@
           "when": "Sparse arithmetic storage construction or conversion failed unexpectedly.",
           "message": "minus: sparse arithmetic internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "minus-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "minus with a 'like' output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MinusLikePrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = minus(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer operand requires the other operand to use the same integer class or to be scalar double; complex integer subtraction is rejected."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Compatible dimensions expand implicitly and the nondouble integer class is preserved."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Same-class integer differences are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage."
+        }
       ]
     },
     {
@@ -101582,6 +101635,51 @@
           "when": "Runtime cannot materialize matrix product outputs.",
           "message": "mtimes: internal runtime failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = mtimes(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "If A is an integer class, B must be scalar and use the same integer class or scalar double; complex integer storage is unsupported."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "If B is an integer class, A must be scalar and use the same integer class or scalar double; the integer class is preserved."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "When either operand is integer the other must be scalar, making the operation equivalent to class-preserving element-wise multiplication. Native integer arithmetic saturates, scalar-double arithmetic follows the 64-bit extended-precision rule, and resident fallback gathers authoritative storage."
+        }
       ]
     },
     {
@@ -105968,6 +106066,51 @@
           "when": "Operands are not broadcast-compatible.",
           "message": "ne: array sizes are not compatible for broadcasting"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = ne(integer_A, integer_or_numeric_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every integer class compares with numeric data without converting authoritative integer storage through f64."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Mixed signed, unsigned, and floating comparisons preserve precision and support compatible-size expansion."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "BroadcastCompatible",
+          "notes": "Signed, unsigned, floating, logical, character, and complex components compare without precision loss; the result is logical and resident provider output is ownership-validated."
+        }
       ]
     },
     {
@@ -107291,6 +107434,35 @@
           "identifier": "RunMat:not:InvalidInput",
           "when": "The input is not logical, numeric, complex, character, or gpuArray with gatherable numeric data.",
           "message": "not: unsupported input type; expected logical, numeric, complex, or character data"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = not(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer class is accepted; zero maps to true after negation and every nonzero value maps to false."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Native integer storage is tested directly for zero. Resident integers bypass floating logical hooks, gather authoritatively, and restore only explicit gpuArray output residency."
         }
       ]
     },
@@ -109748,6 +109920,65 @@
           "identifier": "RunMat:or:SizeMismatch",
           "when": "Input shapes are not broadcast-compatible.",
           "message": "or: array sizes are not compatible for broadcasting"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "or-complex-input",
+          "mode": "RunMatOnly",
+          "description": "or with a complex operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OrComplexInputExtension"
+        },
+        {
+          "id": "or-character-input",
+          "mode": "RunMatOnly",
+          "description": "or with a character-array operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OrCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = or(integer_A, integer_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every integer class uses exact zero/nonzero truth semantics and may be paired with numeric or logical data."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Compatible dimensions expand implicitly; zero is false and every nonzero integer is true."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "The function form and element-wise | operator share exact zero/nonzero truth semantics. Resident integers bypass floating logical hooks, gather through authoritative typed storage, and restore only explicit gpuArray output residency."
         }
       ]
     },
@@ -114228,6 +114459,59 @@
           "when": "Sparse arithmetic storage construction or conversion failed unexpectedly.",
           "message": "plus: sparse arithmetic internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "plus-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "plus with a 'like' output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PlusLikePrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = plus(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer operand requires the other operand to use the same integer class or to be scalar double; complex integer addition is rejected."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Compatible dimensions expand implicitly and the nondouble integer class is preserved."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Same-class integer sums are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage."
+        }
       ]
     },
     {
@@ -115959,6 +116243,59 @@
           "identifier": "RunMat:power:Internal",
           "when": "Provider interaction, gather/upload, or internal tensor construction failed.",
           "message": "power: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "power-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "power with a 'like' output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PowerLikePrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = power(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer bases preserve their class, reject complex integer storage, and require a nonnegative integer-valued exponent."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer exponents are validated exactly before exponentiation and compatible dimensions expand implicitly."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Integer powers use exact exponent validation and saturating exponentiation in the preserved integer class. Resident integer values gather authoritatively before the exact host path rather than entering floating provider pow."
         }
       ]
     },
@@ -121470,6 +121807,59 @@
           "identifier": "RunMat:rdivide:Internal",
           "when": "Provider interaction, gather/upload, or internal tensor construction failed.",
           "message": "rdivide: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rdivide-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "rdivide with a 'like' output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RdivideLikePrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = rdivide(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer dividend requires the divisor to use the same integer class or to be scalar double; complex integer division is rejected."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Compatible dimensions expand implicitly and the nondouble integer class is preserved."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Integer quotients round to nearest with half ties away from zero and saturate to the integer class. Resident fallback reads authoritative storage and uses native kernels only when the provider preserves the exact integer contract."
         }
       ]
     },
@@ -143660,6 +144050,59 @@
           "when": "Sparse arithmetic storage construction or conversion failed unexpectedly.",
           "message": "times: sparse arithmetic internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "times-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "times with a 'like' output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TimesLikePrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = times(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer operand requires the other operand to use the same integer class or to be scalar double; complex integer multiplication is rejected."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Compatible dimensions expand implicitly and the nondouble integer class is preserved."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Same-class integer products are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage."
+        }
       ]
     },
     {
@@ -153884,6 +154327,65 @@
           "identifier": "RunMat:xor:SizeMismatch",
           "when": "Input shapes are not broadcast-compatible.",
           "message": "xor: array sizes are not compatible for broadcasting"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "xor-complex-input",
+          "mode": "RunMatOnly",
+          "description": "xor with a complex operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:XorComplexInputExtension"
+        },
+        {
+          "id": "xor-character-input",
+          "mode": "RunMatOnly",
+          "description": "xor with a character-array operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:XorCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = xor(integer_A, integer_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every integer class uses exact zero/nonzero truth semantics and may be paired with numeric or logical data."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Compatible dimensions expand implicitly; the result is true exactly when one operand is nonzero."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Integer exclusive OR compares exact zero/nonzero predicates. Resident integers bypass floating logical hooks, gather through authoritative typed storage, and restore only explicit gpuArray output residency."
         }
       ]
     },
