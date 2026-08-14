@@ -88,7 +88,7 @@ pub struct ExecutionOutcome {
 | `stdin_events` | Recorded input/key events and errors. |
 | `fusion_plan` | Optional fusion-plan metadata when enabled. |
 
-The VM remains the semantic baseline. When the JIT is enabled, the session may use Turbine for eligible non-expression assignment bytecode. If the JIT cannot run safely, execution falls back to the VM interpreter.
+The VM remains the semantic baseline. When the JIT is enabled, a session starts requests on the canonical VM path and may publish generic or guarded optimized native code after bounded heat. Eligible interactive native requests preserve the same display, `ans`, function-definition, and transactional workspace contracts. Unavailable or failed compilation leaves execution on the VM; after native entry, exceptions and cancellation do not replay the request through another executor.
 
 ## Requested Outputs
 

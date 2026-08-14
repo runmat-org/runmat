@@ -18,7 +18,6 @@ members = [
     "crates/runmat-types",
     "crates/runmat-runtime",
     "crates/runmat-runtime-integration-tests",
-    "crates/runmat-turbine",
     "crates/runmat-gc-api",
     "crates/runmat-gc",
     "crates/runmat-gc-miri-tests",
@@ -123,7 +122,6 @@ runmat-value = { version = "=0.6.1", path = "crates/runmat-value" }
 runmat-types = { version = "=0.6.1", path = "crates/runmat-types" }
 runmat-runtime = { version = "=0.6.1", path = "crates/runmat-runtime", default-features = false }
 runmat-time = { path = "crates/runmat-time", version = "=0.6.1" }
-runmat-turbine = { version = "=0.6.1", path = "crates/runmat-turbine" }
 runmat-gc = { version = "=0.6.1", path = "crates/runmat-gc" }
 runmat-filesystem = { version = "=0.6.1", path = "crates/runmat-filesystem" }
 runmat-config = { version = "=0.6.1", path = "crates/runmat-config" }

@@ -91,6 +91,41 @@ impl ExecutableUnit {
             .collect()
     }
 
+    /// Semantic caller-workspace bindings retained by the synthetic script
+    /// entrypoint. Named procedures are intentionally excluded: their binding
+    /// locals belong to their own lexical frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn entrypoint_workspace_bindings(&self) -> Vec<(runmat_types::BindingId, String)> {
+        let Some(entrypoint) = self.script_entrypoint() else {
+            return Vec::new();
+        };
+        let Some(body) = self.mir.bodies.get(&entrypoint) else {
+            return Vec::new();
+        };
+        let names = self.binding_names();
+        body.locals
+            .iter()
+            .filter(|local| local.kind == runmat_mir::MirLocalKind::Binding)
+            .filter_map(|local| {
+                let binding = local.binding?;
+                names.get(&binding).cloned().map(|name| (binding, name))
+            })
+            .collect()
+    }
+
+    pub(crate) fn script_entrypoint(&self) -> Option<runmat_hir::FunctionId> {
+        self.mir
+            .entrypoints
+            .iter()
+            .copied()
+            .find(|function| {
+                self.mir.functions.get(function).is_some_and(|metadata| {
+                    metadata.kind == runmat_hir::FunctionKind::SyntheticEntrypoint
+                })
+            })
+            .or_else(|| self.mir.entrypoints.first().copied())
+    }
+
     pub fn procedure_names(&self) -> Vec<String> {
         let mut names = self.functions.names.keys().cloned().collect::<Vec<_>>();
         names.sort();

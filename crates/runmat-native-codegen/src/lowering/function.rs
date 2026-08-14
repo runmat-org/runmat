@@ -279,6 +279,9 @@ fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueRes
                 )
             })?,
         ),
+        MirStmtKind::Expr(value) if expression_produces_value(value) => {
+            NativeRvalueResult::Expression
+        }
         MirStmtKind::Expr(_) => NativeRvalueResult::Discard,
         MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
@@ -309,11 +312,21 @@ fn statement_rvalue_outputs(
                 })
                 .collect(),
         )),
-        MirStmtKind::Expr(value) => Some((value, Vec::new())),
+        MirStmtKind::Expr(value) => Some((
+            value,
+            expression_produces_value(value)
+                .then_some(None)
+                .into_iter()
+                .collect(),
+        )),
         MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => None,
     }
+}
+
+fn expression_produces_value(value: &runmat_mir::MirRvalue) -> bool {
+    !matches!(value, runmat_mir::MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0)
 }
 
 fn statement_output_roots(statement: &MirStmtKind) -> Vec<MirLocalId> {

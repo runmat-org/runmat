@@ -4303,20 +4303,13 @@ fn callback_name_from_mir_operand(operand: &MirOperand) -> Option<String> {
 }
 
 fn string_literal_runtime_text(value: &str) -> String {
-    if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-        let inner = &value[1..value.len() - 1];
-        inner.replace("\"\"", "\"")
-    } else if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
-        let inner = &value[1..value.len() - 1];
-        inner.replace("''", "'")
-    } else {
-        value.to_string()
-    }
+    runmat_hir::StringLiteral(value.to_string()).runtime_text()
 }
 
 fn emit_string_literal(compiler: &mut Compiler, value: &str) {
-    let text = string_literal_runtime_text(value);
-    if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
+    let literal = runmat_hir::StringLiteral(value.to_string());
+    let text = literal.runtime_text();
+    if literal.is_character_row() {
         compiler.emit(Instr::LoadCharRow(text));
     } else {
         compiler.emit(Instr::LoadString(text));

@@ -72,7 +72,6 @@ const policies = {
   residency_policy: ["placement", "R15-R20/C00-C07", "Residency is expressed once in the placement contract and this legacy attachment is removed."],
   sink_policy: ["static", "R06/C00-C07", "Effects/output behavior live in the canonical contract; no independent sink flag remains."],
   vm_private_builtin: ["vm", "R10/C00-C07", "Shared runtime semantics own the behavior; VM retains only executor dispatch with no name-specific semantic authority."],
-  turbine_host_bridge: ["native", "R12-R14/R30", "The production native ABI/runtime helper replaces this Turbine bridge and Turbine is removed."],
   lsp_shape_rule: ["static", "R07-R08", "LSP consumes shared program-point facts and contains no independent shape rule."],
   provider_method: ["placement", "R15-R17", "Retain only as a versioned provider capability contracted through the unified planner."],
   provider_direct_call: ["placement", "R15-R17/C00-C07", "Route through placement feasibility/dispatch or explicitly retain below policy; no unclassified bypass remains."],
@@ -364,11 +363,6 @@ for (const file of files) {
     for (let match; (match = special.exec(text)); ) add("vm_private_builtin", match[1], file, text, match.index);
   }
 
-  if (source.startsWith("crates/runmat-turbine/src/")) {
-    const bridges = /\b(?:pub\s+)?(?:unsafe\s+)?extern\s+"C"\s+fn\s+([A-Za-z0-9_]+)|\bfn\s+(declare_host_[A-Za-z0-9_]+)/g;
-    for (let match; (match = bridges.exec(text)); ) add("turbine_host_bridge", match[1] ?? match[2], file, text, match.index);
-  }
-
   if (source === "crates/runmat-accelerate-api/src/lib.rs") {
     const traitStart = text.indexOf("pub trait AccelProvider");
     if (traitStart >= 0) {
@@ -407,7 +401,7 @@ for (const file of files) {
 const providerCallPattern = new RegExp(`\\.(${[...providerMethods].sort((a, b) => b.length - a.length).join("|")})\\s*\\(`, "g");
 for (const file of files) {
   const source = relative(file);
-  if (!/crates\/(runmat-accelerate|runmat-core|runmat-runtime|runmat-turbine|runmat-vm)\//.test(source)) continue;
+  if (!/crates\/(runmat-accelerate|runmat-core|runmat-runtime|runmat-vm)\//.test(source)) continue;
   const text = fs.readFileSync(file, "utf8");
   for (let match; (match = providerCallPattern.exec(text)); ) add("provider_direct_call", match[1], file, text, match.index);
 }

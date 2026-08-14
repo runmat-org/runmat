@@ -81,11 +81,6 @@ pub fn hit_sites(sites: &[u64]) {
     });
 }
 
-/// Stable host callback imported by Turbine-generated native code.
-pub extern "C" fn hit_site_from_jit(site: u64) {
-    hit_sites(&[site]);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

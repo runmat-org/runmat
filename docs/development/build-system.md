@@ -2,7 +2,7 @@
 title: "Build System"
 category: "Development"
 section: "14.1"
-last_updated: "May 28, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # Build System
@@ -18,7 +18,7 @@ The root workspace uses Cargo resolver v2. Workspace dependency versions live in
 | Area | Crates |
 | --- | --- |
 | Language pipeline | `runmat-lexer`, `runmat-parser`, `runmat-hir`, `runmat-mir`, `runmat-static-analysis` |
-| Execution | `runmat-vm`, `runmat-turbine`, `runmat-core` |
+| Execution | `runmat-vm`, `runmat-native-codegen`, `runmat-jit`, `runmat-core` |
 | Runtime | `runmat-runtime`, `runmat-builtins`, `runmat-filesystem`, `runmat-time`, `runmat-config` |
 | Performance systems | `runmat-accelerate`, `runmat-accelerate-api`, `runmat-gc`, `runmat-gc-api`, `runmat-plot` |
 | Host surfaces | `runmat` CLI, `runmat-lsp`, `runmat-wasm`, `runmat-server-client`, `runmat-telemetry`, `runmat-logging` |
@@ -34,7 +34,7 @@ The CLI default feature set enables the normal local developer experience:
 | `gui` | Enables native plotting GUI support through `runmat-plot`. |
 | `blas-lapack` | Enables high-performance BLAS/LAPACK operations in `runmat-runtime`. |
 | `wgpu` | Enables the WGPU acceleration path. |
-| `jit` | Enables the Turbine JIT tier through `runmat-core`. |
+| `jit` | Enables Core's host-native adaptive JIT selection. Native code generation and policy live in `runmat-native-codegen` and `runmat-jit`. |
 
 Additional flags matter for specific builds:
 

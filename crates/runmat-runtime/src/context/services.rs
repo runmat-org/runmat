@@ -224,6 +224,14 @@ impl RuntimeServicePorts {
         RuntimeWorkspaceService,
         Workspace
     );
+
+    /// Remove an inherited caller-workspace service before entering an
+    /// isolated procedure frame. The callee may then install its own scoped
+    /// workspace authority without exposing or mutating the caller frame.
+    pub fn without_workspace(mut self) -> Self {
+        self.workspace = None;
+        self
+    }
     port_accessors!(
         with_object,
         object,

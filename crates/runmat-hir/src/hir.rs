@@ -671,6 +671,23 @@ pub struct FunctionHandleResolution {
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct StringLiteral(pub String);
 
+impl StringLiteral {
+    /// Decode the source spelling into the text observed by MATLAB execution.
+    pub fn runtime_text(&self) -> String {
+        if self.0.starts_with('"') && self.0.ends_with('"') && self.0.len() >= 2 {
+            self.0[1..self.0.len() - 1].replace("\"\"", "\"")
+        } else if self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2 {
+            self.0[1..self.0.len() - 1].replace("''", "'")
+        } else {
+            self.0.clone()
+        }
+    }
+
+    pub fn is_character_row(&self) -> bool {
+        self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub assembly: HirAssembly,

@@ -195,12 +195,12 @@ impl RunMatSession {
         );
     }
 
-    #[cfg(feature = "jit")]
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn has_jit(&self) -> bool {
-        self.jit_engine.is_some()
+        self.native_tiering_enabled
     }
 
-    #[cfg(not(feature = "jit"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn has_jit(&self) -> bool {
         false
     }

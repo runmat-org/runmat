@@ -37,6 +37,7 @@ pub(super) struct HostStateInput {
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_point: Option<runmat_types::ProgramPointId>,
     pub optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
+    pub workspace: Option<super::workspace::NativeWorkspaceInput>,
 }
 
 pub(super) struct HostState {
@@ -74,6 +75,8 @@ pub(super) struct HostState {
     disabled_optimized_regions: BTreeSet<runmat_types::RegionId>,
     skipped_optimized_sites: BTreeSet<crate::region::SiteIdentity>,
     vectorized_regions: u64,
+    workspace: Option<super::workspace::NativeWorkspaceState>,
+    last_expression: Option<NativeValueRef>,
 }
 
 impl HostState {
@@ -90,6 +93,7 @@ impl HostState {
             interpreter_resume_points,
             osr_point,
             optimized_regions,
+            workspace,
         } = input;
         let construction_values = arguments
             .iter()
@@ -136,6 +140,16 @@ impl HostState {
             .zip(&prepared.fixed)
             .filter_map(|(local, value)| value.is_none().then_some(*local))
             .collect();
+        let workspace = if let Some(input) = workspace {
+            super::workspace::NativeWorkspaceState::new(&function, input)?
+        } else {
+            super::workspace::NativeWorkspaceState::function_frame(&function)
+        };
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_workspace(workspace.service());
+        let runtime = runtime.with_service_ports(ports);
         let mut arena = ValueArena::new()?;
         let argument_refs = arguments
             .into_iter()
@@ -190,6 +204,15 @@ impl HostState {
             locals[local.0 as usize] =
                 arena.insert(runmat_value::Value::Num(requested_outputs as f64));
         }
+        for (slot, local) in locals.iter_mut().enumerate() {
+            if let Some(value) = workspace.initial_value(slot) {
+                *local = arena.insert(value);
+            }
+            let reference = *local;
+            if !reference.is_null() {
+                workspace.synchronize_local(slot, arena.get(reference)?.clone());
+            }
+        }
         let roots = locals
             .iter()
             .enumerate()
@@ -242,6 +265,8 @@ impl HostState {
             disabled_optimized_regions: BTreeSet::new(),
             skipped_optimized_sites: BTreeSet::new(),
             vectorized_regions: 0,
+            workspace: Some(workspace),
+            last_expression: None,
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
@@ -651,7 +676,45 @@ impl HostState {
             .get_mut(slot)
             .ok_or_else(|| JitError::Host("native local is out of bounds".into()))?;
         *local = value;
+        if !value.is_null() {
+            if let Some(workspace) = &self.workspace {
+                workspace.synchronize_local(slot, self.arena.get(value)?.clone());
+            }
+        }
         self.synchronize_session_binding(slot, value)
+    }
+
+    pub fn reconcile_workspace(&mut self) -> JitResult<()> {
+        let Some(workspace) = &self.workspace else {
+            return Ok(());
+        };
+        for (slot, value) in workspace.local_values() {
+            let reference = value
+                .map(|value| self.arena.insert(value))
+                .unwrap_or(NativeValueRef::NULL);
+            let local = self
+                .locals
+                .get_mut(slot)
+                .ok_or_else(|| JitError::Host("native workspace local is out of bounds".into()))?;
+            *local = reference;
+        }
+        Ok(())
+    }
+
+    pub fn workspace_snapshot(&self) -> Option<super::workspace::NativeWorkspaceSnapshot> {
+        self.workspace
+            .as_ref()
+            .and_then(|workspace| workspace.snapshot())
+    }
+
+    pub fn record_expression(&mut self, value: NativeValueRef) {
+        self.last_expression = Some(value);
+    }
+
+    pub fn expression_result(&self) -> JitResult<Option<runmat_value::Value>> {
+        self.last_expression
+            .map(|value| self.arena.get(value).cloned())
+            .transpose()
     }
 
     pub fn declare_global(&mut self, slot: usize, name: String) -> JitResult<()> {

@@ -14211,7 +14211,7 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn deterministic_native_tiering_compiles_once_after_exact_profile_heat() {
+fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
         generic_hot_threshold: 2,
@@ -14249,11 +14249,212 @@ fn deterministic_native_tiering_compiles_once_after_exact_profile_heat() {
     assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
 
+    for _ in 0..32 {
+        assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+        assert_eq!(session.generic_native_cache_counts(), (1, 1));
+    }
+
     let snapshot = session.native_tiering_snapshot_for_testing();
     assert_eq!(snapshot.sites.len(), 1);
-    assert_eq!(snapshot.sites[0].invocations, 4);
+    assert_eq!(snapshot.sites[0].invocations, 36);
     assert_eq!(snapshot.sites[0].profiles.len(), 1);
-    assert_eq!(snapshot.sites[0].profiles[0].samples, 4);
+    assert_eq!(snapshot.sites[0].profiles[0].samples, 36);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deterministic_interactive_tiering_commits_workspace_transactionally() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    execute_text_request(&mut session, "counter = 40;").expect("seed workspace");
+
+    let first = execute_text_request(&mut session, "counter = counter + 1;")
+        .expect("cold interactive execution");
+    assert!(!first.used_jit);
+    assert_eq!(
+        session.get_variables().get("counter"),
+        Some(&runmat_value::Value::Num(41.0))
+    );
+
+    let second = execute_text_request(&mut session, "counter = counter + 1;")
+        .expect("threshold interactive execution");
+    let third = execute_text_request(&mut session, "counter = counter + 1;")
+        .expect("native interactive execution");
+    assert!(second.used_jit || third.used_jit);
+    assert_eq!(
+        session.get_variables().get("counter"),
+        Some(&runmat_value::Value::Num(43.0))
+    );
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deterministic_interactive_tiering_preserves_clear_removals() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    execute_text_request(&mut session, "survivor = 0; doomed = 99;").expect("seed workspace");
+    let mut used_native = false;
+    for _ in 0..3 {
+        execute_text_request(&mut session, "doomed = 99;").expect("restore removable binding");
+        let outcome = execute_text_request(&mut session, "survivor = survivor + 1; clear doomed;")
+            .expect("clear execution");
+        used_native |= outcome.used_jit;
+        assert!(
+            !session.get_variables().contains_key("doomed"),
+            "clear outcome: {outcome:#?}; workspace: {:?}; cache: {:?}",
+            session.get_variables(),
+            session.generic_native_cache_counts()
+        );
+    }
+    assert!(used_native);
+    assert_eq!(
+        session.get_variables().get("survivor"),
+        Some(&runmat_value::Value::Num(3.0))
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deterministic_interactive_tiering_preserves_expression_display_and_ans() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    execute_text_request(&mut session, "counter = 40;").expect("seed workspace");
+    let mut used_native = false;
+    for _ in 0..3 {
+        let outcome = execute_text_request(&mut session, "counter + 2")
+            .expect("interactive expression execution");
+        used_native |= outcome.used_jit;
+        assert_eq!(
+            outcome.flow.durable_workspace_value(),
+            Some(&runmat_value::Value::Num(42.0))
+        );
+    }
+    assert!(used_native);
+    assert_eq!(
+        session.get_variables().get("ans"),
+        Some(&runmat_value::Value::Num(42.0))
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deterministic_interactive_tiering_exposes_the_complete_workspace_to_dynamic_builtins() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    execute_text_request(&mut session, "visible_to_runtime = 7;").expect("seed workspace");
+
+    let mut used_native = false;
+    for _ in 0..3 {
+        let outcome = execute_text_request(
+            &mut session,
+            "workspace_visibility = exist('visible_to_runtime', 'var');",
+        )
+        .expect("query workspace visibility");
+        used_native |= outcome.used_jit;
+        if outcome.used_jit {
+            assert_eq!(
+                session.get_variables().get("workspace_visibility"),
+                Some(&runmat_value::Value::Num(1.0))
+            );
+        }
+    }
+    assert!(used_native);
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    execute_text_request(&mut session, "counter = 0;").expect("seed workspace");
+    for _ in 0..3 {
+        let outcome = execute_text_request(&mut session, "counter = counter + 1; assert(false);")
+            .expect("runtime failures are reported in the execution outcome");
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.to_ascii_lowercase().contains("assert")));
+        assert_eq!(
+            session.get_variables().get("counter"),
+            Some(&runmat_value::Value::Num(0.0))
+        );
+    }
+    // Failed native attempts intentionally report `used_jit = false`, but a published
+    // compilation proves the hot attempts entered native execution without VM replay.
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deterministic_interactive_tiering_invalidates_redefined_session_functions() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    execute_text_request(
+        &mut session,
+        "definition_epoch = 1;\nfunction y = hotHelper(x)\ny = x + 1;\nend",
+    )
+    .expect("define first helper");
+    let mut used_native = false;
+    for _ in 0..3 {
+        let outcome = execute_text_request(&mut session, "answer = hotHelper(1);")
+            .expect("invoke first helper");
+        used_native |= outcome.used_jit;
+        assert_eq!(
+            session.get_variables().get("answer"),
+            Some(&runmat_value::Value::Num(2.0)),
+            "{outcome:#?}"
+        );
+    }
+    assert!(used_native);
+    let compilations_before_redefinition = session.generic_native_cache_counts().0;
+
+    execute_text_request(
+        &mut session,
+        "definition_epoch = 2;\nfunction y = hotHelper(x)\ny = x + 10;\nend",
+    )
+    .expect("redefine helper");
+    execute_text_request(&mut session, "answer = hotHelper(1);").expect("invoke redefined helper");
+    assert_eq!(
+        session.get_variables().get("answer"),
+        Some(&runmat_value::Value::Num(11.0))
+    );
+    assert_eq!(
+        session.generic_native_cache_counts().0,
+        compilations_before_redefinition + 1,
+        "the redefined function body must invalidate and replace the native product"
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -25,6 +25,7 @@ pub enum NativeOperation {
 pub enum NativeRvalueResult {
     Assignment,
     MultiAssignment(u32),
+    Expression,
     Discard,
     Terminator,
 }

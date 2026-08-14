@@ -218,7 +218,17 @@ fn execute_statement(
         return Ok(());
     }
     match statement {
-        MirStmtKind::Expr(_) => state.pending_place_mutation = None,
+        MirStmtKind::Expr(_) => {
+            state.pending_place_mutation = None;
+            if let Some(value) = instruction
+                .inputs
+                .first()
+                .and_then(|input| state.values.get(input))
+                .copied()
+            {
+                state.record_expression(value);
+            }
+        }
         MirStmtKind::Assign { .. }
         | MirStmtKind::MultiAssign { .. }
         | MirStmtKind::PlaceMutation(_) => {

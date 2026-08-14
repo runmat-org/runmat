@@ -19,5 +19,7 @@ mod state;
 mod sync;
 mod workspace;
 
+pub use workspace::{NativeWorkspaceBinding, NativeWorkspaceInput, NativeWorkspaceSnapshot};
+
 pub use executor::{GenericExecution, GenericExecutor};
 pub use invocation::{GenericInvocation, GenericInvocationStep};

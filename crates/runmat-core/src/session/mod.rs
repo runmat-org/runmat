@@ -1,8 +1,6 @@
 use anyhow::Result;
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use runmat_value::Value;
-#[cfg(feature = "jit")]
-use tracing::warn;
 use tracing::{debug, info, info_span};
 
 use runmat_hir::{LoweringContext, LoweringResult, SourceId};
@@ -13,8 +11,6 @@ use runmat_runtime::{
     runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
 };
 use runmat_time::Instant;
-#[cfg(feature = "jit")]
-use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -63,9 +59,6 @@ mod workspace;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
 pub struct RunMatSession {
-    /// JIT compiler engine (optional for fallback mode)
-    #[cfg(feature = "jit")]
-    jit_engine: Option<TurbineEngine>,
     /// Verbose output for debugging
     verbose: bool,
     /// Execution statistics
@@ -138,7 +131,6 @@ pub(crate) struct PreparedExecution {
     mir: runmat_mir::MirAssembly,
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
-    project_cache_namespace: Option<String>,
     function_registry_after_success: runmat_vm::FunctionRegistry,
     next_semantic_function_id_after_success: usize,
 }

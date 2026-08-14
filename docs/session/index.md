@@ -2,14 +2,14 @@
 title: "Session Engine"
 category: "Session Engine"
 section: "7.0"
-last_updated: "May 28, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # Session Engine
 
 `runmat-core` owns the host-agnostic execution session. A `RunMatSession` is the long-lived object that a REPL, notebook host, CLI command, or WebAssembly wrapper uses to submit MATLAB source, keep workspace variables alive, preserve user-defined functions, expose inspection data, handle input, and return structured execution results.
 
-The session is not a second compiler or a second VM. It is the orchestration layer around the parser, HIR/MIR pipeline, VM, optional Turbine JIT, runtime builtins, GPU provider state, and host-facing ABI.
+The session is not a second compiler or a second VM. It is the orchestration layer around the parser, HIR/MIR pipeline, VM, adaptive native JIT, runtime builtins, GPU provider state, and host-facing ABI.
 
 ## Execution Spine
 
@@ -26,7 +26,7 @@ flowchart TD
   Bytecode["VM bytecode"]
   Workspace["workspace bridge<br/>workspace_values <-> variable_array"]
   Engine{"execution tier"}
-  JIT["Turbine JIT<br/>when eligible"]
+  JIT["adaptive native JIT<br/>when hot and eligible"]
   VM["VM interpreter"]
   Runtime["runtime builtins<br/>streams, warnings, plots, input"]
   Outcome["ExecutionOutcome"]
@@ -69,4 +69,4 @@ flowchart TD
 | [Interaction & Streams](/docs/runtime/session/interaction-and-streams) | Console streams, warnings, async input, cancellation, diagnostics, and effects. |
 | [Host Integration](/docs/runtime/session/host-integration) | CLI, WASM/TypeScript, notebook, editor, and lifecycle responsibilities. |
 
-For the compiler stages inside `compile_input`, see [Compilation Pipeline](/docs/runtime/compiler). For bytecode execution details, see [VM Interpreter & Bytecode](/docs/runtime/vm). For native execution, see [Turbine JIT Compiler](/docs/runtime/jit).
+For the compiler stages inside `compile_input`, see [Compilation Pipeline](/docs/runtime/compiler). For bytecode execution details, see [VM Interpreter & Bytecode](/docs/runtime/vm). For native execution, see [JIT Compiler](/docs/runtime/jit).

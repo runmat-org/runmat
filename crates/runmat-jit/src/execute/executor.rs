@@ -28,6 +28,8 @@ pub struct GenericExecution {
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_entry: Option<runmat_types::ProgramPointId>,
     pub vectorized_regions: u64,
+    pub workspace: Option<super::workspace::NativeWorkspaceSnapshot>,
+    pub expression: Option<Value>,
 }
 
 impl GenericExecutor {
@@ -259,9 +261,60 @@ impl GenericExecutor {
         deoptimization: DeoptimizationPolicy,
         osr_target: Option<OsrTarget>,
     ) -> JitResult<GenericInvocation> {
-        self.validate_entry_profile(&arguments)?;
+        self.begin_product_with_deoptimization_and_osr(
+            function,
+            captures,
+            arguments,
+            requested_outputs,
+            runtime,
+            deoptimization,
+            osr_target,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_workspace_with_deoptimization_and_osr(
+        &self,
+        function: ProgramFunctionId,
+        workspace: super::workspace::NativeWorkspaceInput,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+        deoptimization: DeoptimizationPolicy,
+        osr_target: Option<OsrTarget>,
+    ) -> JitResult<GenericInvocation> {
+        self.begin_product_with_deoptimization_and_osr(
+            function,
+            Vec::new(),
+            arguments,
+            requested_outputs,
+            runtime,
+            deoptimization,
+            osr_target,
+            Some(workspace),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn begin_product_with_deoptimization_and_osr(
+        &self,
+        function: ProgramFunctionId,
+        captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+        deoptimization: DeoptimizationPolicy,
+        osr_target: Option<OsrTarget>,
+        workspace: Option<super::workspace::NativeWorkspaceInput>,
+    ) -> JitResult<GenericInvocation> {
+        let mut profile_values = arguments.clone();
+        if let Some(workspace) = &workspace {
+            profile_values.extend(workspace.profile_values());
+        }
+        self.validate_entry_profile(&profile_values)?;
         if let Some(target) = &osr_target {
-            target.executor().validate_entry_profile(&arguments)?;
+            target.executor().validate_entry_profile(&profile_values)?;
         }
         let function_ir = self
             .functions
@@ -301,6 +354,7 @@ impl GenericExecutor {
             interpreter_resume_points: self.interpreter_resume_points.clone(),
             osr_point: osr_target.as_ref().map(OsrTarget::point),
             optimized_regions: Arc::clone(&self.optimized_regions),
+            workspace,
         })?;
         let resume = runmat_runtime::native::NativeResumeState {
             function: function.0,

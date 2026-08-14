@@ -15,6 +15,21 @@ pub(crate) struct NativeExecution {
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_entry: Option<runmat_types::ProgramPointId>,
     pub vectorized_regions: u64,
+    pub workspace: Option<runmat_jit::execute::NativeWorkspaceSnapshot>,
+    pub expression: Option<Value>,
+}
+
+pub(crate) struct NativeInvocation<'a> {
+    pub published: runmat_jit::entry::PublishedEntry,
+    pub osr: Option<(
+        runmat_jit::entry::PublishedEntry,
+        runmat_types::ProgramPointId,
+    )>,
+    pub preferred_function: Option<&'a str>,
+    pub arguments: Vec<Value>,
+    pub requested_outputs: usize,
+    pub runtime: runmat_runtime::context::RuntimeContext,
+    pub workspace: Option<runmat_jit::execute::NativeWorkspaceInput>,
 }
 
 // Semantic invokers use Runtime's established Arc callback ABI, while the
@@ -23,16 +38,17 @@ pub(crate) struct NativeExecution {
 #[allow(clippy::arc_with_non_send_sync)]
 pub(crate) async fn invoke(
     unit: &ExecutableUnit,
-    published: runmat_jit::entry::PublishedEntry,
-    osr: Option<(
-        runmat_jit::entry::PublishedEntry,
-        runmat_types::ProgramPointId,
-    )>,
-    preferred_function: Option<&str>,
-    arguments: Vec<Value>,
-    requested_outputs: usize,
-    runtime: runmat_runtime::context::RuntimeContext,
+    invocation: NativeInvocation<'_>,
 ) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
+    let NativeInvocation {
+        published,
+        osr,
+        preferred_function,
+        arguments,
+        requested_outputs,
+        runtime,
+        workspace,
+    } = invocation;
     runmat_vm::prepare_native_execution_metadata(unit.bytecode())?;
     let function = preferred_function
         .map(|name| {
@@ -84,6 +100,7 @@ pub(crate) async fn invoke(
                     .map(ProgramFunctionId)
                     .is_ok_and(|function| semantic_native_functions.contains(&function));
                 Box::pin(async move {
+                    let runtime = isolated_procedure_runtime(runtime);
                     if is_native {
                         let function = program_function(runmat_hir::FunctionId(function))?;
                         let bindings = capture_bindings.get(&function).cloned().unwrap_or_default();
@@ -112,12 +129,15 @@ pub(crate) async fn invoke(
                                 requested_outputs,
                                 runtime,
                                 osr: None,
+                                workspace: None,
                             },
                         )
                         .await?;
                         normalize_outputs(execution.outputs, requested_outputs)
                     } else if let Some(previous_invoker) = previous_invoker {
-                        previous_invoker(function, &arguments, requested_outputs).await
+                        runtime
+                            .scope(previous_invoker(function, &arguments, requested_outputs))
+                            .await
                     } else {
                         Err(super::error::stage(
                             "UndefinedFunction",
@@ -137,6 +157,7 @@ pub(crate) async fn invoke(
             let registry = Arc::clone(&external_registry);
             let runtime = external_runtime.clone();
             Box::pin(async move {
+                let runtime = isolated_procedure_runtime(runtime);
                 if registry
                     .get(runmat_hir::FunctionId(call.function))
                     .is_some()
@@ -151,7 +172,7 @@ pub(crate) async fn invoke(
                     .await;
                 }
                 if let Some(previous) = previous {
-                    return previous(call).await;
+                    return runtime.scope(previous(call)).await;
                 }
                 Err(super::error::stage(
                     "UndefinedFunction",
@@ -175,9 +196,10 @@ pub(crate) async fn invoke(
                 .map(ProgramFunctionId)
                 .is_ok_and(|function| lexical_native_functions.contains(&function));
             Box::pin(async move {
+                let runtime = isolated_procedure_runtime(runtime);
                 if !is_native {
                     if let Some(previous) = previous {
-                        return previous(call).await;
+                        return runtime.scope(previous(call)).await;
                     }
                     return Err(super::error::stage(
                         "UndefinedFunction",
@@ -195,6 +217,7 @@ pub(crate) async fn invoke(
                         requested_outputs: call.requested_outputs,
                         runtime,
                         osr: None,
+                        workspace: None,
                     },
                 )
                 .await?;
@@ -250,6 +273,7 @@ pub(crate) async fn invoke(
             requested_outputs,
             runtime,
             osr,
+            workspace,
         },
     )
     .await;
@@ -265,6 +289,8 @@ pub(crate) async fn invoke(
         loop_backedges: execution.loop_backedges,
         osr_entry: execution.osr_entry,
         vectorized_regions: execution.vectorized_regions,
+        workspace: execution.workspace,
+        expression: execution.expression,
     })
 }
 
@@ -276,6 +302,13 @@ fn program_function(
         .map_err(|_| {
             super::error::stage("NativeProcedure", "function identity exceeds native schema")
         })
+}
+
+fn isolated_procedure_runtime(
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> runmat_runtime::context::RuntimeContext {
+    let ports = runtime.service_ports().clone().without_workspace();
+    runtime.with_service_ports(ports)
 }
 
 fn normalize_outputs(

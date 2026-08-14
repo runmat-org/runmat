@@ -812,29 +812,7 @@ impl RunMatSession {
         self.pending_companion_source_discovery = previous_pending;
 
         let prepared = result?;
-        let source_map = crate::ExecutableSourceMap::new(
-            self.source_pool
-                .entries()
-                .map(|(source_id, entry)| {
-                    let display_name = entry.name.to_string();
-                    let full_path = entry.fullpath_name.as_ref().map(ToString::to_string);
-                    let (owner_identity, relative_path) = executable_source_identity(
-                        &source,
-                        self.project_handoff.as_ref(),
-                        &display_name,
-                        full_path.as_deref(),
-                    );
-                    crate::SourceMapEntry {
-                        source_id: source_id.0,
-                        owner_identity,
-                        relative_path,
-                        display_name,
-                        full_path,
-                        text: entry.text.to_string(),
-                    }
-                })
-                .collect(),
-        );
+        let source_map = self.executable_source_map(&source);
         let revision = crate::ExecutableRevision::derive(
             &source,
             program_revision,
@@ -855,6 +833,35 @@ impl RunMatSession {
                     .build(),
             )
         })
+    }
+
+    pub(super) fn executable_source_map(
+        &self,
+        source: &crate::ExecutableSource,
+    ) -> crate::ExecutableSourceMap {
+        crate::ExecutableSourceMap::new(
+            self.source_pool
+                .entries()
+                .map(|(source_id, entry)| {
+                    let display_name = entry.name.to_string();
+                    let full_path = entry.fullpath_name.as_ref().map(ToString::to_string);
+                    let (owner_identity, relative_path) = executable_source_identity(
+                        source,
+                        self.project_handoff.as_ref(),
+                        &display_name,
+                        full_path.as_deref(),
+                    );
+                    crate::SourceMapEntry {
+                        source_id: source_id.0,
+                        owner_identity,
+                        relative_path,
+                        display_name,
+                        full_path,
+                        text: entry.text.to_string(),
+                    }
+                })
+                .collect(),
+        )
     }
 
     #[cfg(test)]
@@ -1022,10 +1029,6 @@ impl RunMatSession {
                 },
             )?);
         }
-        let project_cache_namespace = source_catalog
-            .as_ref()
-            .and_then(runmat_package::DiscoveredSourceSymbols::project_revision)
-            .map(|revision| revision.cache_namespace());
         bytecode.source_id = Some(source_id);
         for function in bytecode.function_registry.functions.values_mut() {
             function.source_id = companion_function_source_ids
@@ -1061,7 +1064,6 @@ impl RunMatSession {
             mir,
             analysis,
             bytecode,
-            project_cache_namespace,
             function_registry_after_success,
             next_semantic_function_id_after_success,
         })

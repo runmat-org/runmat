@@ -44,8 +44,8 @@
     },
     {
       "description": "Concatenate a string scalar with a string array",
-      "input": "names = [\"VM\", \"Turbine\", \"Accelerate\"];\ntagged = strcat(\"runmat-\", names)",
-      "output": "tagged = 1×3 string\n    \"runmat-VM\"    \"runmat-Turbine\"    \"runmat-Accelerate\""
+      "input": "names = [\"VM\", \"JIT\", \"Accelerate\"];\ntagged = strcat(\"runmat-\", names)",
+      "output": "tagged = 1×3 string\n    \"runmat-VM\"    \"runmat-JIT\"    \"runmat-Accelerate\""
     },
     {
       "description": "Concatenate character arrays while trimming trailing spaces",

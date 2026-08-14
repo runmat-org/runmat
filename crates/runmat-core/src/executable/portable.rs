@@ -60,22 +60,24 @@ impl ExecutableUnit {
                 self.native_function_id(source_stem)
                     .map(|function| (source_stem.to_string(), function))
             });
-        let (entrypoint, entrypoint_function, entrypoint_kind) =
-            if let Some((name, function)) = selected {
-                (
-                    name,
-                    function,
-                    runmat_execution::ExecutableEntrypointKind::Function,
-                )
-            } else if !self.bytecode().instructions.is_empty() {
-                (
-                    "script".to_string(),
-                    runmat_hir::FunctionId(0),
-                    runmat_execution::ExecutableEntrypointKind::Script,
-                )
-            } else {
-                return Err("executable has no callable function or script entrypoint".to_string());
-            };
+        let (entrypoint, entrypoint_function, entrypoint_kind) = if let Some((name, function)) =
+            selected
+        {
+            (
+                name,
+                function,
+                runmat_execution::ExecutableEntrypointKind::Function,
+            )
+        } else if !self.bytecode().instructions.is_empty() {
+            (
+                "script".to_string(),
+                self.script_entrypoint()
+                    .ok_or_else(|| "executable script has no synthetic entrypoint".to_string())?,
+                runmat_execution::ExecutableEntrypointKind::Script,
+            )
+        } else {
+            return Err("executable has no callable function or script entrypoint".to_string());
+        };
         let entrypoint_function = u32::try_from(entrypoint_function.0)
             .map(runmat_types::ProgramFunctionId)
             .map_err(|_| "entrypoint identity exceeds the portable schema".to_string())?;

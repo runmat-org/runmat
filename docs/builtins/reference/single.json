@@ -229,7 +229,7 @@
   },
   "gpu_residency": "You rarely need to call `gpuArray` solely for type conversion. RunMat’s planner already keeps hot paths on the GPU. When `single` runs on gpuArray inputs it attempts a device-side cast first, and falls back to gather/convert/re-upload when hooks are missing. The fallback is documented so users understand the temporary host hop.",
   "gpu_behavior": [
-    "When the input is a gpuArray and the provider implements `unary_single`, RunMat keeps the data on device and returns a new gpuArray handle that already contains single-precision values. This path is also used by fused elementwise kernels emitted by Turbine.",
+    "When the input is a gpuArray and the provider implements `unary_single`, RunMat keeps the data on device and returns a new gpuArray handle that already contains single-precision values. This path is also used by fused elementwise kernels selected by the shared execution planner.",
     "If the provider lacks the hook, RunMat gathers the data to host memory, converts it to single precision, and re-uploads it so downstream GPU code still receives a device-resident value. The original handle is freed once the replacement upload succeeds.",
     "When no provider is active the fallback stops after the host conversion, returning a CPU tensor that still respects single-precision rounding. Scalars follow the same logic (`single(gpuArray(pi))` returns a device scalar when possible, or a host scalar if the provider is absent)."
   ]

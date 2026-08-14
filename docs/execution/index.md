@@ -24,7 +24,7 @@ flowchart TD
   Bytecode["VM bytecode"]
   Workspace["workspace slots<br/>workspace_values <-> variable_array"]
   Tier{"execution tier"}
-  JIT["Turbine JIT<br/>eligible assignments"]
+  JIT["adaptive native JIT<br/>hot eligible work"]
   VM["async VM interpreter"]
   Runtime["runtime builtins<br/>I/O, GPU, plotting, diagnostics"]
   Outcome["ExecutionOutcome"]
@@ -45,7 +45,7 @@ flowchart TD
 | Source resolution | `runmat-core` session | Loads `SourceInput::Text` or `SourceInput::Path` and records source identity for diagnostics. |
 | Compilation | `compile_input` | Parses, lowers HIR, lowers and analyzes MIR, emits bytecode, and prepares semantic function registry updates. |
 | Workspace preparation | Session workspace bridge | Maps durable workspace values into VM variable slots and preserves stable binding keys. |
-| Execution | Turbine JIT or VM interpreter | Runs bytecode or native code, calls runtime builtins, and updates variable slots. |
+| Execution | Adaptive native JIT or VM interpreter | Runs bytecode or verified Native IR, calls shared runtime semantics, and updates invocation state. |
 | Runtime services | `runmat-runtime` | Handles builtins, GPU gathers, plotting hooks, console streams, warnings, input, and object dispatch. |
 | Outcome assembly | `runmat-core` session | Converts final value, workspace state, streams, diagnostics, figures, profiling, and fusion metadata into host ABI values. |
 

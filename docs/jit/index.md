@@ -1,58 +1,46 @@
 ---
-title: "Turbine JIT Compiler"
-category: "Turbine JIT Compiler"
+title: "JIT Compiler"
+category: "JIT Compiler"
 section: "5.0"
-last_updated: "May 28, 2026"
+last_updated: "August 14, 2026"
 ---
 
-# Turbine JIT Compiler
+# JIT Compiler
 
-Turbine is RunMat's native-code execution tier. The VM remains the semantic baseline, while Turbine watches bytecode execution frequency, compiles hot bytecode with Cranelift, caches the resulting function pointer, and falls back to the interpreter whenever compilation or execution cannot preserve full MATLAB semantics.
+RunMat uses adaptive native compilation on supported desktop and server targets. The VM starts execution immediately and remains the semantic baseline. As a function, loop, or interactive input becomes hot, RunMat can compile the same analyzed MIR product to verified Native IR and then to machine code with Cranelift.
 
-The JIT is intentionally narrow. Its fast path is strongest for scalar numeric bytecode, local and variable slot traffic, simple control flow, selected built-ins, and typed semantic calls. Complex object, cell, async, exception, and mutation behaviors stay in the VM unless Turbine has a typed bridge path for them.
+JIT availability changes performance, not MATLAB behavior. Cold execution, native execution, deoptimization, and on-stack replacement use the same runtime-owned operations for calls, indexing, objects, exceptions, workspace access, cancellation, and builtins.
 
-## Tiered Execution
+## Adaptive Execution
 
 ```mermaid
-flowchart TD
-  Bytecode["Function bytecode"]
-  Interpreter["VM interpreter"]
-  Profiler["HotspotProfiler"]
-  Hot{"hot threshold reached?"}
-  Compiler["BytecodeCompiler"]
-  Cranelift["Cranelift JITModule"]
-  Cache["FunctionCache"]
-  Native["compiled function pointer"]
-  Bridge["host bridge"]
-  Runtime["VM/runtime semantics"]
-  Fallback["interpreter fallback"]
-
-  Bytecode --> Interpreter
-  Interpreter --> Profiler
-  Profiler --> Hot
-  Hot -->|no| Fallback
-  Hot -->|yes| Compiler --> Cranelift --> Cache
-  Cache --> Native
-  Native --> Bridge --> Runtime
-  Native -->|error or unsupported| Fallback
+flowchart LR
+  Source["MATLAB source"] --> MIR["MIR + analysis"]
+  MIR --> VM["VM bytecode<br/>cold execution"]
+  MIR --> NativeIR["verified Native IR"]
+  Feedback["bounded session feedback"] --> Policy{"tier decision"}
+  VM --> Feedback
+  Policy -->|hot| Compile["Cranelift compilation"]
+  Compile --> Published["guarded native generation"]
+  Published --> Runtime["shared runtime semantics"]
+  VM --> Runtime
+  Published --> Feedback
 ```
 
-## Main Components
+Each `RunMatSession` owns its feedback, pending compilations, published generations, and executable-memory budget. Normal execution may compile in the background while the current request stays on the VM. Deterministic test mode uses the same pipeline synchronously.
 
-| Component | Role |
-| --- | --- |
-| `TurbineEngine` | Owns the Cranelift module, compiler, profiler, function cache, target ISA, and imported host-call symbols. |
-| `HotspotProfiler` | Counts bytecode executions and marks bytecode hot after the configured threshold. |
-| `FunctionCache` | Stores compiled functions by bytecode hash and tracks cache hit/miss statistics. |
-| `BytecodeCompiler` | Lowers supported `Instr` sequences into Cranelift IR. |
-| `RuntimeCallIds` | Carries imported Cranelift function IDs for host bridge calls. |
-| `TurbineValue` | C-compatible value slot used when compiled code must pass full runtime values to host callbacks. |
-| `JitMemoryManager` | Provides shared allocation helpers for string and array constants used by JIT support code. |
+RunMat can progress from interpretation to a generic native version and then to guarded specialized versions. Specializations are selected only for an exact matching runtime representation profile. Hot loops can transfer from generic to optimized code at a verified loop header without restarting the function or repeating an iteration.
 
-## Execution Policy
+## Correctness And Fallback
 
-Turbine only runs when the current platform supports native JIT code generation. Today that means x86_64 and AArch64 hosts. The engine hashes bytecode, profiles executions by hash, compiles after the hot threshold, and reuses compiled functions through the cache.
+Before native entry, an unavailable, unsupported, stale, or failed compilation simply leaves execution on the canonical cold path. After native entry, RunMat does not restart the request in the VM: doing so could repeat I/O or workspace effects. Native exceptions, cancellation, suspension, and deoptimization instead preserve exact frame and resume state.
 
-If compilation fails, the compiled pointer is missing, a bridge call returns an error status, or an unsupported instruction is encountered, execution returns to `runmat-vm::interpret_with_vars`. This keeps JIT availability a performance property rather than a correctness requirement.
+Interactive native execution receives a complete invocation-scoped workspace view. Successful execution publishes one transactional snapshot, including new and removed variables. Failed or cancelled execution publishes no partial native snapshot. Function redefinitions and project/catalog changes invalidate only products that depend on the changed authority.
 
-For the lowering flow, supported instruction classes, and ABI details, see [JIT Compilation Pipeline](/docs/runtime/jit/pipeline).
+Native versions and profiles are bounded. RunMat limits tracked sites, profiles, pending compilation, specialized versions, and executable bytes. Replacement can retire an old specialized version only after a new version is ready; active invocations retain their code until completion.
+
+## Platforms
+
+Host-native JIT compilation is supported on the native x86-64 and AArch64 backends used by RunMat's supported operating systems. WebAssembly cannot allocate host-native executable memory, so browser sessions execute the same portable program semantics through the web executor and VM. Portable Native IR remains verifiable and reusable by web tooling without embedding Cranelift machine code in the browser.
+
+For the internal stages and ownership boundaries, see [JIT Compilation Pipeline](/docs/runtime/jit/pipeline). For session results and workspace publication, see [Execution Requests](/docs/runtime/session/execution-requests).

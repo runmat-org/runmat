@@ -74,17 +74,139 @@ impl RunMatSession {
             .resolve_or_compile(unit, preferred_function)?;
         crate::generic_native::invoke(
             unit,
-            published,
-            None,
-            preferred_function,
-            arguments,
-            requested_outputs,
-            self.runtime_context
-                .clone()
-                .with_program_revision(Some(unit.revision().program_revision.clone())),
+            crate::generic_native::NativeInvocation {
+                published,
+                osr: None,
+                preferred_function,
+                arguments,
+                requested_outputs,
+                runtime: self
+                    .runtime_context
+                    .clone()
+                    .with_program_revision(Some(unit.revision().program_revision.clone())),
+                workspace: None,
+            },
         )
         .await
         .map(|execution| execution.value)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn prepare_tiered_interactive(
+        &self,
+        unit: &crate::ExecutableUnit,
+    ) -> Option<(
+        runmat_jit::execute::NativeWorkspaceInput,
+        runmat_jit::tiering::RepresentationProfile,
+    )> {
+        if !self.native_tiering_enabled {
+            return None;
+        }
+        let values = self
+            .workspace_values
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let local_names = unit
+            .entrypoint_workspace_bindings()
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        let bindings = local_names
+            .iter()
+            .map(|(binding, name)| (*binding, name.clone()))
+            .filter_map(|(binding, name)| {
+                values.get(&name).cloned().map(|value| {
+                    runmat_jit::execute::NativeWorkspaceBinding {
+                        binding,
+                        name,
+                        value,
+                    }
+                })
+            })
+            .collect();
+        let workspace = runmat_jit::execute::NativeWorkspaceInput {
+            values,
+            local_names,
+            bindings,
+        };
+        let profile_values = workspace.profile_values();
+        self.generic_native_cache
+            .representation_profile(&profile_values)
+            .map(|profile| (workspace, profile))
+    }
+
+    /// Execute only an already-admitted native product. `None` preserves the
+    /// canonical cold interpreter path; observation happens after either path
+    /// completes so timing and hotness describe real semantic execution.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) async fn invoke_tiered_interactive(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        workspace: &runmat_jit::execute::NativeWorkspaceInput,
+        profile: &runmat_jit::tiering::RepresentationProfile,
+    ) -> std::result::Result<Option<crate::generic_native::NativeExecution>, RuntimeError> {
+        let published = self
+            .generic_native_cache
+            .resolve_or_schedule(unit, None, profile)?;
+        let osr = if published
+            .as_ref()
+            .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
+        {
+            self.generic_native_cache
+                .resolve_or_schedule_osr(unit, None, profile)?
+        } else {
+            None
+        };
+        let Some(published) = published else {
+            return Ok(None);
+        };
+        self.stats.jit_compiled += 1;
+        let execution = crate::generic_native::invoke(
+            unit,
+            crate::generic_native::NativeInvocation {
+                published,
+                osr,
+                preferred_function: None,
+                arguments: Vec::new(),
+                requested_outputs: 0,
+                runtime: self
+                    .runtime_context
+                    .clone()
+                    .with_program_revision(Some(unit.revision().program_revision.clone())),
+                workspace: Some(workspace.clone()),
+            },
+        )
+        .await?;
+        self.stats.native_osr_transfers += usize::from(execution.osr_entry.is_some());
+        self.stats.vectorized_native_regions = self
+            .stats
+            .vectorized_native_regions
+            .saturating_add(execution.vectorized_regions);
+        Ok(Some(execution))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn observe_tiered_interactive(
+        &self,
+        unit: &crate::ExecutableUnit,
+        profile: &runmat_jit::tiering::RepresentationProfile,
+        elapsed: std::time::Duration,
+        backedges: &BTreeMap<runmat_types::ProgramPointId, u64>,
+    ) {
+        if let Err(error) = self.generic_native_cache.observe_invocation(
+            unit,
+            None,
+            profile,
+            runmat_time::duration_ns_saturating(elapsed),
+        ) {
+            log::warn!("native tier feedback was not recorded: {error}");
+        }
+        if let Err(error) = self
+            .generic_native_cache
+            .observe_loop_backedges(unit, None, backedges)
+        {
+            log::warn!("native loop feedback was not recorded: {error}");
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -116,14 +238,18 @@ impl RunMatSession {
                 self.stats.jit_compiled += 1;
                 let execution = crate::generic_native::invoke(
                     unit,
-                    published,
-                    osr,
-                    None,
-                    Vec::new(),
-                    0,
-                    self.runtime_context
-                        .clone()
-                        .with_program_revision(Some(unit.revision().program_revision.clone())),
+                    crate::generic_native::NativeInvocation {
+                        published,
+                        osr,
+                        preferred_function: None,
+                        arguments: Vec::new(),
+                        requested_outputs: 0,
+                        runtime: self
+                            .runtime_context
+                            .clone()
+                            .with_program_revision(Some(unit.revision().program_revision.clone())),
+                        workspace: None,
+                    },
                 )
                 .await;
                 match execution {
@@ -205,14 +331,18 @@ impl RunMatSession {
                 self.stats.jit_compiled += 1;
                 let execution = crate::generic_native::invoke(
                     unit,
-                    published,
-                    osr,
-                    Some(name),
-                    arguments,
-                    requested_outputs,
-                    self.runtime_context
-                        .clone()
-                        .with_program_revision(Some(unit.revision().program_revision.clone())),
+                    crate::generic_native::NativeInvocation {
+                        published,
+                        osr,
+                        preferred_function: Some(name),
+                        arguments,
+                        requested_outputs,
+                        runtime: self
+                            .runtime_context
+                            .clone()
+                            .with_program_revision(Some(unit.revision().program_revision.clone())),
+                        workspace: None,
+                    },
                 )
                 .await;
                 match execution {

@@ -12,29 +12,14 @@ impl RunMatSession {
     }
 
     fn initialize(enable_jit: bool, verbose: bool) -> Result<Self> {
-        #[cfg(feature = "jit")]
-        let jit_engine = if enable_jit {
-            match TurbineEngine::new() {
-                Ok(engine) => {
-                    info!("JIT compiler initialized successfully");
-                    Some(engine)
-                }
-                Err(e) => {
-                    warn!("JIT compiler initialization failed: {e}, falling back to interpreter");
-                    None
-                }
-            }
-        } else {
-            info!("JIT compiler disabled, using interpreter only");
-            None
-        };
-
-        #[cfg(not(feature = "jit"))]
+        #[cfg(not(target_arch = "wasm32"))]
+        let native_tiering_enabled = enable_jit && cfg!(feature = "jit");
+        #[cfg(all(not(target_arch = "wasm32"), not(feature = "jit")))]
         if enable_jit {
-            info!(
-                "JIT support was requested but the 'jit' feature is disabled; running interpreter-only."
-            );
+            info!("JIT support was requested but the 'jit' feature is disabled; running interpreter-only.");
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = enable_jit;
 
         let interrupt_flag = Arc::new(AtomicBool::new(false));
         let search_path = Arc::new(
@@ -46,8 +31,6 @@ impl RunMatSession {
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_placement(placement.clone());
         let session = Self {
-            #[cfg(feature = "jit")]
-            jit_engine,
             verbose,
             stats: ExecutionStats::default(),
             variable_array: Vec::new(),
@@ -61,7 +44,7 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             generic_native_cache: crate::generic_native::GenericNativeCache::default(),
             #[cfg(not(target_arch = "wasm32"))]
-            native_tiering_enabled: enable_jit,
+            native_tiering_enabled,
             project_handoff: None,
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::clone(&interrupt_flag),

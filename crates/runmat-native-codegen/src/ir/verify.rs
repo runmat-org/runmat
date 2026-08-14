@@ -868,7 +868,13 @@ fn rvalue_output_locals(
                 MirOutputTarget::Discard => Ok(None),
             })
             .collect(),
-        MirStmtKind::Expr(_) => Ok(Vec::new()),
+        MirStmtKind::Expr(value) => Ok((!matches!(
+            value,
+            runmat_mir::MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0
+        ))
+        .then_some(None)
+        .into_iter()
+        .collect()),
         MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => Err(NativeCodegenError::new(
@@ -926,6 +932,7 @@ fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult
             let arity = match result {
                 NativeRvalueResult::Assignment => 1,
                 NativeRvalueResult::MultiAssignment(arity) => *arity as usize,
+                NativeRvalueResult::Expression => 1,
                 NativeRvalueResult::Discard => 0,
                 NativeRvalueResult::Terminator => {
                     return Err(NativeCodegenError::new(

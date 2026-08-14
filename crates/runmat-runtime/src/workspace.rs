@@ -91,8 +91,10 @@ static TEST_WORKSPACE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 pub fn register_workspace_resolver(resolver: WorkspaceResolver) {
     if let Some(context) = crate::context::legacy::active() {
         context.state().workspace.replace(Some(resolver));
-        return;
     }
+    // The VM resolver consists only of context-independent function pointers. Retain it as the
+    // standalone fallback as well: one-time registration may occur while a RuntimeContext is
+    // active, and later interpreter sessions must not depend on that first context's lifetime.
     resolver_storage::set(resolver);
 }
 
@@ -102,12 +104,9 @@ pub fn lookup(name: &str) -> Option<Value> {
         if let Some(service) = context.service_ports().workspace() {
             return service.lookup(name);
         }
-        return context
-            .state()
-            .workspace
-            .borrow()
-            .as_ref()
-            .and_then(|resolver| (resolver.lookup)(name));
+        if let Some(resolver) = context.state().workspace.borrow().as_ref() {
+            return (resolver.lookup)(name);
+        }
     }
     resolver_storage::with(|resolver| resolver.and_then(|r| (r.lookup)(name)))
 }
@@ -119,12 +118,9 @@ pub fn snapshot() -> Option<Vec<(String, Value)>> {
         if let Some(service) = context.service_ports().workspace() {
             return Some(service.snapshot());
         }
-        return context
-            .state()
-            .workspace
-            .borrow()
-            .as_ref()
-            .map(|resolver| (resolver.snapshot)());
+        if let Some(resolver) = context.state().workspace.borrow().as_ref() {
+            return Some((resolver.snapshot)());
+        }
     }
     resolver_storage::with(|resolver| resolver.map(|r| (r.snapshot)()))
 }
@@ -135,13 +131,9 @@ pub fn global_names() -> Vec<String> {
         if let Some(service) = context.service_ports().workspace() {
             return service.global_names();
         }
-        return context
-            .state()
-            .workspace
-            .borrow()
-            .as_ref()
-            .map(|resolver| (resolver.globals)())
-            .unwrap_or_default();
+        if let Some(resolver) = context.state().workspace.borrow().as_ref() {
+            return (resolver.globals)();
+        }
     }
     resolver_storage::with(|resolver| resolver.map(|r| (r.globals)()).unwrap_or_default())
 }
@@ -153,12 +145,14 @@ pub fn assign(name: &str, value: Value) -> Result<(), String> {
                 .assign(name, value)
                 .map_err(|error| error.to_string());
         }
-        return with_context_resolver(&context, |resolver| {
-            let assign = resolver
-                .assign
-                .ok_or_else(|| "workspace assignment unavailable".to_string())?;
-            assign(name, value)
-        });
+        if context.state().workspace.borrow().is_some() {
+            return with_context_resolver(&context, |resolver| {
+                let assign = resolver
+                    .assign
+                    .ok_or_else(|| "workspace assignment unavailable".to_string())?;
+                assign(name, value)
+            });
+        }
     }
     resolver_storage::with(|resolver| {
         let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
@@ -174,12 +168,14 @@ pub fn clear() -> Result<(), String> {
         if let Some(service) = context.service_ports().workspace() {
             return service.clear().map_err(|error| error.to_string());
         }
-        return with_context_resolver(&context, |resolver| {
-            let clear = resolver
-                .clear
-                .ok_or_else(|| "workspace clearing unavailable".to_string())?;
-            clear()
-        });
+        if context.state().workspace.borrow().is_some() {
+            return with_context_resolver(&context, |resolver| {
+                let clear = resolver
+                    .clear
+                    .ok_or_else(|| "workspace clearing unavailable".to_string())?;
+                clear()
+            });
+        }
     }
     resolver_storage::with(|resolver| {
         let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
@@ -195,12 +191,14 @@ pub fn remove(name: &str) -> Result<(), String> {
         if let Some(service) = context.service_ports().workspace() {
             return service.remove(name).map_err(|error| error.to_string());
         }
-        return with_context_resolver(&context, |resolver| {
-            let remove = resolver
-                .remove
-                .ok_or_else(|| "workspace removal unavailable".to_string())?;
-            remove(name)
-        });
+        if context.state().workspace.borrow().is_some() {
+            return with_context_resolver(&context, |resolver| {
+                let remove = resolver
+                    .remove
+                    .ok_or_else(|| "workspace removal unavailable".to_string())?;
+                remove(name)
+            });
+        }
     }
     resolver_storage::with(|resolver| {
         let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
@@ -214,8 +212,11 @@ pub fn remove(name: &str) -> Result<(), String> {
 /// Returns true when a resolver has been registered.
 pub fn is_available() -> bool {
     if let Some(context) = crate::context::legacy::active() {
-        return context.service_ports().workspace().is_some()
-            || context.state().workspace.borrow().is_some();
+        if context.service_ports().workspace().is_some()
+            || context.state().workspace.borrow().is_some()
+        {
+            return true;
+        }
     }
     resolver_storage::with(|resolver| resolver.is_some())
 }

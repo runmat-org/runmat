@@ -6354,7 +6354,6 @@ dependencies = [
  "runmat-telemetry",
  "runmat-test",
  "runmat-time",
- "runmat-turbine",
  "runmat-types",
  "runmat-value",
  "runmat-vm",
@@ -7181,33 +7180,6 @@ version = "0.6.1"
 dependencies = [
  "instant",
  "js-sys",
-]
-
-[[package]]
-name = "runmat-turbine"
-version = "0.6.1"
-dependencies = [
- "cranelift",
- "cranelift-codegen",
- "cranelift-jit",
- "cranelift-module",
- "cranelift-native",
- "futures",
- "libm",
- "log",
- "runmat-builtins",
- "runmat-gc",
- "runmat-hir",
- "runmat-mir",
- "runmat-parser",
- "runmat-runtime",
- "runmat-time",
- "runmat-value",
- "runmat-vm",
- "stacker",
- "target-lexicon",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]

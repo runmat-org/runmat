@@ -21,6 +21,7 @@ use runmat_hir::{
 use runmat_jit::{
     deopt::{DeoptimizationPolicy, FaultInjection, ResumeTarget},
     entry::{EntryKey, EntryRegistry},
+    execute::{NativeWorkspaceBinding, NativeWorkspaceInput},
     invalidation::{DependencyKey, DependencyTracker},
     osr::OsrTarget,
     specialization::GuardEnvironment,
@@ -925,6 +926,45 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
             Some(Value::Num(10.0))
         );
     }));
+}
+
+#[test]
+fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() {
+    let executor = GenericExecutor::compile(workspace_binding_fixture(
+        "interactive",
+        "counter",
+        WorkspaceEffect::None,
+    ))
+    .unwrap();
+    let mut invocation = executor
+        .begin_workspace_with_deoptimization_and_osr(
+            ProgramFunctionId(0),
+            NativeWorkspaceInput {
+                values: BTreeMap::from([("counter".into(), Value::Num(41.0))]),
+                local_names: BTreeMap::from([(BindingId(0), "counter".into())]),
+                bindings: vec![NativeWorkspaceBinding {
+                    binding: BindingId(0),
+                    name: "counter".into(),
+                    value: Value::Num(41.0),
+                }],
+            },
+            Vec::new(),
+            1,
+            runtime_context(),
+            DeoptimizationPolicy::default(),
+            None,
+        )
+        .unwrap();
+    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+        invocation.advance().unwrap()
+    else {
+        panic!("interactive native invocation should complete")
+    };
+    assert_eq!(execution.outputs, vec![Value::Num(42.0)]);
+    assert_eq!(
+        execution.workspace.unwrap().values,
+        BTreeMap::from([("counter".into(), Value::Num(42.0))])
+    );
 }
 
 #[test]
@@ -2035,6 +2075,27 @@ fn workspace_binding_fixture(
     let span = Span { start: 0, end: 3 };
     let function = FunctionId(0);
     let binding = BindingId(0);
+    let mut statements = Vec::new();
+    if effect != WorkspaceEffect::None {
+        statements.push(MirStmt {
+            kind: MirStmtKind::WorkspaceEffect {
+                effect,
+                bindings: vec![MirLocalId(0)],
+            },
+            span,
+        });
+    }
+    statements.push(MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(0)),
+            value: MirRvalue::Binary(
+                MirOperand::Local(MirLocalId(0)),
+                runmat_types::OperatorKind::Add,
+                MirOperand::Constant(MirConstant::Number("1".into())),
+            ),
+        },
+        span,
+    });
     let mir = MirAssembly {
         bodies: [(
             function,
@@ -2056,26 +2117,7 @@ fn workspace_binding_fixture(
                 }],
                 blocks: vec![BasicBlock {
                     id: BasicBlockId(0),
-                    statements: vec![
-                        MirStmt {
-                            kind: MirStmtKind::WorkspaceEffect {
-                                effect,
-                                bindings: vec![MirLocalId(0)],
-                            },
-                            span,
-                        },
-                        MirStmt {
-                            kind: MirStmtKind::Assign {
-                                place: MirPlace::Local(MirLocalId(0)),
-                                value: MirRvalue::Binary(
-                                    MirOperand::Local(MirLocalId(0)),
-                                    runmat_types::OperatorKind::Add,
-                                    MirOperand::Constant(MirConstant::Number("1".into())),
-                                ),
-                            },
-                            span,
-                        },
-                    ],
+                    statements,
                     terminator: MirTerminator {
                         kind: MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(0))]),
                         span,

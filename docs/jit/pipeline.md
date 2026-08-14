@@ -1,111 +1,55 @@
 ---
 title: "JIT Compilation Pipeline"
-category: "Turbine JIT Compiler"
+category: "JIT Compiler"
 section: "5.1"
-last_updated: "May 28, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # JIT Compilation Pipeline
 
-The Turbine pipeline converts hot VM bytecode into a native function.
+The JIT consumes the same immutable executable unit already produced for a request. It does not reparse source, reconstruct control flow from bytecode, or define a second runtime value representation.
 
-## Compile Flow
-
-```mermaid
-flowchart TD
-  Hash["calculate_bytecode_hash()"]
-  Hot["should_compile()"]
-  Signature["create Cranelift function signature"]
-  CFG["ControlFlowGraph::analyze()"]
-  Blocks["create Cranelift blocks"]
-  Stack["StackSimulator"]
-  Lower["lower supported Instr values"]
-  HostCalls["emit host bridge calls"]
-  Define["JITModule::define_function()"]
-  Finalize["finalize_definitions()"]
-  Pointer["get_finalized_function()"]
-  Cache["FunctionCache::insert()"]
-
-  Hash --> Hot --> Signature --> CFG --> Blocks --> Stack --> Lower
-  Lower --> HostCalls
-  Lower --> Define
-  HostCalls --> Define --> Finalize --> Pointer --> Cache
-```
-
-The compiler first identifies basic block boundaries from jumps, conditional jumps, and returns. It then walks each block, simulating the VM stack while emitting Cranelift IR for operations it can preserve directly. Unsupported instructions return a Turbine execution error during compilation, which causes the engine to use interpreter fallback.
-
-## Stack Simulation
-
-`StackSimulator` tracks a vector of `StackEntry` values. Each entry has:
-
-| Field | Meaning |
-| --- | --- |
-| `num` | A Cranelift `f64` value used by the numeric fast path. |
-| `value_ptr` | Optional pointer to a full `TurbineValue` slot when the value came from VM storage and may need to be passed through the host bridge. |
-
-Loads from variables and locals read the `TurbineValue` payload and keep the original slot address. Pure numeric constants only carry the `f64` lane. When the compiler needs full runtime semantics, it can rebuild argument arrays from either numeric lanes or original value slots.
-
-## Supported Native Paths
-
-| Instruction area | Behavior |
-| --- | --- |
-| Numeric literals | `LoadConst` becomes a Cranelift `f64const`. |
-| Variable/local load and store | Reads and writes 16-byte `TurbineValue` slots, storing numeric results with the `Num` tag. |
-| Scalar arithmetic | `Add`, `Sub`, `Mul`, `Pow`, `Neg`, elementwise arithmetic, comparisons, and logical helpers lower to direct numeric operations or static helper lowering. |
-| Control flow | `Jump`, `JumpIfFalse`, and `Return` lower to Cranelift block branches and returns. |
-| Matrix construction/ranges/indexing | Simple forms call Turbine helper lowering; more complex slice/cell/object forms stay in the interpreter. |
-| Semantic calls | Bound function calls, named calls with resolvable identities, expanded calls, built-in calls, `feval`, and method/member expanded calls use typed host bridge functions. |
-
-Unsupported instructions include complex literals, strings/chars as native values, cell and struct construction, object/member mutation, try/catch, async instructions, closure/function-handle construction, slice assignment, and many dynamic indexing forms. Those paths are not errors at the runtime level; they simply keep execution in the VM.
-
-## Host Bridge and ABI
-
-Turbine registers host bridge symbols with the Cranelift `JITBuilder`, declares matching imported functions in the `JITModule`, and passes the resulting `FuncId` values through `RuntimeCallIds` during lowering.
+## Compile And Publication Flow
 
 ```mermaid
 flowchart TD
-  Native["compiled function"]
-  Args["TurbineValue args"]
-  Specs["TurbineArgSpec array"]
-  Bridge["runmat_call_* host symbol"]
-  Context["RUNTIME_CONTEXT"]
-  Registry["FunctionRegistry"]
-  Runtime["VM/runtime callable dispatch"]
-  Results["TurbineValue results"]
-  Stack["native stack values"]
+  Unit["ExecutableUnit<br/>MIR, analysis, bytecode, source map"]
+  Lower["runmat-native-codegen<br/>MIR to Native IR"]
+  Verify["schema and semantic verification"]
+  CLIF["Native IR to Cranelift IR"]
+  Code["machine code + measured metadata"]
+  Admit["dependency, profile, version,<br/>resource, and byte-budget admission"]
+  Cell["stable published entry cell"]
+  Host["invocation-owned JIT host"]
+  Runtime["runmat-runtime semantics"]
 
-  Native --> Args
-  Native --> Specs
-  Args --> Bridge
-  Specs --> Bridge
-  Bridge --> Context --> Registry --> Runtime
-  Runtime --> Results --> Stack
+  Unit --> Lower --> Verify --> CLIF --> Code --> Admit --> Cell --> Host --> Runtime
 ```
 
-`TurbineValue` is a compact tagged slot:
+`runmat-native-codegen` owns portable Native IR and machine-code lowering. `runmat-jit` owns compilation policy, publication, executable-memory lifetime, invocation state, deoptimization, OSR, and feedback. `runmat-core` owns session selection, immutable executable products, dependency revisions, and host-visible result/workspace commitment. `runmat-runtime` remains executor-neutral and owns language operations and the versioned native ABI.
 
-| Tag | Payload |
-| --- | --- |
-| `Empty` | No value, currently converted back to numeric zero. |
-| `Num` | Raw `f64::to_bits()`. |
-| `Bool` | `0` or `1`. |
-| `Int` | Signed integer bits. |
-| `GcHandle` | Opaque identity token for a GC-managed `Value` registered in Turbine's thread-local ABI root table; compiled and bridge code must use checked GC access APIs to inspect the value, and unregistered raw-address tokens are rejected. |
+## Native Invocation
 
-`TurbineArgSpec` mirrors VM argument expansion metadata with `is_expand`, `num_indices`, and `expand_all`. Expanded and multi-output calls use this layout so compiled code can call the same semantic dispatch paths as the interpreter without falling back to legacy name-only resolution.
+Generated code receives opaque, generation-checked value references and a versioned host table. Runtime `Value` layout never crosses the native ABI. The invocation host retains locals, GC roots, exact source and resume identity, loop iterators, exception handlers, outputs, cancellation state, and any transactional workspace snapshot.
 
-## Runtime Re-entry
+Semantic sites call the same runtime operations used by the VM. Structured exits distinguish completion, exception, cancellation, suspension, and deoptimization. A deoptimization frame includes its exact function, block, position, phase, ordinal, live locals, roots, aliases, and side-effect epoch so continuation does not replay completed work.
 
-Before invoking a compiled function, `TurbineEngine` converts the mutable VM variable slice into `Vec<TurbineValue>` and installs a thread-local `RuntimeContext` containing the bytecode's `FunctionRegistry`. Host bridge functions use that context to resolve semantic function IDs, builtin names, `feval`, and method/member fallback policies.
+## Tiering And Specialization
 
-After native execution returns, the engine converts each `TurbineValue` slot back into `runmat_builtins::Value` and writes it into the original VM variable slice. A nonzero native status becomes a Turbine execution error and causes `execute_or_compile` to fall back to the interpreter when possible.
+Feedback is keyed by stable entry, function, and optional loop-header identity. Exact runtime facts form bounded representation profiles. Policy admits generic native code after generic heat, and guarded optimized versions only after their matching profile becomes hot. Compilation failures retain the existing continuation; runtime program errors are not mistaken for compiler failures.
 
-## Caching and Statistics
+Every published target records exact program, builtin-catalog, project, and referenced session-function generations. Dynamic lookup also depends on the session catalog. Publication rechecks those generations after background compilation. Redefining a referenced function retires stale code even if the function keeps the same semantic ID.
 
-Compiled functions are cached by bytecode hash. The hash includes variable count, bytecode instructions, function layout metadata, entrypoints, callable identities, fallback policy, and argument expansion metadata for call instructions. This prevents code generated for one callable shape from being reused for a semantically different bytecode body.
+## Optimized Regions And Placement
 
-The cache has a fixed capacity and evicts the least-used entry when full. `TurbineStats` reports compiled function count, hot functions, cache size, cache capacity, cache hit rate, and the hottest bytecode hashes.
+Specialized products may include verified effect-free numeric regions. The JIT derives the region plan, Runtime evaluates the admitted numeric DAG transactionally, and the session's shared placement authority decides between ordinary specialized CPU execution and vectorized CPU execution. The JIT does not contain independent GPU policy. Unsupported storage, shape, resource, cancellation, or placement conditions leave ordinary execution intact.
 
-## Constraints
+## Interactive Workspace Contract
 
-The JIT fast path should be treated as a selective optimization tier. It is designed to accelerate hot scalar numeric and typed-call bytecode while delegating dynamic MATLAB semantics to the VM. Adding support for another instruction is only safe when the lowering preserves stack shape, runtime value representation, error behavior, and fallback semantics.
+An eligible interactive input is compiled from the MIR and analysis already produced for that request. Its native invocation receives all ambient assigned values plus exact semantic bindings for locals used by the source. Dynamic builtins such as `exist`, `which`, `save`, `load`, `clear`, and `clearvars` therefore observe the invocation workspace through the common runtime service.
+
+Local writes and runtime workspace effects update invocation-owned state. Only successful completion returns a snapshot to Core. Core then applies the existing display, semicolon suppression, `ans`, workspace-delta, and function-publication policies. An exception or cancellation cannot leak a partial snapshot and is never followed by whole-request VM replay.
+
+## WebAssembly
+
+The portable executable manifest and Native IR schema are target-neutral and validated in WASM builds. The Cranelift JIT module and executable-memory lifecycle are native-only. Browser execution keeps the VM/platform executor as its semantic path while sharing compiler facts, runtime services, portable identities, and artifact validation.

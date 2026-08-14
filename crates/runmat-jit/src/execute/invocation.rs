@@ -163,6 +163,8 @@ impl GenericInvocation {
                         loop_backedges: self.state.loop_backedges(),
                         osr_entry: self.state.osr_entry(),
                         vectorized_regions: self.state.vectorized_regions(),
+                        workspace: self.state.workspace_snapshot(),
+                        expression: self.state.expression_result()?,
                     }));
                 }
                 NativeExitKind::EXCEPTION => {

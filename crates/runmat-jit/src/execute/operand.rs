@@ -295,7 +295,10 @@ pub(super) fn evaluate_operand(
                 MirConstant::Number(text) => Value::Num(text.parse::<f64>().map_err(|error| {
                     JitError::Host(format!("invalid MIR numeric constant {text:?}: {error}"))
                 })?),
-                MirConstant::String(text) => Value::String(text.0.clone()),
+                MirConstant::String(text) if text.is_character_row() => {
+                    Value::CharArray(runmat_value::CharArray::new_row(&text.runtime_text()))
+                }
+                MirConstant::String(text) => Value::String(text.runtime_text()),
                 MirConstant::Symbol(symbol) => Value::String(symbol.0.clone()),
                 MirConstant::Bool(value) => Value::Bool(*value),
                 MirConstant::EmptyArray => Value::Tensor(

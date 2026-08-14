@@ -2,7 +2,7 @@
 title: "Supported Architectures"
 category: "Development"
 section: "14.2"
-last_updated: "May 29, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # Supported Architectures
@@ -37,7 +37,7 @@ RunMat is written in Rust and much of the parser, compiler, VM, runtime, builtin
 | `armv7-*`, `arm-unknown-linux-*` | Untested source build | No | No routine coverage | Not supported | Platform-specific, untested | Interpreter-only builds may be possible, but native dependencies and GPU support vary by board. |
 | `wasm32-unknown-unknown` | Packaged WASM | Yes | WASM build + browser tests | Not supported | Browser WebGPU | Browser and TypeScript package target, not a native CLI target. |
 
-The JIT tier is more constrained than the interpreter. Turbine currently reports JIT support for `x86_64` and `aarch64`; other architectures should be expected to run interpreter-only even if the rest of the runtime builds.
+The host-native JIT tier is more constrained than the interpreter. RunMat's Cranelift backend supports `x86_64` and `aarch64`; other architectures should be expected to run interpreter-only even if the rest of the runtime builds. WebAssembly validates the portable executable and Native IR contracts but does not allocate host-native executable memory.
 
 ## Embedded And Edge Devices
 

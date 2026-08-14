@@ -682,13 +682,50 @@ impl RunMatSession {
         let PreparedExecution {
             ast,
             lowering,
-            mir: _,
+            mir,
             analysis,
-            mut bytecode,
-            project_cache_namespace,
+            bytecode,
             function_registry_after_success,
             next_semantic_function_id_after_success,
         } = self.compile_input(input)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let interactive_unit = {
+            let source = crate::ExecutableSource::new(
+                format!("interactive:{}", self.abi_workspace_handle.0),
+                self.current_source_name(),
+                input,
+            );
+            let revision = crate::ExecutableRevision::derive(
+                &source,
+                self.runtime_context.program_revision().cloned(),
+                crate::program_environment(self.compat_mode),
+            );
+            crate::ExecutableUnit::new(
+                source.clone(),
+                revision,
+                self.executable_source_map(&source),
+                mir,
+                analysis,
+                bytecode,
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableProduct")
+                        .build(),
+                )
+            })?
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let analysis = interactive_unit.analysis();
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut bytecode = interactive_unit.bytecode().clone();
+        #[cfg(target_arch = "wasm32")]
+        let _ = mir;
+        #[cfg(target_arch = "wasm32")]
+        let _ = analysis;
+        #[cfg(target_arch = "wasm32")]
+        let mut bytecode = bytecode;
         let source_catalog_entries = self
             .source_pool
             .entries()
@@ -707,10 +744,6 @@ impl RunMatSession {
             );
         let _source_id_guard =
             runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
-        #[cfg(target_arch = "wasm32")]
-        let _ = &analysis;
-        #[cfg(not(feature = "jit"))]
-        let _ = &project_cache_namespace;
         if self.verbose {
             debug!("AST: {ast:?}");
         }
@@ -719,6 +752,8 @@ impl RunMatSession {
         let display_var_ids = display.display_var_ids;
         let stmt_count = entry_statement_count(&lowering.assembly);
         let execution_vars = execution_workspace_mapping(&bytecode);
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut execution_vars = execution_vars;
         let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
             debug!(?execution_vars, "[repl] execution vars");
@@ -778,7 +813,7 @@ impl RunMatSession {
                     },
                     accel_graph_source: runtime_graph_source.as_str().to_string(),
                     mir_local_fact_count: mir_local_fact_count_for_entrypoint(
-                        &analysis,
+                        analysis,
                         &lowering.assembly,
                     ),
                     mir_diagnostic_count: analysis.diagnostics.len(),
@@ -808,13 +843,13 @@ impl RunMatSession {
             debug!("Bytecode instructions: {:?}", bytecode.instructions);
         }
 
-        #[cfg(feature = "jit")]
+        #[cfg(not(target_arch = "wasm32"))]
         let mut used_jit = false;
-        #[cfg(not(feature = "jit"))]
+        #[cfg(target_arch = "wasm32")]
         let used_jit = false;
-        #[cfg(feature = "jit")]
+        #[cfg(not(target_arch = "wasm32"))]
         let mut execution_completed = false;
-        #[cfg(not(feature = "jit"))]
+        #[cfg(target_arch = "wasm32")]
         let execution_completed = false;
         let mut result_value: Option<Value> = None; // Always start fresh for each execution
         let mut suppressed_value: Option<Value> = None; // Track value for type info when suppressed
@@ -822,6 +857,10 @@ impl RunMatSession {
         let mut workspace_updates: Vec<WorkspaceEntry> = Vec::new();
         let mut workspace_snapshot_force_full = false;
         let mut ans_update: Option<(usize, Value)> = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        let tiered_interactive = self.prepare_tiered_interactive(&interactive_unit);
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut native_loop_backedges = std::collections::BTreeMap::new();
 
         // Check if this is an expression statement (ends with Pop)
         let is_expression_stmt = bytecode
@@ -858,82 +897,66 @@ impl RunMatSession {
             debug!("is_semicolon_suppressed: {is_semicolon_suppressed}");
         }
 
-        // Use JIT for assignments, interpreter for expressions (to capture results properly)
-        #[cfg(feature = "jit")]
-        {
-            if let Some(ref mut jit_engine) = &mut self.jit_engine {
-                if !is_expression_stmt {
-                    // Ensure variable array is large enough
-                    if self.variable_array.len() < bytecode.var_count {
-                        self.variable_array
-                            .resize(bytecode.var_count, Value::Num(0.0));
-                    }
-
-                    if self.verbose {
-                        debug!(
-                            "JIT path for assignment: variable_array size: {}, bytecode.var_count: {}",
-                            self.variable_array.len(),
-                            bytecode.var_count
-                        );
-                    }
-
-                    // Use JIT for assignments
-                    match jit_engine.execute_or_compile_with_cache_namespace(
-                        &bytecode,
-                        &mut self.variable_array,
-                        project_cache_namespace.as_deref(),
-                    ) {
-                        Ok((_, actual_used_jit)) => {
-                            used_jit = actual_used_jit;
-                            execution_completed = true;
-                            if actual_used_jit {
-                                self.stats.jit_compiled += 1;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((workspace, profile)) = tiered_interactive.as_ref() {
+            match self
+                .invoke_tiered_interactive(&interactive_unit, workspace, profile)
+                .await
+            {
+                Ok(Some(native)) => {
+                    native_loop_backedges = native.loop_backedges.clone();
+                    if is_expression_stmt {
+                        if let Some(expression) = native.expression.clone() {
+                            if is_semicolon_suppressed {
+                                suppressed_value = Some(expression);
                             } else {
-                                self.stats.interpreter_fallback += 1;
+                                result_value = Some(expression);
                             }
-                            if !display_context.single_stmt_non_assign {
-                                if let Some(var_id) = display_context.first_assign_var {
-                                    if let Some(name) = id_to_name.get(&var_id) {
-                                        assigned_this_execution.insert(name.clone());
-                                    }
-                                    if var_id < self.variable_array.len() {
-                                        let assignment_value = self.variable_array[var_id].clone();
-                                        if !is_semicolon_suppressed {
-                                            result_value = Some(assignment_value);
-                                            if self.verbose {
-                                                debug!("JIT assignment result: {result_value:?}");
-                                            }
-                                        } else {
-                                            suppressed_value = Some(assignment_value);
-                                            if self.verbose {
-                                                debug!(
-                                                    "JIT assignment suppressed due to semicolon, captured for type info"
-                                                );
-                                            }
-                                        }
-                                    }
+                        }
+                    }
+                    let snapshot = native.workspace.ok_or_else(|| {
+                        RunError::Runtime(
+                            build_runtime_error(
+                                "interactive native execution produced no workspace snapshot",
+                            )
+                            .with_identifier("RunMat:NativeWorkspace")
+                            .build(),
+                        )
+                    })?;
+                    execution_vars.retain(|name, _| snapshot.values.contains_key(name));
+                    for (name, value) in snapshot.values {
+                        let slot = execution_vars.get(&name).copied().unwrap_or_else(|| {
+                            let slot = self.variable_array.len();
+                            execution_vars.insert(name.clone(), slot);
+                            slot
+                        });
+                        if self.variable_array.len() <= slot {
+                            self.variable_array.resize(slot + 1, Value::Num(0.0));
+                        }
+                        self.variable_array[slot] = value;
+                    }
+                    used_jit = true;
+                    execution_completed = true;
+                    if !display_context.single_stmt_non_assign {
+                        if let Some(var_id) = display_context.first_assign_var {
+                            if let Some(name) = id_to_name.get(&var_id) {
+                                assigned_this_execution.insert(name.clone());
+                            }
+                            if let Some(assignment_value) = self.variable_array.get(var_id).cloned()
+                            {
+                                if is_semicolon_suppressed {
+                                    suppressed_value = Some(assignment_value);
+                                } else {
+                                    result_value = Some(assignment_value);
                                 }
                             }
-
-                            if self.verbose {
-                                debug!(
-                                    "{} assignment successful, variable_array: {:?}",
-                                    if actual_used_jit {
-                                        "JIT"
-                                    } else {
-                                        "Interpreter"
-                                    },
-                                    self.variable_array
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            if self.verbose {
-                                debug!("JIT execution failed: {e}, using interpreter");
-                            }
-                            // Fall back to interpreter
                         }
                     }
+                }
+                Ok(None) => {}
+                Err(native_error) => {
+                    execution_completed = true;
+                    error = Some(native_error);
                 }
             }
         }
@@ -978,10 +1001,7 @@ impl RunMatSession {
 
             match self.interpret_with_context(&execution_bytecode).await {
                 Ok(runmat_vm::InterpreterOutcome::Completed(results)) => {
-                    // Only increment interpreter_fallback if JIT wasn't attempted
-                    if !self.has_jit() || is_expression_stmt {
-                        self.stats.interpreter_fallback += 1;
-                    }
+                    self.stats.interpreter_fallback += 1;
                     if self.verbose {
                         debug!("Interpreter results: {results:?}");
                     }
@@ -1106,7 +1126,32 @@ impl RunMatSession {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if used_jit && is_expression_stmt {
+            if let Some(value) = result_value.clone() {
+                let slot = execution_vars.get("ans").copied().unwrap_or_else(|| {
+                    let slot = self.variable_array.len();
+                    execution_vars.insert("ans".to_string(), slot);
+                    slot
+                });
+                if self.variable_array.len() <= slot {
+                    self.variable_array.resize(slot + 1, Value::Num(0.0));
+                }
+                self.variable_array[slot] = value.clone();
+                ans_update = Some((slot, value));
+            }
+        }
+
         let execution_time = start_time.elapsed();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((_, profile)) = tiered_interactive.as_ref() {
+            self.observe_tiered_interactive(
+                &interactive_unit,
+                profile,
+                execution_time,
+                &native_loop_backedges,
+            );
+        }
         let execution_time_ms = execution_time.as_millis() as u64;
 
         self.stats.total_execution_time_ms += execution_time_ms;
@@ -1115,7 +1160,9 @@ impl RunMatSession {
 
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
-            if let Some(workspace_state) = runmat_vm::take_updated_workspace_state() {
+            let vm_workspace_state = runmat_vm::take_updated_workspace_state();
+            let vm_workspace_state = (!used_jit).then_some(vm_workspace_state).flatten();
+            if let Some(workspace_state) = vm_workspace_state {
                 let mutated_names = workspace_state.names;
                 let assigned = workspace_state.assigned;
                 if debug_trace {

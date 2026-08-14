@@ -23,7 +23,6 @@ runmat-static-analysis = { workspace = true }
 runmat-test = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
-runmat-turbine = { workspace = true, optional = true }
 runmat-gc = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-telemetry = { workspace = true }
@@ -44,7 +43,7 @@ default-features = false
 
 [features]
 default = ["jit"]
-jit = ["dep:runmat-turbine"]
+jit = []
 occt-native = ["runmat-runtime/occt-native"]
 occt-wasm-host = ["runmat-runtime/occt-wasm-host"]
 

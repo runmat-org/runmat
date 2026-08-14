@@ -69,8 +69,8 @@
     },
     {
       "description": "Replacing substrings gathered from GPU inputs",
-      "input": "g = gpuArray(\"Turbine\");\nhost = strrep(g, \"bine\", \"bo\")",
-      "output": "host = \"Turbo\""
+      "input": "g = gpuArray(\"native-code\");\nhost = strrep(g, \"code\", \"path\")",
+      "output": "host = \"native-path\""
     }
   ],
   "faqs": [

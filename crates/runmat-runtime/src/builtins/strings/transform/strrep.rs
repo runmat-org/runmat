@@ -623,12 +623,12 @@ pub(crate) mod tests {
             return;
         }
         let result = run_strrep(
-            Value::String("Turbine Engine".into()),
+            Value::String("Native Engine".into()),
             Value::String("Engine".into()),
             Value::String("JIT".into()),
         )
         .expect("strrep");
-        assert_eq!(result, Value::String("Turbine JIT".into()));
+        assert_eq!(result, Value::String("Native JIT".into()));
     }
 
     #[test]
