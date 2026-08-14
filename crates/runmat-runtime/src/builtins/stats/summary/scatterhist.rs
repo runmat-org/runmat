@@ -1695,7 +1695,9 @@ mod tests {
         let mut y_count = 0.0;
         for (plot, axes) in figure.plots().zip(figure.plot_axes_indices()) {
             match (plot, *axes) {
-                (PlotElement::Scatter(scatter), 1) => scatter_points += scatter.x_data.len(),
+                (PlotElement::Scatter(scatter), 1) => {
+                    scatter_points += scatter.host_xy_f64().unwrap().unwrap().0.len()
+                }
                 (PlotElement::Bar(bar), 3) => {
                     x_count = bar.values().unwrap().iter().map(|v| v.abs()).sum()
                 }

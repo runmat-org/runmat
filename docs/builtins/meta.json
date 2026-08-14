@@ -70471,6 +70471,26 @@
             }
           ],
           "outputs": []
+        },
+        {
+          "label": "hold(ax, mode)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes."
+            },
+            {
+              "name": "mode",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Hold mode ('on'|'off'|'all') or numeric/logical scalar."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -70481,17 +70501,9 @@
           "message": "hold: invalid argument"
         }
       ],
-      "extensions": [
-        {
-          "id": "hold-typed-integer-state",
-          "mode": "RunMatOnly",
-          "description": "hold accepts typed integer 0 and 1 only as a RunMat extension because the public numeric-state documentation does not enumerate integer storage classes",
-          "error_identifier": "RunMat:compatibility:HoldTypedIntegerStateExtension"
-        }
-      ],
       "integer_capabilities": [
         {
-          "form": "hold(integer_state)",
+          "form": "hold([ax,] integer_state)",
           "inputs": [
             {
               "name": "state",
@@ -70505,17 +70517,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "availability": "RunMatOnly",
-              "scalar_double": "NotApplicable",
-              "notes": "All eight integer classes are inspected exactly and only values 0 and 1 are accepted behind the typed-state extension."
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented numeric scalar states accept every built-in integer class; all classes are inspected exactly and only values 0 and 1 are accepted."
             }
           ],
           "computation_domain": "Structural",
-          "output_class": "FunctionSpecific",
-          "overflow": "Error",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] The state is read without floating conversion. hold has no public output and mutates plotting state only after validation. Documented axes-target and matlab.lang.OnOffSwitchState forms remain implementation gaps and are not claimed by this integer-role record."
+          "notes": "The scalar state is read without floating conversion and mutates only the selected axes hold policy after validation."
         }
       ]
     },
@@ -87107,7 +87119,11 @@
           "when": "Internal legend state operation fails.",
           "message": "legend: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Legend labels, commands, and style properties have no integer numeric-data role; graphics-object targets are opaque handles rather than integer values."
+      }
     },
     {
       "name": "length",
@@ -87613,6 +87629,35 @@
           "identifier": "RunMat:line:Internal",
           "when": "Internal plotting state update fails.",
           "message": "line: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = line(integer_coordinates, ...)",
+          "inputs": [
+            {
+              "name": "XData/YData/ZData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Line coordinate properties accept all eight integer classes and retain their native class, shape, and exact values."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native numeric storage is authoritative for coordinate properties and figure persistence; only renderer geometry materialization crosses to floating point."
         }
       ]
     },
@@ -90102,6 +90147,35 @@
           "identifier": "RunMat:loglog:LogAxisFailed",
           "when": "Applying logarithmic axis modes fails.",
           "message": "loglog: failed to apply logarithmic axis mode"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = loglog([X,] integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X/Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Coordinate data accept all eight integer classes and retain exact native source properties before logarithmic display scaling."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The plot source and persisted graphics properties remain native; logarithmic axis transformation and renderer geometry are explicit floating boundaries."
         }
       ]
     },
@@ -113127,6 +113201,35 @@
           "when": "Internal line construction or rendering fails unexpectedly.",
           "message": "plot: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = plot([X,] integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X/Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native numeric storage remains authoritative for XData/YData and figure persistence. Rendering is an explicit floating geometry boundary; integer gpuArray inputs gather exactly because the direct WGPU line path is floating-only."
+        }
       ]
     },
     {
@@ -113456,6 +113559,35 @@
           "when": "Internal 3-D line construction or rendering fails unexpectedly.",
           "message": "plot3: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = plot3(integer_X, integer_Y, integer_Z, ...)",
+          "inputs": [
+            {
+              "name": "X/Y/Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Three-dimensional coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native numeric storage remains authoritative for XData/YData/ZData and figure persistence. Rendering is an explicit floating geometry boundary; integer gpuArray inputs gather exactly because the direct WGPU line path is floating-only."
+        }
       ]
     },
     {
@@ -113764,6 +113896,35 @@
           "when": "Internal subplot, scatter, or histogram rendering fails.",
           "message": "plotmatrix: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "plotmatrix(integer_X [, integer_Y], ...)",
+          "inputs": [
+            {
+              "name": "X/Y columns",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Matrix columns accept every integer class and are gathered by native storage before each scatter cell is constructed."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Column extraction preserves authoritative native storage and scatter source properties; histogram binning and rendering are explicit floating computation boundaries."
+        }
       ]
     },
     {
@@ -113910,6 +114071,35 @@
           "identifier": "RunMat:plotyy:Internal",
           "when": "Internal plotting state update fails.",
           "message": "plotyy: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[ax,h1,h2] = plotyy(integer_X1, integer_Y1, integer_X2, integer_Y2, ...)",
+          "inputs": [
+            {
+              "name": "X1/Y1/X2/Y2",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Both coordinate pairs accept all eight integer classes and retain native source properties on their line objects."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each delegated line retains exact native source and persisted property data; dual-axis display and rendering are explicit floating boundaries."
         }
       ]
     },
@@ -128319,6 +128509,51 @@
           "when": "Internal scatter construction or rendering fails unexpectedly.",
           "message": "scatter: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = scatter(integer_X, integer_Y [, integer_S, integer_C], ...)",
+          "inputs": [
+            {
+              "name": "X/Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties."
+            },
+            {
+              "name": "S/C rendering data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Marker areas and numeric color data accept all integer classes and cross explicitly into floating rendering metadata."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "XData/YData and figure persistence retain native storage. Marker sizing, colormap normalization, and rendering are explicit floating boundaries; integer gpuArray coordinates gather exactly because the direct WGPU scatter path is floating-only."
+        }
       ]
     },
     {
@@ -129233,6 +129468,35 @@
           "when": "Applying logarithmic X-axis mode fails.",
           "message": "semilogx: failed to apply logarithmic axis mode"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = semilogx([X,] integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X/Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Coordinate data accept all eight integer classes and retain exact native source properties before logarithmic X-axis display scaling."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The plot source and persisted graphics properties remain native; logarithmic X-axis transformation and renderer geometry are explicit floating boundaries."
+        }
       ]
     },
     {
@@ -129323,6 +129587,35 @@
           "identifier": "RunMat:semilogy:LogAxisFailed",
           "when": "Applying logarithmic Y-axis mode fails.",
           "message": "semilogy: failed to apply logarithmic axis mode"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = semilogy([X,] integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X/Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Coordinate data accept all eight integer classes and retain exact native source properties before logarithmic Y-axis display scaling."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The plot source and persisted graphics properties remain native; logarithmic Y-axis transformation and renderer geometry are explicit floating boundaries."
         }
       ]
     },

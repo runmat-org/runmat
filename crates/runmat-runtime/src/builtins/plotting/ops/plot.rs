@@ -3,13 +3,16 @@
 use log::trace;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::ScalarType;
-use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
+use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle, NumericPlotData};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -17,7 +20,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 
-use super::common::numeric_pair;
+use super::common::numeric_plot_data_pair;
 use super::op_common::line_inputs::NumericInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
@@ -67,6 +70,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "plot";
+
+const PLOT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X/Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties.",
+    }];
+pub const PLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = plot([X,] integer_Y, ...)",
+        inputs: &PLOT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native numeric storage remains authoritative for XData/YData and figure persistence. Rendering is an explicit floating geometry boundary; integer gpuArray inputs gather exactly because the direct WGPU line path is floating-only.",
+    }];
 
 const PLOT_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -432,6 +455,7 @@ fn map_plot_internal(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::plot::PLOT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::plot::PLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::plot"
 )]
 pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -539,10 +563,10 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             .into_tensors_async("plot")
             .await
             .map_err(map_plot_invalid_argument)?;
-        let (x_vals, y_vals) =
-            numeric_pair(x_tensor, y_tensor, "plot").map_err(map_plot_invalid_argument)?;
+        let (x_data, y_data) = numeric_plot_data_pair(x_tensor, y_tensor, "plot")
+            .map_err(map_plot_invalid_argument)?;
         plots.push(
-            build_line_plot(x_vals, y_vals, &label, &appearance)
+            build_line_plot_from_numeric_data(x_data, y_data, &label, &appearance)
                 .map_err(map_plot_invalid_argument)?,
         );
     }
@@ -597,6 +621,36 @@ pub(super) fn build_line_plot_for_builtin(
 ) -> BuiltinResult<LinePlot> {
     let point_count = x.len();
     let mut plot = LinePlot::new(x, y)
+        .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
+        .with_label(label)
+        .with_handle_visibility(appearance.handle_visibility.clone())
+        .with_style(
+            appearance.color,
+            appearance.line_width,
+            appearance.line_style,
+        );
+    apply_marker_metadata(&mut plot, appearance, point_count);
+    Ok(plot)
+}
+
+pub(super) fn build_line_plot_from_numeric_data(
+    x: NumericPlotData,
+    y: NumericPlotData,
+    label: &str,
+    appearance: &LineAppearance,
+) -> BuiltinResult<LinePlot> {
+    build_line_plot_from_numeric_data_for_builtin(BUILTIN_NAME, x, y, label, appearance)
+}
+
+pub(super) fn build_line_plot_from_numeric_data_for_builtin(
+    builtin: &'static str,
+    x: NumericPlotData,
+    y: NumericPlotData,
+    label: &str,
+    appearance: &LineAppearance,
+) -> BuiltinResult<LinePlot> {
+    let point_count = x.len();
+    let mut plot = LinePlot::from_numeric_data(x, y)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_label(label)
         .with_handle_visibility(appearance.handle_visibility.clone())
@@ -774,6 +828,14 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
     label: &str,
     appearance: &LineAppearance,
 ) -> BuiltinResult<LinePlot> {
+    if runmat_accelerate_api::handle_integer_type(x).is_some()
+        || runmat_accelerate_api::handle_integer_type(y).is_some()
+    {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: integer gpuArray source requires exact host property retention"),
+        ));
+    }
     let api_provider_present = runmat_accelerate_api::provider().is_some();
     let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
     let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
@@ -1064,8 +1126,9 @@ pub(crate) mod tests {
             let PlotElement::Line(line) = fig.plots().next().expect("plot created") else {
                 panic!("expected line plot");
             };
-            assert_eq!(line.x_data, vec![1.0, 2.0, 3.0, 4.0]);
-            assert_eq!(line.y_data, vec![10.0, 20.0, 30.0, 40.0]);
+            let (x, y) = line.host_xy_f64().unwrap().unwrap();
+            assert_eq!(x, vec![1.0, 2.0, 3.0, 4.0]);
+            assert_eq!(y, vec![10.0, 20.0, 30.0, 40.0]);
         }
     }
 
@@ -1462,8 +1525,9 @@ pub(crate) mod tests {
         let PlotElement::Line(line) = first_plot else {
             panic!("expected line plot");
         };
-        assert_eq!(line.x_data, vec![1.0, 2.0, 3.0]);
-        assert_eq!(line.y_data, vec![5.0, 6.0, 7.0]);
+        let (x, y) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x, vec![1.0, 2.0, 3.0]);
+        assert_eq!(y, vec![5.0, 6.0, 7.0]);
     }
 
     #[test]
@@ -1497,8 +1561,9 @@ pub(crate) mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line")
         };
-        assert_eq!(line.x_data, vec![0.0]);
-        assert_eq!(line.y_data, vec![1.5]);
+        let (x, y) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x, vec![0.0]);
+        assert_eq!(y, vec![1.5]);
     }
 
     #[test]

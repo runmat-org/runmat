@@ -1236,3 +1236,39 @@ fn stackedplot_dispatches_multiple_tables_through_vm() {
         if numel(labels2) ~= 2; error('separated label count mismatch'); end;";
     execute_source(input).expect("execute stackedplot multiple-table script");
 }
+
+#[test]
+fn numeric_line_graphics_preserve_native_coordinate_classes_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "single", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let input = format!(
+            "x={constructor}([1 2]); y={constructor}([3 4]); z={constructor}([5 6]); h=plot(x,y); if ~strcmp(class(get(h,'XData')),'{constructor}'); error('plot class'); end; h=line(x,y); if ~strcmp(class(get(h,'YData')),'{constructor}'); error('line class'); end; h=plot3(x,y,z); if ~strcmp(class(get(h,'ZData')),'{constructor}'); error('plot3 class'); end; h=scatter(x,y); if ~strcmp(class(get(h,'XData')),'{constructor}'); error('scatter class'); end;"
+        );
+        execute_source(&input).unwrap_or_else(|err| panic!("{constructor}: {err}"));
+    }
+}
+
+#[test]
+fn integer_plot_wrappers_preserve_wide_uint64_source_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "wide=uint64(9007199254740992)+uint64(1); x=[wide wide+uint64(1)]; y=[wide+uint64(2) wide+uint64(3)]; h=loglog(x,y); data=get(h,'XData'); if ~strcmp(class(data),'uint64') || data(1)~=wide; error('loglog source'); end; h=semilogx(x,y); data=get(h,'XData'); if ~strcmp(class(data),'uint64') || data(2)~=wide+uint64(1); error('semilogx source'); end; h=semilogy(x,y); data=get(h,'XData'); if ~strcmp(class(data),'uint64') || data(1)~=wide; error('semilogy source'); end; [ax,h1,h2]=plotyy(x,y,x,y); data1=get(h1,'XData'); data2=get(h2,'XData'); if ~strcmp(class(data1),'uint64') || ~strcmp(class(data2),'uint64') || data1(1)~=wide || data2(2)~=wide+uint64(1); error('plotyy source'); end;";
+    execute_source(input).expect("wide integer wrapper graphics semantics");
+}
+
+#[test]
+fn hold_integer_state_remains_available_in_compatibility_mode() {
+    let _guard = disable_interactive_plots_for_test();
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    execute_source("hold(uint8(1)); hold(int64(0));")
+        .expect("documented integer hold state in compatibility mode");
+}
+
+#[test]
+fn integer_gpu_line_graphics_gather_exactly_before_float_only_wgpu_rendering() {
+    let _guard = disable_interactive_plots_for_test();
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let input = "wide=uint64(9007199254740992)+uint64(1); x=gpuArray([wide wide+uint64(1)]); y=gpuArray([wide+uint64(2) wide+uint64(3)]); z=gpuArray([wide+uint64(4) wide+uint64(5)]); h1=plot(x,y); a=get(h1,'XData'); h2=plot3(x,y,z); b=get(h2,'ZData'); h3=scatter(x,y); c=get(h3,'YData'); if ~strcmp(class(a),'uint64') || a(1)~=wide; error('plot gpu gather'); end; if ~strcmp(class(b),'uint64') || b(2)~=wide+uint64(5); error('plot3 gpu gather'); end; if ~strcmp(class(c),'uint64') || c(1)~=wide+uint64(2); error('scatter gpu gather'); end;";
+    execute_source(input).expect("exact integer GPU plotting gather fallback");
+}

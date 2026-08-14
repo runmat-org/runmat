@@ -1,11 +1,15 @@
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::{line3::Line3GpuInputs, ScalarType};
-use runmat_plot::plots::{Line3Plot, LineStyle};
+use runmat_plot::plots::{Line3Plot, LineStyle, NumericPlotData};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -13,7 +17,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
-use super::common::numeric_triplet;
+use super::common::numeric_plot_data_triplet;
 use super::gpu_helpers::gpu_xyz_bounds_async;
 use super::op_common::line_inputs::NumericInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -23,6 +27,26 @@ use super::style::{parse_line_style_args, LineAppearance, LineStyleParseOptions}
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "plot3";
+
+const PLOT3_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X/Y/Z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Three-dimensional coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties.",
+    }];
+pub const PLOT3_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = plot3(integer_X, integer_Y, integer_Z, ...)",
+        inputs: &PLOT3_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native numeric storage remains authoritative for XData/YData/ZData and figure persistence. Rendering is an explicit floating geometry boundary; integer gpuArray inputs gather exactly because the direct WGPU line path is floating-only.",
+    }];
 
 const PLOT3_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -379,6 +403,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::plot3::PLOT3_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::plot3::PLOT3_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::plot3"
 )]
 pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -429,9 +454,9 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             .await
             .map_err(map_plot3_invalid_argument)?;
         let (x, y, z) =
-            numeric_triplet(x, y, z, BUILTIN_NAME).map_err(map_plot3_invalid_argument)?;
+            numeric_plot_data_triplet(x, y, z, BUILTIN_NAME).map_err(map_plot3_invalid_argument)?;
         plots.push(
-            build_line3_plot(x, y, z, &label, &plan.appearance)
+            build_line3_plot_from_numeric_data(x, y, z, &label, &plan.appearance)
                 .map_err(map_plot3_invalid_argument)?,
         );
     }
@@ -611,14 +636,32 @@ pub(super) fn build_line3_plot_for_builtin(
         .with_label(label))
 }
 
-fn build_line3_plot(
-    x: Vec<f64>,
-    y: Vec<f64>,
-    z: Vec<f64>,
+pub(super) fn build_line3_plot_from_numeric_data_for_builtin(
+    builtin: &'static str,
+    x: NumericPlotData,
+    y: NumericPlotData,
+    z: NumericPlotData,
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    build_line3_plot_for_builtin(BUILTIN_NAME, x, y, z, label, appearance)
+    Ok(Line3Plot::from_numeric_data(x, y, z)
+        .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
+        .with_style(
+            appearance.color,
+            appearance.line_width,
+            appearance.line_style,
+        )
+        .with_label(label))
+}
+
+fn build_line3_plot_from_numeric_data(
+    x: NumericPlotData,
+    y: NumericPlotData,
+    z: NumericPlotData,
+    label: &str,
+    appearance: &LineAppearance,
+) -> crate::BuiltinResult<Line3Plot> {
+    build_line3_plot_from_numeric_data_for_builtin(BUILTIN_NAME, x, y, z, label, appearance)
 }
 
 async fn build_line3_gpu_plot_async(
@@ -628,6 +671,15 @@ async fn build_line3_gpu_plot_async(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
+    if runmat_accelerate_api::handle_integer_type(x).is_some()
+        || runmat_accelerate_api::handle_integer_type(y).is_some()
+        || runmat_accelerate_api::handle_integer_type(z).is_some()
+    {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "plot3: integer gpuArray source requires exact host property retention",
+        ));
+    }
     let _ = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU X data"))?;
@@ -657,8 +709,9 @@ async fn build_line3_gpu_plot_async(
             BUILTIN_NAME,
         )
         .await?;
-        let (host_x, host_y, host_z) = numeric_triplet(host_x, host_y, host_z, BUILTIN_NAME)?;
-        return build_line3_plot(host_x, host_y, host_z, label, appearance);
+        let (host_x, host_y, host_z) =
+            numeric_plot_data_triplet(host_x, host_y, host_z, BUILTIN_NAME)?;
+        return build_line3_plot_from_numeric_data(host_x, host_y, host_z, label, appearance);
     }
     if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
         return Err(plotting_error(
@@ -790,9 +843,10 @@ mod tests {
         let PlotElement::Line3(line) = fig.plots().next().unwrap() else {
             panic!("expected line3")
         };
-        assert_eq!(line.x_data, vec![1.0]);
-        assert_eq!(line.y_data, vec![2.0]);
-        assert_eq!(line.z_data, vec![3.0]);
+        let (x, y, z) = line.host_xyz_f64().unwrap().unwrap();
+        assert_eq!(x, vec![1.0]);
+        assert_eq!(y, vec![2.0]);
+        assert_eq!(z, vec![3.0]);
         assert_eq!(line.line_style, LineStyle::Solid);
     }
 

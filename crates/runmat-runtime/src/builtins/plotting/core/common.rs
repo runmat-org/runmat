@@ -2,6 +2,7 @@ use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::Figure;
+use runmat_plot::plots::NumericPlotData;
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::BuiltinResult;
@@ -33,6 +34,47 @@ pub fn numeric_pair(
         ));
     }
     Ok((x_vec, y_vec))
+}
+
+pub fn numeric_plot_data(tensor: Tensor) -> BuiltinResult<NumericPlotData> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| plotting_error("plotting", err))?;
+    NumericPlotData::new(storage, shape).map_err(|err| plotting_error("plotting", err))
+}
+
+pub fn numeric_plot_data_pair(
+    x: Tensor,
+    y: Tensor,
+    name: &'static str,
+) -> BuiltinResult<(NumericPlotData, NumericPlotData)> {
+    if x.len() != y.len() {
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y inputs must have the same number of elements"),
+        ));
+    }
+    Ok((numeric_plot_data(x)?, numeric_plot_data(y)?))
+}
+
+pub fn numeric_plot_data_triplet(
+    x: Tensor,
+    y: Tensor,
+    z: Tensor,
+    name: &'static str,
+) -> BuiltinResult<(NumericPlotData, NumericPlotData, NumericPlotData)> {
+    if x.len() != y.len() || x.len() != z.len() {
+        return Err(plotting_error(
+            name,
+            format!("{name}: X, Y, and Z inputs must have the same number of elements"),
+        ));
+    }
+    Ok((
+        numeric_plot_data(x)?,
+        numeric_plot_data(y)?,
+        numeric_plot_data(z)?,
+    ))
 }
 
 pub fn numeric_triplet(

@@ -1085,8 +1085,7 @@ fn set_annotation_positions(
             if let Some(plot) = figure.get_plot_mut(plot_index) {
                 match plot {
                     PlotElement::Scatter(scatter) => {
-                        scatter.x_data = x_values.to_vec();
-                        scatter.y_data = y_values.to_vec();
+                        let _ = scatter.update_data(x_values.to_vec(), y_values.to_vec());
                     }
                     PlotElement::Scatter3(scatter) => {
                         scatter.points = (0..x_values.len())

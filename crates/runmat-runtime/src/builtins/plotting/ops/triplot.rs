@@ -662,11 +662,12 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert_eq!(line.x_data.len(), 10);
-        assert_eq!(&line.x_data[0..4], &[0.0, 1.0, 0.0, 0.0]);
-        assert!(line.x_data[4].is_nan());
-        assert_eq!(&line.y_data[5..9], &[0.0, 1.0, 1.0, 0.0]);
-        assert!(line.y_data[9].is_nan());
+        let (x, y) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x.len(), 10);
+        assert_eq!(&x[0..4], &[0.0, 1.0, 0.0, 0.0]);
+        assert!(x[4].is_nan());
+        assert_eq!(&y[5..9], &[0.0, 1.0, 1.0, 0.0]);
+        assert!(y[9].is_nan());
         assert_eq!(line.line_style, runmat_plot::plots::LineStyle::Dashed);
     }
 
@@ -730,13 +731,14 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert_eq!(line.x_data.len(), 5);
-        assert_eq!(line.y_data.len(), 5);
-        assert_eq!(line.x_data[0], line.x_data[3]);
-        assert_eq!(line.y_data[0], line.y_data[3]);
-        assert!(line.x_data[4].is_nan());
-        assert!(line.y_data[4].is_nan());
-        for (x, y) in line.x_data.iter().zip(&line.y_data).take(3) {
+        let (x_data, y_data) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x_data.len(), 5);
+        assert_eq!(y_data.len(), 5);
+        assert_eq!(x_data[0], x_data[3]);
+        assert_eq!(y_data[0], y_data[3]);
+        assert!(x_data[4].is_nan());
+        assert!(y_data[4].is_nan());
+        for (x, y) in x_data.iter().zip(&y_data).take(3) {
             let point = (*x, *y);
             assert!(
                 point == (0.0, 0.0) || point == (1.0, 0.0) || point == (0.0, 1.0),
@@ -762,13 +764,14 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert_eq!(line.x_data.len(), 5);
-        assert_eq!(line.y_data.len(), 5);
-        assert_eq!(line.x_data[0], line.x_data[3]);
-        assert_eq!(line.y_data[0], line.y_data[3]);
-        assert!(line.x_data[4].is_nan());
-        assert!(line.y_data[4].is_nan());
-        for (x, y) in line.x_data.iter().zip(&line.y_data).take(3) {
+        let (x_data, y_data) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x_data.len(), 5);
+        assert_eq!(y_data.len(), 5);
+        assert_eq!(x_data[0], x_data[3]);
+        assert_eq!(y_data[0], y_data[3]);
+        assert!(x_data[4].is_nan());
+        assert!(y_data[4].is_nan());
+        for (x, y) in x_data.iter().zip(&y_data).take(3) {
             let point = (*x, *y);
             assert!(
                 point == (0.0, 0.0) || point == (1.0, 0.0) || point == (0.0, 1.0),
@@ -803,7 +806,8 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert!(line.x_data.is_empty());
-        assert!(line.y_data.is_empty());
+        let (x, y) = line.host_xy_f64().unwrap().unwrap();
+        assert!(x.is_empty());
+        assert!(y.is_empty());
     }
 }

@@ -4782,8 +4782,10 @@ pub fn append_points_to_animated_line(
             match z {
                 None => match plot {
                     PlotElement::Line(line) => {
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let (mut next_x, mut next_y) = line
+                            .host_xy_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         next_x.extend(x);
                         next_y.extend(y);
                         trim_oldest_xy(handle.maximum_num_points, &mut next_x, &mut next_y);
@@ -4803,8 +4805,10 @@ pub fn append_points_to_animated_line(
                             return Err("3-D animated lines do not support marker properties yet"
                                 .to_string());
                         }
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
+                        let (mut next_x, mut next_y) = line
+                            .host_xy_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         let mut next_z = vec![0.0; next_x.len()];
                         next_x.extend(x);
                         next_y.extend(y);
@@ -4826,9 +4830,10 @@ pub fn append_points_to_animated_line(
                         became_3d = true;
                     }
                     PlotElement::Line3(line) => {
-                        let mut next_x = std::mem::take(&mut line.x_data);
-                        let mut next_y = std::mem::take(&mut line.y_data);
-                        let mut next_z = std::mem::take(&mut line.z_data);
+                        let (mut next_x, mut next_y, mut next_z) = line
+                            .host_xyz_f64()
+                            .map_err(|err| format!("failed to read animated line: {err}"))?
+                            .ok_or_else(|| "animated line data is unavailable".to_string())?;
                         next_x.extend(x);
                         next_y.extend(y);
                         next_z.extend(z);
@@ -4880,16 +4885,19 @@ pub fn set_animated_line_maximum_num_points(
                 .ok_or_else(|| "invalid animated line handle".to_string())?;
             match plot {
                 PlotElement::Line(line) => {
-                    let mut x = std::mem::take(&mut line.x_data);
-                    let mut y = std::mem::take(&mut line.y_data);
+                    let (mut x, mut y) = line
+                        .host_xy_f64()
+                        .map_err(|err| format!("failed to read animated line: {err}"))?
+                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
                     trim_oldest_xy(maximum_num_points, &mut x, &mut y);
                     line.update_data(x, y)
                         .map_err(|err| format!("failed to update animated line: {err}"))?;
                 }
                 PlotElement::Line3(line) => {
-                    let mut x = std::mem::take(&mut line.x_data);
-                    let mut y = std::mem::take(&mut line.y_data);
-                    let mut z = std::mem::take(&mut line.z_data);
+                    let (mut x, mut y, mut z) = line
+                        .host_xyz_f64()
+                        .map_err(|err| format!("failed to read animated line: {err}"))?
+                        .ok_or_else(|| "animated line data is unavailable".to_string())?;
                     trim_oldest_xyz(maximum_num_points, &mut x, &mut y, &mut z);
                     line.update_data(x, y, z)
                         .map_err(|err| format!("failed to update animated line: {err}"))?;

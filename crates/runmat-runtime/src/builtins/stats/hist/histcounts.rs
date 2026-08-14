@@ -377,7 +377,7 @@ fn histcounts_from_tensor(
     }
 
     let original_range_zero = match (min_val, max_val) {
-        (Some(minimum), Some(maximum)) => approx_equal(minimum, maximum),
+        (Some(minimum), Some(maximum)) => minimum == maximum,
         _ => false,
     };
 
@@ -470,7 +470,7 @@ fn compute_edges_standard(
         return Err(builtin_error("histcounts: bin limits must be increasing"));
     }
 
-    if options.bin_limits.is_some() && approx_equal(lower, upper) {
+    if options.bin_limits.is_some() && lower == upper {
         return Err(builtin_error(
             "histcounts: BinLimits must specify a non-zero width",
         ));
@@ -492,7 +492,7 @@ fn compute_edges_standard(
             }
         }
 
-        if approx_equal(lower, upper) {
+        if lower == upper {
             upper = lower + width;
         }
 
@@ -504,8 +504,7 @@ fn compute_edges_standard(
         if let Some(last) = edges.last_mut() {
             *last = upper;
         }
-        validate_edges(&edges)?;
-        return Ok(edges);
+        return finalize_generated_edges(edges);
     }
 
     let mut num_bins = options.num_bins.unwrap_or(DEFAULT_BIN_COUNT);
@@ -532,13 +531,11 @@ fn compute_edges_standard(
         }
     }
 
-    if approx_equal(lower, upper) {
+    if lower == upper {
         upper = lower + 1.0;
     }
 
-    let edges = linspace(lower, upper, num_bins + 1);
-    validate_edges(&edges)?;
-    Ok(edges)
+    finalize_generated_edges(linspace(lower, upper, num_bins + 1))
 }
 
 fn compute_edges_with_method(
@@ -554,9 +551,7 @@ fn compute_edges_with_method(
     }
 
     if matches!(method, BinMethod::Integers) {
-        let edges = compute_integer_edges(min_val, max_val, options)?;
-        validate_edges(&edges)?;
-        return Ok(edges);
+        return finalize_generated_edges(compute_integer_edges(min_val, max_val, options)?);
     }
 
     let (lower, upper) = derive_initial_limits(min_val, max_val, options.bin_limits);
@@ -566,7 +561,7 @@ fn compute_edges_with_method(
         ));
     }
 
-    if approx_equal(lower, upper) {
+    if lower == upper {
         if options.bin_limits.is_some() {
             return Err(builtin_error(
                 "histcounts: BinLimits must specify a non-zero width",
@@ -621,8 +616,7 @@ fn compute_edges_with_method(
     if let Some(last) = edges.last_mut() {
         *last = upper;
     }
-    validate_edges(&edges)?;
-    Ok(edges)
+    finalize_generated_edges(edges)
 }
 
 fn compute_integer_edges(
@@ -638,7 +632,7 @@ fn compute_integer_edges(
         ));
     }
 
-    if approx_equal(lower, upper) {
+    if lower == upper {
         let centre = min_val.or(max_val).unwrap_or(lower);
         lower = centre - 0.5;
         upper = centre + 0.5;
@@ -677,7 +671,7 @@ fn compute_integer_edges(
         }
     }
 
-    if !approx_equal(*edges.last().unwrap(), upper) {
+    if *edges.last().unwrap() != upper {
         edges.push(upper);
     }
 
@@ -870,8 +864,59 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     out
 }
 
-fn approx_equal(a: f64, b: f64) -> bool {
-    (a - b).abs() <= RANGE_EPS * (a.abs().max(b.abs()).max(1.0))
+fn finalize_generated_edges(edges: Vec<f64>) -> BuiltinResult<Vec<f64>> {
+    let mut compact = Vec::with_capacity(edges.len());
+    for edge in edges {
+        if !edge.is_finite() {
+            return Err(builtin_error(
+                "histcounts: generated bin edges must be finite numbers",
+            ));
+        }
+        if match compact.last() {
+            Some(previous) => edge > *previous,
+            None => true,
+        } {
+            compact.push(edge);
+        }
+    }
+
+    if compact.len() == 1 {
+        let centre = compact[0];
+        let lower = next_down(centre);
+        if lower.is_finite() {
+            compact.insert(0, lower);
+        } else {
+            let upper = next_up(centre);
+            if upper.is_finite() {
+                compact.push(upper);
+            }
+        }
+    }
+
+    validate_edges(&compact)?;
+    Ok(compact)
+}
+
+fn next_up(value: f64) -> f64 {
+    if value.is_nan() || value == f64::INFINITY {
+        return value;
+    }
+    if value == 0.0 {
+        return f64::from_bits(1);
+    }
+    let bits = value.to_bits();
+    f64::from_bits(if value > 0.0 { bits + 1 } else { bits - 1 })
+}
+
+fn next_down(value: f64) -> f64 {
+    if value.is_nan() || value == f64::NEG_INFINITY {
+        return value;
+    }
+    if value == 0.0 {
+        return -f64::from_bits(1);
+    }
+    let bits = value.to_bits();
+    f64::from_bits(if value > 0.0 { bits - 1 } else { bits + 1 })
 }
 
 #[derive(Clone, Default)]
@@ -1303,6 +1348,24 @@ pub(crate) mod tests {
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
         assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
+    }
+
+    #[test]
+    fn histcounts_automatic_bins_compact_unrepresentable_wide_integer_edges() {
+        let wide = 9_007_199_254_740_993_u64;
+        let eval = block_on(evaluate(
+            integer_tensor(
+                IntegerStorage::U64(vec![wide, wide + 1, wide + 2, wide + 3]),
+                vec![4, 1],
+            ),
+            &[],
+        ))
+        .expect("wide integer histcounts");
+        let (counts, edges) = eval.into_pair();
+        let counts = values_from_tensor(counts);
+        let edges = values_from_tensor(edges);
+        assert_eq!(counts.iter().sum::<f64>(), 4.0);
+        assert!(edges.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]

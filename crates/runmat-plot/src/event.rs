@@ -3,11 +3,12 @@ use crate::plots::{
     AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
     Figure, LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, MeshDeformation,
     MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshRegion, MeshScalarField, MeshTriangleRange,
-    MeshVectorField, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot, PlotElement, PlotType,
-    QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode,
-    StairsPlot, StemPlot, SurfacePlot, TextStyle,
+    MeshVectorField, NumericPlotData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot,
+    PlotElement, PlotType, QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot,
+    ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
+use runmat_builtins::NumericStorage;
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
 
@@ -50,6 +51,69 @@ pub struct FigureScene {
     pub layout: FigureLayout,
     pub metadata: FigureMetadata,
     pub plots: Vec<ScenePlot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "dtype", content = "values", rename_all = "lowercase")]
+pub enum SceneNumericStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneNumericData {
+    pub storage: SceneNumericStorage,
+    pub shape: Vec<usize>,
+}
+
+impl From<&NumericPlotData> for SceneNumericData {
+    fn from(data: &NumericPlotData) -> Self {
+        let storage = match data.storage() {
+            NumericStorage::F64(values) => SceneNumericStorage::F64(values.clone()),
+            NumericStorage::F32(values) => SceneNumericStorage::F32(values.clone()),
+            NumericStorage::I8(values) => SceneNumericStorage::I8(values.clone()),
+            NumericStorage::I16(values) => SceneNumericStorage::I16(values.clone()),
+            NumericStorage::I32(values) => SceneNumericStorage::I32(values.clone()),
+            NumericStorage::I64(values) => SceneNumericStorage::I64(values.clone()),
+            NumericStorage::U8(values) => SceneNumericStorage::U8(values.clone()),
+            NumericStorage::U16(values) => SceneNumericStorage::U16(values.clone()),
+            NumericStorage::U32(values) => SceneNumericStorage::U32(values.clone()),
+            NumericStorage::U64(values) => SceneNumericStorage::U64(values.clone()),
+        };
+        Self {
+            storage,
+            shape: data.shape().to_vec(),
+        }
+    }
+}
+
+impl TryFrom<SceneNumericData> for NumericPlotData {
+    type Error = String;
+
+    fn try_from(data: SceneNumericData) -> Result<Self, Self::Error> {
+        let storage = match data.storage {
+            SceneNumericStorage::F64(values) => NumericStorage::F64(values),
+            SceneNumericStorage::F32(values) => NumericStorage::F32(values),
+            SceneNumericStorage::I8(values) => NumericStorage::I8(values),
+            SceneNumericStorage::I16(values) => NumericStorage::I16(values),
+            SceneNumericStorage::I32(values) => NumericStorage::I32(values),
+            SceneNumericStorage::I64(values) => NumericStorage::I64(values),
+            SceneNumericStorage::U8(values) => NumericStorage::U8(values),
+            SceneNumericStorage::U16(values) => NumericStorage::U16(values),
+            SceneNumericStorage::U32(values) => NumericStorage::U32(values),
+            SceneNumericStorage::U64(values) => NumericStorage::U64(values),
+        };
+        NumericPlotData::new(storage, data.shape)
+    }
 }
 
 pub const DEFAULT_FIGURE_SCENE_EXPORT_BUDGET_BYTES: usize = 8 * 1024 * 1024;
@@ -172,6 +236,10 @@ pub enum ScenePlot {
         x: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
         color_rgba: [f32; 4],
         line_width: f32,
         line_style: String,
@@ -197,6 +265,10 @@ pub enum ScenePlot {
         x: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
         color_rgba: [f32; 4],
         marker_size: f32,
         marker_style: String,
@@ -404,6 +476,12 @@ pub enum ScenePlot {
         y: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         z: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        z_source: Option<SceneNumericData>,
         color_rgba: [f32; 4],
         line_width: f32,
         line_style: String,
@@ -506,7 +584,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 3;
+    pub const SCHEMA_VERSION: u32 = 4;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -1811,10 +1889,15 @@ impl ScenePlot {
     ) -> Result<Self, SceneExportError> {
         let scene_plot = match plot {
             PlotElement::Line(line) => {
-                let (x, y) = line
-                    .export_scene_xy_data()
+                let (x_data, y_data) = line
+                    .export_numeric_xy_data()
                     .await
-                    .map_err(SceneExportError::readback)?;
+                    .map_err(SceneExportError::readback)?
+                    .ok_or_else(|| {
+                        SceneExportError::unexportable("line plot has no exportable scene data")
+                    })?;
+                let x = x_data.materialize_f64();
+                let y = y_data.materialize_f64();
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "line plot has no exportable scene data",
@@ -1823,6 +1906,8 @@ impl ScenePlot {
                 Self::Line {
                     x,
                     y,
+                    x_source: Some((&x_data).into()),
+                    y_source: Some((&y_data).into()),
                     color_rgba: vec4_to_rgba(line.color),
                     line_width: line.line_width,
                     line_style: format!("{:?}", line.line_style),
@@ -1833,10 +1918,15 @@ impl ScenePlot {
             }
             PlotElement::ReferenceLine(_) => Self::from_plot(plot, axes_index),
             PlotElement::Scatter(scatter) => {
-                let (x, y) = scatter
-                    .export_scene_xy_data()
+                let (x_data, y_data) = scatter
+                    .export_numeric_xy_data()
                     .await
-                    .map_err(SceneExportError::readback)?;
+                    .map_err(SceneExportError::readback)?
+                    .ok_or_else(|| {
+                        SceneExportError::unexportable("scatter plot has no exportable scene data")
+                    })?;
+                let x = x_data.materialize_f64();
+                let y = y_data.materialize_f64();
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "scatter plot has no exportable scene data",
@@ -1845,6 +1935,8 @@ impl ScenePlot {
                 Self::Scatter {
                     x,
                     y,
+                    x_source: Some((&x_data).into()),
+                    y_source: Some((&y_data).into()),
                     color_rgba: vec4_to_rgba(scatter.color),
                     marker_size: scatter.marker_size,
                     marker_style: format!("{:?}", scatter.marker_style),
@@ -2057,10 +2149,16 @@ impl ScenePlot {
                 Self::from_plot(plot, axes_index)
             }
             PlotElement::Line3(line) => {
-                let (x, y, z) = line
-                    .export_scene_xyz_data()
+                let (x_data, y_data, z_data) = line
+                    .export_numeric_xyz_data()
                     .await
-                    .map_err(SceneExportError::readback)?;
+                    .map_err(SceneExportError::readback)?
+                    .ok_or_else(|| {
+                        SceneExportError::unexportable("plot3 line has no exportable scene data")
+                    })?;
+                let x = x_data.materialize_f64();
+                let y = y_data.materialize_f64();
+                let z = z_data.materialize_f64();
                 if x.is_empty() && y.is_empty() && z.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "plot3 line has no exportable scene data",
@@ -2070,6 +2168,9 @@ impl ScenePlot {
                     x,
                     y,
                     z,
+                    x_source: Some((&x_data).into()),
+                    y_source: Some((&y_data).into()),
+                    z_source: Some((&z_data).into()),
                     color_rgba: vec4_to_rgba(line.color),
                     line_width: line.line_width,
                     line_style: format!("{:?}", line.line_style),
@@ -2348,16 +2449,22 @@ impl ScenePlot {
 
     fn from_plot(plot: &PlotElement, axes_index: u32) -> Self {
         match plot {
-            PlotElement::Line(line) => Self::Line {
-                x: line.x_data.clone(),
-                y: line.y_data.clone(),
-                color_rgba: vec4_to_rgba(line.color),
-                line_width: line.line_width,
-                line_style: format!("{:?}", line.line_style),
-                axes_index,
-                label: line.label.clone(),
-                visible: line.visible,
-            },
+            PlotElement::Line(line) => {
+                let (x, y) = line.host_xy_f64().ok().flatten().unwrap_or_default();
+                let (source_x, source_y) = line.source_data();
+                Self::Line {
+                    x,
+                    y,
+                    x_source: source_x.map(Into::into),
+                    y_source: source_y.map(Into::into),
+                    color_rgba: vec4_to_rgba(line.color),
+                    line_width: line.line_width,
+                    line_style: format!("{:?}", line.line_style),
+                    axes_index,
+                    label: line.label.clone(),
+                    visible: line.visible,
+                }
+            }
             PlotElement::ReferenceLine(line) => Self::ReferenceLine {
                 orientation: match line.orientation {
                     ReferenceLineOrientation::Vertical => "vertical",
@@ -2374,16 +2481,22 @@ impl ScenePlot {
                 axes_index,
                 visible: line.visible,
             },
-            PlotElement::Scatter(scatter) => Self::Scatter {
-                x: scatter.x_data.clone(),
-                y: scatter.y_data.clone(),
-                color_rgba: vec4_to_rgba(scatter.color),
-                marker_size: scatter.marker_size,
-                marker_style: format!("{:?}", scatter.marker_style),
-                axes_index,
-                label: scatter.label.clone(),
-                visible: scatter.visible,
-            },
+            PlotElement::Scatter(scatter) => {
+                let (x, y) = scatter.host_xy_f64().ok().flatten().unwrap_or_default();
+                let (source_x, source_y) = scatter.source_data();
+                Self::Scatter {
+                    x,
+                    y,
+                    x_source: source_x.map(Into::into),
+                    y_source: source_y.map(Into::into),
+                    color_rgba: vec4_to_rgba(scatter.color),
+                    marker_size: scatter.marker_size,
+                    marker_style: format!("{:?}", scatter.marker_style),
+                    axes_index,
+                    label: scatter.label.clone(),
+                    visible: scatter.visible,
+                }
+            }
             PlotElement::Bar(bar) => Self::Bar {
                 labels: bar.labels.clone(),
                 values: bar.values().unwrap_or(&[]).to_vec(),
@@ -2562,17 +2675,24 @@ impl ScenePlot {
                 deformation: mesh.deformation().map(|field| Box::new(field.into())),
                 visible: mesh.is_visible(),
             },
-            PlotElement::Line3(line) => Self::Line3 {
-                x: line.x_data.clone(),
-                y: line.y_data.clone(),
-                z: line.z_data.clone(),
-                color_rgba: vec4_to_rgba(line.color),
-                line_width: line.line_width,
-                line_style: format!("{:?}", line.line_style),
-                axes_index,
-                label: line.label.clone(),
-                visible: line.visible,
-            },
+            PlotElement::Line3(line) => {
+                let (x, y, z) = line.host_xyz_f64().ok().flatten().unwrap_or_default();
+                let (source_x, source_y, source_z) = line.source_data();
+                Self::Line3 {
+                    x,
+                    y,
+                    z,
+                    x_source: source_x.map(Into::into),
+                    y_source: source_y.map(Into::into),
+                    z_source: source_z.map(Into::into),
+                    color_rgba: vec4_to_rgba(line.color),
+                    line_width: line.line_width,
+                    line_style: format!("{:?}", line.line_style),
+                    axes_index,
+                    label: line.label.clone(),
+                    visible: line.visible,
+                }
+            }
             PlotElement::Scatter3(scatter3) => Self::Scatter3 {
                 points: scatter3
                     .points
@@ -2639,6 +2759,8 @@ impl ScenePlot {
             ScenePlot::Line {
                 x,
                 y,
+                x_source,
+                y_source,
                 color_rgba,
                 line_width,
                 line_style,
@@ -2646,7 +2768,13 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut line = LinePlot::new(x, y)?;
+                let mut line = match (x_source, y_source) {
+                    (Some(x_source), Some(y_source)) => {
+                        LinePlot::from_numeric_data(x_source.try_into()?, y_source.try_into()?)?
+                    }
+                    (None, None) => LinePlot::new(x, y)?,
+                    _ => return Err("line scene contains partial typed source data".to_string()),
+                };
                 line.set_color(rgba_to_vec4(color_rgba));
                 line.set_line_width(line_width);
                 line.set_line_style(parse_line_style(&line_style));
@@ -2681,6 +2809,8 @@ impl ScenePlot {
             ScenePlot::Scatter {
                 x,
                 y,
+                x_source,
+                y_source,
                 color_rgba,
                 marker_size,
                 marker_style,
@@ -2688,7 +2818,13 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut scatter = ScatterPlot::new(x, y)?;
+                let mut scatter = match (x_source, y_source) {
+                    (Some(x_source), Some(y_source)) => {
+                        ScatterPlot::from_numeric_data(x_source.try_into()?, y_source.try_into()?)?
+                    }
+                    (None, None) => ScatterPlot::new(x, y)?,
+                    _ => return Err("scatter scene contains partial typed source data".to_string()),
+                };
                 scatter.set_color(rgba_to_vec4(color_rgba));
                 scatter.set_marker_size(marker_size);
                 scatter.set_marker_style(parse_marker_style(&marker_style));
@@ -3035,6 +3171,9 @@ impl ScenePlot {
                 x,
                 y,
                 z,
+                x_source,
+                y_source,
+                z_source,
                 color_rgba,
                 line_width,
                 line_style,
@@ -3042,7 +3181,18 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut plot = Line3Plot::new(x, y, z)?
+                let line3 = match (x_source, y_source, z_source) {
+                    (Some(x_source), Some(y_source), Some(z_source)) => {
+                        Line3Plot::from_numeric_data(
+                            x_source.try_into()?,
+                            y_source.try_into()?,
+                            z_source.try_into()?,
+                        )?
+                    }
+                    (None, None, None) => Line3Plot::new(x, y, z)?,
+                    _ => return Err("line3 scene contains partial typed source data".to_string()),
+                };
+                let mut plot = line3
                     .with_style(
                         rgba_to_vec4(color_rgba),
                         line_width,
@@ -4104,9 +4254,39 @@ mod tests {
         let PlotElement::Line3(line3) = rebuilt.plots().next().unwrap() else {
             panic!("expected line3")
         };
-        assert_eq!(line3.x_data, vec![0.0, 1.0]);
-        assert_eq!(line3.z_data, vec![2.0, 3.0]);
+        let (x, _, z) = line3.host_xyz_f64().unwrap().unwrap();
+        assert_eq!(x, vec![0.0, 1.0]);
+        assert_eq!(z, vec![2.0, 3.0]);
         assert_eq!(line3.label.as_deref(), Some("Trajectory"));
+    }
+
+    #[test]
+    fn figure_scene_json_roundtrip_preserves_wide_integer_line_sources() {
+        let wide = 9_007_199_254_740_993_u64;
+        let x =
+            NumericPlotData::new(NumericStorage::U64(vec![wide, wide + 1]), vec![1, 2]).unwrap();
+        let y =
+            NumericPlotData::new(NumericStorage::I64(vec![-(wide as i64), 7]), vec![1, 2]).unwrap();
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::from_numeric_data(x, y).unwrap());
+
+        let json = serde_json::to_string(&FigureScene::capture(&figure)).unwrap();
+        let rebuilt = serde_json::from_str::<FigureScene>(&json)
+            .unwrap()
+            .into_figure()
+            .unwrap();
+        let PlotElement::Line(line) = rebuilt.plots().next().unwrap() else {
+            panic!("expected line")
+        };
+        let (x, y) = line.source_data();
+        assert_eq!(
+            x.unwrap().storage(),
+            &NumericStorage::U64(vec![wide, wide + 1])
+        );
+        assert_eq!(
+            y.unwrap().storage(),
+            &NumericStorage::I64(vec![-(wide as i64), 7])
+        );
     }
 
     #[test]

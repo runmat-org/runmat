@@ -629,7 +629,7 @@ mod tests {
         let Some(runmat_plot::plots::PlotElement::Scatter(scatter)) = figure.plots().next() else {
             panic!("expected scatter plot");
         };
-        assert_eq!(scatter.x_data.len(), 2);
+        assert_eq!(scatter.host_xy_f64().unwrap().unwrap().0.len(), 2);
         assert!(scatter.per_point_colors.is_none());
         assert!(scatter.color_values.is_none());
     }

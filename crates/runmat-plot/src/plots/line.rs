@@ -10,15 +10,18 @@ use crate::core::{
 use crate::gpu::line::LineGpuInputs;
 use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
+use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
 use log::{trace, warn};
+use runmat_builtins::NumericStorage;
 
 /// High-performance GPU-accelerated line plot
 #[derive(Debug, Clone)]
 pub struct LinePlot {
-    /// Raw data points (x, y coordinates)
-    pub x_data: Vec<f64>,
-    pub y_data: Vec<f64>,
+    /// Authoritative host source values. GPU-backed plots keep these empty and
+    /// retain their source buffers in `gpu_line_inputs` instead.
+    source_x: Option<NumericPlotData>,
+    source_y: Option<NumericPlotData>,
 
     /// Visual styling
     pub color: Vec4,
@@ -124,15 +127,21 @@ impl LinePlot {
     }
 
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if !self.x_data.is_empty() && self.x_data.len() == self.y_data.len() {
-            return Ok((self.x_data.clone(), self.y_data.clone()));
+        if let Some((x, y)) = self.export_numeric_xy_data().await? {
+            return Ok((x.materialize_f64(), y.materialize_f64()));
         }
-        if !self.x_data.is_empty() || !self.y_data.is_empty() {
-            return Err(format!(
-                "line plot has partial CPU source data: x has {} values, y has {} values",
-                self.x_data.len(),
-                self.y_data.len()
-            ));
+        Ok((Vec::new(), Vec::new()))
+    }
+
+    pub async fn export_numeric_xy_data(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData)>, String> {
+        match (&self.source_x, &self.source_y) {
+            (Some(x), Some(y)) if x.len() == y.len() => {
+                return Ok(Some((x.clone(), y.clone())));
+            }
+            (None, None) => {}
+            _ => return Err("line plot has partial CPU source data".to_string()),
         }
 
         if let Some(inputs) = &self.gpu_line_inputs {
@@ -156,7 +165,24 @@ impl LinePlot {
                 inputs.scalar,
             )
             .await?;
-            return Ok((x, y));
+            let shape = vec![1, len];
+            let (x, y) = match inputs.scalar {
+                crate::gpu::ScalarType::F64 => (
+                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())?,
+                    NumericPlotData::new(NumericStorage::F64(y), shape)?,
+                ),
+                crate::gpu::ScalarType::F32 => (
+                    NumericPlotData::new(
+                        NumericStorage::F32(x.into_iter().map(|v| v as f32).collect()),
+                        shape.clone(),
+                    )?,
+                    NumericPlotData::new(
+                        NumericStorage::F32(y.into_iter().map(|v| v as f32).collect()),
+                        shape,
+                    )?,
+                ),
+            };
+            return Ok(Some((x, y)));
         }
 
         if self.gpu_vertices.is_some() {
@@ -165,11 +191,23 @@ impl LinePlot {
             );
         }
 
-        Ok((Vec::new(), Vec::new()))
+        Ok(None)
     }
 
     /// Create a new line plot with data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>) -> Result<Self, String> {
+        let x_len = x_data.len();
+        let y_len = y_data.len();
+        Self::from_numeric_data(
+            NumericPlotData::from_f64(x_data, vec![1, x_len])?,
+            NumericPlotData::from_f64(y_data, vec![1, y_len])?,
+        )
+    }
+
+    pub fn from_numeric_data(
+        x_data: NumericPlotData,
+        y_data: NumericPlotData,
+    ) -> Result<Self, String> {
         if x_data.len() != y_data.len() {
             return Err(format!(
                 "Data length mismatch: x_data has {} points, y_data has {} points",
@@ -179,8 +217,8 @@ impl LinePlot {
         }
 
         Ok(Self {
-            x_data,
-            y_data,
+            source_x: Some(x_data),
+            source_y: Some(y_data),
             color: Vec4::new(0.0, 0.5, 1.0, 1.0), // Default blue
             line_width: 1.0,
             line_style: LineStyle::default(),
@@ -215,8 +253,8 @@ impl LinePlot {
         marker_buffer: Option<GpuVertexBuffer>,
     ) -> Self {
         Self {
-            x_data: Vec::new(),
-            y_data: Vec::new(),
+            source_x: None,
+            source_y: None,
             color: style.color,
             line_width: style.line_width,
             line_style: style.line_style,
@@ -252,8 +290,8 @@ impl LinePlot {
         marker_buffer: Option<GpuVertexBuffer>,
     ) -> Self {
         Self {
-            x_data: Vec::new(),
-            y_data: Vec::new(),
+            source_x: None,
+            source_y: None,
             color: style.color,
             line_width: style.line_width,
             line_style: style.line_style,
@@ -323,6 +361,19 @@ impl LinePlot {
 
     /// Update the data points
     pub fn update_data(&mut self, x_data: Vec<f64>, y_data: Vec<f64>) -> Result<(), String> {
+        let x_len = x_data.len();
+        let y_len = y_data.len();
+        self.update_numeric_data(
+            NumericPlotData::from_f64(x_data, vec![1, x_len])?,
+            NumericPlotData::from_f64(y_data, vec![1, y_len])?,
+        )
+    }
+
+    pub fn update_numeric_data(
+        &mut self,
+        x_data: NumericPlotData,
+        y_data: NumericPlotData,
+    ) -> Result<(), String> {
         if x_data.len() != y_data.len() {
             return Err(format!(
                 "Data length mismatch: x_data has {} points, y_data has {} points",
@@ -331,8 +382,8 @@ impl LinePlot {
             ));
         }
 
-        self.x_data = x_data;
-        self.y_data = y_data;
+        self.source_x = Some(x_data);
+        self.source_y = Some(y_data);
         self.dirty = true;
         self.bounds = None;
         self.invalidate_gpu_render_cache();
@@ -390,8 +441,8 @@ impl LinePlot {
 
     /// Get the number of data points
     pub fn len(&self) -> usize {
-        if !self.x_data.is_empty() {
-            self.x_data.len()
+        if let Some(source) = &self.source_x {
+            source.len()
         } else {
             self.gpu_vertex_count.unwrap_or(0)
         }
@@ -400,6 +451,24 @@ impl LinePlot {
     /// Check if the plot has no data
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn source_data(&self) -> (Option<&NumericPlotData>, Option<&NumericPlotData>) {
+        (self.source_x.as_ref(), self.source_y.as_ref())
+    }
+
+    pub fn host_xy_f64(&self) -> Result<Option<(Vec<f64>, Vec<f64>)>, String> {
+        match (&self.source_x, &self.source_y) {
+            (Some(x), Some(y)) if x.len() == y.len() => {
+                Ok(Some((x.materialize_f64(), y.materialize_f64())))
+            }
+            (None, None) => Ok(None),
+            (x, y) => Err(format!(
+                "line plot has partial CPU source data: x has {} values, y has {} values",
+                x.as_ref().map_or(0, NumericPlotData::len),
+                y.as_ref().map_or(0, NumericPlotData::len)
+            )),
+        }
     }
 
     /// Generate vertices for GPU rendering
@@ -411,25 +480,29 @@ impl LinePlot {
             return self.vertices.as_ref().unwrap();
         }
         if self.dirty || self.vertices.is_none() {
+            let (x_data, y_data) = self
+                .host_xy_f64()
+                .expect("validated line host source")
+                .unwrap_or_default();
             if self.line_width > 1.0 {
                 // Use triangle extrusion for thicker lines; switch pipeline in render_data
                 let base_tris = match self.line_cap {
                     LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
-                        &self.x_data,
-                        &self.y_data,
+                        &x_data,
+                        &y_data,
                         self.color,
                         self.line_width,
                         self.line_join,
                     ),
                     LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
-                        &self.x_data,
-                        &self.y_data,
+                        &x_data,
+                        &y_data,
                         self.color,
                         self.line_width,
                     ),
                     LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
-                        &self.x_data,
-                        &self.y_data,
+                        &x_data,
+                        &y_data,
                         self.color,
                         self.line_width,
                         12,
@@ -440,8 +513,8 @@ impl LinePlot {
                     LineStyle::Solid => base_tris,
                     LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
                         vertex_utils::create_thick_polyline_dashed(
-                            &self.x_data,
-                            &self.y_data,
+                            &x_data,
+                            &y_data,
                             self.color,
                             self.line_width,
                             self.line_style,
@@ -453,12 +526,12 @@ impl LinePlot {
                 let verts = match self.line_style {
                     LineStyle::None => Vec::new(),
                     LineStyle::Solid => {
-                        vertex_utils::create_line_plot(&self.x_data, &self.y_data, self.color)
+                        vertex_utils::create_line_plot(&x_data, &y_data, self.color)
                     }
                     LineStyle::Dashed | LineStyle::DashDot => {
                         vertex_utils::create_line_plot_dashed(
-                            &self.x_data,
-                            &self.y_data,
+                            &x_data,
+                            &y_data,
                             self.color,
                             self.line_style,
                         )
@@ -466,8 +539,8 @@ impl LinePlot {
                     LineStyle::Dotted => {
                         // Render as a sequence of tiny dashes to approximate dots
                         vertex_utils::create_line_plot_dashed(
-                            &self.x_data,
-                            &self.y_data,
+                            &x_data,
+                            &y_data,
                             self.color,
                             LineStyle::Dashed,
                         )
@@ -481,20 +554,19 @@ impl LinePlot {
     }
 
     fn generate_thin_line_vertices(&self) -> Vec<Vertex> {
+        let (x_data, y_data) = self
+            .host_xy_f64()
+            .expect("validated line host source")
+            .unwrap_or_default();
         match self.line_style {
             LineStyle::None => Vec::new(),
-            LineStyle::Solid => {
-                vertex_utils::create_line_plot(&self.x_data, &self.y_data, self.color)
+            LineStyle::Solid => vertex_utils::create_line_plot(&x_data, &y_data, self.color),
+            LineStyle::Dashed | LineStyle::DashDot => {
+                vertex_utils::create_line_plot_dashed(&x_data, &y_data, self.color, self.line_style)
             }
-            LineStyle::Dashed | LineStyle::DashDot => vertex_utils::create_line_plot_dashed(
-                &self.x_data,
-                &self.y_data,
-                self.color,
-                self.line_style,
-            ),
             LineStyle::Dotted => vertex_utils::create_line_plot_dashed(
-                &self.x_data,
-                &self.y_data,
+                &x_data,
+                &y_data,
                 self.color,
                 LineStyle::Dashed,
             ),
@@ -503,22 +575,29 @@ impl LinePlot {
 
     /// Get the bounding box of the data
     pub fn bounds(&mut self) -> BoundingBox {
-        if self.bounds.is_some() && self.x_data.is_empty() && self.y_data.is_empty() {
+        if self.bounds.is_some() && self.source_x.is_none() && self.source_y.is_none() {
             return self.bounds.unwrap_or_default();
         }
-        if self.x_data.is_empty() && self.y_data.is_empty() {
+        if self.source_x.is_none() && self.source_y.is_none() {
             let bounds = BoundingBox::new(Vec3::ZERO, Vec3::ZERO);
             self.bounds = Some(bounds);
             return bounds;
         }
         if self.dirty || self.bounds.is_none() {
-            let points: Vec<Vec3> = self
-                .x_data
+            let (x_data, y_data) = self
+                .host_xy_f64()
+                .expect("validated line host source")
+                .unwrap_or_default();
+            let points: Vec<Vec3> = x_data
                 .iter()
-                .zip(self.y_data.iter())
+                .zip(y_data.iter())
                 .map(|(&x, &y)| Vec3::new(x as f32, y as f32, 0.0))
                 .collect();
-            self.bounds = Some(BoundingBox::from_points(&points));
+            self.bounds = Some(if points.is_empty() {
+                BoundingBox::new(Vec3::ZERO, Vec3::ZERO)
+            } else {
+                BoundingBox::from_points(&points)
+            });
         }
         self.bounds.unwrap()
     }
@@ -824,13 +903,15 @@ impl LinePlot {
         let sx = vw / x_span;
         let sy = vh / y_span;
 
-        let x_px: Vec<f64> = self
-            .x_data
+        let (x_data, y_data) = self
+            .host_xy_f64()
+            .expect("validated line host source")
+            .unwrap_or_default();
+        let x_px: Vec<f64> = x_data
             .iter()
             .map(|&x| ((x as f32 - bounds.min.x) * sx) as f64)
             .collect();
-        let y_px: Vec<f64> = self
-            .y_data
+        let y_px: Vec<f64> = y_data
             .iter()
             .map(|&y| ((y as f32 - bounds.min.y) * sy) as f64)
             .collect();
@@ -951,13 +1032,14 @@ impl LinePlot {
     }
 
     fn marker_vertices_slice(&mut self, marker: &LineMarkerAppearance) -> Option<&[Vertex]> {
-        if self.x_data.len() != self.y_data.len() || self.x_data.is_empty() {
+        let (x_data, y_data) = self.host_xy_f64().ok().flatten()?;
+        if x_data.len() != y_data.len() || x_data.is_empty() {
             return None;
         }
 
         if self.marker_vertices.is_none() || self.marker_dirty {
-            let mut verts = Vec::with_capacity(self.x_data.len());
-            for (&x, &y) in self.x_data.iter().zip(self.y_data.iter()) {
+            let mut verts = Vec::with_capacity(x_data.len());
+            for (&x, &y) in x_data.iter().zip(y_data.iter()) {
                 let mut vertex = Vertex::new(Vec3::new(x as f32, y as f32, 0.0), marker.face_color);
                 vertex.normal[2] = marker.size.max(1.0);
                 verts.push(vertex);
@@ -970,21 +1052,23 @@ impl LinePlot {
 
     /// Get plot statistics for debugging
     pub fn statistics(&self) -> PlotStatistics {
-        let (min_x, max_x) = self
-            .x_data
+        let (x_data, y_data) = self
+            .host_xy_f64()
+            .expect("validated line host source")
+            .unwrap_or_default();
+        let (min_x, max_x) = x_data
             .iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &x| {
                 (min.min(x), max.max(x))
             });
-        let (min_y, max_y) = self
-            .y_data
+        let (min_y, max_y) = y_data
             .iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &y| {
                 (min.min(y), max.max(y))
             });
 
         PlotStatistics {
-            point_count: self.x_data.len(),
+            point_count: x_data.len(),
             x_range: (min_x, max_x),
             y_range: (min_y, max_y),
             memory_usage: self.estimated_memory_usage(),
@@ -993,7 +1077,14 @@ impl LinePlot {
 
     /// Estimate memory usage in bytes
     pub fn estimated_memory_usage(&self) -> usize {
-        std::mem::size_of::<f64>() * (self.x_data.len() + self.y_data.len())
+        self.source_x
+            .as_ref()
+            .map_or(0, NumericPlotData::estimated_byte_len)
+            .saturating_add(
+                self.source_y
+                    .as_ref()
+                    .map_or(0, NumericPlotData::estimated_byte_len),
+            )
             + self
                 .vertices
                 .as_ref()
@@ -1066,8 +1157,7 @@ mod tests {
 
         let plot = LinePlot::new(x.clone(), y.clone()).unwrap();
 
-        assert_eq!(plot.x_data, x);
-        assert_eq!(plot.y_data, y);
+        assert_eq!(plot.host_xy_f64().unwrap(), Some((x, y)));
         assert_eq!(plot.len(), 4);
         assert!(!plot.is_empty());
         assert!(plot.visible);
@@ -1125,8 +1215,7 @@ mod tests {
 
         plot.update_data(new_x.clone(), new_y.clone()).unwrap();
 
-        assert_eq!(plot.x_data, new_x);
-        assert_eq!(plot.y_data, new_y);
+        assert_eq!(plot.host_xy_f64().unwrap(), Some((new_x, new_y)));
         assert_eq!(plot.len(), 4);
     }
 
@@ -1148,6 +1237,8 @@ mod tests {
     fn style_invalidation_preserves_gpu_source_bounds() {
         let expected = BoundingBox::new(Vec3::new(-2.0, -1.0, 0.0), Vec3::new(3.0, 4.0, 0.0));
         let mut plot = LinePlot::new(Vec::new(), Vec::new()).unwrap();
+        plot.source_x = None;
+        plot.source_y = None;
         plot.bounds = Some(expected);
         plot.dirty = false;
 

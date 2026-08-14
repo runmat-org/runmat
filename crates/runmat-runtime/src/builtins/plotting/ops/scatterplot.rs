@@ -775,8 +775,9 @@ mod tests {
         let PlotElement::Scatter(plot) = fig.plots().next().unwrap() else {
             panic!("expected scatter plot")
         };
-        assert_eq!(plot.x_data, vec![1.0, 0.5, -1.0]);
-        assert_eq!(plot.y_data, vec![-1.0, 0.5, 1.0]);
+        let (x, y) = plot.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x, vec![1.0, 0.5, -1.0]);
+        assert_eq!(y, vec![-1.0, 0.5, 1.0]);
         assert!(fig.axis_equal);
         assert!(fig.grid_enabled);
     }

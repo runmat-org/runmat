@@ -2,7 +2,8 @@ use runmat_builtins::{
     CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value,
 };
 use runmat_plot::plots::{
-    ColorMap, LegendStyle, PatchData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
+    ColorMap, LegendStyle, NumericPlotData, PatchData, PolarHistogramDisplayStyle, ShadingMode,
+    TextStyle,
 };
 use std::borrow::Cow;
 
@@ -2890,8 +2891,8 @@ fn get_line_property(
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
-            st.insert("XData", tensor_from_vec(x_data.clone()));
-            st.insert("YData", tensor_from_vec(y_data.clone()));
+            st.insert("XData", numeric_plot_data_value(&x_data));
+            st.insert("YData", numeric_plot_data_value(&y_data));
             st.insert("Color", Value::String(color_to_short_name(line.color)));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
@@ -2919,8 +2920,8 @@ fn get_line_property(
             line_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(tensor_from_vec(x_data)),
-        Some("ydata") => Ok(tensor_from_vec(y_data)),
+        Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
+        Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
         Some("color") => Ok(Value::String(color_to_short_name(line.color))),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
@@ -2951,8 +2952,8 @@ fn get_animated_line_property(
                         line_handle.figure,
                         line_handle.axes_index,
                     );
-                    st.insert("XData", tensor_from_vec(x_data));
-                    st.insert("YData", tensor_from_vec(y_data));
+                    st.insert("XData", numeric_plot_data_value(&x_data));
+                    st.insert("YData", numeric_plot_data_value(&y_data));
                     st.insert("Color", Value::String(color_to_short_name(line.color)));
                     st.insert("LineWidth", Value::Num(line.line_width as f64));
                     st.insert(
@@ -2980,8 +2981,8 @@ fn get_animated_line_property(
                     line_handle.axes_index,
                 )),
                 Some("children") => Ok(handles_value(Vec::new())),
-                Some("xdata") => Ok(tensor_from_vec(x_data)),
-                Some("ydata") => Ok(tensor_from_vec(y_data)),
+                Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
+                Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
                 Some("zdata") => Ok(tensor_from_vec(Vec::new())),
                 Some("color") => Ok(Value::String(color_to_short_name(line.color))),
                 Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
@@ -2996,57 +2997,63 @@ fn get_animated_line_property(
                 Some(name) => line_marker_property_value(&line.marker, name, builtin),
             }
         }
-        runmat_plot::plots::figure::PlotElement::Line3(line) => match property.as_deref() {
-            None => {
-                let mut st =
-                    child_base_struct("animatedline", line_handle.figure, line_handle.axes_index);
-                st.insert("XData", tensor_from_vec(line.x_data.clone()));
-                st.insert("YData", tensor_from_vec(line.y_data.clone()));
-                st.insert("ZData", tensor_from_vec(line.z_data.clone()));
-                st.insert("Color", Value::String(color_to_short_name(line.color)));
-                st.insert("LineWidth", Value::Num(line.line_width as f64));
-                st.insert(
-                    "LineStyle",
-                    Value::String(line_style_name(line.line_style).into()),
-                );
-                st.insert(
-                    "DisplayName",
-                    Value::String(line.label.clone().unwrap_or_default()),
-                );
-                st.insert(
-                    "Visible",
-                    Value::String(if line.visible { "on" } else { "off" }.into()),
-                );
-                st.insert(
-                    "MaximumNumPoints",
-                    animated_line_maximum_value(line_handle.maximum_num_points),
-                );
-                Ok(Value::Struct(st))
+        runmat_plot::plots::figure::PlotElement::Line3(line) => {
+            let (x_data, y_data, z_data) = line_xyz_data_for_properties(&line, builtin)?;
+            match property.as_deref() {
+                None => {
+                    let mut st = child_base_struct(
+                        "animatedline",
+                        line_handle.figure,
+                        line_handle.axes_index,
+                    );
+                    st.insert("XData", numeric_plot_data_value(&x_data));
+                    st.insert("YData", numeric_plot_data_value(&y_data));
+                    st.insert("ZData", numeric_plot_data_value(&z_data));
+                    st.insert("Color", Value::String(color_to_short_name(line.color)));
+                    st.insert("LineWidth", Value::Num(line.line_width as f64));
+                    st.insert(
+                        "LineStyle",
+                        Value::String(line_style_name(line.line_style).into()),
+                    );
+                    st.insert(
+                        "DisplayName",
+                        Value::String(line.label.clone().unwrap_or_default()),
+                    );
+                    st.insert(
+                        "Visible",
+                        Value::String(if line.visible { "on" } else { "off" }.into()),
+                    );
+                    st.insert(
+                        "MaximumNumPoints",
+                        animated_line_maximum_value(line_handle.maximum_num_points),
+                    );
+                    Ok(Value::Struct(st))
+                }
+                Some("type") => Ok(Value::String("animatedline".into())),
+                Some("parent") => Ok(child_parent_handle(
+                    line_handle.figure,
+                    line_handle.axes_index,
+                )),
+                Some("children") => Ok(handles_value(Vec::new())),
+                Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
+                Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
+                Some("zdata") => Ok(numeric_plot_data_value(&z_data)),
+                Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+                Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
+                Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
+                Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+                Some("visible") => Ok(Value::String(
+                    if line.visible { "on" } else { "off" }.into(),
+                )),
+                Some("maximumnumpoints") => {
+                    Ok(animated_line_maximum_value(line_handle.maximum_num_points))
+                }
+                Some(other) => Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: unsupported animatedline property `{other}`"),
+                )),
             }
-            Some("type") => Ok(Value::String("animatedline".into())),
-            Some("parent") => Ok(child_parent_handle(
-                line_handle.figure,
-                line_handle.axes_index,
-            )),
-            Some("children") => Ok(handles_value(Vec::new())),
-            Some("xdata") => Ok(tensor_from_vec(line.x_data)),
-            Some("ydata") => Ok(tensor_from_vec(line.y_data)),
-            Some("zdata") => Ok(tensor_from_vec(line.z_data)),
-            Some("color") => Ok(Value::String(color_to_short_name(line.color))),
-            Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
-            Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-            Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
-            Some("visible") => Ok(Value::String(
-                if line.visible { "on" } else { "off" }.into(),
-            )),
-            Some("maximumnumpoints") => {
-                Ok(animated_line_maximum_value(line_handle.maximum_num_points))
-            }
-            Some(other) => Err(plotting_error(
-                builtin,
-                format!("{builtin}: unsupported animatedline property `{other}`"),
-            )),
-        },
+        }
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: invalid animatedline handle"),
@@ -3196,12 +3203,15 @@ fn get_scatter_property(
             format!("{builtin}: invalid scatter handle"),
         ));
     };
+    let (x_data, y_data) = scatter_xy_data_for_properties(&scatter, builtin)?;
+    let x_render = x_data.materialize_f64();
+    let y_render = y_data.materialize_f64();
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
-            st.insert("XData", tensor_from_vec(scatter.x_data.clone()));
-            st.insert("YData", tensor_from_vec(scatter.y_data.clone()));
+            st.insert("XData", numeric_plot_data_value(&x_data));
+            st.insert("YData", numeric_plot_data_value(&y_data));
             if let Some(theta) = scatter.theta_data.clone() {
                 st.insert("ThetaData", tensor_from_vec(theta));
             }
@@ -3233,18 +3243,20 @@ fn get_scatter_property(
             scatter_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(tensor_from_vec(scatter.x_data.clone())),
-        Some("ydata") => Ok(tensor_from_vec(scatter.y_data.clone())),
-        Some("thetadata") => {
-            Ok(tensor_from_vec(scatter.theta_data.clone().unwrap_or_else(
-                || cartesian_theta(&scatter.x_data, &scatter.y_data),
-            )))
-        }
-        Some("rdata") => {
-            Ok(tensor_from_vec(scatter.r_data.clone().unwrap_or_else(
-                || cartesian_radius(&scatter.x_data, &scatter.y_data),
-            )))
-        }
+        Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
+        Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
+        Some("thetadata") => Ok(tensor_from_vec(
+            scatter
+                .theta_data
+                .clone()
+                .unwrap_or_else(|| cartesian_theta(&x_render, &y_render)),
+        )),
+        Some("rdata") => Ok(tensor_from_vec(
+            scatter
+                .r_data
+                .clone()
+                .unwrap_or_else(|| cartesian_radius(&x_render, &y_render)),
+        )),
         Some("marker") => Ok(Value::String(
             marker_style_name(scatter.marker_style).into(),
         )),
@@ -3727,9 +3739,10 @@ fn get_line3_property(
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
-            st.insert("XData", tensor_from_vec(line.x_data.clone()));
-            st.insert("YData", tensor_from_vec(line.y_data.clone()));
-            st.insert("ZData", tensor_from_vec(line.z_data.clone()));
+            let (x_data, y_data, z_data) = line_xyz_data_for_properties(&line, builtin)?;
+            st.insert("XData", numeric_plot_data_value(&x_data));
+            st.insert("YData", numeric_plot_data_value(&y_data));
+            st.insert("ZData", numeric_plot_data_value(&z_data));
             st.insert("Color", Value::String(color_to_short_name(line.color)));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
@@ -3752,9 +3765,18 @@ fn get_line3_property(
             line_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(tensor_from_vec(line.x_data.clone())),
-        Some("ydata") => Ok(tensor_from_vec(line.y_data.clone())),
-        Some("zdata") => Ok(tensor_from_vec(line.z_data.clone())),
+        Some("xdata") => {
+            let (x, _, _) = line_xyz_data_for_properties(&line, builtin)?;
+            Ok(numeric_plot_data_value(&x))
+        }
+        Some("ydata") => {
+            let (_, y, _) = line_xyz_data_for_properties(&line, builtin)?;
+            Ok(numeric_plot_data_value(&y))
+        }
+        Some("zdata") => {
+            let (_, _, z) = line_xyz_data_for_properties(&line, builtin)?;
+            Ok(numeric_plot_data_value(&z))
+        }
         Some("color") => Ok(Value::String(color_to_short_name(line.color))),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
@@ -5295,7 +5317,7 @@ fn apply_line_properties(
     super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
             if update_data {
-                let _ = line.update_data(next_x.clone(), next_y.clone());
+                let _ = line.update_numeric_data(next_x.clone(), next_y.clone());
             }
             for (key, value) in &style_pairs {
                 apply_line_plot_properties(line, key, value, builtin);
@@ -5532,21 +5554,34 @@ fn apply_scatter_properties(
         ));
     };
 
+    let (current_x, current_y) = scatter_xy_data_for_properties(&current_scatter, builtin)?;
+    let current_x_render = current_x.materialize_f64();
+    let current_y_render = current_y.materialize_f64();
+
     let current_theta = current_scatter
         .theta_data
         .clone()
-        .unwrap_or_else(|| cartesian_theta(&current_scatter.x_data, &current_scatter.y_data));
+        .unwrap_or_else(|| cartesian_theta(&current_x_render, &current_y_render));
     let current_r = current_scatter
         .r_data
         .clone()
-        .unwrap_or_else(|| cartesian_radius(&current_scatter.x_data, &current_scatter.y_data));
+        .unwrap_or_else(|| cartesian_radius(&current_x_render, &current_y_render));
+    let mut x_update = None;
+    let mut y_update = None;
     let mut theta_update = None;
     let mut r_update = None;
     let mut style_pairs = Vec::new();
     for (key, value) in pairs {
         match key.as_str() {
-            "thetadata" => theta_update = Some(line_numeric_data(value, "ThetaData", builtin)?),
-            "rdata" => r_update = Some(line_numeric_data(value, "RData", builtin)?),
+            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
+            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
+            "thetadata" => {
+                theta_update =
+                    Some(line_numeric_data(value, "ThetaData", builtin)?.materialize_f64())
+            }
+            "rdata" => {
+                r_update = Some(line_numeric_data(value, "RData", builtin)?.materialize_f64())
+            }
             _ => style_pairs.push((key.as_str(), *value)),
         }
     }
@@ -5558,9 +5593,31 @@ fn apply_scatter_properties(
     if let Some((theta, r)) = polar_update.as_ref() {
         validate_polar_scatter_data(theta, r, builtin)?;
     }
+    let next_x = x_update.unwrap_or_else(|| current_x.clone());
+    let next_y = y_update.unwrap_or_else(|| current_y.clone());
+    let cartesian_update = (next_x != current_x || next_y != current_y).then_some((next_x, next_y));
+    if let Some((x, y)) = cartesian_update.as_ref() {
+        if x.len() != y.len() || x.is_empty() {
+            return Err(plotting_error(
+                builtin,
+                format!(
+                    "{builtin}: XData and YData must contain the same nonzero number of elements"
+                ),
+            ));
+        }
+    }
+    if cartesian_update.is_some() && polar_update.is_some() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: cannot update Cartesian and polar coordinate properties together"),
+        ));
+    }
 
     super::state::update_plot_element(scatter_handle.figure, scatter_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
+            if let Some((x, y)) = cartesian_update.as_ref() {
+                let _ = scatter.update_numeric_data(x.clone(), y.clone());
+            }
             if let Some((theta, r)) = polar_update.as_ref() {
                 replace_polar_scatter_data_unchecked(scatter, theta.clone(), r.clone());
             }
@@ -6365,6 +6422,7 @@ fn apply_line3_properties(
         ));
     };
 
+    let (current_x, current_y, current_z) = line_xyz_data_for_properties(&current_line, builtin)?;
     let mut x_update = None;
     let mut y_update = None;
     let mut z_update = None;
@@ -6378,12 +6436,10 @@ fn apply_line3_properties(
         }
     }
 
-    let next_x = x_update.unwrap_or_else(|| current_line.x_data.clone());
-    let next_y = y_update.unwrap_or_else(|| current_line.y_data.clone());
-    let next_z = z_update.unwrap_or_else(|| current_line.z_data.clone());
-    let update_data = next_x != current_line.x_data
-        || next_y != current_line.y_data
-        || next_z != current_line.z_data;
+    let next_x = x_update.unwrap_or_else(|| current_x.clone());
+    let next_y = y_update.unwrap_or_else(|| current_y.clone());
+    let next_z = z_update.unwrap_or_else(|| current_z.clone());
+    let update_data = next_x != current_x || next_y != current_y || next_z != current_z;
     if update_data
         && (next_x.is_empty() || next_x.len() != next_y.len() || next_x.len() != next_z.len())
     {
@@ -6396,7 +6452,7 @@ fn apply_line3_properties(
     super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
             if update_data {
-                let _ = line.update_data(next_x.clone(), next_y.clone(), next_z.clone());
+                let _ = line.update_numeric_data(next_x.clone(), next_y.clone(), next_z.clone());
             }
             for (key, value) in &style_pairs {
                 match *key {
@@ -6623,38 +6679,77 @@ fn apply_line_plot_properties(
     }
 }
 
-fn line_numeric_data(value: &Value, name: &str, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
+fn line_numeric_data(
+    value: &Value,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<NumericPlotData> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    Ok(tensor::tensor_values_f64(&tensor))
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| plotting_error(builtin, format!("{builtin}: {name}: {err}")))?;
+    NumericPlotData::new(storage, shape)
+        .map_err(|err| plotting_error(builtin, format!("{builtin}: {name}: {err}")))
 }
 
 fn line_xy_data_for_properties(
     line: &runmat_plot::plots::LinePlot,
     builtin: &'static str,
-) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
-    if !line.x_data.is_empty() && line.x_data.len() == line.y_data.len() {
-        return Ok((line.x_data.clone(), line.y_data.clone()));
+) -> BuiltinResult<(NumericPlotData, NumericPlotData)> {
+    if let (Some(x), Some(y)) = line.source_data() {
+        return Ok((x.clone(), y.clone()));
     }
-    if !line.x_data.is_empty() || !line.y_data.is_empty() {
-        return Err(plotting_error(
-            builtin,
-            format!(
-                "{builtin}: line source data is inconsistent: XData has {} values, YData has {} values",
-                line.x_data.len(),
-                line.y_data.len()
-            ),
-        ));
+    futures::executor::block_on(line.export_numeric_xy_data())
+        .map_err(|err| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: unable to read line source data: {err}"),
+            )
+        })?
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: line has no source data")))
+}
+
+fn line_xyz_data_for_properties(
+    line: &runmat_plot::plots::Line3Plot,
+    builtin: &'static str,
+) -> BuiltinResult<(NumericPlotData, NumericPlotData, NumericPlotData)> {
+    if let (Some(x), Some(y), Some(z)) = line.source_data() {
+        return Ok((x.clone(), y.clone(), z.clone()));
     }
-    if !line.has_gpu_source_data() {
-        return Ok((Vec::new(), Vec::new()));
+    futures::executor::block_on(line.export_numeric_xyz_data())
+        .map_err(|err| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: unable to read plot3 source data: {err}"),
+            )
+        })?
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: plot3 has no source data")))
+}
+
+fn scatter_xy_data_for_properties(
+    scatter: &runmat_plot::plots::ScatterPlot,
+    builtin: &'static str,
+) -> BuiltinResult<(NumericPlotData, NumericPlotData)> {
+    if let (Some(x), Some(y)) = scatter.source_data() {
+        return Ok((x.clone(), y.clone()));
     }
-    futures::executor::block_on(line.export_scene_xy_data()).map_err(|err| {
-        plotting_error(
-            builtin,
-            format!("{builtin}: unable to read line source data: {err}"),
-        )
-    })
+    futures::executor::block_on(scatter.export_numeric_xy_data())
+        .map_err(|err| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: unable to read scatter source data: {err}"),
+            )
+        })?
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: scatter has no source data")))
+}
+
+fn numeric_plot_data_value(data: &NumericPlotData) -> Value {
+    Value::Tensor(
+        Tensor::from_numeric_storage(data.storage().clone(), data.shape().to_vec())
+            .expect("validated graphics source data"),
+    )
 }
 
 fn limits_from_optional_value(

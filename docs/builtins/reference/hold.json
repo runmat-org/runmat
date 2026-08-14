@@ -32,7 +32,8 @@
     "`hold('on')` enables appending to the current axes.",
     "`hold('off')` disables appending so later plots replace the axes contents.",
     "`hold('all')` is currently treated the same as `hold('on')`.",
-    "Logical and numeric scalar inputs are accepted: zero means off and nonzero means on."
+    "Logical and numeric scalar inputs are accepted: zero means off and one means on.",
+    "An axes handle can be supplied before the mode to update that axes."
   ],
   "examples": [
     {
@@ -46,9 +47,9 @@
       "output": "% the new plot replaces the previous axes contents"
     },
     {
-      "description": "Toggle hold state programmatically",
-      "input": "state1 = hold();\nstate2 = hold();",
-      "output": "% state1 and state2 reflect the toggled boolean state"
+      "description": "Toggle hold state",
+      "input": "hold();\nhold();",
+      "output": "% each call toggles the current axes hold state"
     }
   ],
   "faqs": [
@@ -61,8 +62,8 @@
       "answer": "RunMat currently treats `'all'` the same as `'on'`."
     },
     {
-      "question": "What does the return value mean?",
-      "answer": "It is the resulting boolean hold state after applying the command."
+      "question": "Does hold return the current state?",
+      "answer": "No. `hold` mutates axes state and has no public output."
     }
   ],
   "links": [
