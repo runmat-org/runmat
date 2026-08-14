@@ -2,6 +2,22 @@ use super::*;
 
 impl RunMatSession {
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn set_native_tiering_config_for_testing(
+        &mut self,
+        config: runmat_jit::tiering::TieringConfig,
+    ) {
+        self.generic_native_cache =
+            crate::generic_native::GenericNativeCache::with_tiering_config(config);
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn native_tiering_snapshot_for_testing(
+        &self,
+    ) -> runmat_jit::tiering::TierFeedbackSnapshot {
+        self.generic_native_cache.tiering_snapshot()
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn generic_native_cache_counts(&self) -> (usize, usize) {
         (
             self.generic_native_cache.compilation_count(),
@@ -31,6 +47,105 @@ impl RunMatSession {
                 .with_program_revision(Some(unit.revision().program_revision.clone())),
         )
         .await
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn invoke_tiered_entrypoint(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+    ) -> std::result::Result<Value, RuntimeError> {
+        if !self.native_tiering_enabled {
+            return self.invoke_entrypoint_interpreted(unit).await;
+        }
+        let Some(profile) = self.generic_native_cache.representation_profile(&[]) else {
+            return self.invoke_entrypoint_interpreted(unit).await;
+        };
+        let started = std::time::Instant::now();
+        let published = self.generic_native_cache.resolve_or_schedule(unit, None)?;
+        let result = match published {
+            Some(published) => {
+                self.stats.jit_compiled += 1;
+                crate::generic_native::invoke(
+                    unit,
+                    published,
+                    None,
+                    Vec::new(),
+                    0,
+                    self.runtime_context
+                        .clone()
+                        .with_program_revision(Some(unit.revision().program_revision.clone())),
+                )
+                .await
+            }
+            None => {
+                self.stats.interpreter_fallback += 1;
+                self.invoke_entrypoint_interpreted(unit).await
+            }
+        };
+        if let Err(error) = self.generic_native_cache.observe_invocation(
+            unit,
+            None,
+            &profile,
+            runmat_time::duration_ns_saturating(started.elapsed()),
+        ) {
+            log::warn!("native tier feedback was not recorded: {error}");
+        }
+        result
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn invoke_tiered_procedure(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        function: runmat_hir::FunctionId,
+        name: &str,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+    ) -> std::result::Result<Value, RuntimeError> {
+        if !self.native_tiering_enabled {
+            return self
+                .invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
+                .await;
+        }
+        let Some(profile) = self.generic_native_cache.representation_profile(&arguments) else {
+            return self
+                .invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
+                .await;
+        };
+        let started = std::time::Instant::now();
+        let published = self
+            .generic_native_cache
+            .resolve_or_schedule(unit, Some(name))?;
+        let result = match published {
+            Some(published) => {
+                self.stats.jit_compiled += 1;
+                crate::generic_native::invoke(
+                    unit,
+                    published,
+                    Some(name),
+                    arguments,
+                    requested_outputs,
+                    self.runtime_context
+                        .clone()
+                        .with_program_revision(Some(unit.revision().program_revision.clone())),
+                )
+                .await
+            }
+            None => {
+                self.stats.interpreter_fallback += 1;
+                self.invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
+                    .await
+            }
+        };
+        if let Err(error) = self.generic_native_cache.observe_invocation(
+            unit,
+            Some(name),
+            &profile,
+            runmat_time::duration_ns_saturating(started.elapsed()),
+        ) {
+            log::warn!("native tier feedback was not recorded: {error}");
+        }
+        result
     }
 
     /// Invoke one immutable unit while collecting its backend-independent
@@ -84,6 +199,11 @@ impl RunMatSession {
                 self.project_handoff.clone(),
             ),
         );
+        // Builtin class registration is session-owned. Register the testing
+        // projection after entering this session's runtime context so
+        // function-based TestCase receivers resolve inherited methods here,
+        // rather than only in the caller thread's fallback registry.
+        runmat_runtime::testing::ensure_testing_classes();
         ensure_invocation_allowed(control)?;
         self.stats.total_executions += 1;
         self.configure_executable_runtime();
@@ -123,10 +243,10 @@ impl RunMatSession {
                 if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
                     self.invoke_generic_native(unit, None, Vec::new(), 0).await
                 } else {
-                    self.invoke_entrypoint(unit).await
+                    self.invoke_tiered_entrypoint(unit).await
                 }
                 #[cfg(target_arch = "wasm32")]
-                self.invoke_entrypoint(unit).await
+                self.invoke_entrypoint_interpreted(unit).await
             }
             crate::ProcedureTarget::Function(name) => {
                 let function = unit.functions().resolve_name(&name).ok_or_else(|| {
@@ -145,16 +265,17 @@ impl RunMatSession {
                     )
                     .await
                 } else {
-                    self.invoke_procedure(
+                    self.invoke_tiered_procedure(
                         unit,
                         function,
+                        &name,
                         invocation.arguments,
                         invocation.requested_outputs,
                     )
                     .await
                 }
                 #[cfg(target_arch = "wasm32")]
-                self.invoke_procedure(
+                self.invoke_procedure_interpreted(
                     unit,
                     function,
                     invocation.arguments,
@@ -180,20 +301,11 @@ impl RunMatSession {
         );
     }
 
-    async fn invoke_entrypoint(
+    async fn invoke_entrypoint_interpreted(
         &mut self,
         unit: &crate::ExecutableUnit,
     ) -> std::result::Result<Value, RuntimeError> {
         let mut variables = vec![Value::Num(0.0); unit.bytecode().var_count];
-        #[cfg(feature = "jit")]
-        if let Some(result) = self.execute_executable_backend(
-            unit.bytecode(),
-            &mut variables,
-            &unit.backend_cache_namespace(),
-        ) {
-            result?;
-            return Ok(Value::OutputList(Vec::new()));
-        }
         match runmat_vm::interpret_with_vars_in_context(
             unit.bytecode(),
             &mut variables,
@@ -211,29 +323,13 @@ impl RunMatSession {
         }
     }
 
-    async fn invoke_procedure(
+    async fn invoke_procedure_interpreted(
         &mut self,
         unit: &crate::ExecutableUnit,
         function: runmat_hir::FunctionId,
         arguments: Vec<Value>,
         requested_outputs: usize,
     ) -> std::result::Result<Value, RuntimeError> {
-        #[cfg(feature = "jit")]
-        if let Some(mut program) =
-            unit.procedure_program(function, arguments.clone(), requested_outputs)
-        {
-            if let Some(result) = self.execute_executable_backend(
-                &program.bytecode,
-                &mut program.variables,
-                &unit.backend_cache_namespace(),
-            ) {
-                result?;
-                return Ok(program
-                    .result_slot
-                    .and_then(|slot| program.variables.get(slot).cloned())
-                    .unwrap_or(Value::OutputList(Vec::new())));
-            }
-        }
         runmat_vm::invoke_semantic_function_value_in_context(
             function.0,
             &arguments,
@@ -244,33 +340,6 @@ impl RunMatSession {
                 .with_program_revision(Some(unit.revision().program_revision.clone())),
         )
         .await
-    }
-
-    #[cfg(feature = "jit")]
-    fn execute_executable_backend(
-        &mut self,
-        bytecode: &runmat_vm::Bytecode,
-        variables: &mut Vec<Value>,
-        cache_namespace: &str,
-    ) -> Option<std::result::Result<(), RuntimeError>> {
-        let engine = self.jit_engine.as_mut()?;
-        Some(
-            engine
-                .execute_or_compile_with_cache_namespace(bytecode, variables, Some(cache_namespace))
-                .map(|(_, used_jit)| {
-                    if used_jit {
-                        self.stats.jit_compiled += 1;
-                    } else {
-                        self.stats.interpreter_fallback += 1;
-                    }
-                })
-                .map_err(|error| match error {
-                    runmat_turbine::TurbineError::ExecutionError(error) => error,
-                    error => build_runtime_error(error.to_string())
-                        .with_identifier("RunMat:ExecutableBackend")
-                        .build(),
-                }),
-        )
     }
 }
 

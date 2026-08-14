@@ -12,42 +12,44 @@ pub(super) struct CompiledGenericUnit {
     pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
 }
 
+pub(super) struct PreparedGenericUnit {
+    mir: runmat_mir::MirAssembly,
+    analysis: runmat_mir::analysis::AnalysisStore,
+    manifest: runmat_execution::ExecutableUnitManifest,
+    binding_names: BTreeMap<runmat_types::BindingId, String>,
+    program_capture: Vec<u8>,
+    interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    entrypoint: ProgramFunctionId,
+}
+
+pub(super) struct BackgroundCompiledGenericUnit {
+    pub executor: runmat_jit::GenericExecutor,
+    pub entrypoint: ProgramFunctionId,
+    #[cfg(test)]
+    pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
+}
+
 pub(super) fn compile(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
 ) -> Result<CompiledGenericUnit, runmat_runtime::RuntimeError> {
+    let compiled = compile_prepared(prepare(unit, preferred_function)?)?;
+    Ok(CompiledGenericUnit {
+        executor: Rc::new(compiled.executor),
+        entrypoint: compiled.entrypoint,
+        #[cfg(test)]
+        safepoints: compiled.safepoints,
+    })
+}
+
+pub(super) fn prepare(
+    unit: &ExecutableUnit,
+    preferred_function: Option<&str>,
+) -> Result<PreparedGenericUnit, runmat_runtime::RuntimeError> {
     let envelope = unit
         .portable_envelope_for(preferred_function)
         .map_err(|error| super::error::stage("NativeProduct", error))?;
     let binding_names = unit.binding_names();
-    let assembly =
-        runmat_native_codegen::lower_executable(runmat_native_codegen::NativeLoweringInput {
-            mir: unit.mir(),
-            analysis: unit.analysis(),
-            manifest: &envelope.manifest,
-            binding_names: Some(&binding_names),
-            target: runmat_native_codegen::NativeTarget::current(),
-        })
-        .map_err(|error| super::error::stage("NativeLowering", error))?;
-    #[cfg(test)]
-    let safepoints = assembly
-        .functions
-        .iter()
-        .map(|function| {
-            let points = function
-                .blocks
-                .iter()
-                .flat_map(|block| {
-                    block
-                        .instructions
-                        .iter()
-                        .filter_map(|instruction| instruction.safepoint)
-                        .chain(block.terminator.safepoint)
-                })
-                .collect();
-            (function.id, points)
-        })
-        .collect();
     let program_capture = serde_json::to_vec(unit.functions()).map_err(|error| {
         super::error::stage(
             "NativeProduct",
@@ -73,15 +75,58 @@ pub(super) fn compile(
             interpreter_resume_points.insert(*point, pc);
         }
     }
+    let entrypoint = envelope.manifest.identity.entrypoint_function;
+    Ok(PreparedGenericUnit {
+        mir: unit.mir().clone(),
+        analysis: unit.analysis().clone(),
+        manifest: envelope.manifest,
+        binding_names,
+        program_capture,
+        interpreter_resume_points,
+        entrypoint,
+    })
+}
+
+pub(super) fn compile_prepared(
+    prepared: PreparedGenericUnit,
+) -> Result<BackgroundCompiledGenericUnit, runmat_runtime::RuntimeError> {
+    let assembly =
+        runmat_native_codegen::lower_executable(runmat_native_codegen::NativeLoweringInput {
+            mir: &prepared.mir,
+            analysis: &prepared.analysis,
+            manifest: &prepared.manifest,
+            binding_names: Some(&prepared.binding_names),
+            target: runmat_native_codegen::NativeTarget::current(),
+        })
+        .map_err(|error| super::error::stage("NativeLowering", error))?;
+    #[cfg(test)]
+    let safepoints = assembly
+        .functions
+        .iter()
+        .map(|function| {
+            let points = function
+                .blocks
+                .iter()
+                .flat_map(|block| {
+                    block
+                        .instructions
+                        .iter()
+                        .filter_map(|instruction| instruction.safepoint)
+                        .chain(block.terminator.safepoint)
+                })
+                .collect();
+            (function.id, points)
+        })
+        .collect();
     let executor = runmat_jit::GenericExecutor::compile_with_resume_points(
         assembly,
-        Some(program_capture),
-        interpreter_resume_points,
+        Some(prepared.program_capture),
+        prepared.interpreter_resume_points,
     )
     .map_err(super::error::from_jit_error)?;
-    Ok(CompiledGenericUnit {
-        executor: Rc::new(executor),
-        entrypoint: envelope.manifest.identity.entrypoint_function,
+    Ok(BackgroundCompiledGenericUnit {
+        executor,
+        entrypoint: prepared.entrypoint,
         #[cfg(test)]
         safepoints,
     })

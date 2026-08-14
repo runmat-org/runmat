@@ -14211,6 +14211,107 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn deterministic_native_tiering_compiles_once_after_exact_profile_heat() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 2,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-native-tier-test@1",
+            "nativeTier.m",
+            "function y = nativeTier(x)\ny = x + 1;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile tiering fixture");
+    let invoke = |session: &mut RunMatSession| {
+        block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("nativeTier".into()),
+                arguments: vec![runmat_value::Value::Num(4.0)],
+                requested_outputs: 1,
+            },
+            &InvocationControl::default(),
+        ))
+        .expect("invoke tiered procedure")
+    };
+
+    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_eq!(session.generic_native_cache_counts(), (0, 0));
+    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+
+    let snapshot = session.native_tiering_snapshot_for_testing();
+    assert_eq!(snapshot.sites.len(), 1);
+    assert_eq!(snapshot.sites[0].invocations, 4);
+    assert_eq!(snapshot.sites[0].profiles.len(), 1);
+    assert_eq!(snapshot.sites[0].profiles[0].samples, 4);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn background_native_tiering_publishes_once_without_blocking_the_hot_invocation() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        max_pending_compilations: 1,
+        deterministic: false,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-background-tier-test@1",
+            "backgroundTier.m",
+            "function y = backgroundTier(x)\ny = x * 2;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile background tiering fixture");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("backgroundTier".into()),
+        arguments: vec![runmat_value::Value::Num(6.0)],
+        requested_outputs: 1,
+    };
+
+    assert_eq!(
+        block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .unwrap(),
+        runmat_value::Value::Num(12.0)
+    );
+    assert_eq!(session.generic_native_cache_counts(), (0, 0));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        let value = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .unwrap();
+        assert_eq!(value, runmat_value::Value::Num(12.0));
+        if session.generic_native_cache_counts() == (1, 1) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = ExecutableSource::new(

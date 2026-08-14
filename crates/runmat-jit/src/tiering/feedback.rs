@@ -132,22 +132,18 @@ impl TieringSession {
         })
     }
 
+    pub fn config(&self) -> TieringConfig {
+        self.config
+    }
+
     pub fn observe_invocation(
         &self,
         site: TierSiteId,
         profile: &RepresentationProfile,
         elapsed_ns: u64,
-        succeeded: bool,
     ) -> Result<(), &'static str> {
         site.validate()?;
-        let encoded = serde_json::to_vec(&profile.facts)
-            .map_err(|_| "tier representation profile could not be encoded")?;
-        if encoded.len() > self.config.max_profile_bytes {
-            return Err("tier representation profile exceeds its byte bound");
-        }
-        if Digest::sha256(encoded) != profile.digest {
-            return Err("tier representation profile digest does not match its facts");
-        }
+        validate_profile(profile, self.config.max_profile_bytes)?;
         let mut state = self.state.borrow_mut();
         let tick = next_tick(&mut state)?;
         let feedback = state.sites.entry(site.clone()).or_default();
@@ -155,11 +151,26 @@ impl TieringSession {
         feedback.total_elapsed_ns = feedback.total_elapsed_ns.saturating_add(elapsed_ns);
         feedback.latest_tick = tick;
         let profile_feedback = feedback.profiles.entry(profile.digest).or_default();
-        if succeeded {
-            profile_feedback.samples = bounded_count_add(profile_feedback.samples, 1);
-        } else {
-            profile_feedback.failures = bounded_count_add(profile_feedback.failures, 1);
-        }
+        profile_feedback.samples = bounded_count_add(profile_feedback.samples, 1);
+        profile_feedback.latest_tick = tick;
+        evict_profiles(feedback, self.config.max_profiles_per_site);
+        evict_sites(&mut state, self.config.max_sites, Some(&site));
+        Ok(())
+    }
+
+    pub fn observe_specialization_failure(
+        &self,
+        site: TierSiteId,
+        profile: &RepresentationProfile,
+    ) -> Result<(), &'static str> {
+        site.validate()?;
+        validate_profile(profile, self.config.max_profile_bytes)?;
+        let mut state = self.state.borrow_mut();
+        let tick = next_tick(&mut state)?;
+        let feedback = state.sites.entry(site.clone()).or_default();
+        feedback.latest_tick = tick;
+        let profile_feedback = feedback.profiles.entry(profile.digest).or_default();
+        profile_feedback.failures = bounded_count_add(profile_feedback.failures, 1);
         profile_feedback.latest_tick = tick;
         evict_profiles(feedback, self.config.max_profiles_per_site);
         evict_sites(&mut state, self.config.max_sites, Some(&site));
@@ -220,6 +231,21 @@ impl TieringSession {
             sites,
         }
     }
+}
+
+fn validate_profile(
+    profile: &RepresentationProfile,
+    max_profile_bytes: usize,
+) -> Result<(), &'static str> {
+    let encoded = serde_json::to_vec(&profile.facts)
+        .map_err(|_| "tier representation profile could not be encoded")?;
+    if encoded.len() > max_profile_bytes {
+        return Err("tier representation profile exceeds its byte bound");
+    }
+    if Digest::sha256(encoded) != profile.digest {
+        return Err("tier representation profile digest does not match its facts");
+    }
+    Ok(())
 }
 
 fn dominant_profile(feedback: &SiteFeedback) -> Option<(Digest, u64, u64)> {
@@ -331,10 +357,10 @@ mod tests {
             TierDecision::Interpret
         );
         session
-            .observe_invocation(site.clone(), &profile, 100, true)
+            .observe_invocation(site.clone(), &profile, 100)
             .unwrap();
         session
-            .observe_invocation(site.clone(), &profile, 90, true)
+            .observe_invocation(site.clone(), &profile, 90)
             .unwrap();
         assert_eq!(
             session.decide(&site, &availability),
@@ -348,7 +374,7 @@ mod tests {
             TierDecision::ExecuteGeneric
         );
         session
-            .observe_invocation(site.clone(), &profile, 80, true)
+            .observe_invocation(site.clone(), &profile, 80)
             .unwrap();
         assert_eq!(
             session.decide(&site, &availability),
@@ -398,21 +424,21 @@ mod tests {
         let target = site("target", false);
         for profile in [profile(1), profile(2), profile(3)] {
             session
-                .observe_invocation(target.clone(), &profile, u64::MAX, true)
+                .observe_invocation(target.clone(), &profile, u64::MAX)
                 .unwrap();
         }
         let failing = profile(3);
         session
-            .observe_invocation(target.clone(), &failing, 1, false)
+            .observe_specialization_failure(target.clone(), &failing)
             .unwrap();
         session
-            .observe_invocation(target.clone(), &failing, 1, false)
+            .observe_specialization_failure(target.clone(), &failing)
             .unwrap();
         session
-            .observe_invocation(site("other", false), &profile(1), 1, true)
+            .observe_invocation(site("other", false), &profile(1), 1)
             .unwrap();
         session
-            .observe_invocation(site("newest", false), &profile(1), 1, true)
+            .observe_invocation(site("newest", false), &profile(1), 1)
             .unwrap();
 
         let snapshot = session.snapshot();
@@ -428,7 +454,7 @@ mod tests {
         let mut invalid = profile(1);
         invalid.digest = profile(2).digest;
         assert_eq!(
-            session.observe_invocation(site("entry", false), &invalid, 1, true),
+            session.observe_invocation(site("entry", false), &invalid, 1),
             Err("tier representation profile digest does not match its facts")
         );
         assert!(session.snapshot().sites.is_empty());

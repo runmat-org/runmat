@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use runmat_native_codegen::{
     NativeBlockId, NativeEdge, NativeFunction, NativeLocalKind, NativeTerminatorKind, NativeValueId,
@@ -31,7 +31,7 @@ pub(super) struct HostStateInput {
     pub requested_outputs: usize,
     pub runtime: RuntimeContext,
     pub program_capture: Option<Vec<u8>>,
-    pub functions: Rc<Vec<NativeFunction>>,
+    pub functions: Arc<Vec<NativeFunction>>,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub deoptimization: DeoptimizationPolicy,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
@@ -39,7 +39,7 @@ pub(super) struct HostStateInput {
 
 pub(super) struct HostState {
     pub function: NativeFunction,
-    pub functions: Rc<Vec<NativeFunction>>,
+    pub functions: Arc<Vec<NativeFunction>>,
     pub runtime: RuntimeContext,
     pub arena: ValueArena,
     pub locals: Vec<NativeValueRef>,

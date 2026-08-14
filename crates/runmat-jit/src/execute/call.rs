@@ -9,8 +9,46 @@ use super::operand::materialize_operand;
 use super::state::HostState;
 
 pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<Value>> {
-    let arguments = materialize_arguments(state, &call.args)?;
+    let mut arguments = materialize_arguments(state, &call.args)?;
     let requested_outputs = call.requested_outputs.fixed_count();
+    if matches!(
+        call.syntax,
+        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+    ) {
+        if let MirCallee::Static(identity) = &call.callee {
+            if !matches!(
+                identity,
+                runmat_hir::CallableIdentity::BoundFunction(_)
+                    | runmat_hir::CallableIdentity::ExternalFunction { .. }
+            ) {
+                if arguments.is_empty() {
+                    return Err(JitError::Host(
+                        "method/member-index call requires a base receiver".into(),
+                    ));
+                }
+                let base = arguments.remove(0);
+                let _outputs = runmat_runtime::output_context::push_output_count(requested_outputs);
+                let caller = state.function.name.as_str();
+                let class_context =
+                    runmat_runtime::class_registry::class_context_for_function(caller);
+                let _access = class_context
+                    .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+                let value = super::sync::complete(
+                    &state.runtime,
+                    runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
+                        base,
+                        identity.clone(),
+                        arguments,
+                        requested_outputs,
+                        (!caller.is_empty()).then_some(caller),
+                        call.fallback_policy,
+                    ),
+                    "method/member-index call",
+                )?;
+                return normalize_outputs(value, requested_outputs);
+            }
+        }
+    }
     let result = match &call.callee {
         MirCallee::Static(identity) => {
             if let Some(function) = local_program_function(identity)? {

@@ -1,7 +1,7 @@
 use runmat_runtime::context::RuntimeContext;
 use runmat_types::ProgramFunctionId;
 use runmat_value::Value;
-use std::{collections::BTreeMap, rc::Rc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::deopt::DeoptimizationPolicy;
 use crate::{CompiledExecutable, GenericCompiler, JitError, JitResult};
@@ -10,7 +10,7 @@ use super::invocation::{GenericInvocation, GenericInvocationStep};
 use super::state::{HostState, HostStateInput};
 
 pub struct GenericExecutor {
-    functions: Rc<Vec<runmat_native_codegen::NativeFunction>>,
+    functions: Arc<Vec<runmat_native_codegen::NativeFunction>>,
     compiled: CompiledExecutable,
     program_capture: Option<Vec<u8>>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
@@ -46,7 +46,7 @@ impl GenericExecutor {
         let compiled = GenericCompiler::compile(&assembly)?;
         let compile_duration_ns = runmat_time::duration_ns_saturating(compile_started.elapsed());
         Ok(Self {
-            functions: Rc::new(assembly.functions),
+            functions: Arc::new(assembly.functions),
             compiled,
             program_capture,
             interpreter_resume_points,
@@ -188,7 +188,7 @@ impl GenericExecutor {
             requested_outputs: requested_outputs as usize,
             runtime,
             program_capture: self.program_capture.clone(),
-            functions: Rc::clone(&self.functions),
+            functions: Arc::clone(&self.functions),
             captures,
             deoptimization,
             interpreter_resume_points: self.interpreter_resume_points.clone(),
@@ -212,5 +212,17 @@ impl GenericExecutor {
             requested_outputs,
             resume,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GenericExecutor;
+
+    fn assert_send<T: Send>() {}
+
+    #[test]
+    fn compiled_executor_can_move_from_a_background_compiler_to_its_session_owner() {
+        assert_send::<GenericExecutor>();
     }
 }

@@ -292,6 +292,38 @@ pub fn class_names() -> Vec<String> {
     with_state(|state| state.classes.keys().cloned().collect())
 }
 
+/// Resolve the declaring class context for a runtime function name. Executors
+/// use this shared lookup to apply identical private/protected member access.
+pub fn class_context_for_function(function_name: &str) -> Option<String> {
+    if function_name.is_empty() {
+        return None;
+    }
+    if let Some((class_name, method_name)) = function_name.rsplit_once('.') {
+        if !class_name.is_empty() && !method_name.is_empty() && get_class(class_name).is_some() {
+            return Some(class_name.to_string());
+        }
+    }
+    class_names().into_iter().find(|class_name| {
+        get_class(class_name).is_some_and(|class_def| {
+            class_def.methods.values().any(|method| {
+                method.function_name == function_name
+                    || method
+                        .function_name
+                        .strip_prefix(class_name)
+                        .is_some_and(|suffix| {
+                            suffix
+                                .strip_prefix('.')
+                                .is_some_and(|name| name == function_name)
+                        })
+                    || method
+                        .function_name
+                        .rsplit_once('.')
+                        .is_some_and(|(_, name)| name == function_name)
+            })
+        })
+    })
+}
+
 pub fn is_class_sealed(name: &str) -> bool {
     with_state(|state| state.sealed.contains(name))
 }

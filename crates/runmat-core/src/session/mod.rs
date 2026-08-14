@@ -88,6 +88,8 @@ pub struct RunMatSession {
     /// Session-scoped production native entry publication and invalidation.
     #[cfg(not(target_arch = "wasm32"))]
     generic_native_cache: crate::generic_native::GenericNativeCache,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_tiering_enabled: bool,
     /// Optional host-frozen project snapshot used by every compilation in this session.
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     /// Interned source pool for user-defined functions

@@ -12,18 +12,15 @@ pub struct CompiledExecutable {
     // deliberately not exposed: executable-memory ownership is a JIT concern,
     // not part of the executor or native ABI.
     pub(crate) _module: JITModule,
-    pub(crate) entrypoints: BTreeMap<ProgramFunctionId, *const u8>,
+    pub(crate) entrypoints: BTreeMap<ProgramFunctionId, NativeEntryPoint>,
     pub(crate) retained_code_bytes: u64,
 }
 
 impl CompiledExecutable {
     pub fn entrypoint(&self, function: ProgramFunctionId) -> JitResult<NativeEntryPoint> {
-        let address = *self.entrypoints.get(&function).ok_or_else(|| {
+        self.entrypoints.get(&function).copied().ok_or_else(|| {
             JitError::Module(format!("compiled function {} is unavailable", function.0))
-        })?;
-        // SAFETY: GenericCompiler defines every exported function with the
-        // runtime-owned NativeEntryPoint signature and retains its JITModule.
-        Ok(unsafe { std::mem::transmute::<*const u8, NativeEntryPoint>(address) })
+        })
     }
 
     pub fn retained_function_count(&self) -> usize {

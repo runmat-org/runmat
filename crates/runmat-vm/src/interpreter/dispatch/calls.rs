@@ -32,41 +32,6 @@ pub enum UserCallHandling {
     Uncaught(Box<RuntimeError>),
 }
 
-fn current_class_context_from_function_name(current_function_name: &str) -> Option<String> {
-    if current_function_name.is_empty() {
-        return None;
-    }
-    if let Some((class_name, method_name)) = current_function_name.rsplit_once('.') {
-        if !class_name.is_empty()
-            && !method_name.is_empty()
-            && runmat_runtime::class_registry::get_class(class_name).is_some()
-        {
-            return Some(class_name.to_string());
-        }
-    }
-    runmat_runtime::class_registry::class_names()
-        .into_iter()
-        .find(|class_name| {
-            runmat_runtime::class_registry::get_class(class_name).is_some_and(|class_def| {
-                class_def.methods.values().any(|method| {
-                    method.function_name == current_function_name
-                        || method
-                            .function_name
-                            .strip_prefix(class_name)
-                            .is_some_and(|suffix| {
-                                suffix
-                                    .strip_prefix('.')
-                                    .is_some_and(|name| name == current_function_name)
-                            })
-                        || method
-                            .function_name
-                            .rsplit_once('.')
-                            .is_some_and(|(_, name)| name == current_function_name)
-                })
-            })
-        })
-}
-
 pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
     // Preserve values for non-singleton requests (including zero). Statement-level
     // display/public-result policy is decided later by core/session plumbing.
@@ -300,7 +265,8 @@ async fn handle_builtin_call_inner(
 
     let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
@@ -351,7 +317,8 @@ pub async fn handle_prepared_user_function_call(
         imports,
         exception,
     } = ctx;
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _function_input_callsite_guard =
         runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans);
     let ExceptionRouteContext {
@@ -742,7 +709,8 @@ async fn handle_method_or_member_index_call_inner(
 ) -> Result<MethodHandling, RuntimeError> {
     let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
@@ -775,7 +743,8 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     }
     let base = args.remove(0);
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
-    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let current_class_context =
+        runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let value = runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(

@@ -51,7 +51,17 @@ impl GenericCompiler {
         module.finalize_definitions().map_err(module_error)?;
         let entrypoints = definitions
             .into_iter()
-            .map(|(function, id)| (function, module.get_finalized_function(id)))
+            .map(|(function, id)| {
+                let address = module.get_finalized_function(id);
+                // SAFETY: every exported function is defined with Runtime's
+                // NativeEntryPoint signature and the module remains retained.
+                let entrypoint = unsafe {
+                    std::mem::transmute::<*const u8, runmat_runtime::native::NativeEntryPoint>(
+                        address,
+                    )
+                };
+                (function, entrypoint)
+            })
             .collect::<BTreeMap<_, _>>();
         Ok(CompiledExecutable {
             _module: module,

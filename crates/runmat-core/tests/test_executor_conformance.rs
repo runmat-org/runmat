@@ -135,28 +135,28 @@ async fn jit_tiering_preserves_the_portable_lifecycle_contract() {
     let mut session = RunMatSession::with_options(true, false).unwrap();
     let snapshot = conformance_snapshot();
 
-    for _ in 0..12 {
+    for iteration in 0..12 {
         let run = session
             .run_test_snapshot(&snapshot, &TestSelector::default())
             .await
             .unwrap();
-        assert_eq!(run.results.len(), 2, "{run:#?}");
+        assert_eq!(run.results.len(), 2, "iteration {iteration}: {run:#?}");
         assert_eq!(
             run.results[0].state.disposition,
             TerminalDisposition::Passed,
-            "{run:#?}"
+            "iteration {iteration}: {run:#?}"
         );
         assert_eq!(
             run.results[1].state.disposition,
             TerminalDisposition::Failed,
-            "{run:#?}"
+            "iteration {iteration}: {run:#?}"
         );
         assert_eq!(run.results[1].attempts[0].diagnostics.len(), 1, "{run:#?}");
     }
 
     assert!(
         session.stats().jit_compiled > 0,
-        "the immutable procedure call frame never reached Turbine: {:?}",
+        "the immutable procedure call frame never reached adaptive native execution: {:?}",
         session.stats()
     );
 }

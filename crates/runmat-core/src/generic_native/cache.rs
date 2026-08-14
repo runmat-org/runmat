@@ -1,9 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use runmat_hir::FunctionId;
 use runmat_jit::{
     entry::{EntryKey, EntryRegistry, PublishedEntry},
     invalidation::{DependencyKey, DependencyTracker},
+    tiering::{CompilationMode, RepresentationProfile, TierDecision, TierSiteId, TieringSession},
 };
 
 use crate::ExecutableUnit;
@@ -15,8 +18,16 @@ pub(crate) struct GenericNativeCache {
     entries: EntryRegistry,
     dependencies: DependencyTracker,
     project_scope_revision: String,
+    tiering: TieringSession,
+    pending: BTreeMap<EntryKey, PendingCompilation>,
+    failed_compilations: BTreeSet<EntryKey>,
     #[cfg(test)]
     compilations: usize,
+}
+
+struct PendingCompilation {
+    dependencies: runmat_jit::invalidation::DependencySnapshot,
+    receiver: Receiver<Result<super::compile::BackgroundCompiledGenericUnit, String>>,
 }
 
 impl Default for GenericNativeCache {
@@ -25,6 +36,9 @@ impl Default for GenericNativeCache {
             entries: EntryRegistry::default(),
             dependencies: DependencyTracker::default(),
             project_scope_revision: "loose".to_string(),
+            tiering: TieringSession::default(),
+            pending: BTreeMap::new(),
+            failed_compilations: BTreeSet::new(),
             #[cfg(test)]
             compilations: 0,
         }
@@ -32,6 +46,14 @@ impl Default for GenericNativeCache {
 }
 
 impl GenericNativeCache {
+    #[cfg(test)]
+    pub(crate) fn with_tiering_config(config: runmat_jit::tiering::TieringConfig) -> Self {
+        Self {
+            tiering: TieringSession::new(config).expect("test tiering config must be valid"),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn resolve_or_compile(
         &mut self,
         unit: &ExecutableUnit,
@@ -53,6 +75,190 @@ impl GenericNativeCache {
         self.entries
             .publish(key, compiled.executor, compiled.entrypoint, snapshot)
             .map_err(|error| super::error::stage("NativePublication", error))
+    }
+
+    pub(crate) fn representation_profile(
+        &self,
+        arguments: &[runmat_value::Value],
+    ) -> Option<RepresentationProfile> {
+        let facts = arguments
+            .iter()
+            .map(runmat_runtime::value_fact::value_fact)
+            .collect();
+        RepresentationProfile::from_facts(facts, self.tiering.config().max_profile_bytes).ok()
+    }
+
+    pub(crate) fn resolve_or_schedule(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+    ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
+        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let current = self.dependencies.snapshot_all();
+        let key = entry_key(unit, preferred_function);
+        self.publish_completed(&current)?;
+        let site = tier_site(unit, preferred_function, &key)?;
+        let availability = self
+            .entries
+            .availability(&key, &current, self.pending.len());
+        match self.tiering.decide(&site, &availability) {
+            TierDecision::Interpret => Ok(None),
+            TierDecision::ExecuteGeneric => Ok(self.entries.resolve(&key, &current)),
+            TierDecision::ExecuteSpecialized { profile } => Ok(self
+                .entries
+                .resolve_specialized(&key, profile, &current)
+                .or_else(|| self.entries.resolve(&key, &current))),
+            TierDecision::CompileGeneric { mode } => {
+                if self.failed_compilations.contains(&key) {
+                    return Ok(None);
+                }
+                match mode {
+                    CompilationMode::DeterministicSynchronous => {
+                        let compiled = match super::compile::compile(unit, preferred_function) {
+                            Ok(compiled) => compiled,
+                            Err(error) => {
+                                log::warn!("adaptive native compilation failed: {error}");
+                                self.failed_compilations.insert(key);
+                                return Ok(None);
+                            }
+                        };
+                        if !self
+                            .code_budget_admits(compiled.executor.retained_code_bytes(), &current)
+                        {
+                            self.failed_compilations.insert(key);
+                            return Ok(None);
+                        }
+                        #[cfg(test)]
+                        {
+                            self.compilations += 1;
+                        }
+                        let snapshot = self.dependencies.snapshot(dependency_keys.iter());
+                        self.entries
+                            .publish(key, compiled.executor, compiled.entrypoint, snapshot)
+                            .map(Some)
+                            .map_err(|error| super::error::stage("NativePublication", error))
+                    }
+                    CompilationMode::Background => {
+                        if let Err(error) = self.schedule_background(
+                            unit,
+                            preferred_function,
+                            key.clone(),
+                            self.dependencies.snapshot(dependency_keys.iter()),
+                        ) {
+                            log::warn!("adaptive native compilation was not scheduled: {error}");
+                            self.failed_compilations.insert(key);
+                        }
+                        Ok(None)
+                    }
+                }
+            }
+            // Specialized code publication is enabled only after the optimized
+            // code generator can consume and enforce this exact profile.
+            TierDecision::CompileSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
+        }
+    }
+
+    pub(crate) fn observe_invocation(
+        &self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        profile: &RepresentationProfile,
+        elapsed_ns: u64,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        let key = entry_key(unit, preferred_function);
+        let site = tier_site(unit, preferred_function, &key)?;
+        self.tiering
+            .observe_invocation(site, profile, elapsed_ns)
+            .map_err(|error| super::error::stage("NativeTierFeedback", error))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tiering_snapshot(&self) -> runmat_jit::tiering::TierFeedbackSnapshot {
+        self.tiering.snapshot()
+    }
+
+    fn schedule_background(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        key: EntryKey,
+        dependencies: runmat_jit::invalidation::DependencySnapshot,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        if self.pending.contains_key(&key) {
+            return Ok(());
+        }
+        let prepared = super::compile::prepare(unit, preferred_function)?;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("runmat-jit-compile".into())
+            .spawn(move || {
+                let result =
+                    super::compile::compile_prepared(prepared).map_err(|error| error.to_string());
+                let _ = sender.send(result);
+            })
+            .map_err(|error| super::error::stage("NativeBackgroundCompile", error))?;
+        self.pending.insert(
+            key,
+            PendingCompilation {
+                dependencies,
+                receiver,
+            },
+        );
+        Ok(())
+    }
+
+    fn publish_completed(
+        &mut self,
+        current: &runmat_jit::invalidation::DependencySnapshot,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        let completed = self
+            .pending
+            .iter()
+            .filter_map(|(key, pending)| match pending.receiver.try_recv() {
+                Ok(result) => Some((key.clone(), Some(result))),
+                Err(TryRecvError::Disconnected) => Some((key.clone(), None)),
+                Err(TryRecvError::Empty) => None,
+            })
+            .collect::<Vec<_>>();
+        for (key, result) in completed {
+            let pending = self
+                .pending
+                .remove(&key)
+                .expect("completed native compilation must remain pending");
+            let Some(Ok(compiled)) = result else {
+                self.failed_compilations.insert(key);
+                continue;
+            };
+            if !pending.dependencies.is_satisfied_by(current)
+                || !self.code_budget_admits(compiled.executor.retained_code_bytes(), current)
+            {
+                continue;
+            }
+            #[cfg(test)]
+            {
+                self.compilations += 1;
+            }
+            self.entries
+                .publish(
+                    key,
+                    Rc::new(compiled.executor),
+                    compiled.entrypoint,
+                    pending.dependencies,
+                )
+                .map_err(|error| super::error::stage("NativePublication", error))?;
+        }
+        Ok(())
+    }
+
+    fn code_budget_admits(
+        &self,
+        additional_bytes: u64,
+        current: &runmat_jit::invalidation::DependencySnapshot,
+    ) -> bool {
+        self.entries
+            .retained_code_bytes(current)
+            .checked_add(additional_bytes)
+            .is_some_and(|total| total <= self.tiering.config().max_code_bytes)
     }
 
     pub(crate) fn publish_session_registry(
@@ -81,6 +287,7 @@ impl GenericNativeCache {
             )?;
         }
         if changed {
+            self.failed_compilations.clear();
             self.observe(
                 DependencyKey::SessionCatalog,
                 session_catalog_revision(current),
@@ -102,6 +309,7 @@ impl GenericNativeCache {
             return Ok(());
         }
         self.project_scope_revision = revision.clone();
+        self.failed_compilations.clear();
         self.observe(DependencyKey::Program("session-project".into()), revision)?;
         let current = self.dependencies.snapshot_all();
         self.entries.invalidate(&current);
@@ -172,6 +380,25 @@ impl GenericNativeCache {
     pub(crate) fn compilation_count(&self) -> usize {
         self.compilations
     }
+}
+
+fn tier_site(
+    unit: &ExecutableUnit,
+    preferred_function: Option<&str>,
+    key: &EntryKey,
+) -> Result<TierSiteId, runmat_runtime::RuntimeError> {
+    let function = preferred_function
+        .and_then(|name| unit.native_function_id(name))
+        .or_else(|| unit.mir().entrypoints.first().copied())
+        .ok_or_else(|| super::error::stage("NativeTierIdentity", "entry function is missing"))?;
+    let function = u32::try_from(function.0)
+        .map(runmat_types::ProgramFunctionId)
+        .map_err(|_| super::error::stage("NativeTierIdentity", "function identity exceeds u32"))?;
+    Ok(TierSiteId {
+        entry: key.0.clone(),
+        function,
+        loop_header: None,
+    })
 }
 
 fn entry_key(unit: &ExecutableUnit, preferred_function: Option<&str>) -> EntryKey {

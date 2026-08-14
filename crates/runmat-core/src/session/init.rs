@@ -60,6 +60,8 @@ impl RunMatSession {
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(not(target_arch = "wasm32"))]
             generic_native_cache: crate::generic_native::GenericNativeCache::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            native_tiering_enabled: enable_jit,
             project_handoff: None,
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::clone(&interrupt_flag),
