@@ -18,8 +18,10 @@ use runmat_hir::{
     FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span, WorkspaceEffect,
 };
 use runmat_jit::{
+    deopt::{DeoptimizationPolicy, FaultInjection, ResumeTarget},
     entry::{EntryKey, EntryRegistry},
     invalidation::{DependencyKey, DependencyTracker},
+    specialization::GuardEnvironment,
     GenericExecutor, JitError,
 };
 use runmat_mir::{
@@ -32,10 +34,13 @@ use runmat_mir::{
 use runmat_native_codegen::{lower_executable, NativeLoweringInput, NativeTarget};
 use runmat_runtime::{context::RuntimeContext, execution::RuntimeExecutionService};
 use runmat_types::{
-    BindingId, BuiltinId, CallableFallbackPolicy, CallableIdentity, CapabilitySet, InteropManifest,
-    ParallelManifest, ProgramFunctionId, ProgramSourceId, RequestedOutputCount,
-    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
-    REGION_CONTRACT_SCHEMA_VERSION,
+    AliasFact, BindingId, BuiltinId, CallableFallbackPolicy, CallableIdentity,
+    CapabilityRequirement, CapabilitySet, DeoptimizationPointId, InteropManifest, NumericClass,
+    NumericDomain, NumericFact, ParallelManifest, ProgramFunctionId, ProgramPointId,
+    ProgramSourceId, RegionContract, RegionGuardCondition, RegionGuardContract, RegionGuardId,
+    RegionId, RegionProvenance, RegionValueFact, RegionValueId, RequestedOutputCount,
+    ResidencyFact, ShapeFact, ValueFact, ValueKindFact, INTEROP_MANIFEST_SCHEMA_VERSION,
+    PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 use runmat_value::Value;
 
@@ -93,6 +98,333 @@ fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(41.0)]);
+}
+
+#[test]
+fn failed_representation_guard_materializes_and_resumes_exact_native_state() {
+    let region = fixture_region(ValueFact::scalar(ValueKindFact::String));
+    let executor = GenericExecutor::compile(fixture_with_regions(vec![region])).unwrap();
+    let mut invocation = executor
+        .begin_with_deoptimization(
+            ProgramFunctionId(0),
+            Vec::new(),
+            Vec::new(),
+            1,
+            runtime_context(),
+            DeoptimizationPolicy::default(),
+        )
+        .unwrap();
+    let runmat_jit::execute::GenericInvocationStep::Deoptimized {
+        reason,
+        target,
+        frame,
+        ..
+    } = invocation.advance().unwrap()
+    else {
+        panic!("mismatched representation guard must deoptimize")
+    };
+    assert_eq!(
+        reason,
+        runmat_runtime::native::NativeDeoptReason::REPRESENTATION
+    );
+    assert_eq!(
+        target,
+        runmat_runtime::native::NativeResumeKind::GENERIC_NATIVE
+    );
+    assert_eq!(frame.site.point.position, 1);
+    assert_eq!(frame.locals[0].value, Some(Value::Num(41.0)));
+
+    invocation.resume_deoptimization().unwrap();
+    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+        invocation.advance().unwrap()
+    else {
+        panic!("retired guard must resume at the exact generic-native site")
+    };
+    assert_eq!(execution.outputs, vec![Value::Num(41.0)]);
+}
+
+#[test]
+fn injected_failure_at_every_guard_materializes_and_resumes_exact_state() {
+    let function = ProgramFunctionId(0);
+    let value = RegionValueId { function, local: 0 };
+    let numeric = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    });
+    let expected = ValueFact::scalar(numeric.clone());
+    let mut region = fixture_region(expected.clone());
+    region.capabilities = CapabilitySet([CapabilityRequirement::NativeCode].into_iter().collect());
+    let conditions = vec![
+        RegionGuardCondition::ValueFact {
+            value,
+            expected: expected.clone(),
+        },
+        RegionGuardCondition::Shape {
+            value,
+            expected: ShapeFact::Scalar,
+        },
+        RegionGuardCondition::Class {
+            value,
+            expected: numeric,
+        },
+        RegionGuardCondition::Residency {
+            value,
+            expected: ResidencyFact::Host,
+        },
+        RegionGuardCondition::Alias {
+            value,
+            expected: AliasFact::Unique,
+        },
+        RegionGuardCondition::RuntimeState {
+            identity: "catalog".into(),
+            revision: "7".into(),
+        },
+        RegionGuardCondition::Capability {
+            requirement: CapabilityRequirement::NativeCode,
+        },
+    ];
+    region.guards = conditions
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, condition)| RegionGuardContract {
+            id: RegionGuardId {
+                region: region.id,
+                ordinal: u32::try_from(ordinal).unwrap(),
+            },
+            condition,
+            deopt: DeoptimizationPointId {
+                function,
+                ordinal: u32::try_from(ordinal).unwrap(),
+            },
+        })
+        .collect();
+    let guards = region
+        .guards
+        .iter()
+        .map(|guard| guard.id)
+        .collect::<Vec<_>>();
+    let assembly = fixture_with_regions(vec![region]);
+
+    for guard in guards {
+        let policy = DeoptimizationPolicy {
+            guards: GuardEnvironment::default()
+                .with_runtime_revision("catalog", "7")
+                .with_capability(CapabilityRequirement::NativeCode),
+            ..DeoptimizationPolicy::default()
+        }
+        .inject(FaultInjection::Guard(guard));
+        let executor = GenericExecutor::compile(assembly.clone()).unwrap();
+        let mut invocation = executor
+            .begin_with_deoptimization(
+                function,
+                Vec::new(),
+                Vec::new(),
+                1,
+                runtime_context(),
+                policy,
+            )
+            .unwrap();
+        let runmat_jit::execute::GenericInvocationStep::Deoptimized { frame, .. } =
+            invocation.advance().unwrap()
+        else {
+            panic!("selected guard must deoptimize")
+        };
+        assert_eq!(frame.locals[0].value, Some(Value::Num(41.0)));
+        invocation.resume_deoptimization().unwrap();
+        let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+            invocation.advance().unwrap()
+        else {
+            panic!("retired guard must resume at the exact native site")
+        };
+        assert_eq!(execution.outputs, vec![Value::Num(41.0)]);
+    }
+}
+
+#[test]
+fn interpreter_target_is_selected_only_for_verified_empty_stack_resume_points() {
+    let point = ProgramPointId {
+        function: ProgramFunctionId(0),
+        block: 0,
+        position: 1,
+    };
+    let region = fixture_region(ValueFact::scalar(ValueKindFact::String));
+    let executor = GenericExecutor::compile_with_resume_points(
+        fixture_with_regions(vec![region]),
+        None,
+        BTreeMap::from([(point, 7)]),
+    )
+    .unwrap();
+    let policy = DeoptimizationPolicy {
+        target: ResumeTarget::Interpreter,
+        ..DeoptimizationPolicy::default()
+    };
+    let mut invocation = executor
+        .begin_with_deoptimization(
+            ProgramFunctionId(0),
+            Vec::new(),
+            Vec::new(),
+            1,
+            runtime_context(),
+            policy,
+        )
+        .unwrap();
+    let runmat_jit::execute::GenericInvocationStep::Deoptimized { target, frame, .. } =
+        invocation.advance().unwrap()
+    else {
+        panic!("mismatched representation guard must deoptimize")
+    };
+    assert_eq!(
+        target,
+        runmat_runtime::native::NativeResumeKind::INTERPRETER
+    );
+    assert_eq!(frame.site.bytecode_pc, Some(7));
+    assert!(frame.operands.is_empty());
+    assert_eq!(invocation.resume_state().bytecode_pc, 7);
+}
+
+#[test]
+fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
+    let assembly = two_semantic_calls_fixture();
+    let safepoints = assembly.functions[0].blocks[0]
+        .instructions
+        .iter()
+        .filter_map(|instruction| instruction.safepoint)
+        .collect::<Vec<_>>();
+    assert_eq!(safepoints.len(), 2);
+    for (index, safepoint) in safepoints.into_iter().enumerate() {
+        let runtime = runtime_context();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let activation = runtime.enter();
+        let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(move |_function, arguments, _requested_outputs| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                let result = arguments[0].clone();
+                Box::pin(async move { Ok(result) })
+            }),
+        ));
+        drop(activation);
+
+        let executor = GenericExecutor::compile(assembly.clone()).unwrap();
+        let policy = DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(safepoint));
+        let mut invocation = executor
+            .begin_with_deoptimization(
+                ProgramFunctionId(0),
+                Vec::new(),
+                Vec::new(),
+                1,
+                runtime,
+                policy,
+            )
+            .unwrap();
+        let runmat_jit::execute::GenericInvocationStep::Deoptimized { frame, .. } =
+            invocation.advance().unwrap()
+        else {
+            panic!("selected safepoint must deoptimize")
+        };
+        assert_eq!(calls.load(Ordering::SeqCst), index);
+        if index == 1 {
+            assert_eq!(frame.locals[0].value, Some(Value::Num(11.0)));
+        }
+
+        invocation.resume_deoptimization().unwrap();
+        let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+            invocation.advance().unwrap()
+        else {
+            panic!("safepoint deoptimization must resume")
+        };
+        assert_eq!(execution.outputs, vec![Value::Num(22.0)]);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        drop(invoker);
+    }
+}
+
+#[test]
+fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
+    let rooted = runmat_gc::gc_allocate_rooted(Value::String("native-live".to_string()))
+        .expect("allocate rooted native test value");
+    let handle = rooted.handle();
+    let handle_value = Value::HandleObject(runmat_value::HandleRef {
+        class_name: "NativeGcValue".to_string(),
+        target: handle,
+        valid: true,
+    });
+    let runtime = runtime_context();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let activation = runtime.enter();
+    // Runtime's scoped invoker API uses `Arc`, while GC handles are deliberately
+    // thread-affine and this callback runs only in the active RuntimeContext.
+    #[allow(clippy::arc_with_non_send_sync)]
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |_function, _arguments, _requested_outputs| {
+            let call = observed.fetch_add(1, Ordering::SeqCst);
+            let value = handle_value.clone();
+            Box::pin(async move {
+                if call == 1 {
+                    runmat_gc::gc_collect_major().map_err(|error| {
+                        runmat_runtime::RuntimeError::new(format!(
+                            "native GC stress collection failed: {error}"
+                        ))
+                    })?;
+                    runmat_gc::gc_clone_value(&handle).map_err(|error| {
+                        runmat_runtime::RuntimeError::new(format!(
+                            "native arena did not retain its GC handle: {error}"
+                        ))
+                    })?;
+                }
+                Ok(value)
+            })
+        }),
+    ));
+    drop(activation);
+
+    let assembly = two_semantic_calls_returning_first_fixture();
+    let second_safepoint = assembly.functions[0].blocks[0]
+        .instructions
+        .iter()
+        .filter_map(|instruction| instruction.safepoint)
+        .nth(1)
+        .expect("second semantic call safepoint");
+    let executor = GenericExecutor::compile(assembly).unwrap();
+    let policy =
+        DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(second_safepoint));
+    let mut invocation = executor
+        .begin_with_deoptimization(
+            ProgramFunctionId(0),
+            Vec::new(),
+            Vec::new(),
+            1,
+            runtime,
+            policy,
+        )
+        .unwrap();
+    let runmat_jit::execute::GenericInvocationStep::Deoptimized { frame, .. } =
+        invocation.advance().unwrap()
+    else {
+        panic!("second safepoint must deoptimize")
+    };
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        frame.locals[0].value,
+        Some(Value::HandleObject(ref value)) if value.target == handle
+    ));
+    rooted
+        .unroot()
+        .expect("transfer handle ownership to native arena");
+
+    invocation.resume_deoptimization().unwrap();
+    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+        invocation.advance().unwrap()
+    else {
+        panic!("GC-stressed deoptimization must resume")
+    };
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(matches!(
+        execution.outputs.as_slice(),
+        [Value::HandleObject(value)] if value.target == handle
+    ));
+    drop(invoker);
 }
 
 #[test]
@@ -482,6 +814,10 @@ fn runtime_context() -> RuntimeContext {
 }
 
 fn fixture() -> runmat_native_codegen::NativeAssembly {
+    fixture_with_regions(Vec::new())
+}
+
+fn fixture_with_regions(regions: Vec<RegionContract>) -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 2 };
     let function = FunctionId(0);
     let mir = MirAssembly {
@@ -543,7 +879,13 @@ fn fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let mut manifest = manifest(analysis.revision.schema_version);
+    manifest.capabilities.0.extend(
+        regions
+            .iter()
+            .flat_map(|region| region.capabilities.0.iter().copied()),
+    );
+    manifest.regions = regions;
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,
@@ -552,6 +894,46 @@ fn fixture() -> runmat_native_codegen::NativeAssembly {
         target: NativeTarget::current(),
     })
     .unwrap()
+}
+
+fn fixture_region(expected: ValueFact) -> RegionContract {
+    let function = ProgramFunctionId(0);
+    let region = RegionId {
+        function,
+        ordinal: 0,
+    };
+    let value = RegionValueId { function, local: 0 };
+    RegionContract {
+        schema_version: REGION_CONTRACT_SCHEMA_VERSION,
+        id: region,
+        source: ProgramSourceId(0),
+        span: runmat_types::ProgramSpan { start: 0, end: 2 },
+        entry: ProgramPointId {
+            function,
+            block: 0,
+            position: 1,
+        },
+        exits: Vec::new(),
+        live_in: vec![value],
+        live_out: Vec::new(),
+        value_facts: vec![RegionValueFact {
+            value,
+            fact: expected.clone(),
+        }],
+        effects: Default::default(),
+        capabilities: Default::default(),
+        guards: vec![RegionGuardContract {
+            id: RegionGuardId { region, ordinal: 0 },
+            condition: RegionGuardCondition::ValueFact { value, expected },
+            deopt: DeoptimizationPointId {
+                function,
+                ordinal: 0,
+            },
+        }],
+        provenance: RegionProvenance::Profiled {
+            profile_digest: "guard-test".into(),
+        },
+    }
 }
 
 fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
@@ -771,6 +1153,51 @@ fn semantic_call_fixture() -> runmat_native_codegen::NativeAssembly {
             span,
         }],
         MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+fn two_semantic_calls_fixture() -> runmat_native_codegen::NativeAssembly {
+    two_semantic_calls_fixture_returning(1, "two_semantic_calls")
+}
+
+fn two_semantic_calls_returning_first_fixture() -> runmat_native_codegen::NativeAssembly {
+    two_semantic_calls_fixture_returning(0, "two_semantic_calls_returning_first")
+}
+
+fn two_semantic_calls_fixture_returning(
+    return_local: usize,
+    name: &str,
+) -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let call = |argument: &str| {
+        MirRvalue::Call(MirCall {
+            callee: MirCallee::Static(CallableIdentity::BoundFunction(runmat_types::FunctionId(9))),
+            args: vec![MirCallArg::Single(MirOperand::Constant(
+                MirConstant::Number(argument.into()),
+            ))],
+            arg_spans: vec![span],
+            syntax: runmat_hir::CallSyntax::Plain,
+            requested_outputs: RequestedOutputCount::One,
+            fallback_policy: CallableFallbackPolicy::None,
+            workspace_first_name: None,
+            bare_identifier: false,
+            async_behavior: AsyncBehaviorFact::NeverSuspends,
+            effects: runmat_builtins::BuiltinEffects::none(),
+            workspace_effect: None,
+            environment_effect: None,
+            purity: runmat_builtins::BuiltinPurity::Pure,
+            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        })
+    };
+    lower_body(
+        name,
+        2,
+        vec![
+            statement(0, call("11"), span),
+            statement(1, call("22"), span),
+        ],
+        MirOperand::Local(MirLocalId(return_local)),
         span,
     )
 }

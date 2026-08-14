@@ -1,7 +1,7 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
-use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
+use crate::interpreter::api::{InterpreterOutcome, InterpreterResumeState, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
 use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::{attach_span_from_pc, mex, set_vm_pc};
@@ -416,6 +416,124 @@ pub async fn interpret_with_vars_in_context(
             ),
         ))
         .await
+}
+
+pub async fn interpret_resume_in_context(
+    bytecode: &Bytecode,
+    resume: InterpreterResumeState,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> VmResult<InterpreterOutcome> {
+    runtime
+        .scope(runmat_runtime::data::with_tx_registry_scope(
+            interpret_resume_inner(bytecode, resume, current_function_name, runtime.clone()),
+        ))
+        .await
+}
+
+/// Install immutable bytecode metadata that native execution does not visit as
+/// ordinary MIR sites. Core calls this before entering a native unit so class
+/// definitions have the same runtime visibility as interpreter execution.
+pub fn prepare_native_execution_metadata(bytecode: &Bytecode) -> VmResult<()> {
+    register_class_metadata(bytecode.instructions.iter())
+}
+
+fn register_class_metadata<'a>(instructions: impl IntoIterator<Item = &'a Instr>) -> VmResult<()> {
+    for instruction in instructions {
+        if let Instr::RegisterClass {
+            name,
+            super_class,
+            is_sealed,
+            is_abstract,
+            properties,
+            methods,
+            enumerations,
+        } = instruction
+        {
+            interp_dispatch::handle_register_class(
+                name.clone(),
+                super_class.clone(),
+                *is_sealed,
+                *is_abstract,
+                properties.clone(),
+                methods.clone(),
+                enumerations.clone(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+async fn interpret_resume_inner(
+    bytecode: &Bytecode,
+    resume: InterpreterResumeState,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> VmResult<InterpreterOutcome> {
+    if resume.pc > bytecode.instructions.len() {
+        return Err(mex(
+            "NativeResumePoint",
+            "interpreter resume PC is outside the immutable bytecode product",
+        ));
+    }
+    if resume.vars.len() != bytecode.var_count {
+        return Err(mex(
+            "NativeResumeFrame",
+            "materialized native locals do not match the VM frame layout",
+        ));
+    }
+    let mut resumed_bytecode = bytecode.clone();
+    resumed_bytecode.initially_unassigned_slots.clear();
+    let mut vars = Vec::with_capacity(resume.vars.len());
+    for (slot, value) in resume.vars.into_iter().enumerate() {
+        match value {
+            Some(value) => vars.push(value),
+            None => {
+                vars.push(Value::Num(0.0));
+                resumed_bytecode.initially_unassigned_slots.insert(slot);
+            }
+        }
+    }
+    let previous_call_counts = CALL_COUNTS.with(|counts| counts.borrow().clone());
+    let mut call_counts = previous_call_counts.clone();
+    call_counts.push((resume.supplied_inputs, resume.requested_outputs));
+    let mut state = InterpreterState::new_in_context(
+        resumed_bytecode,
+        &mut vars,
+        current_function_name,
+        call_counts,
+        runtime,
+    );
+    state.pc = resume.pc;
+    state.missing_input_slots = resume.missing_input_slots;
+    state.global_aliases = resume.global_aliases;
+    state.persistent_aliases = resume.persistent_aliases;
+    register_class_metadata(&bytecode.instructions[..resume.pc])?;
+    for instruction in &bytecode.instructions[..resume.pc] {
+        if let Instr::RegisterImport { path, wildcard } = instruction {
+            state.imports.push((path.clone(), *wildcard));
+        }
+    }
+    debug!(
+        "interpreter resumed from native execution at pc={} side_effect_epoch={}",
+        state.pc, resume.side_effect_epoch
+    );
+    let current_name = current_function_name.unwrap_or("<main>");
+    let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
+        current_name,
+        bytecode.source_id,
+        bytecode_frame_span(bytecode),
+    );
+    let mut output_vars = vars;
+    let result = run_interpreter(Box::new(state), &mut output_vars).await;
+    CALL_COUNTS.with(|counts| *counts.borrow_mut() = previous_call_counts);
+    match result {
+        Ok(outcome) => Ok(outcome),
+        Err(err) => {
+            let err = attach_span_from_pc(bytecode, err);
+            Err(attach_call_frames(bytecode, current_name, err))
+        }
+    }
 }
 
 async fn interpret_with_vars_inner(
@@ -1060,10 +1178,12 @@ async fn interpret_function_with_counts_in_context_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::{interpret_with_vars, output_value, run_interpreter_inner};
+    use super::{
+        interpret_resume_in_context, interpret_with_vars, output_value, run_interpreter_inner,
+    };
     use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
-    use crate::interpreter::api::InterpreterState;
+    use crate::interpreter::api::{InterpreterResumeState, InterpreterState};
     use futures::executor::block_on;
     use runmat_runtime::builtins::common::validation::{
         value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
@@ -1109,6 +1229,44 @@ mod tests {
             value,
             Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
         );
+    }
+
+    #[test]
+    fn interpreter_resume_starts_at_exact_pc_without_replaying_prefix() {
+        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(99.0),
+                Instr::StoreVar(0),
+                Instr::LoadConst(2.0),
+                Instr::StoreVar(1),
+                Instr::Return,
+            ],
+            2,
+        );
+        let resume = InterpreterResumeState {
+            pc: 2,
+            vars: vec![Some(Value::Num(41.0)), None],
+            supplied_inputs: 1,
+            requested_outputs: 1,
+            missing_input_slots: Default::default(),
+            global_aliases: Default::default(),
+            persistent_aliases: Default::default(),
+            side_effect_epoch: 1,
+        };
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let super::InterpreterOutcome::Completed(values) = block_on(interpret_resume_in_context(
+            &bytecode,
+            resume,
+            Some("resume_test"),
+            runtime,
+        ))
+        .unwrap();
+        assert_eq!(values[0], Value::Num(41.0));
+        assert_eq!(values[1], Value::Num(2.0));
+        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod compile;
+pub mod deopt;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod entry;
 mod error;
@@ -9,6 +10,7 @@ mod error;
 pub mod execute;
 pub mod invalidation;
 pub mod memory;
+pub mod specialization;
 
 pub use error::*;
 

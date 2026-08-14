@@ -78,6 +78,8 @@ pub struct FunctionBytecode {
     pub initially_unassigned_slots: HashSet<usize>,
     #[serde(default)]
     pub argument_validations: Vec<FunctionArgumentValidation>,
+    #[serde(default, with = "crate::layout::resume_point_map_serde")]
+    pub resume_points: std::collections::BTreeMap<runmat_types::ProgramPointId, usize>,
 }
 
 impl Default for FunctionBytecode {
@@ -102,6 +104,7 @@ impl Default for FunctionBytecode {
             var_names: HashMap::new(),
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
+            resume_points: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -410,6 +413,34 @@ impl Bytecode {
         self.function_registry.clone()
     }
 
+    pub fn for_function(
+        function: &FunctionBytecode,
+        registry: FunctionRegistry,
+        layout: VmAssemblyLayout,
+    ) -> Self {
+        Self {
+            instructions: function.instructions.clone(),
+            instr_spans: function.instr_spans.clone(),
+            call_arg_spans: function.call_arg_spans.clone(),
+            coverage_sites: function.coverage_sites.clone(),
+            source_id: function.source_id,
+            var_count: function.var_count,
+            bound_functions: registry.functions.clone(),
+            function_registry: registry,
+            var_types: vec![Type::Unknown; function.var_count],
+            var_names: function.var_names.clone(),
+            initially_unassigned_slots: function.initially_unassigned_slots.clone(),
+            layout: Some(layout),
+            async_metadata: AsyncMetadata::default(),
+            #[cfg(feature = "native-accel")]
+            accel_graph: None,
+            #[cfg(feature = "native-accel")]
+            fusion_groups: Vec::new(),
+            #[cfg(feature = "native-accel")]
+            fusion_metadata: FusionMetadata::default(),
+        }
+    }
+
     #[cfg(feature = "native-accel")]
     pub fn runtime_fusion_groups(&self) -> Vec<FusionGroup> {
         let metadata_present = self.fusion_metadata.mir_fusion_signal_count > 0
@@ -517,6 +548,7 @@ mod function_registry_tests {
             var_names: HashMap::new(),
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
+            resume_points: std::collections::BTreeMap::new(),
         }
     }
 

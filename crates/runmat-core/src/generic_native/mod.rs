@@ -1,5 +1,6 @@
 mod cache;
 mod compile;
+mod deopt;
 mod dependencies;
 mod error;
 mod invoke;

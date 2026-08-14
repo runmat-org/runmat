@@ -1155,6 +1155,16 @@ impl RunMatSession {
             };
             let mut function = function;
             function.function = new_id;
+            function.resume_points = std::mem::take(&mut function.resume_points)
+                .into_iter()
+                .map(|(mut point, pc)| {
+                    point.function = runmat_types::ProgramFunctionId(
+                        u32::try_from(new_id.0)
+                            .expect("session function identity exceeds portable schema"),
+                    );
+                    (point, pc)
+                })
+                .collect();
             function.source_id = function.source_id.or(bytecode.source_id);
             for instr in &mut function.instructions {
                 remap_semantic_function_instr(instr, &remap);

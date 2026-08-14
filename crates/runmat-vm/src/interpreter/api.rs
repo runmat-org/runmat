@@ -1,1 +1,1 @@
-pub use crate::interpreter::state::{InterpreterOutcome, InterpreterState};
+pub use crate::interpreter::state::{InterpreterOutcome, InterpreterResumeState, InterpreterState};

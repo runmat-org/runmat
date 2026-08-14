@@ -22,6 +22,7 @@ pub(crate) async fn invoke(
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Value, runmat_runtime::RuntimeError> {
+    runmat_vm::prepare_native_execution_metadata(unit.bytecode())?;
     let function = preferred_function
         .map(|name| {
             unit.native_function_id(name)
@@ -58,6 +59,7 @@ pub(crate) async fn invoke(
     let nested_runtime = runtime.clone();
     let semantic_capture_bindings = Arc::new(capture_bindings.clone());
     let semantic_native_functions = native_functions.clone();
+    let semantic_unit = unit.clone();
     let invoker =
         user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function, arguments, requested_outputs| {
@@ -66,6 +68,7 @@ pub(crate) async fn invoke(
                 let executor = Rc::clone(&nested_executor);
                 let runtime = nested_runtime.clone();
                 let capture_bindings = Arc::clone(&semantic_capture_bindings);
+                let unit = semantic_unit.clone();
                 let is_native = u32::try_from(function)
                     .map(ProgramFunctionId)
                     .is_ok_and(|function| semantic_native_functions.contains(&function));
@@ -88,16 +91,16 @@ pub(crate) async fn invoke(
                                 })
                                 .collect::<Vec<_>>();
                         let arguments = arguments[captures.len()..].to_vec();
-                        let execution = executor
-                            .invoke_async_with_captures(
-                                function,
-                                captures,
-                                arguments,
-                                requested_outputs,
-                                runtime,
-                            )
-                            .await
-                            .map_err(super::error::from_jit_error)?;
+                        let execution = super::deopt::invoke(
+                            &unit,
+                            executor,
+                            function,
+                            captures,
+                            arguments,
+                            requested_outputs,
+                            runtime,
+                        )
+                        .await?;
                         normalize_outputs(execution.outputs, requested_outputs)
                     } else if let Some(previous_invoker) = previous_invoker {
                         previous_invoker(function, &arguments, requested_outputs).await
@@ -147,11 +150,13 @@ pub(crate) async fn invoke(
     let lexical_executor = Rc::clone(&published.executor);
     let lexical_runtime = runtime.clone();
     let lexical_native_functions = native_functions.clone();
+    let lexical_unit = unit.clone();
     let lexical_invoker =
         user_functions::install_lexical_function_invoker(Some(Arc::new(move |call| {
             let previous = previous_lexical_invoker.clone();
             let executor = Rc::clone(&lexical_executor);
             let runtime = lexical_runtime.clone();
+            let unit = lexical_unit.clone();
             let is_native = u32::try_from(call.function)
                 .map(ProgramFunctionId)
                 .is_ok_and(|function| lexical_native_functions.contains(&function));
@@ -166,16 +171,16 @@ pub(crate) async fn invoke(
                     ));
                 }
                 let function = program_function(runmat_hir::FunctionId(call.function))?;
-                let execution = executor
-                    .invoke_async_with_captures(
-                        function,
-                        call.captures,
-                        call.arguments,
-                        call.requested_outputs,
-                        runtime,
-                    )
-                    .await
-                    .map_err(super::error::from_jit_error)?;
+                let execution = super::deopt::invoke(
+                    &unit,
+                    executor,
+                    function,
+                    call.captures,
+                    call.arguments,
+                    call.requested_outputs,
+                    runtime,
+                )
+                .await?;
                 Ok(runmat_runtime::call::lexical::LexicalCallResult {
                     value: normalize_outputs(execution.outputs, call.requested_outputs)?,
                     captures: execution.captures,
@@ -212,11 +217,16 @@ pub(crate) async fn invoke(
     source_functions.sort_by_key(|function| function.function);
     let catalog = user_functions::install_source_function_catalog(Some(Arc::new(source_functions)));
     let active = user_functions::push_active_semantic_function(function.0 as usize);
-    let execution = published
-        .executor
-        .invoke_async(function, arguments, requested_outputs, runtime)
-        .await
-        .map_err(super::error::from_jit_error);
+    let execution = super::deopt::invoke(
+        unit,
+        published.executor,
+        function,
+        Vec::new(),
+        arguments,
+        requested_outputs,
+        runtime,
+    )
+    .await;
     drop(active);
     drop(catalog);
     drop(resolver);

@@ -25,6 +25,10 @@ The RunMat interpreter executes the bytecode emitted by the VM compiler. It is a
 | `try_stack` | Stack of scoped catch targets used by `try`/`catch` bytecode. |
 | `last_exception` | Last caught exception value, used by exception-sensitive built-ins such as `rethrow`. |
 
+### Exact native continuation
+
+The compiler retains a portable MIR-program-point to bytecode-PC map for boundaries where the VM operand stack is empty. When native execution exits at one of those verified boundaries, Core can resume this same interpreter loop with materialized variable assignment state, global and persistent aliases, omitted inputs, `nargin` and `nargout`, imports, source context, and the exact next `pc`. The bytecode before that boundary is not executed again. If the native frame contains state the interpreter cannot represent exactly, execution stays in the generic-native continuation instead.
+
 ## Execution Loop
 
 The main loop in `run_interpreter_inner` repeatedly fetches the instruction at `pc`, offers eligible spans to the fusion executor, dispatches the instruction, and then applies the resulting control-flow decision.

@@ -54,6 +54,17 @@ pub(super) fn execute(
             block.terminator.frame_state.side_effect_epoch.0,
             request,
         )?;
+        if super::deoptimization::checkpoint(
+            state,
+            call,
+            &block.terminator.site,
+            &block.terminator.frame_state,
+            &block.region_boundaries,
+            block.terminator.safepoint,
+            exit,
+        )? {
+            return Ok(NativeSiteOutcome::exit());
+        }
         let outcome = execute_terminator(state, call, block.id, &block.terminator, exit)?;
         refresh_frame_roots(state, call)?;
         Ok(outcome)
@@ -74,6 +85,21 @@ pub(super) fn execute(
                 .map_or(0, |frame| frame.side_effect_epoch.0),
             request,
         )?;
+        let frame_state = instruction
+            .frame_state
+            .as_ref()
+            .unwrap_or(&block.terminator.frame_state);
+        if super::deoptimization::checkpoint(
+            state,
+            call,
+            &instruction.site,
+            frame_state,
+            &block.region_boundaries,
+            instruction.safepoint,
+            exit,
+        )? {
+            return Ok(NativeSiteOutcome::exit());
+        }
         // A MATLAB `for` iterable is evaluated once. Native IR represents its
         // evaluation as terminator-rvalue sites in the loop header, so a body
         // backedge must retain their first SSA results instead of replaying

@@ -18,7 +18,7 @@ pub(crate) mod runtime;
 pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
     AsyncMetadata, AwaitSite, Bytecode, EmitLabel, FunctionBytecode, FunctionRegistry, Instr,
-    SpawnSite, StackEffect, BYTECODE_SCHEMA_VERSION,
+    SpawnSite, StackEffect, BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
@@ -31,10 +31,11 @@ pub use interpreter::runner::{
     interpret_with_vars_in_context, invoke_semantic_function_value,
     invoke_semantic_function_value_in_context,
 };
-pub use interpreter::state::{InterpreterOutcome, InterpreterState};
+pub use interpreter::runner::{interpret_resume_in_context, prepare_native_execution_metadata};
+pub use interpreter::state::{InterpreterOutcome, InterpreterResumeState, InterpreterState};
 pub use layout::{
     derive_layout, remap_layout_function_ids, LayoutError, VmAssemblyLayout, VmEntrypointLayout,
-    VmFunctionLayout, VmSlotId,
+    VmFunctionLayout, VmSlotId, VM_LAYOUT_SCHEMA_VERSION,
 };
 pub use program_execution::{execute_program_request, materialize_deferred_call};
 pub use runtime::workspace::{

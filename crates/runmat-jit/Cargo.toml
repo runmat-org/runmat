@@ -19,6 +19,7 @@ runmat-value = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+runmat-gc = { workspace = true }
 runmat-runtime = { workspace = true }
 cranelift-codegen = { workspace = true }
 cranelift-jit = { workspace = true }

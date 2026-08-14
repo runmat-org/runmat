@@ -6589,6 +6589,7 @@ dependencies = [
  "futures",
  "runmat-builtins",
  "runmat-execution",
+ "runmat-gc",
  "runmat-hir",
  "runmat-mir",
  "runmat-native-codegen",

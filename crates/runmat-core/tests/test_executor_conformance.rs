@@ -370,7 +370,8 @@ async fn portable_product_retains_names_for_lexical_and_session_bindings() {
     assert!(names.values().any(|name| name == "shared"));
 
     let envelope = unit.portable_envelope_for(Some("bindings")).unwrap();
-    assert_eq!(envelope.manifest.revisions.vm_layout_schema, 2);
+    assert_eq!(envelope.manifest.revisions.vm_layout_schema, 3);
+    assert_eq!(envelope.manifest.revisions.function_registry_schema, 2);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

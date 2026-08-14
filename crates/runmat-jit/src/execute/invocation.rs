@@ -3,6 +3,7 @@ use runmat_runtime::native::{
     NativeFrame, NativeHostStatus, NativeResumeKind, NativeResumeState, NativeValueRef,
 };
 
+use crate::deopt::MaterializedFrame;
 use crate::{JitError, JitResult};
 
 use super::executor::GenericExecution;
@@ -23,6 +24,7 @@ pub struct GenericInvocation {
     resume: NativeResumeState,
     resume_pending: bool,
     terminal: bool,
+    deoptimization_target: Option<NativeResumeKind>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -36,6 +38,7 @@ pub enum GenericInvocationStep {
         reason: NativeDeoptReason,
         target: NativeResumeKind,
         guard: u64,
+        frame: MaterializedFrame,
     },
 }
 
@@ -56,6 +59,7 @@ impl GenericInvocation {
             resume,
             resume_pending: false,
             terminal: false,
+            deoptimization_target: None,
         }
     }
 
@@ -91,6 +95,19 @@ impl GenericInvocation {
         let target = super::site::resume_await(&mut self.state, completion)?;
         self.install_resume_target(target)?;
         self.resume_pending = false;
+        Ok(())
+    }
+
+    /// Resume a guard failure in the generic native version at the exact site.
+    pub fn resume_deoptimization(&mut self) -> JitResult<()> {
+        if self.deoptimization_target != Some(NativeResumeKind::GENERIC_NATIVE) {
+            return Err(JitError::Host(
+                "native deoptimization is not targeted at generic native code".into(),
+            ));
+        }
+        self.state.prepare_resume(self.resume)?;
+        self.resume_pending = false;
+        self.deoptimization_target = None;
         Ok(())
     }
 
@@ -145,10 +162,12 @@ impl GenericInvocation {
                 }
                 NativeExitKind::DEOPTIMIZED => {
                     self.resume_pending = true;
+                    self.deoptimization_target = Some(exit.deoptimization.target);
                     return Ok(GenericInvocationStep::Deoptimized {
                         reason: exit.deoptimization.reason,
                         target: exit.deoptimization.target,
                         guard: exit.deoptimization.guard,
+                        frame: self.state.take_deoptimization()?,
                     });
                 }
                 other => return Err(JitError::UnsupportedExit(other.0)),

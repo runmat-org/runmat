@@ -790,6 +790,12 @@ fn compile_semantic_functions(
             .modules
             .get(function.module.0)
             .map(|module| module.source_id);
+        let resume_points = compiler
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.functions.get(&function.id))
+            .map(|layout| layout.resume_points.clone())
+            .unwrap_or_default();
         functions.insert(
             function.id,
             FunctionBytecode {
@@ -851,6 +857,7 @@ fn compile_semantic_functions(
                             )
                     })
                     .collect(),
+                resume_points,
             },
         );
     }

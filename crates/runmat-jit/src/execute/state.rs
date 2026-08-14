@@ -8,7 +8,11 @@ use runmat_runtime::call::function_abi::{prepare_function_inputs, FunctionInputS
 use runmat_runtime::native::{NativeRoot, NativeRootKind, NativeRootSet, NativeValueRef};
 use runmat_runtime::{context::RuntimeContext, RuntimeError};
 
-use crate::memory::ValueArena;
+use crate::deopt::{
+    DeoptimizationPolicy, FaultInjection, MaterializedFrame, NativeMaterializationContext,
+};
+use crate::memory::{ScopedValueRoots, ValueArena};
+use crate::specialization::{GuardFailure, GuardFailureKind};
 use crate::{JitError, JitResult};
 
 pub(super) struct ActiveForLoop {
@@ -19,6 +23,18 @@ pub(super) struct ActiveForLoop {
 pub(super) struct ActiveExceptionHandler {
     pub catch_edge: NativeEdge,
     protected_blocks: BTreeSet<NativeBlockId>,
+}
+
+pub(super) struct HostStateInput {
+    pub function: NativeFunction,
+    pub arguments: Vec<runmat_value::Value>,
+    pub requested_outputs: usize,
+    pub runtime: RuntimeContext,
+    pub program_capture: Option<Vec<u8>>,
+    pub functions: Rc<Vec<NativeFunction>>,
+    pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub deoptimization: DeoptimizationPolicy,
+    pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
 }
 
 pub(super) struct HostState {
@@ -42,18 +58,35 @@ pub(super) struct HostState {
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
     active_exception_handlers: Vec<ActiveExceptionHandler>,
     next_await_continuation: u64,
+    deoptimization: DeoptimizationPolicy,
+    retired_guards: BTreeSet<runmat_types::RegionGuardId>,
+    pending_deoptimization: Option<MaterializedFrame>,
+    interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    supplied_inputs: usize,
+    requested_outputs: usize,
+    missing_input_locals: Vec<runmat_native_codegen::NativeLocalId>,
 }
 
 impl HostState {
-    pub fn new(
-        function: NativeFunction,
-        arguments: Vec<runmat_value::Value>,
-        requested_outputs: usize,
-        runtime: RuntimeContext,
-        program_capture: Option<Vec<u8>>,
-        functions: Rc<Vec<NativeFunction>>,
-        captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
-    ) -> JitResult<(Self, Vec<NativeValueRef>)> {
+    pub fn new(input: HostStateInput) -> JitResult<(Self, Vec<NativeValueRef>)> {
+        let HostStateInput {
+            function,
+            arguments,
+            requested_outputs,
+            runtime,
+            program_capture,
+            functions,
+            captures,
+            deoptimization,
+            interpreter_resume_points,
+        } = input;
+        let construction_values = arguments
+            .iter()
+            .cloned()
+            .chain(captures.iter().map(|capture| capture.value.clone()))
+            .collect();
+        let _construction_roots =
+            ScopedValueRoots::register(construction_values, "native_invocation_construction")?;
         let input_specs = function
             .argument_validations
             .iter()
@@ -77,6 +110,7 @@ impl HostState {
                 })
             })
             .collect::<JitResult<Vec<_>>>()?;
+        let supplied_inputs = arguments.len();
         let prepared = prepare_function_inputs(
             &function.name,
             &arguments,
@@ -84,7 +118,14 @@ impl HostState {
             function.abi.varargin.is_some(),
             &input_specs,
         )?;
-        let mut arena = ValueArena::default();
+        let missing_input_locals = function
+            .abi
+            .fixed_inputs
+            .iter()
+            .zip(&prepared.fixed)
+            .filter_map(|(local, value)| value.is_none().then_some(*local))
+            .collect();
+        let mut arena = ValueArena::new()?;
         let argument_refs = arguments
             .into_iter()
             .map(|value| arena.insert(value))
@@ -172,6 +213,13 @@ impl HostState {
             persistent_bindings: BTreeMap::new(),
             active_exception_handlers: Vec::new(),
             next_await_continuation: 1,
+            deoptimization,
+            retired_guards: BTreeSet::new(),
+            pending_deoptimization: None,
+            interpreter_resume_points,
+            supplied_inputs,
+            requested_outputs,
+            missing_input_locals,
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
@@ -319,6 +367,150 @@ impl HostState {
         }
         self.resume_target = Some(target);
         Ok(())
+    }
+
+    pub fn evaluate_guard(
+        &self,
+        guard: &runmat_native_codegen::NativeRegionGuard,
+    ) -> Result<(), GuardFailure> {
+        if self.retired_guards.contains(&guard.contract.id) {
+            return Ok(());
+        }
+        let value = guard
+            .value
+            .and_then(|value| self.values.get(&value).copied())
+            .and_then(|value| (!value.is_null()).then_some(value))
+            .and_then(|value| self.arena.get(value).ok());
+        self.deoptimization.guards.evaluate(&guard.contract, value)
+    }
+
+    pub fn should_inject_guard(&mut self, guard: runmat_types::RegionGuardId) -> bool {
+        if self.deoptimization.inject == Some(FaultInjection::Guard(guard)) {
+            self.deoptimization.inject = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn should_inject_safepoint(
+        &mut self,
+        safepoint: runmat_native_codegen::NativeSafepointId,
+    ) -> bool {
+        if self.deoptimization.inject == Some(FaultInjection::Safepoint(safepoint)) {
+            self.deoptimization.inject = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn materialize_deoptimization(
+        &mut self,
+        frame: &runmat_native_codegen::NativeFrameState,
+        site: &runmat_native_codegen::NativeMirSite,
+    ) -> JitResult<MaterializedFrame> {
+        let bytecode_pc = self
+            .interpreter_resume_supported(site)
+            .then(|| self.interpreter_resume_points.get(&frame.point).copied())
+            .flatten();
+        let materialized = MaterializedFrame::from_native(
+            frame,
+            NativeMaterializationContext {
+                phase: site.phase,
+                ordinal: site.ordinal,
+                bytecode_pc,
+                supplied_inputs: self.supplied_inputs,
+                requested_outputs: self.requested_outputs,
+                missing_input_locals: self.missing_input_locals.clone(),
+                global_bindings: self.global_bindings.clone(),
+                persistent_bindings: self.persistent_bindings.clone(),
+            },
+            |value| {
+                let Some(reference) = self.values.get(&value).copied() else {
+                    return Err(JitError::Host(format!(
+                        "native frame references unavailable SSA value {}",
+                        value.0
+                    )));
+                };
+                if reference.is_null() {
+                    Ok(None)
+                } else {
+                    self.arena.get(reference).cloned().map(Some)
+                }
+            },
+        )?;
+        self.pending_deoptimization = Some(materialized.clone());
+        Ok(materialized)
+    }
+
+    pub fn take_deoptimization(&mut self) -> JitResult<MaterializedFrame> {
+        self.pending_deoptimization
+            .take()
+            .ok_or_else(|| JitError::Host("native deoptimization has no materialized frame".into()))
+    }
+
+    pub fn retire_guard(&mut self, guard: runmat_types::RegionGuardId) {
+        self.retired_guards.insert(guard);
+    }
+
+    pub fn deoptimization_target(&self) -> runmat_runtime::native::NativeResumeKind {
+        self.deoptimization.target.native()
+    }
+
+    pub fn effective_deoptimization_target(
+        &self,
+        frame: &MaterializedFrame,
+    ) -> runmat_runtime::native::NativeResumeKind {
+        let requested = self.deoptimization_target();
+        if requested == runmat_runtime::native::NativeResumeKind::INTERPRETER
+            && frame.site.bytecode_pc.is_none()
+        {
+            runmat_runtime::native::NativeResumeKind::GENERIC_NATIVE
+        } else {
+            requested
+        }
+    }
+
+    fn interpreter_resume_supported(&self, site: &runmat_native_codegen::NativeMirSite) -> bool {
+        if self.pending_await.is_some()
+            || self.pending_place_mutation.is_some()
+            || self.last_error.is_some()
+            || !self.active_for_loops.is_empty()
+            || !self.active_exception_handlers.is_empty()
+        {
+            return false;
+        }
+        match site.phase {
+            runmat_native_codegen::NativeSitePhase::Rvalue => true,
+            runmat_native_codegen::NativeSitePhase::Statement => {
+                !self.function.expected_sites.iter().any(|candidate| {
+                    candidate.point == site.point
+                        && candidate.phase == runmat_native_codegen::NativeSitePhase::Rvalue
+                })
+            }
+            runmat_native_codegen::NativeSitePhase::TerminatorRvalue => site.ordinal == 0,
+            runmat_native_codegen::NativeSitePhase::Terminator => {
+                !self.function.expected_sites.iter().any(|candidate| {
+                    candidate.point == site.point
+                        && candidate.phase
+                            == runmat_native_codegen::NativeSitePhase::TerminatorRvalue
+                })
+            }
+        }
+    }
+
+    pub fn deoptimization_reason(
+        failure: GuardFailureKind,
+    ) -> runmat_runtime::native::NativeDeoptReason {
+        match failure {
+            GuardFailureKind::Representation | GuardFailureKind::Capability => {
+                runmat_runtime::native::NativeDeoptReason::REPRESENTATION
+            }
+            GuardFailureKind::RuntimeState => {
+                runmat_runtime::native::NativeDeoptReason::RUNTIME_STATE
+            }
+        }
     }
 
     pub fn enter_site_block(&mut self, block: NativeBlockId) {

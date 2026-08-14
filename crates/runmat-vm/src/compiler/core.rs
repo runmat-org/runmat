@@ -684,9 +684,11 @@ impl Compiler {
             for scope in exception_scopes.leaving_at(block.id) {
                 self.emit(Instr::LeaveTry(*scope));
             }
-            for stmt in &block.statements {
+            for (position, stmt) in block.statements.iter().enumerate() {
+                self.record_resume_point(block.id, position)?;
                 self.compile_mir_stmt(stmt)?;
             }
+            self.record_resume_point(block.id, block.statements.len())?;
             match &block.terminator.kind {
                 MirTerminatorKind::Goto(target) => {
                     let pc = self.emit(Instr::Jump(usize::MAX));
@@ -832,6 +834,44 @@ impl Compiler {
             );
         }
 
+        Ok(())
+    }
+
+    fn record_resume_point(
+        &mut self,
+        block: BasicBlockId,
+        position: usize,
+    ) -> Result<(), CompileError> {
+        let function = self
+            .function
+            .ok_or_else(|| CompileError::new("compiler missing selected function"))?;
+        let function = u32::try_from(function.0)
+            .map(runmat_types::ProgramFunctionId)
+            .map_err(|_| CompileError::new("function identity exceeds resume schema"))?;
+        let position = u32::try_from(position)
+            .map_err(|_| CompileError::new("MIR position exceeds resume schema"))?;
+        let point = runmat_types::ProgramPointId {
+            function,
+            block: u32::try_from(block.0)
+                .map_err(|_| CompileError::new("MIR block exceeds resume schema"))?,
+            position,
+        };
+        let layout = self
+            .layout
+            .as_mut()
+            .and_then(|layout| {
+                layout
+                    .functions
+                    .get_mut(&runmat_hir::FunctionId(function.0 as usize))
+            })
+            .ok_or_else(|| CompileError::new("compiler missing function resume layout"))?;
+        if layout
+            .resume_points
+            .insert(point, self.instructions.len())
+            .is_some()
+        {
+            return Err(CompileError::new("duplicate MIR resume point"));
+        }
         Ok(())
     }
 
@@ -4358,6 +4398,7 @@ mod tests {
                 mir_local_slots,
                 captures: Vec::new(),
                 local_count,
+                resume_points: std::collections::BTreeMap::new(),
             },
         );
         let span = runmat_hir::Span::default();
@@ -4401,6 +4442,40 @@ mod tests {
             current_span: None,
             pending_place_mutation: None,
         }
+    }
+
+    #[test]
+    fn compiler_records_exact_empty_stack_mir_resume_boundaries() {
+        let mut compiler = compiler_with_local_assignments(vec![MirRvalue::Use(
+            MirOperand::Constant(MirConstant::Number("1".into())),
+        )]);
+        compiler.compile().unwrap();
+        let points = &compiler
+            .layout
+            .as_ref()
+            .unwrap()
+            .functions
+            .get(&FunctionId(0))
+            .unwrap()
+            .resume_points;
+        assert_eq!(
+            points.get(&runmat_types::ProgramPointId {
+                function: runmat_types::ProgramFunctionId(0),
+                block: 0,
+                position: 0,
+            }),
+            Some(&0)
+        );
+        let terminator = points
+            .get(&runmat_types::ProgramPointId {
+                function: runmat_types::ProgramFunctionId(0),
+                block: 0,
+                position: 1,
+            })
+            .copied()
+            .unwrap();
+        assert!(terminator > 0);
+        assert!(terminator <= compiler.instructions.len());
     }
 
     #[test]

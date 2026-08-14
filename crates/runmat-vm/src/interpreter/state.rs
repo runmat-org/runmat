@@ -13,6 +13,19 @@ pub enum InterpreterOutcome {
     Completed(Vec<Value>),
 }
 
+/// Exact VM-owned state materialized from a native empty-stack MIR boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InterpreterResumeState {
+    pub pc: usize,
+    pub vars: Vec<Option<Value>>,
+    pub supplied_inputs: usize,
+    pub requested_outputs: usize,
+    pub missing_input_slots: HashSet<usize>,
+    pub global_aliases: HashMap<usize, String>,
+    pub persistent_aliases: HashMap<usize, String>,
+    pub side_effect_epoch: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActiveTryHandler {
     pub scope: usize,

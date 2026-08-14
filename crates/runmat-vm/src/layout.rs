@@ -4,9 +4,10 @@ use runmat_hir::{
 };
 use runmat_mir::{MirAssembly, MirLocalId};
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+
+/// Portable schema for serialized [`VmAssemblyLayout`] payloads.
+pub const VM_LAYOUT_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct VmSlotId(pub usize);
@@ -31,6 +32,43 @@ pub struct VmFunctionLayout {
     pub mir_local_slots: HashMap<MirLocalId, VmSlotId>,
     pub captures: Vec<VmCaptureSlot>,
     pub local_count: usize,
+    /// Bytecode instruction at which an empty-operand MIR boundary can resume.
+    #[serde(default, with = "resume_point_map_serde")]
+    pub resume_points: BTreeMap<runmat_types::ProgramPointId, usize>,
+}
+
+/// Portable sequence encoding for a map whose structured program-point keys
+/// cannot be represented as JSON object keys.
+pub(crate) mod resume_point_map_serde {
+    use std::collections::BTreeMap;
+
+    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+
+    use runmat_types::ProgramPointId;
+
+    pub fn serialize<S>(
+        points: &BTreeMap<ProgramPointId, usize>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        points.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<ProgramPointId, usize>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries = Vec::<(ProgramPointId, usize)>::deserialize(deserializer)?;
+        let mut points = BTreeMap::new();
+        for (point, pc) in entries {
+            if points.insert(point, pc).is_some() {
+                return Err(D::Error::custom("duplicate VM resume program point"));
+            }
+        }
+        Ok(points)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,10 +122,21 @@ pub fn remap_layout_function_ids(
     }
     let mut functions = HashMap::with_capacity(layout.functions.len());
     for (function, mut metadata) in std::mem::take(&mut layout.functions) {
-        metadata.function = remap
+        let published = remap
             .get(&metadata.function)
             .copied()
             .unwrap_or(metadata.function);
+        metadata.function = published;
+        metadata.resume_points = std::mem::take(&mut metadata.resume_points)
+            .into_iter()
+            .map(|(mut point, pc)| {
+                point.function = runmat_types::ProgramFunctionId(
+                    u32::try_from(published.0)
+                        .expect("published VM function identity exceeds portable schema"),
+                );
+                (point, pc)
+            })
+            .collect();
         for capture in &mut metadata.captures {
             capture.from_function = remap
                 .get(&capture.from_function)
@@ -246,6 +295,7 @@ fn derive_function_layout(
         mir_local_slots,
         captures,
         local_count: next_slot,
+        resume_points: BTreeMap::new(),
     })
 }
 
