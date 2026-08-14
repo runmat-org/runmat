@@ -17,7 +17,11 @@ use runmat_execution::{
 use runmat_hir::{
     FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span, WorkspaceEffect,
 };
-use runmat_jit::{GenericExecutor, JitError};
+use runmat_jit::{
+    entry::{EntryKey, EntryRegistry},
+    invalidation::{DependencyKey, DependencyTracker},
+    GenericExecutor, JitError,
+};
 use runmat_mir::{
     AsyncBehaviorFact, BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall,
     MirCallArg, MirCallee, MirConstant, MirFunctionMetadata, MirIndexComponent, MirIndexPlan,
@@ -34,6 +38,53 @@ use runmat_types::{
     REGION_CONTRACT_SCHEMA_VERSION,
 };
 use runmat_value::Value;
+
+#[test]
+fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
+    let mut dependencies = DependencyTracker::default();
+    let program = DependencyKey::Program("project".into());
+    let provider = DependencyKey::Provider(7);
+    dependencies.observe(program.clone(), "revision-a").unwrap();
+    dependencies
+        .observe(provider.clone(), "provider-a")
+        .unwrap();
+    let first_snapshot = dependencies.snapshot([&program, &provider]);
+
+    let key = EntryKey("project/main".into());
+    let mut registry = EntryRegistry::default();
+    let stable_cell = registry.cell(key.clone());
+    let first_executor = Rc::new(GenericExecutor::compile(fixture()).unwrap());
+    let first = registry
+        .publish(
+            key.clone(),
+            Rc::clone(&first_executor),
+            ProgramFunctionId(0),
+            first_snapshot,
+        )
+        .unwrap();
+    assert_eq!(first.publication, 1);
+    assert!(Rc::ptr_eq(&first.executor, &first_executor));
+
+    dependencies.observe(provider, "provider-b").unwrap();
+    let current = dependencies.snapshot_all();
+    assert_eq!(registry.invalidate(&current), 1);
+    assert!(!stable_cell.is_published());
+    assert_eq!(registry.retained_cell_count(), 1);
+
+    let second_executor = Rc::new(GenericExecutor::compile(fixture()).unwrap());
+    let second = registry
+        .publish(
+            key,
+            Rc::clone(&second_executor),
+            ProgramFunctionId(0),
+            current,
+        )
+        .unwrap();
+    assert_eq!(second.publication, 2);
+    assert!(stable_cell.is_published());
+    assert!(Rc::ptr_eq(&second.executor, &second_executor));
+    assert!(!Rc::ptr_eq(&first.executor, &second.executor));
+}
 
 #[test]
 fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {

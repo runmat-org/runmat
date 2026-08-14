@@ -14113,6 +14113,104 @@ fn workspace_state_import_rejects_invalid_payload() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_dependencies() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction y = cacheDependency(x)\ny = x + 1;\nend",
+    )
+    .expect("define first dependency");
+
+    let source = ExecutableSource::new(
+        "core-native-cache-test@1",
+        "nativeCacheCaller.m",
+        "function y = nativeCacheCaller(x)\ny = cacheDependency(x);\nend\n",
+    );
+    let first_unit = block_on(session.compile_executable_unit(source.clone(), None))
+        .expect("compile first unit");
+    let published_function = first_unit
+        .functions()
+        .resolve_name("nativeCacheCaller")
+        .expect("published function identity");
+    let published_program_function = runmat_types::ProgramFunctionId(
+        u32::try_from(published_function.0).expect("portable function identity"),
+    );
+    assert!(first_unit.mir().bodies.contains_key(&published_function));
+    assert!(first_unit
+        .analysis()
+        .function(published_program_function)
+        .is_some());
+    assert!(first_unit
+        .vm_layout()
+        .functions
+        .contains_key(&published_function));
+    assert_eq!(
+        first_unit
+            .portable_envelope_for(Some("nativeCacheCaller"))
+            .expect("portable product")
+            .manifest
+            .identity
+            .entrypoint_function,
+        published_program_function
+    );
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeCacheCaller".into()),
+        arguments: vec![runmat_value::Value::Num(2.0)],
+        requested_outputs: 1,
+    };
+    let first = block_on(session.invoke_executable(
+        &first_unit,
+        invocation.clone(),
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("invoke first publication");
+    assert_eq!(first, runmat_value::Value::Num(3.0));
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+
+    let repeated = block_on(session.invoke_executable(
+        &first_unit,
+        invocation.clone(),
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("reuse exact publication");
+    assert_eq!(repeated, first);
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction y = unrelatedNativeCacheFunction(x)\ny = x * 2;\nend",
+    )
+    .expect("publish unrelated definition");
+    let after_unrelated = block_on(session.invoke_executable(
+        &first_unit,
+        invocation.clone(),
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("reuse after unrelated definition");
+    assert_eq!(after_unrelated, first);
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction y = cacheDependency(x)\ny = x + 10;\nend",
+    )
+    .expect("redefine exact dependency");
+    assert_eq!(session.generic_native_cache_counts(), (1, 0));
+
+    let second_unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile unit after dependency redefinition");
+    let second = block_on(session.invoke_executable(
+        &second_unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("invoke replacement publication");
+    assert_eq!(second, runmat_value::Value::Num(12.0));
+    assert_eq!(session.generic_native_cache_counts(), (2, 1));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = ExecutableSource::new(

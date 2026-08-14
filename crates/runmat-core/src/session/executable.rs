@@ -1,6 +1,14 @@
 use super::*;
 
 impl RunMatSession {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn generic_native_cache_counts(&self) -> (usize, usize) {
+        (
+            self.generic_native_cache.compilation_count(),
+            self.generic_native_cache.published_entry_count(),
+        )
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     async fn invoke_generic_native(
         &mut self,
@@ -9,8 +17,12 @@ impl RunMatSession {
         arguments: Vec<Value>,
         requested_outputs: usize,
     ) -> std::result::Result<Value, RuntimeError> {
+        let published = self
+            .generic_native_cache
+            .resolve_or_compile(unit, preferred_function)?;
         crate::generic_native::invoke(
             unit,
+            published,
             preferred_function,
             arguments,
             requested_outputs,

@@ -959,7 +959,7 @@ impl RunMatSession {
                 project_symbol_aliases,
             )
         };
-        let (lowering, mir, analysis, mut bytecode) = {
+        let (lowering, mut mir, mut analysis, mut bytecode) = {
             let _span = info_span!("runtime.lower").entered();
             // WASM registrations are explicit rather than inventory-backed. Install
             // them before analysis so the retained catalog revision is identical to
@@ -1034,11 +1034,27 @@ impl RunMatSession {
                 .or(Some(source_id));
         }
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
-        let (function_registry_after_success, next_semantic_function_id_after_success) = self
-            .prepare_session_semantic_function_registry(
-                &mut bytecode,
-                &private_companion_function_names,
-            );
+        let (
+            function_registry_after_success,
+            next_semantic_function_id_after_success,
+            function_id_remap,
+        ) = self.prepare_session_semantic_function_registry(
+            &mut bytecode,
+            &private_companion_function_names,
+        );
+        if !function_id_remap.is_empty() {
+            runmat_mir::remap_function_ids(&mut mir, &function_id_remap).map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .build(),
+                )
+            })?;
+            analysis = runmat_mir::analysis::analyze_assembly(&mir);
+            if let Some(layout) = &mut bytecode.layout {
+                runmat_vm::remap_layout_function_ids(layout, &function_id_remap);
+            }
+        }
         Ok(PreparedExecution {
             ast,
             lowering,
@@ -1079,7 +1095,11 @@ impl RunMatSession {
         &self,
         bytecode: &mut runmat_vm::Bytecode,
         private_companion_function_names: &HashSet<String>,
-    ) -> (runmat_vm::FunctionRegistry, usize) {
+    ) -> (
+        runmat_vm::FunctionRegistry,
+        usize,
+        HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+    ) {
         let mut session_registry = self.function_registry.clone();
         let mut execution_registry = session_registry.clone();
         let mut next_semantic_function_id = self.next_semantic_function_id;
@@ -1088,7 +1108,7 @@ impl RunMatSession {
             bytecode.function_registry = session_registry.clone();
             bytecode.bound_functions = bytecode.function_registry.functions.clone();
             bind_semantic_function_references(bytecode);
-            return (session_registry, next_semantic_function_id);
+            return (session_registry, next_semantic_function_id, HashMap::new());
         }
 
         let mut remap = HashMap::new();
@@ -1159,7 +1179,7 @@ impl RunMatSession {
         bytecode.function_registry = execution_registry;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         bind_semantic_function_references(bytecode);
-        (session_registry, next_semantic_function_id)
+        (session_registry, next_semantic_function_id, remap)
     }
 
     pub(crate) fn normalize_error_namespace(&self, error: &mut RuntimeError) {

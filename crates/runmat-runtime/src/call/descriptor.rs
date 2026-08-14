@@ -457,8 +457,34 @@ async fn execute_resolved_callable(
         CallableIdentity::Builtin(id) => {
             call_builtin_with_requested_outputs(&id.0, &args, requested_outputs).await
         }
-        CallableIdentity::BoundFunction(function)
-        | CallableIdentity::ExternalFunction { function, .. } => {
+        CallableIdentity::BoundFunction(function) => {
+            if let Some(result) = crate::user_functions::try_call_semantic_function(
+                function.0,
+                &args,
+                requested_outputs,
+            )
+            .await
+            {
+                return result;
+            }
+            Err(function_unavailable_error(function.0, &metadata))
+        }
+        CallableIdentity::ExternalFunction {
+            function,
+            display_name,
+        } => {
+            if let Some(result) = crate::user_functions::try_call_external_function(
+                crate::user_functions::ExternalFunctionCall {
+                    function: function.0,
+                    display_name,
+                    arguments: args.clone(),
+                    requested_outputs,
+                },
+            )
+            .await
+            {
+                return result;
+            }
             if let Some(result) = crate::user_functions::try_call_semantic_function(
                 function.0,
                 &args,
@@ -501,8 +527,34 @@ async fn try_execute_resolved_callable(
                 .await
                 .map(Some)
         }
-        CallableIdentity::BoundFunction(function)
-        | CallableIdentity::ExternalFunction { function, .. } => {
+        CallableIdentity::BoundFunction(function) => {
+            if let Some(result) = crate::user_functions::try_call_semantic_function(
+                function.0,
+                &args,
+                requested_outputs,
+            )
+            .await
+            {
+                return result.map(Some);
+            }
+            Ok(None)
+        }
+        CallableIdentity::ExternalFunction {
+            function,
+            display_name,
+        } => {
+            if let Some(result) = crate::user_functions::try_call_external_function(
+                crate::user_functions::ExternalFunctionCall {
+                    function: function.0,
+                    display_name,
+                    arguments: args.clone(),
+                    requested_outputs,
+                },
+            )
+            .await
+            {
+                return result.map(Some);
+            }
             if let Some(result) = crate::user_functions::try_call_semantic_function(
                 function.0,
                 &args,

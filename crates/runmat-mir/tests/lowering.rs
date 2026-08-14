@@ -13,6 +13,7 @@ use runmat_types::{
     DimensionFact, ExecutionFact, NumericClass, NumericDomain, NumericFact, ProgramFunctionId,
     ProgramPointId, RegionValueId, ShapeFact, ValueFact, ValueKindFact,
 };
+use std::collections::HashMap;
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
     let ast = runmat_parser::parse(src).unwrap();
@@ -88,6 +89,30 @@ fn first_call(body: &MirBody) -> &runmat_mir::MirCall {
             _ => None,
         })
         .expect("expected at least one lowered call")
+}
+
+#[test]
+fn function_remap_moves_local_program_identity_without_collapsing_external_identity() {
+    let ast = runmat_parser::parse("function y = caller(x)\ny = published(x);\nend").unwrap();
+    let bound = HashMap::from([("published".to_string(), runmat_hir::FunctionId(0))]);
+    let hir = lower(&ast, &LoweringContext::empty().with_bound_functions(&bound)).unwrap();
+    let mut mir = lower_assembly(&hir.assembly).unwrap();
+    let remap = HashMap::from([(runmat_hir::FunctionId(0), runmat_hir::FunctionId(9))]);
+    runmat_mir::remap_function_ids(&mut mir, &remap).unwrap();
+
+    assert!(mir.bodies.contains_key(&runmat_hir::FunctionId(9)));
+    assert!(mir.functions.contains_key(&runmat_hir::FunctionId(9)));
+    let call = first_call(&mir.bodies[&runmat_hir::FunctionId(9)]);
+    assert!(matches!(
+        call.callee,
+        MirCallee::Static(CallableIdentity::ExternalFunction {
+            function: runmat_hir::FunctionId(0),
+            ..
+        })
+    ));
+    let analysis = analyze_assembly(&mir);
+    assert!(analysis.function(ProgramFunctionId(9)).is_some());
+    assert!(analysis.function(ProgramFunctionId(0)).is_none());
 }
 
 fn first_indexing(body: &MirBody) -> &runmat_mir::MirIndexing {

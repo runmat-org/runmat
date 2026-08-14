@@ -87,6 +87,7 @@ pub(crate) struct CallState {
     pub callsites: Vec<CallsiteInfo>,
     pub function_input_callsites: Vec<CallsiteInfo>,
     pub semantic_invoker: Option<std::sync::Arc<crate::user_functions::FunctionInvoker>>,
+    pub external_invoker: Option<std::sync::Arc<crate::user_functions::ExternalFunctionInvoker>>,
     pub lexical_invoker: Option<std::sync::Arc<crate::user_functions::LexicalFunctionInvoker>>,
     pub semantic_resolver: Option<std::sync::Arc<crate::user_functions::FunctionResolver>>,
     pub dynamic_loader: Option<std::sync::Arc<crate::user_functions::DynamicFunctionLoader>>,
@@ -105,6 +106,7 @@ impl std::fmt::Debug for CallState {
                 &self.function_input_callsites.len(),
             )
             .field("semantic_invoker", &self.semantic_invoker.is_some())
+            .field("external_invoker", &self.external_invoker.is_some())
             .field("lexical_invoker", &self.lexical_invoker.is_some())
             .field("semantic_resolver", &self.semantic_resolver.is_some())
             .field("dynamic_loader", &self.dynamic_loader.is_some())

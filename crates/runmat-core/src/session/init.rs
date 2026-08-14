@@ -55,6 +55,8 @@ impl RunMatSession {
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(not(target_arch = "wasm32"))]
+            generic_native_cache: crate::generic_native::GenericNativeCache::default(),
             project_handoff: None,
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::clone(&interrupt_flag),

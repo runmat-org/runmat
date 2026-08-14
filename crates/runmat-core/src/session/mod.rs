@@ -85,6 +85,9 @@ pub struct RunMatSession {
     next_semantic_function_id: usize,
     /// Canonically compiled functions discovered through the runtime search path.
     dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
+    /// Session-scoped production native entry publication and invalidation.
+    #[cfg(not(target_arch = "wasm32"))]
+    generic_native_cache: crate::generic_native::GenericNativeCache,
     /// Optional host-frozen project snapshot used by every compilation in this session.
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     /// Interned source pool for user-defined functions

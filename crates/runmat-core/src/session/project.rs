@@ -26,6 +26,12 @@ impl RunMatSession {
             .runtime_context
             .clone()
             .with_program_revision(Some(program_revision));
+        #[cfg(not(target_arch = "wasm32"))]
+        self.generic_native_cache
+            .publish_project_revision(Some(&revision))
+            .map_err(|error| {
+                runmat_package::FrozenProjectHandoffError::Revision(error.to_string())
+            })?;
         self.project_handoff = Some(handoff);
         self.pending_companion_source_discovery = None;
         self.dynamic_function_cache
@@ -37,6 +43,10 @@ impl RunMatSession {
 
     /// Remove the host-frozen snapshot and restore normal project discovery.
     pub fn clear_project_handoff(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.generic_native_cache
+            .publish_project_revision(None)
+            .expect("native project dependency generation is valid");
         self.project_handoff = None;
         self.runtime_context = self.runtime_context.clone().with_program_revision(None);
         self.pending_companion_source_discovery = None;

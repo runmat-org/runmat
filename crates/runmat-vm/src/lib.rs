@@ -33,7 +33,8 @@ pub use interpreter::runner::{
 };
 pub use interpreter::state::{InterpreterOutcome, InterpreterState};
 pub use layout::{
-    derive_layout, LayoutError, VmAssemblyLayout, VmEntrypointLayout, VmFunctionLayout, VmSlotId,
+    derive_layout, remap_layout_function_ids, LayoutError, VmAssemblyLayout, VmEntrypointLayout,
+    VmFunctionLayout, VmSlotId,
 };
 pub use program_execution::{execute_program_request, materialize_deferred_call};
 pub use runtime::workspace::{

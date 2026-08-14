@@ -91,6 +91,16 @@ impl ExecutableUnit {
         names
     }
 
+    /// Resolve the canonical MIR/native function identity by source name.
+    /// Interactive VM publication may remap its registry identities into the
+    /// session namespace; native compilation retains the immutable MIR identity.
+    pub(crate) fn native_function_id(&self, name: &str) -> Option<runmat_hir::FunctionId> {
+        self.mir
+            .functions
+            .iter()
+            .find_map(|(function, metadata)| (metadata.name.0 == name).then_some(*function))
+    }
+
     pub(crate) fn procedure_input_count(&self, name: &str) -> Option<usize> {
         self.functions
             .resolve_name(name)

@@ -11,6 +11,14 @@ pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeE
 pub type DynamicFunctionLoadFuture =
     Pin<Box<dyn Future<Output = Option<Result<Value, RuntimeError>>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
+#[derive(Debug, Clone)]
+pub struct ExternalFunctionCall {
+    pub function: usize,
+    pub display_name: String,
+    pub arguments: Vec<Value>,
+    pub requested_outputs: usize,
+}
+pub type ExternalFunctionInvoker = dyn Fn(ExternalFunctionCall) -> UserFunctionFuture;
 pub type LexicalFunctionFuture =
     Pin<Box<dyn Future<Output = Result<crate::call::lexical::LexicalCallResult, RuntimeError>>>>;
 pub type LexicalFunctionInvoker =
@@ -62,6 +70,8 @@ impl CallableRequest {
 runmat_thread_local! {
     static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Arc<FunctionInvoker>>> =
         const { RefCell::new(None) };
+    static EXTERNAL_FUNCTION_INVOKER: RefCell<Option<Arc<ExternalFunctionInvoker>>> =
+        const { RefCell::new(None) };
     static LEXICAL_FUNCTION_INVOKER: RefCell<Option<Arc<LexicalFunctionInvoker>>> =
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
@@ -74,6 +84,11 @@ runmat_thread_local! {
 
 pub struct FunctionInvokerGuard {
     previous: Option<Arc<FunctionInvoker>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
+
+pub struct ExternalFunctionInvokerGuard {
+    previous: Option<Arc<ExternalFunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
@@ -103,6 +118,19 @@ impl Drop for FunctionInvokerGuard {
             state.call.borrow_mut().semantic_invoker = previous;
         } else {
             SEMANTIC_FUNCTION_INVOKER.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
+    }
+}
+
+impl Drop for ExternalFunctionInvokerGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().external_invoker = previous;
+        } else {
+            EXTERNAL_FUNCTION_INVOKER.with(|slot| {
                 *slot.borrow_mut() = previous;
             });
         }
@@ -173,6 +201,24 @@ pub fn install_semantic_function_invoker(
     let previous =
         SEMANTIC_FUNCTION_INVOKER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), invoker));
     FunctionInvokerGuard {
+        previous,
+        state: None,
+    }
+}
+
+pub fn install_external_function_invoker(
+    invoker: Option<Arc<ExternalFunctionInvoker>>,
+) -> ExternalFunctionInvokerGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(&mut state.call.borrow_mut().external_invoker, invoker);
+        return ExternalFunctionInvokerGuard {
+            previous,
+            state: Some(state),
+        };
+    }
+    let previous =
+        EXTERNAL_FUNCTION_INVOKER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), invoker));
+    ExternalFunctionInvokerGuard {
         previous,
         state: None,
     }
@@ -250,6 +296,13 @@ pub fn current_semantic_function_invoker() -> Option<Arc<FunctionInvoker>> {
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
+pub fn current_external_function_invoker() -> Option<Arc<ExternalFunctionInvoker>> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().external_invoker.clone();
+    }
+    EXTERNAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
+}
+
 pub fn current_lexical_function_invoker() -> Option<Arc<LexicalFunctionInvoker>> {
     if let Some(state) = active_state() {
         return state.call.borrow().lexical_invoker.clone();
@@ -290,6 +343,13 @@ pub async fn try_call_semantic_function(
     let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
     Some(invoker(function, args, requested_outputs).await)
+}
+
+pub async fn try_call_external_function(
+    call: ExternalFunctionCall,
+) -> Option<Result<Value, RuntimeError>> {
+    let invoker = current_external_function_invoker()?;
+    Some(invoker(call).await)
 }
 
 pub async fn try_call_lexical_function(
@@ -418,5 +478,31 @@ mod lexical_tests {
         assert_eq!(result.captures[0].value, Value::Num(5.0));
         drop(guard);
         assert!(current_lexical_function_invoker().is_none());
+    }
+
+    #[test]
+    fn external_invoker_preserves_identity_kind_and_restores_scope() {
+        assert!(current_external_function_invoker().is_none());
+        let guard = install_external_function_invoker(Some(Arc::new(|call| {
+            Box::pin(async move {
+                assert_eq!(call.function, 0);
+                assert_eq!(call.display_name, "published");
+                assert_eq!(call.arguments, vec![Value::Num(2.0)]);
+                assert_eq!(call.requested_outputs, 1);
+                Ok(Value::Num(12.0))
+            })
+        })));
+        let result =
+            futures::executor::block_on(try_call_external_function(ExternalFunctionCall {
+                function: 0,
+                display_name: "published".into(),
+                arguments: vec![Value::Num(2.0)],
+                requested_outputs: 1,
+            }))
+            .expect("external invoker is installed")
+            .expect("external call succeeds");
+        assert_eq!(result, Value::Num(12.0));
+        drop(guard);
+        assert!(current_external_function_invoker().is_none());
     }
 }

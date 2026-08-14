@@ -16,21 +16,20 @@ use crate::ExecutableUnit;
 #[allow(clippy::arc_with_non_send_sync)]
 pub(crate) async fn invoke(
     unit: &ExecutableUnit,
+    published: runmat_jit::entry::PublishedEntry,
     preferred_function: Option<&str>,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Value, runmat_runtime::RuntimeError> {
-    let compiled = super::compile::compile(unit, preferred_function)?;
     let function = preferred_function
         .map(|name| {
-            unit.functions()
-                .resolve_name(name)
+            unit.native_function_id(name)
                 .ok_or_else(|| super::error::stage("NativeProcedure", name))
                 .and_then(program_function)
         })
         .transpose()?
-        .unwrap_or(compiled.entrypoint);
+        .unwrap_or(published.entrypoint);
     let registry = Arc::new(unit.functions().clone());
     let native_functions = unit
         .mir()
@@ -55,7 +54,7 @@ pub(crate) async fn invoke(
         .collect::<Result<BTreeMap<_, _>, runmat_runtime::RuntimeError>>()?;
 
     let previous_invoker = user_functions::current_semantic_function_invoker();
-    let nested_executor = Rc::clone(&compiled.executor);
+    let nested_executor = Rc::clone(&published.executor);
     let nested_runtime = runtime.clone();
     let semantic_capture_bindings = Arc::new(capture_bindings.clone());
     let semantic_native_functions = native_functions.clone();
@@ -112,8 +111,40 @@ pub(crate) async fn invoke(
             },
         )));
 
+    let previous_external_invoker = user_functions::current_external_function_invoker();
+    let external_registry = Arc::clone(&registry);
+    let external_runtime = runtime.clone();
+    let external_invoker =
+        user_functions::install_external_function_invoker(Some(Arc::new(move |call| {
+            let previous = previous_external_invoker.clone();
+            let registry = Arc::clone(&external_registry);
+            let runtime = external_runtime.clone();
+            Box::pin(async move {
+                if registry
+                    .get(runmat_hir::FunctionId(call.function))
+                    .is_some()
+                {
+                    return runmat_vm::invoke_semantic_function_value_in_context(
+                        call.function,
+                        &call.arguments,
+                        call.requested_outputs,
+                        &registry,
+                        runtime,
+                    )
+                    .await;
+                }
+                if let Some(previous) = previous {
+                    return previous(call).await;
+                }
+                Err(super::error::stage(
+                    "UndefinedFunction",
+                    format!("external function '{}' is unavailable", call.display_name),
+                ))
+            })
+        })));
+
     let previous_lexical_invoker = user_functions::current_lexical_function_invoker();
-    let lexical_executor = Rc::clone(&compiled.executor);
+    let lexical_executor = Rc::clone(&published.executor);
     let lexical_runtime = runtime.clone();
     let lexical_native_functions = native_functions.clone();
     let lexical_invoker =
@@ -181,7 +212,7 @@ pub(crate) async fn invoke(
     source_functions.sort_by_key(|function| function.function);
     let catalog = user_functions::install_source_function_catalog(Some(Arc::new(source_functions)));
     let active = user_functions::push_active_semantic_function(function.0 as usize);
-    let execution = compiled
+    let execution = published
         .executor
         .invoke_async(function, arguments, requested_outputs, runtime)
         .await
@@ -190,6 +221,7 @@ pub(crate) async fn invoke(
     drop(catalog);
     drop(resolver);
     drop(lexical_invoker);
+    drop(external_invoker);
     drop(invoker);
     normalize_outputs(execution?.outputs, requested_outputs)
 }

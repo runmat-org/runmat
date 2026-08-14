@@ -53,15 +53,13 @@ impl ExecutableUnit {
             .unwrap_or("script");
         let selected = preferred_function
             .map(|name| {
-                self.functions()
-                    .resolve_name(name)
+                self.native_function_id(name)
                     .map(|function| (name.to_string(), function))
                     .ok_or_else(|| format!("source does not define requested function '{name}'"))
             })
             .transpose()?
             .or_else(|| {
-                self.functions()
-                    .resolve_name(source_stem)
+                self.native_function_id(source_stem)
                     .map(|function| (source_stem.to_string(), function))
             });
         let (entrypoint, entrypoint_function, entrypoint_kind) =

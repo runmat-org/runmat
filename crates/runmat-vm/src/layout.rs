@@ -73,6 +73,38 @@ pub struct VmStorageBinding {
     pub storage: BindingStorage,
 }
 
+/// Apply Core's unit-local to session/program function publication map to the
+/// retained VM layout. Binding and local-slot identities remain unchanged.
+pub fn remap_layout_function_ids(
+    layout: &mut VmAssemblyLayout,
+    remap: &HashMap<FunctionId, FunctionId>,
+) {
+    if remap.is_empty() {
+        return;
+    }
+    let mut functions = HashMap::with_capacity(layout.functions.len());
+    for (function, mut metadata) in std::mem::take(&mut layout.functions) {
+        metadata.function = remap
+            .get(&metadata.function)
+            .copied()
+            .unwrap_or(metadata.function);
+        for capture in &mut metadata.captures {
+            capture.from_function = remap
+                .get(&capture.from_function)
+                .copied()
+                .unwrap_or(capture.from_function);
+        }
+        functions.insert(remap.get(&function).copied().unwrap_or(function), metadata);
+    }
+    layout.functions = functions;
+    for entrypoint in layout.entrypoints.values_mut() {
+        entrypoint.target = remap
+            .get(&entrypoint.target)
+            .copied()
+            .unwrap_or(entrypoint.target);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayoutError {
     MissingFunction(FunctionId),
