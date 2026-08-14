@@ -236,6 +236,47 @@ impl GenericExecutor {
         }
     }
 
+    pub async fn invoke_workspace_async(
+        &self,
+        function: ProgramFunctionId,
+        workspace: super::workspace::NativeWorkspaceInput,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+    ) -> JitResult<GenericExecution> {
+        let mut invocation = self.begin_workspace_with_deoptimization_and_osr(
+            function,
+            workspace,
+            Vec::new(),
+            requested_outputs,
+            runtime,
+            DeoptimizationPolicy::default(),
+            None,
+        )?;
+        loop {
+            match invocation.advance()? {
+                GenericInvocationStep::Completed(execution) => return Ok(execution),
+                GenericInvocationStep::Suspended {
+                    continuation,
+                    generation,
+                } => {
+                    invocation
+                        .resume_suspension(continuation, generation)
+                        .await?;
+                }
+                GenericInvocationStep::Deoptimized { target, .. }
+                    if target == runmat_runtime::native::NativeResumeKind::GENERIC_NATIVE =>
+                {
+                    invocation.resume_deoptimization()?;
+                }
+                GenericInvocationStep::Deoptimized { .. } => {
+                    return Err(JitError::UnsupportedExit(
+                        runmat_runtime::native::NativeExitKind::DEOPTIMIZED.0,
+                    ));
+                }
+            }
+        }
+    }
+
     pub fn begin(
         &self,
         function: ProgramFunctionId,

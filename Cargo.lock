@@ -6313,6 +6313,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-aot-runtime"
+version = "0.6.1"
+dependencies = [
+ "futures",
+ "runmat-execution",
+ "runmat-jit",
+ "runmat-native-codegen",
+ "runmat-runtime",
+ "runmat-types",
+ "runmat-value",
+ "runmat-vm",
+ "serde_json",
+]
+
+[[package]]
 name = "runmat-async"
 version = "0.6.1"
 dependencies = [

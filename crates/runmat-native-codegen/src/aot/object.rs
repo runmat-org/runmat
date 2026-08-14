@@ -54,6 +54,7 @@ pub fn emit_relocatable_object_with_data(
         .map_err(module_error)?;
     let mut module = ObjectModule::new(builder);
     let mut functions = Vec::with_capacity(assembly.functions.len());
+    let mut entrypoint_id = None;
 
     for function in &assembly.functions {
         let compiled = crate::cranelift::lower_function(function, &assembly.target)?;
@@ -67,6 +68,9 @@ pub fn emit_relocatable_object_with_data(
             .define_function(id, &mut context)
             .map_err(module_error)?;
         module.clear_context(&mut context);
+        if function.id == entrypoint {
+            entrypoint_id = Some(id);
+        }
         functions.push(NativeObjectFunction {
             function: function.id,
             symbol,
@@ -95,6 +99,7 @@ pub fn emit_relocatable_object_with_data(
         ));
     }
     let mut data = Vec::with_capacity(embedded_data.len());
+    let mut linked_data = std::collections::BTreeMap::new();
     for item in embedded_data {
         if !super::product::valid_data_symbol(&item.symbol)
             || item.bytes.is_empty()
@@ -112,6 +117,18 @@ pub fn emit_relocatable_object_with_data(
         description.define(item.bytes.clone().into_boxed_slice());
         description.set_align(item.alignment);
         module.define_data(id, &description).map_err(module_error)?;
+        linked_data.insert(
+            item.symbol.clone(),
+            (
+                id,
+                u64::try_from(item.bytes.len()).map_err(|_| {
+                    NativeCodegenError::new(
+                        "native.object.data",
+                        "native object data size exceeds the portable manifest limit",
+                    )
+                })?,
+            ),
+        );
         data.push(NativeObjectDataDescriptor {
             symbol: item.symbol,
             digest: runmat_execution::Digest::sha256(&item.bytes),
@@ -123,6 +140,13 @@ pub fn emit_relocatable_object_with_data(
             })?,
             alignment: item.alignment,
         });
+    }
+    if !linked_data.is_empty() {
+        super::launcher::define(
+            &mut module,
+            entrypoint_id.expect("verified entrypoint was defined"),
+            &linked_data,
+        )?;
     }
 
     let product = module.finish();
@@ -156,7 +180,7 @@ pub(super) fn function_symbol(
     entrypoint: ProgramFunctionId,
 ) -> String {
     if function == entrypoint {
-        "runmat_aot_entry".to_string()
+        super::AOT_ENTRY_SYMBOL.to_string()
     } else {
         format!("runmat_native_f{}", function.0)
     }

@@ -225,6 +225,11 @@ fn relocatable_object_embeds_canonical_bounded_runtime_data() {
             bytes: b"native-ir".to_vec(),
             alignment: 8,
         },
+        NativeObjectData {
+            symbol: "runmat_aot_resume_points".into(),
+            bytes: b"resume-points".to_vec(),
+            alignment: 8,
+        },
     ];
     let object =
         emit_relocatable_object_with_data(&assembly, NativeOptimization::Speed, data).unwrap();
@@ -236,7 +241,11 @@ fn relocatable_object_embeds_canonical_bounded_runtime_data() {
             .iter()
             .map(|item| item.symbol.as_str())
             .collect::<Vec<_>>(),
-        ["runmat_aot_native_ir", "runmat_aot_program"]
+        [
+            "runmat_aot_native_ir",
+            "runmat_aot_program",
+            "runmat_aot_resume_points"
+        ]
     );
 
     let duplicate = vec![

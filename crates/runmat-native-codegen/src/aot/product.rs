@@ -4,6 +4,11 @@ use runmat_types::ProgramFunctionId;
 use crate::NativeTarget;
 
 pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 1;
+pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
+pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
+pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
+pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
+pub const AOT_RESUME_POINTS_SYMBOL: &str = "runmat_aot_resume_points";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -65,6 +70,24 @@ pub struct NativeObjectData {
     pub symbol: String,
     pub bytes: Vec<u8>,
     pub alignment: u64,
+}
+
+pub fn embedded_blob(
+    symbol: &str,
+    bytes: Vec<u8>,
+    alignment: u64,
+) -> Result<NativeObjectData, crate::NativeCodegenError> {
+    if !valid_data_symbol(symbol) || bytes.is_empty() {
+        return Err(crate::NativeCodegenError::new(
+            "native.object.data",
+            "embedded AOT blob has an invalid symbol or empty payload",
+        ));
+    }
+    Ok(NativeObjectData {
+        symbol: symbol.to_string(),
+        bytes,
+        alignment,
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

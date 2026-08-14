@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -14,8 +15,6 @@ pub(super) struct CompiledGenericUnit {
 
 pub(super) struct PreparedGenericUnit {
     native: crate::NativeCompilationInput,
-    program_capture: Vec<u8>,
-    interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     entrypoint: ProgramFunctionId,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
 }
@@ -46,36 +45,9 @@ pub(super) fn prepare(
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
 ) -> Result<PreparedGenericUnit, runmat_runtime::RuntimeError> {
     let native = unit.prepare_native_compilation_for(preferred_function)?;
-    let program_capture = serde_json::to_vec(unit.functions()).map_err(|error| {
-        super::error::stage(
-            "NativeProduct",
-            format!("failed to capture native async program: {error}"),
-        )
-    })?;
-    let mut interpreter_resume_points = unit
-        .vm_layout()
-        .functions
-        .values()
-        .flat_map(|function| function.resume_points.iter())
-        .map(|(point, pc)| {
-            u64::try_from(*pc).map(|pc| (*point, pc)).map_err(|_| {
-                super::error::stage("NativeProduct", "bytecode resume PC exceeds native ABI")
-            })
-        })
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
-    for function in unit.functions().functions.values() {
-        for (point, pc) in &function.resume_points {
-            let pc = u64::try_from(*pc).map_err(|_| {
-                super::error::stage("NativeProduct", "bytecode resume PC exceeds native ABI")
-            })?;
-            interpreter_resume_points.insert(*point, pc);
-        }
-    }
     let entrypoint = native.entrypoint();
     Ok(PreparedGenericUnit {
         native,
-        program_capture,
-        interpreter_resume_points,
         entrypoint,
         specialization,
     })
@@ -84,6 +56,8 @@ pub(super) fn prepare(
 pub(super) fn compile_prepared(
     prepared: PreparedGenericUnit,
 ) -> Result<BackgroundCompiledGenericUnit, runmat_runtime::RuntimeError> {
+    let program_capture = prepared.native.program_capture().to_vec();
+    let interpreter_resume_points = prepared.native.interpreter_resume_points().clone();
     let assembly = prepared
         .native
         .lower(runmat_native_codegen::NativeTarget::current())
@@ -110,14 +84,14 @@ pub(super) fn compile_prepared(
     let executor = match prepared.specialization {
         Some(profile) => runmat_jit::GenericExecutor::compile_specialized_with_resume_points(
             assembly,
-            Some(prepared.program_capture),
-            prepared.interpreter_resume_points,
+            Some(program_capture),
+            interpreter_resume_points,
             profile,
         ),
         None => runmat_jit::GenericExecutor::compile_with_resume_points(
             assembly,
-            Some(prepared.program_capture),
-            prepared.interpreter_resume_points,
+            Some(program_capture),
+            interpreter_resume_points,
         ),
     }
     .map_err(super::error::from_jit_error)?;
