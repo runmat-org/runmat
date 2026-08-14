@@ -26,6 +26,7 @@ pub(super) struct HostState {
     pub host_failure: Option<JitError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,
+    resume_target: Option<runmat_runtime::native::NativeSiteRequest>,
     global_bindings: BTreeMap<usize, String>,
     persistent_bindings: BTreeMap<usize, String>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
@@ -133,6 +134,7 @@ impl HostState {
             },
             active_for_loops: BTreeMap::new(),
             pending_place_mutation: None,
+            resume_target: None,
             global_bindings: BTreeMap::new(),
             persistent_bindings: BTreeMap::new(),
         };
@@ -168,6 +170,50 @@ impl HostState {
             roots: self.roots.as_ptr(),
             count: self.roots.len(),
         }
+    }
+
+    pub fn prepare_resume(
+        &mut self,
+        resume: runmat_runtime::native::NativeResumeState,
+    ) -> JitResult<()> {
+        let target = runmat_runtime::native::NativeSiteRequest {
+            function: resume.function,
+            block: resume.block,
+            position: resume.position,
+            phase: runmat_runtime::native::NativeSitePhase(resume.phase),
+            ordinal: resume.ordinal,
+            reserved: 0,
+        };
+        target
+            .validate()
+            .map_err(|error| JitError::Host(error.to_string()))?;
+        if target.function != self.function.id.0
+            || !self
+                .function
+                .expected_sites
+                .iter()
+                .any(|site| native_site_matches(site, target))
+        {
+            return Err(JitError::Host(
+                "native resume target is not a verified site in this function".into(),
+            ));
+        }
+        self.resume_target = Some(target);
+        Ok(())
+    }
+
+    pub fn skip_before_resume(
+        &mut self,
+        request: runmat_runtime::native::NativeSiteRequest,
+    ) -> JitResult<bool> {
+        let Some(target) = self.resume_target else {
+            return Ok(false);
+        };
+        if request == target {
+            self.resume_target = None;
+            return Ok(false);
+        }
+        skip_before_target(&self.function.expected_sites, target, request)
     }
 
     pub fn annotate_error(&self, mut error: RuntimeError) -> RuntimeError {
@@ -328,6 +374,62 @@ impl HostState {
     }
 }
 
+fn skip_before_target(
+    expected_sites: &[runmat_native_codegen::NativeMirSite],
+    target: runmat_runtime::native::NativeSiteRequest,
+    request: runmat_runtime::native::NativeSiteRequest,
+) -> JitResult<bool> {
+    if request.block != target.block {
+        return Err(JitError::Host(
+            "generated re-entry reached a block before its resume target".into(),
+        ));
+    }
+    let current = expected_sites
+        .iter()
+        .position(|site| native_site_matches(site, request));
+    let target = expected_sites
+        .iter()
+        .position(|site| native_site_matches(site, target));
+    match (current, target) {
+        (Some(current), Some(target)) if current < target => Ok(true),
+        (Some(_), Some(_)) => Err(JitError::Host(
+            "generated re-entry passed its exact resume target".into(),
+        )),
+        _ => Err(JitError::Host(
+            "generated re-entry produced an unverified site".into(),
+        )),
+    }
+}
+
+fn native_site_matches(
+    site: &runmat_native_codegen::NativeMirSite,
+    request: runmat_runtime::native::NativeSiteRequest,
+) -> bool {
+    site.point.block == request.block
+        && site.point.position == request.position
+        && native_site_phase(site.phase) == request.phase
+        && site.ordinal == request.ordinal
+}
+
+fn native_site_phase(
+    phase: runmat_native_codegen::NativeSitePhase,
+) -> runmat_runtime::native::NativeSitePhase {
+    match phase {
+        runmat_native_codegen::NativeSitePhase::Rvalue => {
+            runmat_runtime::native::NativeSitePhase::RVALUE
+        }
+        runmat_native_codegen::NativeSitePhase::Statement => {
+            runmat_runtime::native::NativeSitePhase::STATEMENT
+        }
+        runmat_native_codegen::NativeSitePhase::TerminatorRvalue => {
+            runmat_runtime::native::NativeSitePhase::TERMINATOR_RVALUE
+        }
+        runmat_native_codegen::NativeSitePhase::Terminator => {
+            runmat_runtime::native::NativeSitePhase::TERMINATOR
+        }
+    }
+}
+
 fn empty_workspace_value() -> runmat_value::Value {
     runmat_value::Value::Tensor(
         runmat_value::Tensor::new(Vec::new(), vec![0, 0])
@@ -360,5 +462,58 @@ fn successor_blocks(kind: &NativeTerminatorKind) -> Vec<NativeBlockId> {
         } => vec![try_edge.target, catch_edge.target],
         NativeTerminatorKind::Await { resume, .. } => vec![resume.target],
         NativeTerminatorKind::Return { .. } | NativeTerminatorKind::Unreachable => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_native_codegen::{NativeMirSite, NativeSitePhase};
+    use runmat_runtime::native::{NativeSitePhase as RuntimePhase, NativeSiteRequest};
+    use runmat_types::{ProgramFunctionId, ProgramPointId};
+
+    fn site(position: u32, phase: NativeSitePhase, ordinal: u32) -> NativeMirSite {
+        NativeMirSite {
+            point: ProgramPointId {
+                function: ProgramFunctionId(7),
+                block: 4,
+                position,
+            },
+            phase,
+            ordinal,
+            construct: runmat_mir::MirConstructKind::Use,
+        }
+    }
+
+    fn request(position: u32, phase: RuntimePhase, ordinal: u32) -> NativeSiteRequest {
+        NativeSiteRequest {
+            function: 7,
+            block: 4,
+            position,
+            phase,
+            ordinal,
+            reserved: 0,
+        }
+    }
+
+    #[test]
+    fn exact_resume_skips_only_verified_predecessor_sites() {
+        let expected = vec![
+            site(0, NativeSitePhase::Rvalue, 0),
+            site(0, NativeSitePhase::Statement, 1),
+            site(1, NativeSitePhase::Terminator, 0),
+        ];
+        let target = request(0, RuntimePhase::STATEMENT, 1);
+        assert!(
+            skip_before_target(&expected, target, request(0, RuntimePhase::RVALUE, 0)).unwrap()
+        );
+        assert!(
+            skip_before_target(&expected, target, request(1, RuntimePhase::TERMINATOR, 0)).is_err()
+        );
+        let wrong_block = NativeSiteRequest {
+            block: 3,
+            ..request(0, RuntimePhase::RVALUE, 0)
+        };
+        assert!(skip_before_target(&expected, target, wrong_block).is_err());
     }
 }

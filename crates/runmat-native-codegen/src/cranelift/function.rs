@@ -44,7 +44,7 @@ pub fn lower_function(
         .iter()
         .map(|block| (block.id, builder.create_block()))
         .collect::<BTreeMap<_, _>>();
-    let entry_target = *blocks.get(&function.entry).ok_or_else(|| {
+    let _entry_target = *blocks.get(&function.entry).ok_or_else(|| {
         NativeCodegenError::new(
             "native.cranelift.entry",
             "Native IR entry block is unavailable during Cranelift lowering",
@@ -93,9 +93,12 @@ pub fn lower_function(
         super::abi::host_execute_site_offset(),
     );
     let execute_missing = builder.ins().icmp_imm(IntCC::Equal, execute_site, 0);
+    let resume_dispatch = builder.create_block();
     builder
         .ins()
-        .brif(execute_missing, invalid, &[], entry_target, &[]);
+        .brif(execute_missing, invalid, &[], resume_dispatch, &[]);
+    builder.switch_to_block(resume_dispatch);
+    dispatch_resume_block(&mut builder, &abi, call, &blocks, invalid);
 
     builder.switch_to_block(failure);
     return_status(
@@ -141,6 +144,57 @@ pub fn lower_function(
         function: function.id,
         ir,
     })
+}
+
+fn dispatch_resume_block(
+    builder: &mut FunctionBuilder<'_>,
+    abi: &AbiTypes,
+    call: Value,
+    blocks: &BTreeMap<crate::NativeBlockId, Block>,
+    invalid: Block,
+) {
+    let frame = builder.ins().load(
+        abi.pointer,
+        MemFlags::new(),
+        call,
+        super::abi::call_frame_offset(),
+    );
+    let frame_missing = builder.ins().icmp_imm(IntCC::Equal, frame, 0);
+    let resume_ready = builder.create_block();
+    builder
+        .ins()
+        .brif(frame_missing, invalid, &[], resume_ready, &[]);
+    builder.switch_to_block(resume_ready);
+    let resume = builder.ins().load(
+        abi.pointer,
+        MemFlags::new(),
+        frame,
+        super::abi::frame_resume_offset(),
+    );
+    let resume_missing = builder.ins().icmp_imm(IntCC::Equal, resume, 0);
+    let block_ready = builder.create_block();
+    builder
+        .ins()
+        .brif(resume_missing, invalid, &[], block_ready, &[]);
+    builder.switch_to_block(block_ready);
+    let requested = builder.ins().load(
+        types::I32,
+        MemFlags::new(),
+        resume,
+        super::abi::resume_block_offset(),
+    );
+    for (index, (block, target)) in blocks.iter().enumerate() {
+        let matches = builder
+            .ins()
+            .icmp_imm(IntCC::Equal, requested, i64::from(block.0));
+        if index + 1 == blocks.len() {
+            builder.ins().brif(matches, *target, &[], invalid, &[]);
+        } else {
+            let next = builder.create_block();
+            builder.ins().brif(matches, *target, &[], next, &[]);
+            builder.switch_to_block(next);
+        }
+    }
 }
 
 fn continue_or_exit(

@@ -8,7 +8,7 @@ use super::{
     NativeValueRef,
 };
 
-pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 3;
+pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,12 +23,12 @@ impl NativeAbiVersion {
     }
 }
 
-pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 2 };
+pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 3 };
 
 /// Target-independent identity used by executable/runtime compatibility keys.
 pub fn native_abi_contract_fingerprint() -> runmat_execution::Digest {
     runmat_execution::Digest::sha256(
-        b"runmat-native-abi-v3\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch\0no-obsolete-slow-call-slot",
+        b"runmat-native-abi-v4\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-site-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch\0no-obsolete-slow-call-slot",
     )
 }
 
@@ -121,10 +121,10 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn version_and_contract_identity_are_stable() {
-        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0002);
+        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0003);
         assert_eq!(
             native_abi_contract_fingerprint().to_string(),
-            "sha256:029205fe1105fd14c4b637269a12c69f0e6f3395255e6b8239508b7741177317"
+            "sha256:f550a4e40b7d2f75c72231767205f88b68c73b1d7ae89b057bbbdcf4de67b225"
         );
     }
 
@@ -164,7 +164,9 @@ mod tests {
         assert_eq!(std::mem::offset_of!(NativeFrame, caller), 16);
         assert_eq!(std::mem::offset_of!(NativeCall, host), 16);
         assert_eq!(std::mem::offset_of!(NativeExit, exception), 16);
-        assert_eq!(std::mem::offset_of!(NativeResumeState, bytecode_pc), 16);
+        assert_eq!(std::mem::offset_of!(NativeResumeState, phase), 12);
+        assert_eq!(std::mem::offset_of!(NativeResumeState, ordinal), 16);
+        assert_eq!(std::mem::offset_of!(NativeResumeState, bytecode_pc), 32);
         assert_eq!(
             layout.site_request,
             NativeTypeLayout {

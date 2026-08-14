@@ -23,6 +23,9 @@ pub(super) fn execute(
             "native site function identity mismatch".into(),
         ));
     }
+    if state.skip_before_resume(request)? {
+        return Ok(NativeSiteOutcome::continue_execution());
+    }
     if state
         .runtime
         .cancellation()
@@ -105,6 +108,8 @@ fn enter_site(
     resume.function = request.function;
     resume.block = request.block;
     resume.position = request.position;
+    resume.phase = request.phase.0;
+    resume.ordinal = request.ordinal;
     resume.local_count = state.locals.len() as u32;
     resume.side_effect_epoch = u64::from(side_effect_epoch);
     resume.source = state.current_source;

@@ -5,6 +5,7 @@ mod call;
 mod callbacks;
 mod executor;
 mod indexing;
+mod invocation;
 mod mutation;
 mod operand;
 mod operator;
@@ -14,3 +15,4 @@ mod sync;
 mod workspace;
 
 pub use executor::{GenericExecution, GenericExecutor};
+pub use invocation::{GenericInvocation, GenericInvocationStep};

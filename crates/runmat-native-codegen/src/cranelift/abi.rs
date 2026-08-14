@@ -43,6 +43,18 @@ pub(super) fn call_host_offset() -> i32 {
     std::mem::offset_of!(runmat_runtime::native::NativeCall, host) as i32
 }
 
+pub(super) fn call_frame_offset() -> i32 {
+    std::mem::offset_of!(runmat_runtime::native::NativeCall, frame) as i32
+}
+
+pub(super) fn frame_resume_offset() -> i32 {
+    std::mem::offset_of!(runmat_runtime::native::NativeFrame, resume) as i32
+}
+
+pub(super) fn resume_block_offset() -> i32 {
+    std::mem::offset_of!(runmat_runtime::native::NativeResumeState, block) as i32
+}
+
 pub(super) fn host_context_offset() -> i32 {
     std::mem::offset_of!(runmat_runtime::native::NativeHostVTable, context) as i32
 }

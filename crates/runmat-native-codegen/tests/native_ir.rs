@@ -546,7 +546,7 @@ fn generic_cranelift_executes_the_native_block_graph_through_typed_sites() {
         let decision = if request.phase == NativeSitePhase::TERMINATOR {
             match request.block {
                 0 => NativeSiteOutcome::edge(0),
-                1 => {
+                1 | 2 => {
                     // SAFETY: the generated entrypoint supplied its writable exit slot.
                     unsafe { *exit = NativeExit::completed(0) };
                     NativeSiteOutcome::exit()
@@ -656,6 +656,18 @@ fn generic_cranelift_executes_the_native_block_graph_through_typed_sites() {
         Some(NativeSitePhase::TERMINATOR)
     );
     assert_eq!(NativeSiteOutcomeKind::EXIT.0, 2);
+
+    log.0.clear();
+    resume.block = 2;
+    exit = NativeExit::completed(0);
+    // SAFETY: the same validated ABI records remain live, and block 2 is a
+    // verified resume target in this function.
+    let resumed_status = unsafe { entry(&mut call, &mut exit) };
+    assert_eq!(resumed_status, NativeHostStatus::OK);
+    call.validate_exit(&exit).unwrap();
+    assert!(!log.0.iter().any(|site| site.block == 0));
+    assert!(!log.0.iter().any(|site| site.block == 1));
+    assert!(log.0.iter().any(|site| site.block == 2));
 
     // SAFETY: a null call is intentionally passed to exercise generated ABI validation.
     let invalid_status = unsafe { entry(std::ptr::null_mut(), &mut exit) };

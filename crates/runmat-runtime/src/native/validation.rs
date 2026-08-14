@@ -170,6 +170,13 @@ impl NativeSafepoint {
 impl super::NativeResumeState {
     pub fn validate(&self) -> Result<(), NativeAbiError> {
         validate_zero("native.resume.flags", self.flags)?;
+        validate_zero("native.resume.reserved", self.reserved)?;
+        if !super::NativeSitePhase(self.phase).is_known() {
+            return Err(NativeAbiError::new(
+                "native.resume.phase",
+                "resume site phase is unknown",
+            ));
+        }
         self.source.validate()
     }
 }
