@@ -38,6 +38,9 @@ pub(super) fn execute(
         });
         return Ok(NativeSiteOutcome::exit());
     }
+    if state.skip_optimized_site(request) {
+        return Ok(NativeSiteOutcome::continue_execution());
+    }
     let block = state
         .function
         .blocks
@@ -110,6 +113,11 @@ pub(super) fn execute(
             exit,
         )? {
             return Ok(NativeSiteOutcome::exit());
+        }
+        if request.phase == NativeSitePhase::RVALUE {
+            if let Some(outcome) = super::region::checkpoint(state, request, exit)? {
+                return Ok(outcome);
+            }
         }
         // A MATLAB `for` iterable is evaluated once. Native IR represents its
         // evaluation as terminator-rvalue sites in the loop header, so a body

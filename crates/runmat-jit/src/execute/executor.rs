@@ -18,6 +18,7 @@ pub struct GenericExecutor {
     pub(super) regions: Vec<runmat_types::RegionContract>,
     pub(super) compile_duration_ns: u64,
     entry_profile: Option<crate::tiering::RepresentationProfile>,
+    optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -26,6 +27,7 @@ pub struct GenericExecution {
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_entry: Option<runmat_types::ProgramPointId>,
+    pub vectorized_regions: u64,
 }
 
 impl GenericExecutor {
@@ -70,6 +72,11 @@ impl GenericExecutor {
     ) -> JitResult<Self> {
         let regions = assembly.requirements.regions.clone();
         let compile_started = std::time::Instant::now();
+        let optimized_regions = if entry_profile.is_some() {
+            crate::region::derive_plans(&assembly.functions, &regions)
+        } else {
+            Vec::new()
+        };
         let compiled = if entry_profile.is_some() {
             GenericCompiler::compile_specialized(&assembly)?
         } else {
@@ -84,6 +91,7 @@ impl GenericExecutor {
             regions,
             compile_duration_ns,
             entry_profile,
+            optimized_regions: Arc::new(optimized_regions),
         })
     }
 
@@ -93,6 +101,10 @@ impl GenericExecutor {
 
     pub fn entry_profile(&self) -> Option<&crate::tiering::RepresentationProfile> {
         self.entry_profile.as_ref()
+    }
+
+    pub fn optimized_region_count(&self) -> usize {
+        self.optimized_regions.len()
     }
 
     pub(crate) fn compiled_entrypoint(
@@ -288,6 +300,7 @@ impl GenericExecutor {
             deoptimization,
             interpreter_resume_points: self.interpreter_resume_points.clone(),
             osr_point: osr_target.as_ref().map(OsrTarget::point),
+            optimized_regions: Arc::clone(&self.optimized_regions),
         })?;
         let resume = runmat_runtime::native::NativeResumeState {
             function: function.0,

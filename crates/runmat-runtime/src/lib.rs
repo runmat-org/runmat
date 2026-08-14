@@ -44,6 +44,7 @@ pub mod interaction;
 pub mod interrupt;
 pub mod iteration;
 pub mod native;
+pub mod numeric_region;
 pub mod object;
 pub mod output_context;
 pub mod output_count;

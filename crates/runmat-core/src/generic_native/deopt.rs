@@ -269,6 +269,7 @@ async fn resume_interpreter(
         captures,
         loop_backedges: BTreeMap::new(),
         osr_entry: None,
+        vectorized_regions: 0,
     })
 }
 

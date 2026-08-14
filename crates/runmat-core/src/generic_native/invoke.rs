@@ -14,6 +14,7 @@ pub(crate) struct NativeExecution {
     pub value: Value,
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_entry: Option<runmat_types::ProgramPointId>,
+    pub vectorized_regions: u64,
 }
 
 // Semantic invokers use Runtime's established Arc callback ABI, while the
@@ -263,6 +264,7 @@ pub(crate) async fn invoke(
         value: normalize_outputs(execution.outputs, requested_outputs)?,
         loop_backedges: execution.loop_backedges,
         osr_entry: execution.osr_entry,
+        vectorized_regions: execution.vectorized_regions,
     })
 }
 

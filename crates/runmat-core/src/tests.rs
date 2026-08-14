@@ -14360,6 +14360,111 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_placement() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 3,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-vector-region-test@1",
+            "vectorRegion.m",
+            "function y = vectorRegion(x)\nfor k = 1:3\n    a = x + k;\n    y = a .* 2;\nend\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile vectorized region fixture");
+    let input =
+        runmat_value::Tensor::new((0..4096).map(f64::from).collect(), vec![1, 4096]).unwrap();
+    assert!(!unit.analysis().regions.is_empty());
+    assert!(
+        session.optimized_region_plan_count_for_testing(
+            &unit,
+            Some("vectorRegion"),
+            &[runmat_value::Value::Tensor(input.clone())],
+        ) >= 1
+    );
+    for _ in 0..4 {
+        let value = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("vectorRegion".into()),
+                arguments: vec![runmat_value::Value::Tensor(input.clone())],
+                requested_outputs: 1,
+            },
+            &InvocationControl::default(),
+        ))
+        .expect("invoke vectorized region fixture");
+        let runmat_value::Value::Tensor(output) = value else {
+            panic!("vectorized region must return a dense tensor")
+        };
+        assert_eq!(output.shape, vec![1, 4096]);
+        assert_eq!(output.as_f64_slice().unwrap()[0], 6.0);
+        assert_eq!(output.as_f64_slice().unwrap()[4095], 8196.0);
+    }
+    assert_eq!(session.specialized_native_version_count_for_testing(), 1);
+    assert!(
+        session.vectorized_native_region_count_for_testing() >= 2,
+        "placement profile: {:?}",
+        session.placement_profile_snapshot()
+    );
+    assert!(!session.placement_profile_snapshot().feedback.is_empty());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 3,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-vector-region-fallback-test@1",
+            "vectorRegionFallback.m",
+            "function y = vectorRegionFallback(x)\na = x + x;\ny = a .* x;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile numeric-region fallback fixture");
+    let input = runmat_value::Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+    assert!(
+        session.optimized_region_plan_count_for_testing(
+            &unit,
+            Some("vectorRegionFallback"),
+            &[runmat_value::Value::Tensor(input.clone())],
+        ) >= 1
+    );
+    for _ in 0..4 {
+        let value = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("vectorRegionFallback".into()),
+                arguments: vec![runmat_value::Value::Tensor(input.clone())],
+                requested_outputs: 1,
+            },
+            &InvocationControl::default(),
+        ))
+        .expect("invoke numeric-region fallback fixture");
+        let runmat_value::Value::Tensor(output) = value else {
+            panic!("ordinary specialized execution must return a dense tensor")
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.materialize_f64(), vec![2.0, 8.0, 18.0]);
+    }
+    assert_eq!(session.specialized_native_version_count_for_testing(), 1);
+    assert_eq!(session.vectorized_native_region_count_for_testing(), 0);
+    assert!(session.placement_profile_snapshot().feedback.is_empty());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn native_tiering_records_exact_loop_header_backedges() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {

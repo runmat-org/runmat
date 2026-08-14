@@ -13,6 +13,7 @@ mod mutation;
 mod operand;
 mod operator;
 mod osr;
+mod region;
 mod site;
 mod state;
 mod sync;

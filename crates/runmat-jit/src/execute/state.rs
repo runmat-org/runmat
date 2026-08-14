@@ -36,6 +36,7 @@ pub(super) struct HostStateInput {
     pub deoptimization: DeoptimizationPolicy,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_point: Option<runmat_types::ProgramPointId>,
+    pub optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
 }
 
 pub(super) struct HostState {
@@ -69,6 +70,10 @@ pub(super) struct HostState {
     supplied_inputs: usize,
     requested_outputs: usize,
     missing_input_locals: Vec<runmat_native_codegen::NativeLocalId>,
+    optimized_regions: BTreeMap<crate::region::SiteIdentity, crate::region::OptimizedRegionPlan>,
+    disabled_optimized_regions: BTreeSet<runmat_types::RegionId>,
+    skipped_optimized_sites: BTreeSet<crate::region::SiteIdentity>,
+    vectorized_regions: u64,
 }
 
 impl HostState {
@@ -84,6 +89,7 @@ impl HostState {
             deoptimization,
             interpreter_resume_points,
             osr_point,
+            optimized_regions,
         } = input;
         let construction_values = arguments
             .iter()
@@ -228,6 +234,14 @@ impl HostState {
             supplied_inputs,
             requested_outputs,
             missing_input_locals,
+            optimized_regions: optimized_regions
+                .iter()
+                .cloned()
+                .map(|plan| (plan.entry, plan))
+                .collect(),
+            disabled_optimized_regions: BTreeSet::new(),
+            skipped_optimized_sites: BTreeSet::new(),
+            vectorized_regions: 0,
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
@@ -738,6 +752,95 @@ impl HostState {
         self.osr_entry
     }
 
+    pub fn optimized_region(
+        &self,
+        request: runmat_runtime::native::NativeSiteRequest,
+    ) -> Option<crate::region::OptimizedRegionPlan> {
+        self.optimized_regions
+            .get(&optimized_site_identity(request))
+            .filter(|plan| !self.disabled_optimized_regions.contains(&plan.region))
+            .cloned()
+    }
+
+    pub fn disable_optimized_region(&mut self, region: runmat_types::RegionId) {
+        self.disabled_optimized_regions.insert(region);
+    }
+
+    pub fn optimized_region_inputs(
+        &self,
+        plan: &crate::region::OptimizedRegionPlan,
+    ) -> JitResult<Vec<&runmat_value::Value>> {
+        plan.inputs
+            .iter()
+            .map(|value| {
+                let reference =
+                    self.locals
+                        .get(value.local as usize)
+                        .copied()
+                        .ok_or_else(|| {
+                            JitError::Host("numeric region input local is invalid".into())
+                        })?;
+                self.arena.get(reference)
+            })
+            .collect()
+    }
+
+    pub fn publish_optimized_region(
+        &mut self,
+        plan: &crate::region::OptimizedRegionPlan,
+        computed_outputs: Vec<runmat_value::Value>,
+    ) -> JitResult<()> {
+        if computed_outputs.len() != plan.program.outputs.len() {
+            return Err(JitError::Host(
+                "numeric region output count is inconsistent".into(),
+            ));
+        }
+        let input_references = plan
+            .inputs
+            .iter()
+            .map(|input| {
+                self.locals
+                    .get(input.local as usize)
+                    .copied()
+                    .ok_or_else(|| JitError::Host("numeric region input local is invalid".into()))
+            })
+            .collect::<JitResult<Vec<_>>>()?;
+        let computed_references = computed_outputs
+            .into_iter()
+            .map(|value| self.arena.insert(value))
+            .collect::<Vec<_>>();
+        for output in &plan.outputs {
+            let reference = match output.source {
+                crate::region::RegionOutputSource::Input(index) => *input_references
+                    .get(index)
+                    .ok_or_else(|| JitError::Host("numeric region input is invalid".into()))?,
+                crate::region::RegionOutputSource::Computed(index) => *computed_references
+                    .get(index)
+                    .ok_or_else(|| JitError::Host("numeric region result is invalid".into()))?,
+            };
+            if let Some(local) = output.value {
+                self.set_local(local.local as usize, reference)?;
+            }
+            self.values.insert(output.ssa, reference);
+        }
+        self.skipped_optimized_sites
+            .extend(plan.skipped_sites.iter().copied());
+        self.vectorized_regions = self.vectorized_regions.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn vectorized_regions(&self) -> u64 {
+        self.vectorized_regions
+    }
+
+    pub fn skip_optimized_site(
+        &mut self,
+        request: runmat_runtime::native::NativeSiteRequest,
+    ) -> bool {
+        self.skipped_optimized_sites
+            .remove(&optimized_site_identity(request))
+    }
+
     /// Retire loop snapshots when control leaves their natural loop body.
     /// This covers `break` and exceptional structured exits as well as normal
     /// exhaustion, while retaining state across body backedges and `continue`.
@@ -810,6 +913,31 @@ impl HostState {
             pending.extend(successor_blocks(&block.terminator.kind));
         }
         Ok(reachable)
+    }
+}
+
+fn optimized_site_identity(
+    request: runmat_runtime::native::NativeSiteRequest,
+) -> crate::region::SiteIdentity {
+    crate::region::SiteIdentity {
+        point: runmat_types::ProgramPointId {
+            function: runmat_types::ProgramFunctionId(request.function),
+            block: request.block,
+            position: request.position,
+        },
+        phase: match request.phase {
+            phase if phase == runmat_runtime::native::NativeSitePhase::RVALUE => {
+                runmat_native_codegen::NativeSitePhase::Rvalue
+            }
+            phase if phase == runmat_runtime::native::NativeSitePhase::STATEMENT => {
+                runmat_native_codegen::NativeSitePhase::Statement
+            }
+            phase if phase == runmat_runtime::native::NativeSitePhase::TERMINATOR_RVALUE => {
+                runmat_native_codegen::NativeSitePhase::TerminatorRvalue
+            }
+            _ => runmat_native_codegen::NativeSitePhase::Terminator,
+        },
+        ordinal: request.ordinal,
     }
 }
 

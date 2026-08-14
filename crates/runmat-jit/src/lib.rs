@@ -12,6 +12,8 @@ pub mod invalidation;
 pub mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod osr;
+#[cfg(not(target_arch = "wasm32"))]
+mod region;
 pub mod specialization;
 pub mod tiering;
 

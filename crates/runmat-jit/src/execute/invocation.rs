@@ -162,6 +162,7 @@ impl GenericInvocation {
                         captures: self.state.capture_results()?,
                         loop_backedges: self.state.loop_backedges(),
                         osr_entry: self.state.osr_entry(),
+                        vectorized_regions: self.state.vectorized_regions(),
                     }));
                 }
                 NativeExitKind::EXCEPTION => {

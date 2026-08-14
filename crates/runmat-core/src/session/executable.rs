@@ -30,6 +30,30 @@ impl RunMatSession {
     }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn vectorized_native_region_count_for_testing(&self) -> u64 {
+        self.stats.vectorized_native_regions
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn optimized_region_plan_count_for_testing(
+        &self,
+        unit: &crate::ExecutableUnit,
+        preferred_function: Option<&str>,
+        arguments: &[Value],
+    ) -> usize {
+        self.generic_native_cache
+            .representation_profile(arguments)
+            .map(|profile| {
+                self.generic_native_cache.optimized_region_plan_count(
+                    unit,
+                    preferred_function,
+                    &profile,
+                )
+            })
+            .unwrap_or(0)
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn generic_native_cache_counts(&self) -> (usize, usize) {
         (
             self.generic_native_cache.compilation_count(),
@@ -87,7 +111,7 @@ impl RunMatSession {
         } else {
             None
         };
-        let (result, backedges, osr_entry) = match published {
+        let (result, backedges, osr_entry, vectorized_regions) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
                 let execution = crate::generic_native::invoke(
@@ -107,8 +131,9 @@ impl RunMatSession {
                         Ok(execution.value),
                         execution.loop_backedges,
                         execution.osr_entry,
+                        execution.vectorized_regions,
                     ),
-                    Err(error) => (Err(error), BTreeMap::new(), None),
+                    Err(error) => (Err(error), BTreeMap::new(), None, 0),
                 }
             }
             None => {
@@ -117,10 +142,15 @@ impl RunMatSession {
                     self.invoke_entrypoint_interpreted(unit).await,
                     BTreeMap::new(),
                     None,
+                    0,
                 )
             }
         };
         self.stats.native_osr_transfers += usize::from(osr_entry.is_some());
+        self.stats.vectorized_native_regions = self
+            .stats
+            .vectorized_native_regions
+            .saturating_add(vectorized_regions);
         if let Err(error) = self.generic_native_cache.observe_invocation(
             unit,
             None,
@@ -170,7 +200,7 @@ impl RunMatSession {
         } else {
             None
         };
-        let (result, backedges, osr_entry) = match published {
+        let (result, backedges, osr_entry, vectorized_regions) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
                 let execution = crate::generic_native::invoke(
@@ -190,8 +220,9 @@ impl RunMatSession {
                         Ok(execution.value),
                         execution.loop_backedges,
                         execution.osr_entry,
+                        execution.vectorized_regions,
                     ),
-                    Err(error) => (Err(error), BTreeMap::new(), None),
+                    Err(error) => (Err(error), BTreeMap::new(), None, 0),
                 }
             }
             None => {
@@ -201,10 +232,15 @@ impl RunMatSession {
                         .await,
                     BTreeMap::new(),
                     None,
+                    0,
                 )
             }
         };
         self.stats.native_osr_transfers += usize::from(osr_entry.is_some());
+        self.stats.vectorized_native_regions = self
+            .stats
+            .vectorized_native_regions
+            .saturating_add(vectorized_regions);
         if let Err(error) = self.generic_native_cache.observe_invocation(
             unit,
             Some(name),

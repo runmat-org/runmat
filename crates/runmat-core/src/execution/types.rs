@@ -11,6 +11,7 @@ pub struct ExecutionStats {
     pub jit_compiled: usize,
     pub interpreter_fallback: usize,
     pub native_osr_transfers: usize,
+    pub vectorized_native_regions: u64,
     pub total_execution_time_ms: u64,
     pub average_execution_time_ms: f64,
 }

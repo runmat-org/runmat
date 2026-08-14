@@ -617,6 +617,19 @@ impl GenericNativeCache {
         self.entries
             .specialized_version_count(&self.dependencies.snapshot_all())
     }
+
+    #[cfg(test)]
+    pub(crate) fn optimized_region_plan_count(
+        &self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        profile: &RepresentationProfile,
+    ) -> usize {
+        super::compile::prepare(unit, preferred_function, Some(profile.clone()))
+            .and_then(super::compile::compile_prepared)
+            .map(|compiled| compiled.executor.optimized_region_count())
+            .unwrap_or(0)
+    }
 }
 
 fn tier_site(
