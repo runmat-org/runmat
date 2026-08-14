@@ -56,6 +56,7 @@ pub(super) struct HostState {
     global_bindings: BTreeMap<usize, String>,
     persistent_bindings: BTreeMap<usize, String>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
+    loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     active_exception_handlers: Vec<ActiveExceptionHandler>,
     next_await_continuation: u64,
     deoptimization: DeoptimizationPolicy,
@@ -204,6 +205,7 @@ impl HostState {
                 ..runmat_runtime::native::NativeSourceLocation::default()
             },
             active_for_loops: BTreeMap::new(),
+            loop_backedges: BTreeMap::new(),
             pending_place_mutation: None,
             program_capture,
             pending_await: None,
@@ -705,6 +707,15 @@ impl HostState {
         self.active_for_loops
             .get_mut(&header)
             .ok_or_else(|| JitError::Host("native for-loop state is unavailable".into()))
+    }
+
+    pub fn observe_loop_backedge(&mut self, point: runmat_types::ProgramPointId) {
+        let count = self.loop_backedges.entry(point).or_default();
+        *count = count.saturating_add(1);
+    }
+
+    pub fn loop_backedges(&self) -> BTreeMap<runmat_types::ProgramPointId, u64> {
+        self.loop_backedges.clone()
     }
 
     /// Retire loop snapshots when control leaves their natural loop body.

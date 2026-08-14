@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_jit::{
     deopt::{DeoptimizationPolicy, MaterializedFrame, ResumeTarget},
@@ -248,7 +248,11 @@ async fn resume_interpreter(
             })
         })
         .collect();
-    Ok(GenericExecution { outputs, captures })
+    Ok(GenericExecution {
+        outputs,
+        captures,
+        loop_backedges: BTreeMap::new(),
+    })
 }
 
 #[cfg(test)]

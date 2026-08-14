@@ -14360,6 +14360,58 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn native_tiering_records_exact_loop_header_backedges() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        loop_hot_threshold: 2,
+        deterministic: true,
+        ..runmat_jit::tiering::TieringConfig::default()
+    });
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-loop-tier-test@1",
+            "loopTier.m",
+            "function y = loopTier()\ny = 0;\nfor x = 1:3\ny = y + x;\nend\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile loop feedback fixture");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("loopTier".into()),
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    for _ in 0..2 {
+        assert_eq!(
+            block_on(session.invoke_executable(
+                &unit,
+                invocation.clone(),
+                &InvocationControl::default(),
+            ))
+            .unwrap(),
+            runmat_value::Value::Num(6.0)
+        );
+    }
+
+    let snapshot = session.native_tiering_snapshot_for_testing();
+    let loop_site = snapshot
+        .sites
+        .iter()
+        .find(|site| site.site.loop_header.is_some())
+        .expect("exact loop site feedback");
+    assert_eq!(loop_site.backedges, 3);
+    let function_site = snapshot
+        .sites
+        .iter()
+        .find(|site| site.site.loop_header.is_none())
+        .expect("function aggregate feedback");
+    assert_eq!(function_site.backedges, 3);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = ExecutableSource::new(

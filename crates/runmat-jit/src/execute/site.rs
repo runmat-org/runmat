@@ -290,6 +290,7 @@ fn execute_terminator(
                 super::sync::complete(&runtime, active.iterator.next(), "for iteration")?
             };
             if let Some(value) = next {
+                state.observe_loop_backedge(terminator.site.point);
                 let reference = state.arena.insert(value);
                 take_edge(state, body, 0, Some((*binding, reference)), None)
             } else {

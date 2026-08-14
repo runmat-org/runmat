@@ -135,6 +135,7 @@ impl GenericInvocation {
                     return Ok(GenericInvocationStep::Completed(GenericExecution {
                         outputs,
                         captures: self.state.capture_results()?,
+                        loop_backedges: self.state.loop_backedges(),
                     }));
                 }
                 NativeExitKind::EXCEPTION => {

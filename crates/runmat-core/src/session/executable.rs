@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::BTreeMap;
 
 impl RunMatSession {
     #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -52,6 +54,7 @@ impl RunMatSession {
                 .with_program_revision(Some(unit.revision().program_revision.clone())),
         )
         .await
+        .map(|execution| execution.value)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -69,10 +72,10 @@ impl RunMatSession {
         let published = self
             .generic_native_cache
             .resolve_or_schedule(unit, None, &profile)?;
-        let result = match published {
+        let (result, backedges) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
-                crate::generic_native::invoke(
+                let execution = crate::generic_native::invoke(
                     unit,
                     published,
                     None,
@@ -82,11 +85,18 @@ impl RunMatSession {
                         .clone()
                         .with_program_revision(Some(unit.revision().program_revision.clone())),
                 )
-                .await
+                .await;
+                match execution {
+                    Ok(execution) => (Ok(execution.value), execution.loop_backedges),
+                    Err(error) => (Err(error), BTreeMap::new()),
+                }
             }
             None => {
                 self.stats.interpreter_fallback += 1;
-                self.invoke_entrypoint_interpreted(unit).await
+                (
+                    self.invoke_entrypoint_interpreted(unit).await,
+                    BTreeMap::new(),
+                )
             }
         };
         if let Err(error) = self.generic_native_cache.observe_invocation(
@@ -96,6 +106,12 @@ impl RunMatSession {
             runmat_time::duration_ns_saturating(started.elapsed()),
         ) {
             log::warn!("native tier feedback was not recorded: {error}");
+        }
+        if let Err(error) = self
+            .generic_native_cache
+            .observe_loop_backedges(unit, None, &backedges)
+        {
+            log::warn!("native loop feedback was not recorded: {error}");
         }
         result
     }
@@ -123,10 +139,10 @@ impl RunMatSession {
         let published =
             self.generic_native_cache
                 .resolve_or_schedule(unit, Some(name), &profile)?;
-        let result = match published {
+        let (result, backedges) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
-                crate::generic_native::invoke(
+                let execution = crate::generic_native::invoke(
                     unit,
                     published,
                     Some(name),
@@ -136,12 +152,19 @@ impl RunMatSession {
                         .clone()
                         .with_program_revision(Some(unit.revision().program_revision.clone())),
                 )
-                .await
+                .await;
+                match execution {
+                    Ok(execution) => (Ok(execution.value), execution.loop_backedges),
+                    Err(error) => (Err(error), BTreeMap::new()),
+                }
             }
             None => {
                 self.stats.interpreter_fallback += 1;
-                self.invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
-                    .await
+                (
+                    self.invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
+                        .await,
+                    BTreeMap::new(),
+                )
             }
         };
         if let Err(error) = self.generic_native_cache.observe_invocation(
@@ -151,6 +174,12 @@ impl RunMatSession {
             runmat_time::duration_ns_saturating(started.elapsed()),
         ) {
             log::warn!("native tier feedback was not recorded: {error}");
+        }
+        if let Err(error) =
+            self.generic_native_cache
+                .observe_loop_backedges(unit, Some(name), &backedges)
+        {
+            log::warn!("native loop feedback was not recorded: {error}");
         }
         result
     }
@@ -175,9 +204,9 @@ impl RunMatSession {
     /// Invoke an immutable executable entrypoint or exact semantic procedure.
     ///
     /// This path does not synthesize or append source and does not publish the
-    /// unit into the interactive workspace. When Turbine is enabled, exact
-    /// procedure calls pass through the same tiering policy as ordinary
-    /// session execution.
+    /// unit into the interactive workspace. Native-capable sessions collect
+    /// bounded facts and tier hot exact procedures through the MIR/Native-IR
+    /// executor; other targets retain the canonical portable path.
     pub async fn invoke_executable(
         &mut self,
         unit: &crate::ExecutableUnit,

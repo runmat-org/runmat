@@ -259,6 +259,35 @@ impl GenericNativeCache {
             .map_err(|error| super::error::stage("NativeTierFeedback", error))
     }
 
+    pub(crate) fn observe_loop_backedges(
+        &self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        backedges: &BTreeMap<runmat_types::ProgramPointId, u64>,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        if backedges.is_empty() {
+            return Ok(());
+        }
+        let key = entry_key(unit, preferred_function);
+        let function_site = tier_site(unit, preferred_function, &key)?;
+        for (header, count) in backedges {
+            self.tiering
+                .observe_backedge(function_site.clone(), *count)
+                .and_then(|_| {
+                    self.tiering.observe_backedge(
+                        TierSiteId {
+                            entry: key.0.clone(),
+                            function: header.function,
+                            loop_header: Some(*header),
+                        },
+                        *count,
+                    )
+                })
+                .map_err(|error| super::error::stage("NativeTierFeedback", error))?;
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn tiering_snapshot(&self) -> runmat_jit::tiering::TierFeedbackSnapshot {
         self.tiering.snapshot()

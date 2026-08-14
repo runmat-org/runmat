@@ -10,6 +10,11 @@ use runmat_value::Value;
 
 use crate::ExecutableUnit;
 
+pub(crate) struct NativeExecution {
+    pub value: Value,
+    pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
+}
+
 // Semantic invokers use Runtime's established Arc callback ABI, while the
 // executable-memory owner, RuntimeContext, and GC Values are deliberately
 // invocation-thread confined. This callback never crosses that thread.
@@ -21,7 +26,7 @@ pub(crate) async fn invoke(
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<Value, runmat_runtime::RuntimeError> {
+) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     runmat_vm::prepare_native_execution_metadata(unit.bytecode())?;
     let function = preferred_function
         .map(|name| {
@@ -233,7 +238,11 @@ pub(crate) async fn invoke(
     drop(lexical_invoker);
     drop(external_invoker);
     drop(invoker);
-    normalize_outputs(execution?.outputs, requested_outputs)
+    let execution = execution?;
+    Ok(NativeExecution {
+        value: normalize_outputs(execution.outputs, requested_outputs)?,
+        loop_backedges: execution.loop_backedges,
+    })
 }
 
 fn program_function(

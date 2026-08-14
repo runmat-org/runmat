@@ -23,6 +23,7 @@ pub struct GenericExecutor {
 pub struct GenericExecution {
     pub outputs: Vec<Value>,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
 }
 
 impl GenericExecutor {

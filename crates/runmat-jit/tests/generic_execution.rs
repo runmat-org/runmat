@@ -749,13 +749,12 @@ fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
 #[test]
 fn generic_for_iterates_captured_columns_through_compiled_backedges() {
     let executor = GenericExecutor::compile(for_fixture()).unwrap();
-    assert_eq!(
-        executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
-            .unwrap()
-            .outputs,
-        vec![Value::Num(6.0)]
-    );
+    let execution = executor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap();
+    assert_eq!(execution.outputs, vec![Value::Num(6.0)]);
+    assert_eq!(execution.loop_backedges.len(), 1);
+    assert_eq!(execution.loop_backedges.values().sum::<u64>(), 3);
 }
 
 #[test]
