@@ -25,6 +25,12 @@ impl ExecutableUnit {
         analysis: runmat_mir::analysis::AnalysisStore,
         mut bytecode: runmat_vm::Bytecode,
     ) -> Result<Self, String> {
+        let region_contracts = analysis
+            .regions
+            .iter()
+            .map(|region| region.contract.clone())
+            .collect::<Vec<_>>();
+        bytecode.install_regions(&region_contracts)?;
         let coverage = CoveragePlan::instrument(&source, &revision, &source_map, &mut bytecode);
         let layout = bytecode
             .layout

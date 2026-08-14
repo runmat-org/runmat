@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const ANALYSIS_STORE_SCHEMA_VERSION: u16 = 1;
+pub const ANALYSIS_STORE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

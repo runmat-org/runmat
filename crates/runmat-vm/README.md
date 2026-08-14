@@ -22,6 +22,7 @@ src/
 ### `bytecode/`
 - Bytecode contracts and compile entrypoints.
 - Owns `Instr`, `EndExpr`, `Bytecode`, `UserFunction`, `ExecutionContext`, and `compile(...)`.
+- Retains the complete analyzed region inventory and maps each stable MIR entry/exit point to an exact empty-stack bytecode PC; missing boundaries fail executable construction.
 
 ### `compiler/`
 - HIR-to-bytecode lowering.

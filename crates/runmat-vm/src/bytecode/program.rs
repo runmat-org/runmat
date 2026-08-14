@@ -15,6 +15,8 @@ use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use super::region::BytecodeRegion;
+
 #[derive(Debug, Clone)]
 pub struct CallFrame {
     pub function_name: String,
@@ -80,6 +82,8 @@ pub struct FunctionBytecode {
     pub argument_validations: Vec<FunctionArgumentValidation>,
     #[serde(default, with = "crate::layout::resume_point_map_serde")]
     pub resume_points: std::collections::BTreeMap<runmat_types::ProgramPointId, usize>,
+    #[serde(default)]
+    pub regions: Vec<BytecodeRegion>,
 }
 
 impl Default for FunctionBytecode {
@@ -105,6 +109,7 @@ impl Default for FunctionBytecode {
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
             resume_points: std::collections::BTreeMap::new(),
+            regions: Vec::new(),
         }
     }
 }
@@ -257,6 +262,9 @@ pub struct Bytecode {
     pub layout: Option<VmAssemblyLayout>,
     #[serde(default)]
     pub async_metadata: AsyncMetadata,
+    /// Canonical region identities mapped onto function-local bytecode PCs.
+    #[serde(default)]
+    pub regions: Vec<BytecodeRegion>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -383,6 +391,7 @@ impl Bytecode {
             initially_unassigned_slots: HashSet::new(),
             layout: None,
             async_metadata: AsyncMetadata::default(),
+            regions: Vec::new(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]
@@ -432,6 +441,7 @@ impl Bytecode {
             initially_unassigned_slots: function.initially_unassigned_slots.clone(),
             layout: Some(layout),
             async_metadata: AsyncMetadata::default(),
+            regions: function.regions.clone(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]
@@ -522,9 +532,13 @@ impl Bytecode {
 
 #[cfg(test)]
 mod function_registry_tests {
-    use super::{FunctionBytecode, FunctionRegistry};
+    use super::{Bytecode, FunctionBytecode, FunctionRegistry};
     use crate::Instr;
     use runmat_hir::FunctionId;
+    use runmat_types::{
+        ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionId,
+        RegionProvenance, REGION_CONTRACT_SCHEMA_VERSION,
+    };
     use std::collections::{HashMap, HashSet};
 
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
@@ -549,6 +563,7 @@ mod function_registry_tests {
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
             resume_points: std::collections::BTreeMap::new(),
+            regions: Vec::new(),
         }
     }
 
@@ -579,6 +594,107 @@ mod function_registry_tests {
             None,
             "qualified names should not be rewritten as private-folder aliases"
         );
+    }
+
+    fn region_contract() -> RegionContract {
+        let function = ProgramFunctionId(7);
+        RegionContract {
+            schema_version: REGION_CONTRACT_SCHEMA_VERSION,
+            id: RegionId {
+                function,
+                ordinal: 2,
+            },
+            source: ProgramSourceId(1),
+            span: ProgramSpan { start: 10, end: 20 },
+            entry: ProgramPointId {
+                function,
+                block: 3,
+                position: 1,
+            },
+            exits: vec![ProgramPointId {
+                function,
+                block: 3,
+                position: 4,
+            }],
+            live_in: Vec::new(),
+            live_out: Vec::new(),
+            value_facts: Vec::new(),
+            effects: Default::default(),
+            capabilities: Default::default(),
+            guards: Vec::new(),
+            provenance: RegionProvenance::Inferred,
+        }
+    }
+
+    #[test]
+    fn bytecode_installs_exact_region_boundaries_for_every_function_authority() {
+        let contract = region_contract();
+        let mut function = test_function(7, "region_owner", "");
+        function.resume_points.insert(contract.entry, 5);
+        function.resume_points.insert(contract.exits[0], 11);
+        let mut bytecode = Bytecode::empty();
+        bytecode
+            .function_registry
+            .functions
+            .insert(FunctionId(7), function.clone());
+        bytecode
+            .bound_functions
+            .insert(FunctionId(7), function.clone());
+
+        bytecode
+            .install_regions(std::slice::from_ref(&contract))
+            .unwrap();
+
+        assert_eq!(bytecode.regions.len(), 1);
+        assert_eq!(bytecode.regions[0].entry.pc, 5);
+        assert_eq!(bytecode.regions[0].exits[0].pc, 11);
+        assert_eq!(
+            bytecode
+                .function_registry
+                .functions
+                .get(&FunctionId(7))
+                .unwrap()
+                .regions,
+            bytecode.regions
+        );
+        assert_eq!(
+            bytecode
+                .bound_functions
+                .get(&FunctionId(7))
+                .unwrap()
+                .regions,
+            bytecode.regions
+        );
+    }
+
+    #[test]
+    fn bytecode_rejects_regions_without_an_exact_resume_boundary() {
+        let contract = region_contract();
+        let mut function = test_function(7, "region_owner", "");
+        function.resume_points.insert(contract.entry, 5);
+        function.resume_points.insert(contract.exits[0], 11);
+        let mut bytecode = Bytecode::empty();
+        bytecode
+            .function_registry
+            .functions
+            .insert(FunctionId(7), function);
+        bytecode
+            .install_regions(std::slice::from_ref(&contract))
+            .unwrap();
+        bytecode
+            .function_registry
+            .functions
+            .get_mut(&FunctionId(7))
+            .unwrap()
+            .resume_points
+            .remove(&contract.exits[0]);
+
+        let error = bytecode
+            .install_regions(std::slice::from_ref(&contract))
+            .unwrap_err();
+
+        assert!(error.contains("has no bytecode boundary"));
+        assert_eq!(bytecode.regions[0].id, contract.id);
     }
 }
 

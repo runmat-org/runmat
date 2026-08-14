@@ -214,7 +214,7 @@ async fn executable_unit_retains_exact_program_point_analysis() {
             ExecutableSource::new(
                 "path:analysis-store",
                 "analyzed.m",
-                "function y = analyzed(); y = zeros(2, 3); end\n",
+                "function y = analyzed(); y = (1 + 2) * 3; end\n",
             ),
             None,
         )
@@ -224,6 +224,7 @@ async fn executable_unit_retains_exact_program_point_analysis() {
     assert!(!unit.analysis().program_points.is_empty());
     assert_eq!(unit.analysis().functions.len(), 1);
     assert!(!unit.analysis().dependencies.is_empty());
+    assert!(!unit.analysis().regions.is_empty());
     assert_eq!(unit.mir().bodies.len(), 1);
     assert_eq!(unit.vm_layout().functions.len(), 1);
     assert!(!unit
@@ -232,10 +233,75 @@ async fn executable_unit_retains_exact_program_point_analysis() {
         .canonical_identity()
         .is_empty());
     let envelope = unit.portable_envelope().unwrap();
+    let analysis_region_ids = unit
+        .analysis()
+        .regions
+        .iter()
+        .map(|region| region.contract.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        envelope
+            .manifest
+            .regions
+            .iter()
+            .map(|region| region.id)
+            .collect::<Vec<_>>(),
+        analysis_region_ids
+    );
     assert_eq!(
         envelope.manifest.revisions.bytecode_schema,
         runmat_vm::BYTECODE_SCHEMA_VERSION
     );
+    let bytecode: runmat_vm::Bytecode = serde_json::from_slice(
+        &envelope
+            .component(runmat_execution::ExecutableComponentKind::Bytecode)
+            .unwrap()
+            .bytes,
+    )
+    .unwrap();
+    assert_eq!(
+        bytecode
+            .regions
+            .iter()
+            .map(|region| region.id)
+            .collect::<Vec<_>>(),
+        analysis_region_ids
+    );
+    for region in &bytecode.regions {
+        assert_eq!(region.entry.point.function, region.id.function);
+        assert!(region
+            .exits
+            .iter()
+            .all(|exit| exit.point.function == region.id.function));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let binding_names = unit.binding_names();
+        let native =
+            runmat_native_codegen::lower_executable(runmat_native_codegen::NativeLoweringInput {
+                mir: unit.mir(),
+                analysis: unit.analysis(),
+                manifest: &envelope.manifest,
+                binding_names: Some(&binding_names),
+                target: runmat_native_codegen::NativeTarget::current(),
+            })
+            .unwrap();
+        assert_eq!(native.requirements.regions, envelope.manifest.regions);
+        let native_region_ids = native
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.region_boundaries)
+            .filter(|boundary| {
+                matches!(
+                    boundary.kind,
+                    runmat_native_codegen::NativeRegionBoundaryKind::Entry
+                )
+            })
+            .map(|boundary| boundary.region)
+            .collect::<Vec<_>>();
+        assert_eq!(native_region_ids, analysis_region_ids);
+    }
     let bytes = envelope.canonical_bytes().unwrap();
     assert_eq!(
         runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes).unwrap(),
@@ -371,7 +437,10 @@ async fn portable_product_retains_names_for_lexical_and_session_bindings() {
 
     let envelope = unit.portable_envelope_for(Some("bindings")).unwrap();
     assert_eq!(envelope.manifest.revisions.vm_layout_schema, 3);
-    assert_eq!(envelope.manifest.revisions.function_registry_schema, 2);
+    assert_eq!(
+        envelope.manifest.revisions.function_registry_schema,
+        runmat_vm::FUNCTION_REGISTRY_SCHEMA_VERSION
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

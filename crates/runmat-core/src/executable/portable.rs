@@ -103,7 +103,12 @@ impl ExecutableUnit {
             revisions,
             components,
             capabilities,
-            regions: Vec::new(),
+            regions: self
+                .analysis()
+                .regions
+                .iter()
+                .map(|region| region.contract.clone())
+                .collect(),
             interop: runmat_types::InteropManifest::empty(),
             parallel: runmat_types::ParallelManifest::empty(),
             optional_sections: Vec::new(),

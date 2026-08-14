@@ -445,6 +445,145 @@ fn dataflow_marks_parameters_and_assigned_outputs_definitely_assigned() {
 }
 
 #[test]
+fn analysis_discovers_deterministic_pure_regions_with_liveness_and_consumers() {
+    let source = "function z = f(x)\na = x + 1;\ndisp(a);\nb = a * 2;\nz = b + 3;\nend";
+    let mir = lower_mir(source);
+    let first = analyze_assembly(&mir);
+    let second = analyze_assembly(&mir);
+
+    assert_eq!(first.regions, second.regions);
+    assert!(first.regions.len() >= 2);
+    assert!(first
+        .regions
+        .windows(2)
+        .all(|pair| pair[0].contract.id < pair[1].contract.id));
+    for region in &first.regions {
+        region.contract.validate().unwrap();
+        assert!(region.contract.effects.0.is_empty());
+        assert!(!region.operations.is_empty());
+        assert!(region.operations.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+    assert!(first.regions.iter().any(|region| {
+        !region.contract.live_out.is_empty() && !region.future_consumers.is_empty()
+    }));
+
+    let encoded = serde_json::to_vec(&first).unwrap();
+    let decoded: AnalysisStore = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded.regions, first.regions);
+}
+
+#[test]
+fn analysis_excludes_workspace_environment_and_mutating_place_statements_from_regions() {
+    let source = "function y = f(x)\ny = x + 1;\ny(1) = 2;\nclear y;\ny = x + 3;\nend";
+    let mir = lower_mir(source);
+    let store = analyze_assembly(&mir);
+
+    assert!(!store.regions.is_empty());
+    for region in &store.regions {
+        for operation in &region.operations {
+            let body = mir
+                .bodies
+                .values()
+                .find(|body| {
+                    usize::try_from(operation.function.0)
+                        .is_ok_and(|function| body.function.0 == function)
+                })
+                .unwrap();
+            let block = body
+                .blocks
+                .iter()
+                .find(|block| usize::try_from(operation.block).is_ok_and(|id| block.id.0 == id))
+                .unwrap();
+            let position = usize::try_from(operation.position).unwrap();
+            assert!(matches!(
+                block.statements[position].kind,
+                MirStmtKind::Assign {
+                    place: MirPlace::Local(_),
+                    ..
+                } | MirStmtKind::MultiAssign { .. }
+                    | MirStmtKind::Expr(_)
+            ));
+        }
+    }
+}
+
+#[test]
+fn analysis_regions_preserve_branch_liveness_and_all_reachable_consumers() {
+    let source = "function y = f(x, c)\na = x + 1;\nif c\n b = a * 2;\nelse\n b = a * 3;\nend\ny = b + 4;\nend";
+    let mir = lower_mir(source);
+    let store = analyze_assembly(&mir);
+
+    let branch_input = store
+        .regions
+        .iter()
+        .find(|region| {
+            let consumer_blocks = region
+                .future_consumers
+                .iter()
+                .map(|consumer| consumer.point.block)
+                .collect::<std::collections::BTreeSet<_>>();
+            !region.contract.live_out.is_empty() && consumer_blocks.len() >= 2
+        })
+        .expect("the value produced before the branch has consumers on both branch arms");
+    assert!(branch_input
+        .future_consumers
+        .iter()
+        .all(|consumer| branch_input.contract.live_out.contains(&consumer.value)));
+    assert!(branch_input
+        .future_consumers
+        .windows(2)
+        .all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn analysis_regions_preserve_preexisting_loop_binding_on_zero_iteration_exit() {
+    let source = "function z = f()\ny = 7;\nfor y = 1:0\nend\nz = y + 1;\nend";
+    let mir = lower_mir(source);
+    let body = mir.bodies.values().next().unwrap();
+    let store = analyze_assembly(&mir);
+    let y = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::Assign {
+                place: MirPlace::Local(local),
+                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number(value))),
+            } if value == "7" => Some(*local),
+            _ => None,
+        })
+        .unwrap();
+    let y = region_value(body, y);
+    let initial_assignment_region = store
+        .regions
+        .iter()
+        .find(|region| {
+            region.operations.iter().any(|operation| {
+                let block = body
+                    .blocks
+                    .iter()
+                    .find(|block| u32::try_from(block.id.0).ok() == Some(operation.block))
+                    .unwrap();
+                let position = usize::try_from(operation.position).unwrap();
+                matches!(
+                    &block.statements[position].kind,
+                    MirStmtKind::Assign {
+                        place: MirPlace::Local(local),
+                        value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number(value))),
+                    } if region_value(body, *local) == y && value == "7"
+                )
+            })
+        })
+        .unwrap();
+
+    assert!(initial_assignment_region.contract.live_out.contains(&y));
+    assert!(initial_assignment_region
+        .future_consumers
+        .iter()
+        .any(|consumer| consumer.value == y));
+}
+
+#[test]
 fn dataflow_joins_branch_assignment_as_maybe_assigned() {
     let mir = lower_mir("function y = f(c); if c; y = 1; end; end");
     let body = mir.bodies.values().next().unwrap();

@@ -112,6 +112,7 @@ pub fn compile(
         initially_unassigned_slots,
         layout: c.layout,
         async_metadata,
+        regions: Vec::new(),
         #[cfg(feature = "native-accel")]
         accel_graph,
         #[cfg(feature = "native-accel")]
@@ -858,6 +859,7 @@ fn compile_semantic_functions(
                     })
                     .collect(),
                 resume_points,
+                regions: Vec::new(),
             },
         );
     }

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use runmat_hir::FunctionId;
-use runmat_types::{CapabilityRequirement, EffectKind};
+use runmat_types::{CapabilityRequirement, CapabilitySet, EffectKind, EffectSet};
 
-use crate::MirRvalue;
+use crate::{MirRvalue, MirStmt, MirStmtKind};
 
 use crate::analysis::engine::FlowState;
 
@@ -14,71 +14,102 @@ pub(crate) fn apply_rvalue_contract(
     state: &mut FlowState,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) {
+    let (effects, capabilities) = rvalue_contract(value, summaries);
+    state.effects.0.extend(effects.0);
+    state.capabilities.0.extend(capabilities.0);
+}
+
+pub(crate) fn statement_contract(
+    statement: &MirStmt,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> (EffectSet, CapabilitySet) {
+    match &statement.kind {
+        MirStmtKind::Assign { value, .. }
+        | MirStmtKind::MultiAssign { value, .. }
+        | MirStmtKind::Expr(value) => rvalue_contract(value, summaries),
+        MirStmtKind::PlaceMutation(_) => (
+            EffectSet([EffectKind::Unknown].into_iter().collect()),
+            CapabilitySet::default(),
+        ),
+        MirStmtKind::WorkspaceEffect { .. } => (
+            EffectSet([EffectKind::WorkspaceWrite].into_iter().collect()),
+            CapabilitySet::default(),
+        ),
+        MirStmtKind::EnvironmentEffect(_) => (
+            EffectSet([EffectKind::EnvironmentWrite].into_iter().collect()),
+            CapabilitySet::default(),
+        ),
+    }
+}
+
+pub(crate) fn rvalue_contract(
+    value: &MirRvalue,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> (EffectSet, CapabilitySet) {
+    let mut effects = EffectSet::default();
+    let mut capabilities = CapabilitySet::default();
     match value {
         MirRvalue::Call(call) => {
             if let Some(function) = bound_function(call) {
                 if let Some(summary) = summaries.get(&function) {
-                    state.effects.0.extend(summary.effects.0.iter().copied());
-                    state
-                        .capabilities
-                        .0
-                        .extend(summary.capabilities.0.iter().copied());
-                    return;
+                    return (summary.effects.clone(), summary.capabilities.clone());
                 }
             }
             if let Some(name) = call_name(call) {
                 if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
-                    state.effects.0.extend(entry.contract.effect_set().0);
-                    state
-                        .capabilities
-                        .0
-                        .extend(entry.contract.capability_set().0);
-                    return;
+                    return (entry.contract.effect_set(), entry.contract.capability_set());
                 }
             }
             if call.effects.workspace {
-                state.effects.0.insert(EffectKind::WorkspaceWrite);
+                effects.0.insert(EffectKind::WorkspaceWrite);
             }
             if call.effects.environment {
-                state.effects.0.insert(EffectKind::EnvironmentWrite);
+                effects.0.insert(EffectKind::EnvironmentWrite);
             }
             if call.effects.filesystem {
-                state.effects.0.insert(EffectKind::FilesystemRead);
+                effects.0.insert(EffectKind::FilesystemRead);
             }
             if call.effects.network {
-                state.effects.0.insert(EffectKind::Network);
+                effects.0.insert(EffectKind::Network);
             }
             if call.effects.ui {
-                state.effects.0.insert(EffectKind::UserInterface);
+                effects.0.insert(EffectKind::UserInterface);
             }
             if call.effects.random {
-                state.effects.0.insert(EffectKind::Randomness);
+                effects.0.insert(EffectKind::Randomness);
             }
             if call.effects.time {
-                state.effects.0.insert(EffectKind::Clock);
+                effects.0.insert(EffectKind::Clock);
             }
             if call.effects.host_callback {
-                state.effects.0.insert(EffectKind::HostCallback);
+                effects.0.insert(EffectKind::HostCallback);
             }
             if call.effects.unknown {
-                state.effects.0.insert(EffectKind::Unknown);
+                effects.0.insert(EffectKind::Unknown);
             }
         }
         MirRvalue::Future { .. } | MirRvalue::Spawn(_) => {
-            state.effects.0.insert(EffectKind::MaySuspend);
-            state
-                .capabilities
+            effects.0.insert(EffectKind::MaySuspend);
+            capabilities
                 .0
                 .insert(CapabilityRequirement::ParallelRuntime);
         }
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => {
-            state
-                .capabilities
+            capabilities
                 .0
                 .insert(CapabilityRequirement::DistributedRuntime);
         }
+        MirRvalue::ShortCircuit { right_temps, .. } => {
+            for statement in right_temps {
+                let (nested_effects, nested_capabilities) =
+                    statement_contract(statement, summaries);
+                effects.0.extend(nested_effects.0);
+                capabilities.0.extend(nested_capabilities.0);
+            }
+        }
         _ => {}
     }
+    (effects, capabilities)
 }
 
 fn bound_function(call: &crate::MirCall) -> Option<FunctionId> {

@@ -1,11 +1,13 @@
 mod dependency;
 mod function;
 mod program_point;
+mod region;
 mod version;
 
 pub use dependency::*;
 pub use function::*;
 pub use program_point::*;
+pub use region::*;
 pub use version::*;
 
 use crate::MirDiagnostic;
@@ -21,6 +23,7 @@ pub struct AnalysisStore {
     pub revision: AnalysisRevision,
     pub dependencies: Vec<AnalysisDependency>,
     pub program_points: Vec<ProgramPointFacts>,
+    pub regions: Vec<RegionAnalysis>,
     pub functions: Vec<FunctionAnalysis>,
     pub classes: Vec<ClassAnalysis>,
     pub diagnostics: Vec<MirDiagnostic>,
@@ -32,6 +35,7 @@ impl Default for AnalysisStore {
             revision: AnalysisRevision::current(),
             dependencies: Vec::new(),
             program_points: Vec::new(),
+            regions: Vec::new(),
             functions: Vec::new(),
             classes: Vec::new(),
             diagnostics: Vec::new(),
@@ -52,6 +56,13 @@ impl AnalysisStore {
             .binary_search_by_key(&function, |facts| facts.function)
             .ok()
             .map(|index| &self.functions[index])
+    }
+
+    pub fn region(&self, region: runmat_types::RegionId) -> Option<&RegionAnalysis> {
+        self.regions
+            .binary_search_by_key(&region, |analysis| analysis.contract.id)
+            .ok()
+            .map(|index| &self.regions[index])
     }
 
     pub fn local_value_count(&self, function: Option<runmat_types::ProgramFunctionId>) -> usize {

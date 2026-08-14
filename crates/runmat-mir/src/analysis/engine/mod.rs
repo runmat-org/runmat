@@ -23,6 +23,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.diagnostics.extend(program.diagnostics.clone());
     store.dependencies = analysis_dependencies(&store);
     store.program_points.clear();
+    store.regions.clear();
     store.functions.clear();
     store.classes.clear();
 
@@ -134,6 +135,24 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             }
         })
         .collect();
+    let mut regions = Vec::new();
+    for (function, body) in &assembly.bodies {
+        let (Some(metadata), Ok(function)) = (
+            assembly.functions.get(function),
+            u32::try_from(function.0).map(ProgramFunctionId),
+        ) else {
+            continue;
+        };
+        regions.extend(super::regions::discover_regions(
+            body,
+            function,
+            metadata.source,
+            &program.summaries,
+            &store,
+        ));
+    }
+    regions.sort_by_key(|region| region.contract.id);
+    store.regions = regions;
     store
 }
 

@@ -1,6 +1,7 @@
 mod dataflow;
 mod engine;
 mod inference;
+mod regions;
 mod spawn_safety;
 mod store;
 
