@@ -1,6 +1,7 @@
 mod assembly;
 mod context;
 mod function;
+mod index_expression;
 mod inventory;
 mod operation;
 mod requirements;

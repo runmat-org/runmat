@@ -10,7 +10,14 @@ pub(super) fn evaluate_rvalue(
     state: &mut HostState,
     value: &MirRvalue,
     requested_outputs: usize,
+    output_local: Option<runmat_native_codegen::NativeLocalId>,
 ) -> JitResult<Vec<NativeValueRef>> {
+    if output_local.is_some_and(|local| state.function.index_expression(local).is_some()) {
+        // Context-dependent selector temporaries are recipes, not ordinary
+        // eager values. Evaluating them here would execute `end` calls with no
+        // base shape and replay their effects during the actual index site.
+        return Ok(vec![state.arena.insert(Value::Num(0.0))]);
+    }
     match value {
         MirRvalue::Use(operand) => evaluate_operand(state, operand).map(|value| vec![value]),
         MirRvalue::Unary(operator, operand) => {
@@ -171,7 +178,10 @@ fn execute_embedded_statement(
             place: runmat_mir::MirPlace::Local(local),
             value,
         } => {
-            let mut values = evaluate_rvalue(state, value, 1)?;
+            let native_local = u32::try_from(local.0)
+                .map(runmat_native_codegen::NativeLocalId)
+                .map_err(|_| JitError::Host("embedded local exceeds native schema".into()))?;
+            let mut values = evaluate_rvalue(state, value, 1, Some(native_local))?;
             if values.len() != 1 {
                 return Err(JitError::Host(
                     "embedded short-circuit assignment did not produce one value".into(),
@@ -180,7 +190,7 @@ fn execute_embedded_statement(
             state.set_local(local.0, values.remove(0))
         }
         runmat_mir::MirStmtKind::Expr(value) => {
-            let _ = evaluate_rvalue(state, value, 0)?;
+            let _ = evaluate_rvalue(state, value, 0, None)?;
             Ok(())
         }
         other => Err(JitError::UnsupportedSite(format!(

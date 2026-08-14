@@ -221,6 +221,13 @@ pub fn verify_against_mir(
                 .at_function(function_id));
             }
         }
+        if native.index_expressions != super::index_expression::derive(body, function_id)? {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_index_expressions",
+                "Native IR selector-expression metadata differs from canonical MIR",
+            )
+            .at_function(function_id));
+        }
         let expected = super::inventory::expected_sites(function_id, body)?;
         if native.expected_sites != expected {
             return Err(NativeCodegenError::new(
@@ -228,6 +235,91 @@ pub fn verify_against_mir(
                 "Native IR inventory differs from canonical MIR",
             )
             .at_function(function_id));
+        }
+        verify_statement_operations(native, body, function_id)?;
+    }
+    Ok(())
+}
+
+fn verify_statement_operations(
+    native: &crate::NativeFunction,
+    body: &runmat_mir::MirBody,
+    function: runmat_types::ProgramFunctionId,
+) -> NativeCodegenResult<()> {
+    for block in &body.blocks {
+        let block_id = u32::try_from(block.id.0)
+            .map(crate::NativeBlockId)
+            .map_err(|_| {
+                NativeCodegenError::new(
+                    "native.ir.mir_operation",
+                    "MIR block identity exceeds the Native IR schema",
+                )
+                .at_function(function)
+            })?;
+        let native_block = native
+            .blocks
+            .iter()
+            .find(|candidate| candidate.id == block_id)
+            .ok_or_else(|| {
+                NativeCodegenError::new(
+                    "native.ir.mir_operation",
+                    "canonical MIR block is absent from Native IR",
+                )
+                .at_function(function)
+            })?;
+        for (position, statement) in block.statements.iter().enumerate() {
+            let position = u32::try_from(position).map_err(|_| {
+                NativeCodegenError::new(
+                    "native.ir.mir_operation",
+                    "MIR statement position exceeds the Native IR schema",
+                )
+                .at_function(function)
+            })?;
+            let point = runmat_types::ProgramPointId {
+                function,
+                block: block_id.0,
+                position,
+            };
+            let statement_instruction = native_block.instructions.iter().find(|instruction| {
+                instruction.site.point == point
+                    && instruction.site.phase == crate::NativeSitePhase::Statement
+                    && instruction.site.ordinal == 0
+            });
+            if !matches!(
+                statement_instruction.map(|instruction| &instruction.operation),
+                Some(crate::NativeOperation::Statement(actual)) if actual == &statement.kind
+            ) {
+                return Err(NativeCodegenError::new(
+                    "native.ir.mir_operation",
+                    "Native IR statement payload differs from canonical MIR",
+                )
+                .at_point(point));
+            }
+            let expected_rvalue = match &statement.kind {
+                runmat_mir::MirStmtKind::Assign { value, .. }
+                | runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                | runmat_mir::MirStmtKind::Expr(value) => Some(value),
+                runmat_mir::MirStmtKind::PlaceMutation(_)
+                | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+                | runmat_mir::MirStmtKind::EnvironmentEffect(_) => None,
+            };
+            if let Some(expected_rvalue) = expected_rvalue {
+                let rvalue_instruction = native_block.instructions.iter().find(|instruction| {
+                    instruction.site.point == point
+                        && instruction.site.phase == crate::NativeSitePhase::Rvalue
+                        && instruction.site.ordinal == 0
+                });
+                if !matches!(
+                    rvalue_instruction.map(|instruction| &instruction.operation),
+                    Some(crate::NativeOperation::Rvalue { value, .. }) if value == expected_rvalue
+                ) {
+                    return Err(NativeCodegenError::new(
+                        "native.ir.mir_operation",
+                        "Native IR rvalue payload differs from canonical MIR",
+                    )
+                    .at_point(point));
+                }
+            }
         }
     }
     Ok(())

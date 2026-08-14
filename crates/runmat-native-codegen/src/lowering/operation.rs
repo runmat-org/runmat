@@ -95,13 +95,18 @@ fn build_instruction(
     let class = construct.native_lowering_class();
     let outputs = output_locals
         .iter()
-        .map(|local| NativeOutput {
-            value: ctx.value(),
-            value_type: local.map_or(NativeValueType::Generic, |local| {
-                ctx.value_type(site.output_point, local)
-            }),
+        .map(|local| {
+            Ok(NativeOutput {
+                value: ctx.value(),
+                value_type: local.map_or(NativeValueType::Generic, |local| {
+                    ctx.value_type(site.output_point, local)
+                }),
+                local: local
+                    .map(|local| super::function::checked_local(local, ctx.function))
+                    .transpose()?,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<NativeCodegenResult<Vec<_>>>()?;
     let requires_safepoint = class != runmat_mir::NativeLoweringClass::NativeOperation
         || !requirements.effects.0.is_empty();
     let frame_state = requires_safepoint.then(|| {

@@ -217,6 +217,7 @@ pub(super) fn lower_function(
         name: metadata.name.0.clone(),
         abi: lower_abi(body, function)?,
         locals,
+        index_expressions: super::index_expression::derive(body, function)?,
         entry: checked_block(entry.id, function)?,
         blocks,
         expected_sites,

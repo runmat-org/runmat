@@ -14,4 +14,6 @@ pub struct NativeBlockParameter {
 pub struct NativeOutput {
     pub value: NativeValueId,
     pub value_type: NativeValueType,
+    /// MIR local receiving this output, when the operation publishes one.
+    pub local: Option<NativeLocalId>,
 }

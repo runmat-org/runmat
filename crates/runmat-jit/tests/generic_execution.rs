@@ -1,6 +1,13 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::{collections::BTreeMap, rc::Rc};
+use std::{
+    collections::BTreeMap,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use runmat_execution::{
     Digest, ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
@@ -260,6 +267,55 @@ fn generic_workspace_first_static_property_prefers_named_local_binding() {
             .outputs,
         vec![Value::Num(55.0)]
     );
+}
+
+#[test]
+fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape() {
+    let scalar = GenericExecutor::compile(end_scalar_fixture()).unwrap();
+    assert_eq!(
+        scalar
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(30.0)]
+    );
+
+    let range = GenericExecutor::compile(end_range_fixture()).unwrap();
+    let Value::Tensor(selected) = range
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap()
+        .outputs
+        .pop()
+        .unwrap()
+    else {
+        panic!("expected end-relative range selection to return a tensor")
+    };
+    assert_eq!(selected.materialize_f64(), vec![10.0, 20.0, 30.0]);
+
+    let runtime = runtime_context();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let invoker_calls = Arc::clone(&calls);
+    let activation = runtime.enter();
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function, arguments, requested_outputs| {
+            assert_eq!(function, 9);
+            assert_eq!(requested_outputs, 1);
+            invoker_calls.fetch_add(1, Ordering::SeqCst);
+            let value = arguments[0].clone();
+            Box::pin(async move { Ok(value) })
+        }),
+    ));
+    drop(activation);
+    let called = GenericExecutor::compile(end_call_fixture()).unwrap();
+    assert_eq!(
+        called
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
+            .unwrap()
+            .outputs,
+        vec![Value::Num(40.0)]
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    drop(invoker);
 }
 
 fn runtime_context() -> RuntimeContext {
@@ -1277,6 +1333,168 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
         target: NativeTarget::current(),
     })
     .unwrap()
+}
+
+fn end_scalar_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let mut statements = tensor_assignment(span);
+    statements.extend([
+        statement(1, MirRvalue::End, span),
+        statement(
+            2,
+            MirRvalue::Binary(
+                MirOperand::Local(MirLocalId(1)),
+                runmat_types::OperatorKind::Subtract,
+                MirOperand::Constant(MirConstant::Number("1".into())),
+            ),
+            span,
+        ),
+        statement(
+            3,
+            MirRvalue::Index {
+                base: MirOperand::Local(MirLocalId(0)),
+                indexing: MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: MirIndexPlan::SliceExpr,
+                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(2)))],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            },
+            span,
+        ),
+    ]);
+    lower_body(
+        "end_scalar",
+        4,
+        statements,
+        MirOperand::Local(MirLocalId(3)),
+        span,
+    )
+}
+
+fn end_range_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let mut statements = tensor_assignment(span);
+    statements.extend([
+        statement(1, MirRvalue::End, span),
+        statement(
+            2,
+            MirRvalue::Binary(
+                MirOperand::Local(MirLocalId(1)),
+                runmat_types::OperatorKind::Subtract,
+                MirOperand::Constant(MirConstant::Number("1".into())),
+            ),
+            span,
+        ),
+        statement(
+            3,
+            MirRvalue::Range {
+                start: MirOperand::Constant(MirConstant::Number("1".into())),
+                step: None,
+                end: MirOperand::Local(MirLocalId(2)),
+            },
+            span,
+        ),
+        statement(
+            4,
+            MirRvalue::Index {
+                base: MirOperand::Local(MirLocalId(0)),
+                indexing: MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: MirIndexPlan::SliceExpr,
+                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(3)))],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            },
+            span,
+        ),
+    ]);
+    lower_body(
+        "end_range",
+        5,
+        statements,
+        MirOperand::Local(MirLocalId(4)),
+        span,
+    )
+}
+
+fn end_call_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let mut statements = tensor_assignment(span);
+    statements.extend([
+        statement(1, MirRvalue::End, span),
+        statement(
+            2,
+            MirRvalue::Call(MirCall {
+                callee: MirCallee::Static(CallableIdentity::BoundFunction(
+                    runmat_types::FunctionId(9),
+                )),
+                args: vec![MirCallArg::Single(MirOperand::Local(MirLocalId(1)))],
+                arg_spans: vec![span],
+                syntax: runmat_hir::CallSyntax::Plain,
+                requested_outputs: RequestedOutputCount::One,
+                fallback_policy: CallableFallbackPolicy::None,
+                workspace_first_name: None,
+                bare_identifier: false,
+                async_behavior: AsyncBehaviorFact::NeverSuspends,
+                effects: runmat_builtins::BuiltinEffects::none(),
+                workspace_effect: None,
+                environment_effect: None,
+                purity: runmat_builtins::BuiltinPurity::Pure,
+                semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+            }),
+            span,
+        ),
+        statement(
+            3,
+            MirRvalue::Index {
+                base: MirOperand::Local(MirLocalId(0)),
+                indexing: MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: MirIndexPlan::SliceExpr,
+                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(2)))],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            },
+            span,
+        ),
+    ]);
+    lower_body(
+        "end_call",
+        4,
+        statements,
+        MirOperand::Local(MirLocalId(3)),
+        span,
+    )
+}
+
+fn tensor_assignment(span: Span) -> Vec<MirStmt> {
+    vec![statement(
+        0,
+        MirRvalue::Aggregate {
+            kind: MirAggregateKind::Tensor,
+            rows: 1,
+            cols: 4,
+            elements: ["10", "20", "30", "40"]
+                .into_iter()
+                .map(|value| MirOperand::Constant(MirConstant::Number(value.into())))
+                .collect(),
+        },
+        span,
+    )]
+}
+
+fn statement(local: usize, value: MirRvalue, span: Span) -> MirStmt {
+    MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(local)),
+            value,
+        },
+        span,
+    }
 }
 
 fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {

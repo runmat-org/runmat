@@ -1,9 +1,5 @@
 use crate::call::shared::expand_brace_values;
-use crate::interpreter::dispatch::calls::normalize_requested_outputs;
 use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
-use runmat_runtime::call::descriptor::{
-    execute_callable_descriptor, CallableCallKind, CallableDescriptor,
-};
 use runmat_runtime::indexing as runtime_indexing;
 use runmat_runtime::indexing::plan::{
     build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
@@ -26,8 +22,6 @@ use runmat_runtime::object::indexing::{
 };
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
-use std::future::Future;
-use std::pin::Pin;
 
 fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{context}: {}", err.message()));
@@ -891,106 +885,8 @@ async fn resolve_end_expr_value(
     end_expr: &EndExpr,
     vars: &[Value],
 ) -> Result<f64, RuntimeError> {
-    fn eval_end_expr_value<'a>(
-        expr: &'a EndExpr,
-        end_value: f64,
-        vars: &'a [Value],
-    ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>> {
-        Box::pin(async move {
-            match expr {
-                EndExpr::End => Ok(end_value),
-                EndExpr::Const(v) => Ok(*v),
-                EndExpr::Var(i) => {
-                    let mut value = vars
-                        .get(*i)
-                        .ok_or_else(|| {
-                            crate::interpreter::errors::mex(
-                                "MissingNumericIndex",
-                                "missing variable for end expression",
-                            )
-                        })?
-                        .clone();
-                    if matches!(value, Value::GpuTensor(_)) {
-                        value = runmat_runtime::dispatcher::gather_if_needed_async(&value).await?;
-                    }
-                    runtime_indexing::value_to_f64(&value).map_err(|_| {
-                        crate::interpreter::errors::mex(
-                            "UnsupportedIndexType",
-                            "end expression must be numeric",
-                        )
-                    })
-                }
-                EndExpr::ResolvedCall {
-                    identity,
-                    fallback_policy,
-                    args,
-                } => {
-                    let mut argv: Vec<Value> = Vec::with_capacity(args.len());
-                    for a in args {
-                        let val = eval_end_expr_value(a, end_value, vars).await?;
-                        argv.push(Value::Num(val));
-                    }
-                    let descriptor = CallableDescriptor::resolved(
-                        identity.clone(),
-                        argv,
-                        1,
-                        *fallback_policy,
-                        CallableCallKind::EndExpr,
-                    );
-                    let v = normalize_requested_outputs(
-                        execute_callable_descriptor(descriptor).await?,
-                        1,
-                    );
-                    runtime_indexing::value_to_f64(&v).map_err(|_| {
-                        crate::interpreter::errors::mex(
-                            "UnsupportedIndexType",
-                            "end call must return scalar",
-                        )
-                    })
-                }
-                EndExpr::Add(a, b) => Ok(eval_end_expr_value(a, end_value, vars).await?
-                    + eval_end_expr_value(b, end_value, vars).await?),
-                EndExpr::Sub(a, b) => Ok(eval_end_expr_value(a, end_value, vars).await?
-                    - eval_end_expr_value(b, end_value, vars).await?),
-                EndExpr::Mul(a, b) => Ok(eval_end_expr_value(a, end_value, vars).await?
-                    * eval_end_expr_value(b, end_value, vars).await?),
-                EndExpr::Div(a, b) => {
-                    let denom = eval_end_expr_value(b, end_value, vars).await?;
-                    if denom == 0.0 {
-                        return Err(crate::interpreter::errors::mex(
-                            "IndexOutOfBounds",
-                            "Index out of bounds",
-                        ));
-                    }
-                    Ok(eval_end_expr_value(a, end_value, vars).await? / denom)
-                }
-                EndExpr::LeftDiv(a, b) => {
-                    let denom = eval_end_expr_value(a, end_value, vars).await?;
-                    if denom == 0.0 {
-                        return Err(crate::interpreter::errors::mex(
-                            "IndexOutOfBounds",
-                            "Index out of bounds",
-                        ));
-                    }
-                    Ok(eval_end_expr_value(b, end_value, vars).await? / denom)
-                }
-                EndExpr::Pow(a, b) => Ok(eval_end_expr_value(a, end_value, vars)
-                    .await?
-                    .powf(eval_end_expr_value(b, end_value, vars).await?)),
-                EndExpr::Neg(a) => Ok(-eval_end_expr_value(a, end_value, vars).await?),
-                EndExpr::Pos(a) => Ok(eval_end_expr_value(a, end_value, vars).await?),
-                EndExpr::Floor(a) => Ok(eval_end_expr_value(a, end_value, vars).await?.floor()),
-                EndExpr::Ceil(a) => Ok(eval_end_expr_value(a, end_value, vars).await?.ceil()),
-                EndExpr::Round(a) => Ok(eval_end_expr_value(a, end_value, vars).await?.round()),
-                EndExpr::Fix(a) => {
-                    let v = eval_end_expr_value(a, end_value, vars).await?;
-                    Ok(if v >= 0.0 { v.floor() } else { v.ceil() })
-                }
-            }
-        })
-    }
-
-    eval_end_expr_value(end_expr, dim_len as f64, vars).await
+    runtime_indexing::resolve_end_expr_value(dim_len, end_expr, |local| vars.get(local).cloned())
+        .await
 }
 
 async fn resolve_end_expr_index(

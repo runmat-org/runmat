@@ -9,4 +9,4 @@ pub mod selectors;
 pub mod write_linear;
 pub mod write_slice;
 
-pub use end_expr::{value_to_f64, EndExpr, ValueToF64Error};
+pub use end_expr::{resolve_end_expr_value, value_to_f64, EndExpr, ValueToF64Error};

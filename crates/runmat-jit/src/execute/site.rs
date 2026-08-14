@@ -136,7 +136,10 @@ fn runtime_source(
 fn execute_instruction(state: &mut HostState, instruction: &NativeInstruction) -> JitResult<()> {
     match &instruction.operation {
         NativeOperation::Rvalue { value, .. } => {
-            let results = evaluate_rvalue(state, value, instruction.outputs.len())?;
+            let output_local = (instruction.outputs.len() == 1)
+                .then(|| instruction.outputs[0].local)
+                .flatten();
+            let results = evaluate_rvalue(state, value, instruction.outputs.len(), output_local)?;
             if instruction.outputs.len() != results.len() {
                 return Err(JitError::Host(format!(
                     "native rvalue produced {} values for {} SSA outputs",

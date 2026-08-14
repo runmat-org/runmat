@@ -1,4 +1,4 @@
-use super::{NativeBlock, NativeBlockId, NativeLocalId, NativeMirSite};
+use super::{NativeBlock, NativeBlockId, NativeIndexExpression, NativeLocalId, NativeMirSite};
 use runmat_types::{BindingId, ProgramFunctionId, ProgramSourceId};
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +58,7 @@ pub struct NativeFunction {
     pub name: String,
     pub abi: NativeFunctionAbi,
     pub locals: Vec<NativeLocalMetadata>,
+    pub index_expressions: Vec<NativeIndexExpression>,
     pub entry: NativeBlockId,
     pub blocks: Vec<NativeBlock>,
     pub expected_sites: Vec<NativeMirSite>,
@@ -70,5 +71,12 @@ impl NativeFunction {
 
     pub fn local(&self, local: NativeLocalId) -> Option<&NativeLocalMetadata> {
         self.locals.get(local.0 as usize)
+    }
+
+    pub fn index_expression(&self, local: NativeLocalId) -> Option<&NativeIndexExpression> {
+        self.index_expressions
+            .binary_search_by_key(&local, |expression| expression.local)
+            .ok()
+            .map(|index| &self.index_expressions[index])
     }
 }

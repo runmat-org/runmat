@@ -1,5 +1,6 @@
 use futures::executor::block_on;
 use runmat_mir::{MirIndexComponent, MirIndexing, MirOperand};
+use runmat_native_codegen::{NativeIndexBound, NativeIndexExpressionKind, NativeRangeExpression};
 use runmat_runtime::indexing::plan::{build_index_plan, IndexPlan};
 use runmat_runtime::indexing::read_slice;
 use runmat_runtime::indexing::selectors::build_slice_selectors;
@@ -185,14 +186,7 @@ fn materialize_selectors(
             }
             MirIndexComponent::End { dim, offset } => {
                 let resolved_dimension = dim.unwrap_or(dimension);
-                let extent = if dims == 1 {
-                    shape
-                        .iter()
-                        .try_fold(1_usize, |total, extent| total.checked_mul(*extent))
-                } else {
-                    Some(*shape.get(resolved_dimension).unwrap_or(&1))
-                }
-                .ok_or_else(|| JitError::Host("index shape exceeds platform limits".into()))?;
+                let extent = selector_dimension_length(&shape, dims, resolved_dimension)?;
                 let resolved = extent.checked_add_signed(*offset).ok_or_else(|| {
                     JitError::from(runmat_runtime::runtime_error::semantic_error(
                         "IndexOutOfBounds",
@@ -208,7 +202,8 @@ fn materialize_selectors(
                 positional.push(value);
             }
             MirIndexComponent::Expr(operand) => {
-                let value = materialize_operand(state, operand)?;
+                let value =
+                    materialize_selector_expression(state, operand, &shape, dims, dimension)?;
                 numeric.push(value.clone());
                 positional.push(value);
             }
@@ -221,6 +216,124 @@ fn materialize_selectors(
         numeric,
         positional,
     })
+}
+
+fn materialize_selector_expression(
+    state: &mut HostState,
+    operand: &MirOperand,
+    shape: &[usize],
+    dims: usize,
+    dimension: usize,
+) -> JitResult<Value> {
+    let MirOperand::Local(local) = operand else {
+        return materialize_operand(state, operand);
+    };
+    let local = u32::try_from(local.0)
+        .map(runmat_native_codegen::NativeLocalId)
+        .map_err(|_| JitError::Host("selector local exceeds native schema".into()))?;
+    let Some(expression) = state.function.index_expression(local).cloned() else {
+        return materialize_operand(state, operand);
+    };
+    let dimension_length = selector_dimension_length(shape, dims, dimension)?;
+    match expression.kind {
+        NativeIndexExpressionKind::Scalar(expression) => {
+            resolve_end_expression(state, dimension_length, &expression).map(Value::Num)
+        }
+        NativeIndexExpressionKind::Range(range) => {
+            materialize_range_expression(state, dimension_length, &range)
+        }
+    }
+}
+
+fn materialize_range_expression(
+    state: &mut HostState,
+    dimension_length: usize,
+    range: &NativeRangeExpression,
+) -> JitResult<Value> {
+    let start = materialize_index_bound(state, dimension_length, &range.start)?;
+    let step = range
+        .step
+        .as_ref()
+        .map(|step| materialize_index_bound(state, dimension_length, step))
+        .transpose()?;
+    let end = resolve_end_expression(state, dimension_length, &range.end)?;
+    let mut arguments = vec![Value::Num(start)];
+    if let Some(step) = step {
+        arguments.push(Value::Num(step));
+    }
+    arguments.push(Value::Num(end));
+    let mut values = super::call::builtin(state, "colon", arguments, 1)?;
+    if values.len() != 1 {
+        return Err(JitError::Host(
+            "context-dependent range did not produce one selector".into(),
+        ));
+    }
+    Ok(values.remove(0))
+}
+
+fn materialize_index_bound(
+    state: &mut HostState,
+    dimension_length: usize,
+    bound: &NativeIndexBound,
+) -> JitResult<f64> {
+    match bound {
+        NativeIndexBound::Expression(expression) => {
+            resolve_end_expression(state, dimension_length, expression)
+        }
+        NativeIndexBound::Operand(MirOperand::Constant(runmat_mir::MirConstant::Number(value))) => {
+            value
+                .parse()
+                .map_err(|error| JitError::Host(format!("invalid range bound {value:?}: {error}")))
+        }
+        NativeIndexBound::Operand(MirOperand::Local(local)) => resolve_end_expression(
+            state,
+            dimension_length,
+            &runmat_runtime::indexing::EndExpr::Var(local.0),
+        ),
+        NativeIndexBound::Operand(operand) => {
+            let value = materialize_operand(state, operand)?;
+            runmat_runtime::indexing::value_to_f64(&value).map_err(|_| {
+                JitError::from(semantic_error(
+                    "UnsupportedIndexType",
+                    "range bound must be numeric",
+                ))
+            })
+        }
+    }
+}
+
+fn resolve_end_expression(
+    state: &HostState,
+    dimension_length: usize,
+    expression: &runmat_runtime::indexing::EndExpr,
+) -> JitResult<f64> {
+    let runtime = state.runtime.clone();
+    block_on(
+        runtime.scope(runmat_runtime::indexing::resolve_end_expr_value(
+            dimension_length,
+            expression,
+            |local| {
+                state
+                    .locals
+                    .get(local)
+                    .copied()
+                    .filter(|value| !value.is_null())
+                    .and_then(|value| state.arena.get(value).ok().cloned())
+            },
+        )),
+    )
+    .map_err(JitError::from)
+}
+
+fn selector_dimension_length(shape: &[usize], dims: usize, dimension: usize) -> JitResult<usize> {
+    if dims == 1 {
+        shape
+            .iter()
+            .try_fold(1_usize, |total, extent| total.checked_mul(*extent))
+            .ok_or_else(|| JitError::Host("index shape exceeds platform limits".into()))
+    } else {
+        Ok(*shape.get(dimension).unwrap_or(&1))
+    }
 }
 
 fn read_paren(

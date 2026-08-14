@@ -211,7 +211,7 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
     assert_eq!(local.binding, Some(binding));
     assert_eq!(local.name.as_deref(), Some("answer"));
     assert_eq!(local.kind, runmat_native_codegen::NativeLocalKind::Binding);
-    assert_eq!(assembly.schema_version, 2);
+    assert_eq!(assembly.schema_version, 3);
     assembly.verify().unwrap();
     verify_against_mir(&assembly, &mir, Some(&names)).unwrap();
 
@@ -222,6 +222,95 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
             .unwrap_err()
             .code,
         "native.ir.mir_locals"
+    );
+}
+
+#[test]
+fn end_expression_catalog_is_verified_against_canonical_mir() {
+    let span = Span { start: 0, end: 3 };
+    let mut mir = function(vec![
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::End,
+            },
+            span,
+        },
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(1)),
+                value: MirRvalue::Binary(
+                    MirOperand::Local(MirLocalId(0)),
+                    runmat_types::OperatorKind::Subtract,
+                    MirOperand::Constant(MirConstant::Number("1".into())),
+                ),
+            },
+            span,
+        },
+    ]);
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    body.locals.push(MirLocal {
+        id: MirLocalId(1),
+        binding: None,
+        kind: MirLocalKind::Temporary,
+        span,
+    });
+    body.blocks[0].terminator.kind =
+        MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(1))]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
+    assert_eq!(assembly.functions[0].index_expressions.len(), 2);
+    assert!(matches!(
+        &assembly.functions[0].index_expressions[1].kind,
+        runmat_native_codegen::NativeIndexExpressionKind::Scalar(
+            runmat_runtime::indexing::EndExpr::Sub(_, _)
+        )
+    ));
+
+    let mut structurally_invalid = assembly.clone();
+    structurally_invalid.functions[0].index_expressions[1].kind =
+        runmat_native_codegen::NativeIndexExpressionKind::Scalar(
+            runmat_runtime::indexing::EndExpr::Var(99),
+        );
+    assert_eq!(
+        structurally_invalid.verify().unwrap_err().code,
+        "native.ir.index_expressions"
+    );
+
+    let mut redirected_output = assembly.clone();
+    redirected_output.functions[0].blocks[0].instructions[0].outputs[0].local =
+        Some(runmat_native_codegen::NativeLocalId(1));
+    assert_eq!(
+        redirected_output.verify().unwrap_err().code,
+        "native.ir.output_local_identity"
+    );
+
+    let mut coordinated_redirect = assembly.clone();
+    coordinated_redirect.functions[0].blocks[0].instructions[0].outputs[0].local =
+        Some(runmat_native_codegen::NativeLocalId(1));
+    coordinated_redirect.functions[0].blocks[0].instructions[1].outputs[0].local =
+        Some(runmat_native_codegen::NativeLocalId(1));
+    let runmat_native_codegen::NativeOperation::Statement(MirStmtKind::Assign { place, .. }) =
+        &mut coordinated_redirect.functions[0].blocks[0].instructions[1].operation
+    else {
+        panic!("fixture statement must be an assignment");
+    };
+    *place = MirPlace::Local(MirLocalId(1));
+    coordinated_redirect.verify().unwrap();
+    assert_eq!(
+        verify_against_mir(&coordinated_redirect, &mir, None)
+            .unwrap_err()
+            .code,
+        "native.ir.mir_operation"
+    );
+
+    let mut omitted = assembly;
+    omitted.functions[0].index_expressions.pop();
+    omitted.verify().unwrap();
+    assert_eq!(
+        verify_against_mir(&omitted, &mir, None).unwrap_err().code,
+        "native.ir.mir_index_expressions"
     );
 }
 

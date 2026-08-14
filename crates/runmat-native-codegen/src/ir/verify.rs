@@ -118,6 +118,22 @@ fn verify_function(
             "locals must be ordered and bound locals must retain non-empty canonical names",
         ));
     }
+    ensure_sorted_unique_by(
+        "native.ir.index_expressions",
+        &function.index_expressions,
+        |expression| expression.local,
+    )
+    .map_err(|error| error.at_function(function.id))?;
+    for expression in &function.index_expressions {
+        if expression.local.0 as usize >= function.local_count()
+            || !verify_index_expression(function, &expression.kind)
+        {
+            return Err(error(
+                "native.ir.index_expressions",
+                "selector expressions must be valid, context-dependent, and local to the function",
+            ));
+        }
+    }
     for local in function
         .abi
         .fixed_inputs
@@ -200,6 +216,15 @@ fn verify_function(
         let mut boundary_states =
             BTreeMap::from([(0_u32, (available.clone(), current_effect_epoch))]);
         for instruction in &block.instructions {
+            let containing_statement = block.instructions.iter().find_map(|candidate| {
+                (candidate.site.point == instruction.site.point
+                    && candidate.site.phase == NativeSitePhase::Statement)
+                    .then_some(&candidate.operation)
+                    .and_then(|operation| match operation {
+                        NativeOperation::Statement(statement) => Some(statement),
+                        NativeOperation::Rvalue { .. } => None,
+                    })
+            });
             if !all_instructions.insert(instruction.id) {
                 return Err(error(
                     "native.ir.instruction_identity",
@@ -212,6 +237,7 @@ fn verify_function(
                 &available,
                 current_effect_epoch,
                 &mut all_safepoints,
+                containing_statement,
             )?;
             if !instruction.capabilities.0.is_subset(&capabilities.0) {
                 return Err(error(
@@ -352,12 +378,103 @@ fn verify_function(
     Ok(())
 }
 
+fn verify_index_expression(
+    function: &NativeFunction,
+    expression: &NativeIndexExpressionKind,
+) -> bool {
+    match expression {
+        NativeIndexExpressionKind::Scalar(expression) => {
+            end_expression_valid(function, expression) && end_expression_contains_end(expression)
+        }
+        NativeIndexExpressionKind::Range(range) => {
+            let start_valid = index_bound_valid(function, &range.start);
+            let step_valid = range
+                .step
+                .as_ref()
+                .is_none_or(|step| index_bound_valid(function, step));
+            let contains_end = index_bound_contains_end(&range.start)
+                || range.step.as_ref().is_some_and(index_bound_contains_end)
+                || end_expression_contains_end(&range.end);
+            start_valid && step_valid && end_expression_valid(function, &range.end) && contains_end
+        }
+    }
+}
+
+fn index_bound_valid(function: &NativeFunction, bound: &NativeIndexBound) -> bool {
+    match bound {
+        NativeIndexBound::Operand(runmat_mir::MirOperand::Local(local)) => {
+            local.0 < function.local_count()
+        }
+        NativeIndexBound::Operand(
+            runmat_mir::MirOperand::Constant(_) | runmat_mir::MirOperand::FunctionHandle(_),
+        ) => true,
+        NativeIndexBound::Expression(expression) => end_expression_valid(function, expression),
+    }
+}
+
+fn index_bound_contains_end(bound: &NativeIndexBound) -> bool {
+    matches!(bound, NativeIndexBound::Expression(expression) if end_expression_contains_end(expression))
+}
+
+fn end_expression_valid(
+    function: &NativeFunction,
+    expression: &runmat_runtime::indexing::EndExpr,
+) -> bool {
+    use runmat_runtime::indexing::EndExpr;
+    match expression {
+        EndExpr::End => true,
+        EndExpr::Const(value) => value.is_finite(),
+        EndExpr::Var(local) => *local < function.local_count(),
+        EndExpr::ResolvedCall { args, .. } => {
+            args.iter().all(|arg| end_expression_valid(function, arg))
+        }
+        EndExpr::Add(left, right)
+        | EndExpr::Sub(left, right)
+        | EndExpr::Mul(left, right)
+        | EndExpr::Div(left, right)
+        | EndExpr::LeftDiv(left, right)
+        | EndExpr::Pow(left, right) => {
+            end_expression_valid(function, left) && end_expression_valid(function, right)
+        }
+        EndExpr::Neg(inner)
+        | EndExpr::Pos(inner)
+        | EndExpr::Floor(inner)
+        | EndExpr::Ceil(inner)
+        | EndExpr::Round(inner)
+        | EndExpr::Fix(inner) => end_expression_valid(function, inner),
+    }
+}
+
+fn end_expression_contains_end(expression: &runmat_runtime::indexing::EndExpr) -> bool {
+    use runmat_runtime::indexing::EndExpr;
+    match expression {
+        EndExpr::End => true,
+        EndExpr::Const(_) | EndExpr::Var(_) => false,
+        EndExpr::ResolvedCall { args, .. } => args.iter().any(end_expression_contains_end),
+        EndExpr::Add(left, right)
+        | EndExpr::Sub(left, right)
+        | EndExpr::Mul(left, right)
+        | EndExpr::Div(left, right)
+        | EndExpr::LeftDiv(left, right)
+        | EndExpr::Pow(left, right) => {
+            end_expression_contains_end(left) || end_expression_contains_end(right)
+        }
+        EndExpr::Neg(inner)
+        | EndExpr::Pos(inner)
+        | EndExpr::Floor(inner)
+        | EndExpr::Ceil(inner)
+        | EndExpr::Round(inner)
+        | EndExpr::Fix(inner) => end_expression_contains_end(inner),
+    }
+}
+
 fn verify_instruction(
     function: &NativeFunction,
     instruction: &NativeInstruction,
     available: &BTreeSet<NativeValueId>,
     current_effect_epoch: NativeValueId,
     all_safepoints: &mut BTreeSet<NativeSafepointId>,
+    containing_statement: Option<&runmat_mir::MirStmtKind>,
 ) -> NativeCodegenResult<()> {
     let error = |code, message| {
         NativeCodegenError::new(code, message)
@@ -475,6 +592,28 @@ fn verify_instruction(
             "instruction output arity differs from its canonical MIR role",
         ));
     }
+    if instruction.outputs.iter().any(|output| {
+        output
+            .local
+            .is_some_and(|local| local.0 as usize >= function.local_count())
+    }) {
+        return Err(error(
+            "native.ir.output_local",
+            "instruction output names a local outside the function",
+        ));
+    }
+    let expected_output_locals = expected_output_locals(instruction, containing_statement)?;
+    if instruction
+        .outputs
+        .iter()
+        .map(|output| output.local)
+        .ne(expected_output_locals)
+    {
+        return Err(error(
+            "native.ir.output_local_identity",
+            "instruction output locals differ from the retained canonical statement role",
+        ));
+    }
     let requires_safepoint = instruction.class != runmat_mir::NativeLoweringClass::NativeOperation
         || !instruction.effects.0.is_empty();
     if requires_safepoint != instruction.safepoint.is_some()
@@ -513,6 +652,97 @@ fn verify_instruction(
         }
     }
     Ok(())
+}
+
+fn expected_output_locals(
+    instruction: &NativeInstruction,
+    containing_statement: Option<&runmat_mir::MirStmtKind>,
+) -> NativeCodegenResult<impl Iterator<Item = Option<NativeLocalId>>> {
+    let locals = match (&instruction.site.phase, &instruction.operation) {
+        (NativeSitePhase::Rvalue, NativeOperation::Rvalue { .. }) => {
+            let statement = containing_statement.ok_or_else(|| {
+                NativeCodegenError::new(
+                    "native.ir.output_local_identity",
+                    "rvalue output has no containing statement",
+                )
+                .at_point(instruction.site.point)
+            })?;
+            rvalue_output_locals(statement)?
+        }
+        (NativeSitePhase::TerminatorRvalue, NativeOperation::Rvalue { .. }) => vec![None],
+        (NativeSitePhase::Statement, NativeOperation::Statement(statement)) => {
+            statement_output_locals(statement)?
+                .into_iter()
+                .map(Some)
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+    Ok(locals.into_iter())
+}
+
+fn rvalue_output_locals(
+    statement: &runmat_mir::MirStmtKind,
+) -> NativeCodegenResult<Vec<Option<NativeLocalId>>> {
+    use runmat_mir::{MirOutputTarget, MirStmtKind};
+    match statement {
+        MirStmtKind::Assign { place, .. } => root_local(place)
+            .map(checked_native_local)
+            .transpose()
+            .map(|local| vec![local]),
+        MirStmtKind::MultiAssign { targets, .. } => targets
+            .targets
+            .iter()
+            .map(|target| match target {
+                MirOutputTarget::Place(place) => {
+                    root_local(place).map(checked_native_local).transpose()
+                }
+                MirOutputTarget::Discard => Ok(None),
+            })
+            .collect(),
+        MirStmtKind::Expr(_) => Ok(Vec::new()),
+        MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::WorkspaceEffect { .. }
+        | MirStmtKind::EnvironmentEffect(_) => Err(NativeCodegenError::new(
+            "native.ir.output_local_identity",
+            "statement without an rvalue contains an rvalue instruction",
+        )),
+    }
+}
+
+fn statement_output_locals(
+    statement: &runmat_mir::MirStmtKind,
+) -> NativeCodegenResult<Vec<NativeLocalId>> {
+    use runmat_mir::{MirOutputTarget, MirStmtKind};
+    let roots = match statement {
+        MirStmtKind::Assign { place, .. } => root_local(place).into_iter().collect(),
+        MirStmtKind::MultiAssign { targets, .. } => targets
+            .targets
+            .iter()
+            .filter_map(|target| match target {
+                MirOutputTarget::Place(place) => root_local(place),
+                MirOutputTarget::Discard => None,
+            })
+            .collect(),
+        MirStmtKind::PlaceMutation(mutation) => root_local(&mutation.place).into_iter().collect(),
+        MirStmtKind::WorkspaceEffect { bindings, .. } => bindings.clone(),
+        MirStmtKind::Expr(_) | MirStmtKind::EnvironmentEffect(_) => Vec::new(),
+    };
+    let mut seen = BTreeSet::new();
+    roots
+        .into_iter()
+        .filter(|local| seen.insert(*local))
+        .map(checked_native_local)
+        .collect()
+}
+
+fn checked_native_local(local: runmat_mir::MirLocalId) -> NativeCodegenResult<NativeLocalId> {
+    u32::try_from(local.0).map(NativeLocalId).map_err(|_| {
+        NativeCodegenError::new(
+            "native.ir.output_local_identity",
+            "MIR output local exceeds the Native IR schema",
+        )
+    })
 }
 
 fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult<usize> {
