@@ -55,6 +55,10 @@ impl GenericExecutor {
         })
     }
 
+    pub fn retained_code_bytes(&self) -> u64 {
+        self.compiled.retained_code_bytes()
+    }
+
     pub fn invoke(
         &self,
         function: ProgramFunctionId,

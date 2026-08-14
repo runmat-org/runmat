@@ -13,6 +13,7 @@ pub struct CompiledExecutable {
     // not part of the executor or native ABI.
     pub(crate) _module: JITModule,
     pub(crate) entrypoints: BTreeMap<ProgramFunctionId, *const u8>,
+    pub(crate) retained_code_bytes: u64,
 }
 
 impl CompiledExecutable {
@@ -27,5 +28,11 @@ impl CompiledExecutable {
 
     pub fn retained_function_count(&self) -> usize {
         self.entrypoints.len()
+    }
+
+    /// Exact emitted function-body bytes retained by this executable. Module
+    /// allocator metadata is intentionally excluded from the code budget.
+    pub fn retained_code_bytes(&self) -> u64 {
+        self.retained_code_bytes
     }
 }

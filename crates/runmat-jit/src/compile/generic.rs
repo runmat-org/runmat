@@ -26,6 +26,7 @@ impl GenericCompiler {
         let builder = JITBuilder::with_isa(isa, default_libcall_names());
         let mut module = JITModule::new(builder);
         let mut definitions = Vec::with_capacity(assembly.functions.len());
+        let mut retained_code_bytes = 0_u64;
         for function in &assembly.functions {
             let compiled =
                 runmat_native_codegen::cranelift::lower_function(function, &assembly.target)?;
@@ -38,6 +39,13 @@ impl GenericCompiler {
             module
                 .define_function(id, &mut context)
                 .map_err(module_error)?;
+            let function_bytes = context
+                .compiled_code()
+                .map(|code| u64::from(code.code_info().total_size))
+                .ok_or_else(|| JitError::Module("compiled function has no emitted code".into()))?;
+            retained_code_bytes = retained_code_bytes
+                .checked_add(function_bytes)
+                .ok_or_else(|| JitError::Module("compiled code size exceeds u64".into()))?;
             definitions.push((function.id, id));
         }
         module.finalize_definitions().map_err(module_error)?;
@@ -48,6 +56,7 @@ impl GenericCompiler {
         Ok(CompiledExecutable {
             _module: module,
             entrypoints,
+            retained_code_bytes,
         })
     }
 }

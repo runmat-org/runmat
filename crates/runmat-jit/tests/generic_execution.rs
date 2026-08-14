@@ -71,6 +71,58 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
     assert_eq!(first.publication, 1);
     assert!(Rc::ptr_eq(&first.executor, &first_executor));
 
+    let first_profile = Digest::sha256(b"scalar-double");
+    let second_profile = Digest::sha256(b"dense-double");
+    let first_specialized = registry
+        .publish_specialized(
+            key.clone(),
+            first_profile,
+            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            ProgramFunctionId(0),
+            dependencies.snapshot([&program, &provider]),
+        )
+        .unwrap();
+    registry
+        .publish_specialized(
+            key.clone(),
+            second_profile,
+            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            ProgramFunctionId(0),
+            dependencies.snapshot([&program, &provider]),
+        )
+        .unwrap();
+    let availability = registry.availability(&key, &dependencies.snapshot_all(), 0);
+    assert_eq!(availability.retained_versions, 3);
+    assert_eq!(availability.specialized_profiles.len(), 2);
+    assert!(availability.retained_code_bytes > 0);
+    assert_eq!(
+        registry
+            .enforce_limits(&dependencies.snapshot_all(), 2, u64::MAX)
+            .unwrap(),
+        1
+    );
+    assert!(registry
+        .resolve_specialized(&key, first_profile, &dependencies.snapshot_all())
+        .is_none());
+    assert!(registry
+        .resolve_specialized(&key, second_profile, &dependencies.snapshot_all())
+        .is_some());
+    // Retirement removes publication reachability, while the active handle
+    // retains executable memory until that invocation owner releases it.
+    assert_eq!(
+        first_specialized
+            .executor
+            .invoke(
+                first_specialized.entrypoint,
+                Vec::new(),
+                1,
+                runtime_context()
+            )
+            .unwrap()
+            .outputs,
+        vec![Value::Num(41.0)]
+    );
+
     dependencies.observe(provider, "provider-b").unwrap();
     let current = dependencies.snapshot_all();
     assert_eq!(registry.invalidate(&current), 1);
@@ -86,7 +138,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
             current,
         )
         .unwrap();
-    assert_eq!(second.publication, 2);
+    assert_eq!(second.publication, 4);
     assert!(stable_cell.is_published());
     assert!(Rc::ptr_eq(&second.executor, &second_executor));
     assert!(!Rc::ptr_eq(&first.executor, &second.executor));
@@ -95,6 +147,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
 #[test]
 fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
     let executor = GenericExecutor::compile(fixture()).unwrap();
+    assert!(executor.retained_code_bytes() > 0);
     let execution = executor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
