@@ -105,7 +105,7 @@ const IMAG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat accepts every native real or componentwise-complex integer class; current public imag documentation does not enumerate its exact class matrix, so endpoint compatibility remains evidence-open.",
+        notes: "RunMat accepts every native real or componentwise-complex integer class. R2026a defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open.",
     }];
 
 pub const IMAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -117,7 +117,7 @@ pub const IMAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "[integer-audit-open] Real integer input currently produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage. Provider paths preserve class, shape, owner, and explicit residency; the public page documents full gpuArray support but does not explicitly enumerate integer input or result classes, so the endpoint class contract remains provisional.",
+        notes: "[integer-audit-open] Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability, but the public page does not explicitly state the integer endpoint class.",
     }];
 
 fn builtin_error_with_detail(

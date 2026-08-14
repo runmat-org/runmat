@@ -97,11 +97,11 @@ pub const RGB2GRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         form: "I = rgb2gray(integer_RGB)",
         inputs: &RGB2GRAY_DOCUMENTED_INTEGER_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The luminance computation reads authoritative integer samples, rounds into the same class, and restores documented GPU output through the input owner. [integer-audit-open] Public documentation gives the coefficients and same-class result but does not state the exact integer tie-rounding rule.",
+        notes: "[integer-audit-open] RunMat reads authoritative uint8/uint16 samples, returns the same integer class using nearest rounding and saturation, and restores resident output through the input owner. The public rgb2gray page documents the input classes, coefficients, numeric image output, and gpuArray support but not the exact integer output class or tie rule.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "rgb2gray(unsupported_integer_RGB)",
@@ -480,9 +480,10 @@ mod tests {
             RGB2GRAY_INTEGER_CAPABILITIES[1].inputs[0].availability,
             BuiltinIntegerInputAvailability::Rejected
         );
-        assert!(RGB2GRAY_INTEGER_CAPABILITIES[0]
-            .notes
-            .contains("[integer-audit-open]"));
+        assert_eq!(
+            RGB2GRAY_INTEGER_CAPABILITIES[0].overflow,
+            BuiltinIntegerOverflowRule::EvidenceOpen
+        );
     }
 
     #[test]

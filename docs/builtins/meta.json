@@ -73452,7 +73452,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "RunMat accepts every native real or componentwise-complex integer class; current public imag documentation does not enumerate its exact class matrix, so endpoint compatibility remains evidence-open."
+              "notes": "RunMat accepts every native real or componentwise-complex integer class. R2026a defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -73460,7 +73460,7 @@
           "overflow": "EvidenceOpen",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "[integer-audit-open] Real integer input currently produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage. Provider paths preserve class, shape, owner, and explicit residency; the public page documents full gpuArray support but does not explicitly enumerate integer input or result classes, so the endpoint class contract remains provisional."
+          "notes": "[integer-audit-open] Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability, but the public page does not explicitly state the integer endpoint class."
         }
       ]
     },
@@ -73979,7 +73979,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "Documented int8, int16, int32, uint8, uint16, and uint32 host images are accumulated in binary64 and finalized into the original native class."
+              "notes": "Documented int8, int16, int32, uint8, uint16, and uint32 images retain their authoritative class. Host and automatic-fallback calls accumulate in binary64; explicit gpuArray calls accumulate in binary64 for uint32 and binary32 for the other documented integer classes."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -73987,7 +73987,7 @@
           "overflow": "Saturate",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "The host filter sum is evaluated in double precision. Fractional integer results are rounded and out-of-range results saturate before authoritative same-class storage is constructed; resident integer input uses an owner-aware host fallback and preserves explicit residency. [integer-audit-open] Documented GPU accumulation uses double for uint32 and single for the other integer and logical classes; RunMat's current resident-integer fallback uses binary64, so that backend precision delta remains open."
+          "notes": "Host and automatic-placement fallback sums use binary64 so planner placement is transparent. Explicit gpuArray uint32 sums use binary64, while the other documented explicit resident integer classes use binary32 multiplication and accumulation. Fractional results round to nearest and out-of-range results saturate before authoritative same-class storage is constructed; owner-aware fallback preserves explicit residency."
         }
       ]
     },
@@ -74240,6 +74240,14 @@
           "message": "imhist: internal error"
         }
       ],
+      "extensions": [
+        {
+          "id": "imhist-typed-integer-bin-count",
+          "mode": "RunMatOnly",
+          "description": "imhist accepts a typed-integer bin count as a RunMat extension because the public positive-integer form does not enumerate typed storage classes",
+          "error_identifier": "RunMat:compatibility:ImhistTypedIntegerBinCountExtension"
+        }
+      ],
       "integer_capabilities": [
         {
           "form": "[counts, binLocations] = imhist(integer_I, n?)",
@@ -74260,11 +74268,11 @@
             }
           ],
           "computation_domain": "ExactInteger",
-          "output_class": "Double",
+          "output_class": "FunctionSpecific",
           "overflow": "EvidenceOpen",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Exact native values are assigned to the documented class-wide half-open bins. [integer-audit-open] The public page does not state the output classes or programmatic gpuArray output residency, so double resident result publication remains provisional."
+          "notes": "[integer-audit-open] Exact native values are assigned to the documented class-wide half-open bins. RunMat returns double counts and bin locations and restores programmatic resident results, but the public page does not specify exact output classes or programmatic gpuArray result residency."
         },
         {
           "form": "[counts, binLocations] = imhist(integer_X, map)",
@@ -74281,11 +74289,11 @@
             }
           ],
           "computation_domain": "ExactInteger",
-          "output_class": "Double",
+          "output_class": "FunctionSpecific",
           "overflow": "EvidenceOpen",
           "backend": "GpuRestricted",
           "overload": "Multiple",
-          "notes": "Host uint8/uint16 indices are counted exactly and the documented gpuArray surface excludes indexed images. [integer-audit-open] The public page calls the outputs numeric arrays without specifying their exact classes."
+          "notes": "[integer-audit-open] Host uint8/uint16 indices are counted exactly and indexed gpuArray input is documented as unsupported. RunMat returns double arrays, while the public page describes only numeric output arrays."
         },
         {
           "form": "[counts, binLocations] = imhist(I, integer_n)",
@@ -74302,17 +74310,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "availability": "Documented",
+              "availability": "RunMatOnly",
               "scalar_double": "Allowed",
               "notes": "The public form requires a positive integer scalar but does not enumerate typed-integer storage classes; RunMat accepts every native integer scalar exactly after range validation."
             }
           ],
           "computation_domain": "ExactInteger",
-          "output_class": "Double",
+          "output_class": "FunctionSpecific",
           "overflow": "EvidenceOpen",
           "backend": "GatherFallback",
           "overload": "ScalarOnly",
-          "notes": "RunMat reads typed n from authoritative integer storage and rejects zero, negative, platform-unrepresentable, or implementation-limit values before allocation. [integer-audit-open] R2026a documents an integer-valued n but not its accepted typed classes or exact output classes."
+          "notes": "[integer-audit-open] R2026a specifies a positive integer-valued n without enumerating typed storage classes. RunMat's all-eight-class typed-n extension reads authoritative scalars exactly and returns double histogram arrays; typed-n acceptance and exact output classes remain evidence-open."
         },
         {
           "form": "imhist(int64_or_uint64_image, ...)",
@@ -74789,7 +74797,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "[integer-audit-open] Typed-integer coefficients and timing metadata are gated before model parsing and must be exactly representable at the host floating simulation boundary."
+              "notes": "Typed-integer coefficients and timing metadata are outside the documented dynamic-system/time surface, are gated before model parsing, and must be exactly representable at the host floating simulation boundary when the RunMat extension is enabled."
             },
             {
               "name": "t or tFinal",
@@ -74805,7 +74813,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "[integer-audit-open] The current public impulse reference states value and shape requirements but publishes no numeric class table for time controls."
+              "notes": "The public impulse reference specifies numeric time values and shapes but no typed-integer class support, so every typed-integer time control is consistently classified as a RunMat-only extension."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -74813,7 +74821,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] Non-double and resident numeric roles are independent RunMat extensions. This bounded SISO tf implementation simulates on the host and returns host response/time arrays."
+          "notes": "Non-double and resident numeric roles are independent RunMat extensions. Typed integers cross to binary64 only after exact-representability validation; this bounded SISO tf implementation simulates on the host and returns double response/time arrays."
         }
       ]
     },
@@ -75500,10 +75508,10 @@
           ],
           "computation_domain": "ExactInteger",
           "output_class": "NotApplicable",
-          "overflow": "EvidenceOpen",
+          "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] The function is a documented host/file sink. Resident image input is gathered non-destructively through its owner, and all validation/encoding completes before the write begins. Uint16 JPEG, TIFF CMYK, and format-specific integer Alpha/control forms remain explicit implementation or public-evidence gaps."
+          "notes": "The documented host/file sink retains native uint8 or uint16 samples and indexed values through encoding. Resident image input is gathered non-destructively through its exact owner, and all validation/encoding completes before the write begins. Encoder limitations such as 16-bit JPEG and TIFF CMYK reject explicitly without changing the class contract or creating a file."
         },
         {
           "form": "imwrite(unsupported_integer_A_or_X, ...)",
@@ -75529,6 +75537,54 @@
           "backend": "HostAndGpu",
           "overload": "Multiple",
           "notes": "Unsupported image classes reject from authoritative host or resident metadata without a floating compatibility conversion or file effect."
+        },
+        {
+          "form": "imwrite(A, ..., Alpha=integer_alpha)",
+          "inputs": [
+            {
+              "name": "Alpha",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented uint8 and uint16 Alpha matrices are read from authoritative storage and scaled by their own full class range into the encoded channel."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Documented uint8 and uint16 Alpha arrays preserve exact native samples until deterministic class-range scaling into the image bit depth; shape and format validation complete before file effects."
+        },
+        {
+          "form": "imwrite(A, ..., integer_control)",
+          "inputs": [
+            {
+              "name": "integer-valued format control",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "RowsPerStrip is documented for every integer class. Other integer-valued controls are format-specific; implemented controls read exact scalar storage before validation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Typed scalar controls are read exactly and range-checked before encoding. Documented but not-yet-supported format controls, including RowsPerStrip and explicit BitDepth, reject with the stable invalid-option error before any file effect rather than silently coercing or ignoring the value."
         }
       ]
     },
@@ -85793,7 +85849,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "RGB = lab2rgb(LAB)",
+          "label": "RGB = lab2rgb(LAB, OutputType=type)",
           "inputs": [
             {
               "name": "LAB",
@@ -85801,6 +85857,20 @@
               "arity": "Required",
               "default": null,
               "description": "CIE L*a*b* image or Nx3 colormap values."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Variadic",
+              "default": null,
+              "description": "OutputType name."
+            },
+            {
+              "name": "value",
+              "ty": "StringScalar",
+              "arity": "Variadic",
+              "default": null,
+              "description": "double, single, uint8, or uint16 output class."
             }
           ],
           "outputs": [
@@ -85818,7 +85888,7 @@
         {
           "code": "RM.LAB2RGB.TOO_MANY_INPUTS",
           "identifier": "RunMat:lab2rgb:TooManyInputs",
-          "when": "More than one input argument is supplied.",
+          "when": "Too many name-value arguments are supplied.",
           "message": "lab2rgb: too many input arguments"
         },
         {
@@ -85832,6 +85902,49 @@
           "identifier": "RunMat:lab2rgb:Internal",
           "when": "RGB output tensor construction fails internally.",
           "message": "lab2rgb: internal conversion failure"
+        },
+        {
+          "code": "RM.LAB2RGB.INVALID_OPTION",
+          "identifier": "RunMat:lab2rgb:InvalidOption",
+          "when": "OutputType is malformed or unsupported.",
+          "message": "lab2rgb: invalid option"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "lab2rgb-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "lab2rgb with an explicitly requested gpuArray input is a RunMat extension because R2026a documents no interactive GPU Arrays capability",
+          "error_identifier": "RunMat:compatibility:Lab2rgbExplicitGpuExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "RGB = lab2rgb(LAB, OutputType=integer_type)",
+          "inputs": [
+            {
+              "name": "LAB",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a accepts only single or double LAB input. Every integer class rejects from host or resident metadata before conversion or gather."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer LAB input is rejected. For floating LAB input, OutputType uint8 or uint16 clamps normalized RGB to [0,1], rounds after scaling by the class maximum, and constructs authoritative native integer storage; floating output preserves out-of-gamut values. Automatic residency may gather transparently, while the gated explicit-gpuArray extension restores output to the exact owner or errors."
         }
       ]
     },
@@ -124761,11 +124874,11 @@
             }
           ],
           "computation_domain": "FloatingPoint",
-          "output_class": "PreserveInput",
-          "overflow": "NotApplicable",
+          "output_class": "FunctionSpecific",
+          "overflow": "EvidenceOpen",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "The luminance computation reads authoritative integer samples, rounds into the same class, and restores documented GPU output through the input owner. [integer-audit-open] Public documentation gives the coefficients and same-class result but does not state the exact integer tie-rounding rule."
+          "notes": "[integer-audit-open] RunMat reads authoritative uint8/uint16 samples, returns the same integer class using nearest rounding and saturation, and restores resident output through the input owner. The public rgb2gray page documents the input classes, coefficients, numeric image output, and gpuArray support but not the exact integer output class or tie rule."
         },
         {
           "form": "rgb2gray(unsupported_integer_RGB)",
@@ -124978,7 +125091,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Authoritative uint8/uint16 samples are normalized before color-space conversion; automatic residency may gather to the documented host implementation. [integer-audit-open] Public documentation specifies normalization and double output but does not state intermediate precision or rounding details."
+          "notes": "Authoritative uint8/uint16 samples are normalized by their full class range before the documented floating color-space conversion and produce double output. Automatic residency may gather to the documented host implementation; the separately gated explicit-gpuArray extension restores output to the exact owner or errors."
         },
         {
           "form": "rgb2lab(unsupported_integer_RGB)",

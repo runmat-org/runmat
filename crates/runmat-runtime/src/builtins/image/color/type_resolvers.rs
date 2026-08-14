@@ -6,6 +6,10 @@ pub fn same_shape_type(args: &[Type], _context: &ResolveContext) -> Type {
     common::same_shape_type(args)
 }
 
+pub fn lab2rgb_type(args: &[Type], _context: &ResolveContext) -> Type {
+    common::same_shape_type(args)
+}
+
 pub fn rgb2gray_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Tensor { shape: Some(shape) }) if shape.len() == 3 && shape[2] == Some(3) => {

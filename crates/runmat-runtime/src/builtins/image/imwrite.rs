@@ -210,9 +210,17 @@ const IMWRITE_DOCUMENTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability { name: "A_or_X", classes: &IMWRITE_DOCUMENTED_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Uint8 and uint16 direct or indexed images retain their native sample/index interpretation through the host encoder sink." }];
 const IMWRITE_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability { name: "A_or_X", classes: &IMWRITE_REJECTED_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Rejected, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Signed integer, uint32, and uint64 image arrays are outside the documented imwrite image-data surface and reject before file effects." }];
-pub const IMWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "imwrite(integer_A_or_X, ...)", inputs: &IMWRITE_DOCUMENTED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "[integer-audit-open] The function is a documented host/file sink. Resident image input is gathered non-destructively through its owner, and all validation/encoding completes before the write begins. Uint16 JPEG, TIFF CMYK, and format-specific integer Alpha/control forms remain explicit implementation or public-evidence gaps." },
+const IMWRITE_ALPHA_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
+    [BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16];
+const IMWRITE_ALPHA_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "Alpha", classes: &IMWRITE_ALPHA_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Documented uint8 and uint16 Alpha matrices are read from authoritative storage and scaled by their own full class range into the encoded channel." }];
+const IMWRITE_CONTROL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "integer-valued format control", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "RowsPerStrip is documented for every integer class. Other integer-valued controls are format-specific; implemented controls read exact scalar storage before validation." }];
+pub const IMWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "imwrite(integer_A_or_X, ...)", inputs: &IMWRITE_DOCUMENTED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The documented host/file sink retains native uint8 or uint16 samples and indexed values through encoding. Resident image input is gathered non-destructively through its exact owner, and all validation/encoding completes before the write begins. Encoder limitations such as 16-bit JPEG and TIFF CMYK reject explicitly without changing the class contract or creating a file." },
     BuiltinIntegerCapabilityDescriptor { form: "imwrite(unsupported_integer_A_or_X, ...)", inputs: &IMWRITE_REJECTED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Unsupported image classes reject from authoritative host or resident metadata without a floating compatibility conversion or file effect." },
+    BuiltinIntegerCapabilityDescriptor { form: "imwrite(A, ..., Alpha=integer_alpha)", inputs: &IMWRITE_ALPHA_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::SameSizeOrScalar, notes: "Documented uint8 and uint16 Alpha arrays preserve exact native samples until deterministic class-range scaling into the image bit depth; shape and format validation complete before file effects." },
+    BuiltinIntegerCapabilityDescriptor { form: "imwrite(A, ..., integer_control)", inputs: &IMWRITE_CONTROL_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Typed scalar controls are read exactly and range-checked before encoding. Documented but not-yet-supported format controls, including RowsPerStrip and explicit BitDepth, reject with the stable invalid-option error before any file effect rather than silently coercing or ignoring the value." },
 ];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::imwrite")]
@@ -519,7 +527,11 @@ fn parse_invocation(args: &[Value]) -> BuiltinResult<Invocation> {
         idx += 1;
 
         match canonical_option_name(&name).as_str() {
-            "alpha" => alpha = Some(tensor_from_numeric_like(value, "Alpha")?),
+            "alpha" => {
+                let alpha_tensor = tensor_from_numeric_like(value, "Alpha")?;
+                ensure_documented_alpha_class(&alpha_tensor)?;
+                alpha = Some(alpha_tensor);
+            }
             "quality" => {
                 let q = numeric_scalar(value, "Quality")?;
                 if !q.is_finite() || !(0.0..=100.0).contains(&q) {
@@ -612,17 +624,61 @@ fn string_arg(
 }
 
 fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
-    match value {
-        Value::Num(n) => Ok(*n),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
-        Value::LogicalArray(a) if a.data.len() == 1 => Ok(if a.data[0] != 0 { 1.0 } else { 0.0 }),
+    let scalar = match value {
+        Value::Num(n) => return Ok(*n),
+        Value::Int(i) => NumericScalar::from(i.clone()),
+        Value::Bool(b) => return Ok(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            t.numeric_value_at(0).ok_or_else(|| {
+                imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_OPTION,
+                    format!("{label} scalar storage is unavailable"),
+                )
+            })?
+        }
+        Value::LogicalArray(a) if a.data.len() == 1 => {
+            return Ok(if a.data[0] != 0 { 1.0 } else { 0.0 })
+        }
         _ => Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
             format!("{label} must be a numeric scalar"),
-        )),
-    }
+        ))?,
+    };
+    numeric_scalar_to_exact_f64(scalar, label)
+}
+
+fn numeric_scalar_to_exact_f64(value: NumericScalar, label: &str) -> BuiltinResult<f64> {
+    let converted = match value {
+        NumericScalar::F64(value) => return Ok(value),
+        NumericScalar::F32(value) => return Ok(f64::from(value)),
+        NumericScalar::I8(value) => f64::from(value),
+        NumericScalar::I16(value) => f64::from(value),
+        NumericScalar::I32(value) => f64::from(value),
+        NumericScalar::I64(value)
+            if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(
+                &runmat_builtins::IntValue::I64(value),
+            ) =>
+        {
+            value as f64
+        }
+        NumericScalar::U8(value) => f64::from(value),
+        NumericScalar::U16(value) => f64::from(value),
+        NumericScalar::U32(value) => f64::from(value),
+        NumericScalar::U64(value)
+            if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(
+                &runmat_builtins::IntValue::U64(value),
+            ) =>
+        {
+            value as f64
+        }
+        NumericScalar::I64(_) | NumericScalar::U64(_) => {
+            return Err(imwrite_error_with_detail(
+                &IMWRITE_ERROR_INVALID_OPTION,
+                format!("{label} integer value must be exactly representable as double"),
+            ))
+        }
+    };
+    Ok(converted)
 }
 
 fn canonical_option_name(name: &str) -> String {
@@ -787,6 +843,20 @@ fn ensure_double_colormap(value: &Value) -> BuiltinResult<()> {
         Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_COLORMAP,
             "map must be a double Nx3 colormap",
+        ))
+    }
+}
+
+fn ensure_documented_alpha_class(alpha: &Tensor) -> BuiltinResult<()> {
+    if matches!(
+        alpha.numeric_dtype(),
+        NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+    ) {
+        Ok(())
+    } else {
+        Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_OPTION,
+            "Alpha class must be double, single, uint8, or uint16",
         ))
     }
 }
@@ -1655,9 +1725,28 @@ mod tests {
             vec![1, 1],
         )
         .expect("scalar");
+        assert!(numeric_scalar(&Value::Tensor(scalar), "LoopCount").is_err());
+        assert!(numeric_scalar(
+            &Value::Int(runmat_builtins::IntValue::I64(i64::MAX)),
+            "LoopCount"
+        )
+        .is_err());
         assert_eq!(
-            numeric_scalar(&Value::Tensor(scalar), "LoopCount").unwrap(),
-            u64::MAX as f64
+            numeric_scalar(
+                &Value::Int(runmat_builtins::IntValue::I64(i64::MIN)),
+                "LoopCount"
+            )
+            .unwrap(),
+            i64::MIN as f64
+        );
+        let largest_exact_u64_below_max = u64::MAX - 2047;
+        assert_eq!(
+            numeric_scalar(
+                &Value::Int(runmat_builtins::IntValue::U64(largest_exact_u64_below_max)),
+                "LoopCount"
+            )
+            .unwrap(),
+            largest_exact_u64_below_max as f64
         );
 
         let vector =

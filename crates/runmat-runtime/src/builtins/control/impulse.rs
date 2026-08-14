@@ -63,14 +63,14 @@ const IMPULSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "[integer-audit-open] Typed-integer coefficients and timing metadata are gated before model parsing and must be exactly representable at the host floating simulation boundary.",
+        notes: "Typed-integer coefficients and timing metadata are outside the documented dynamic-system/time surface, are gated before model parsing, and must be exactly representable at the host floating simulation boundary when the RunMat extension is enabled.",
     },
     BuiltinIntegerInputCapability {
         name: "t or tFinal",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "[integer-audit-open] The current public impulse reference states value and shape requirements but publishes no numeric class table for time controls.",
+        notes: "The public impulse reference specifies numeric time values and shapes but no typed-integer class support, so every typed-integer time control is consistently classified as a RunMat-only extension.",
     },
 ];
 pub const IMPULSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -82,7 +82,7 @@ pub const IMPULSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] Non-double and resident numeric roles are independent RunMat extensions. This bounded SISO tf implementation simulates on the host and returns host response/time arrays.",
+        notes: "Non-double and resident numeric roles are independent RunMat extensions. Typed integers cross to binary64 only after exact-representability validation; this bounded SISO tf implementation simulates on the host and returns double response/time arrays.",
     }];
 
 const IMPULSE_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -1294,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn impulse_evidence_open_numeric_roles_are_gated_and_exact() {
+    fn impulse_runmat_numeric_extensions_are_gated_and_exact() {
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let integer = run_impulse(

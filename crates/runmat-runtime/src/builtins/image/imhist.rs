@@ -1,12 +1,13 @@
 //! MATLAB-compatible `imhist` grayscale and indexed-image histograms.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerClass, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, LogicalArray, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, LogicalArray, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -180,6 +181,14 @@ pub const IMHIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &IMHIST_ERRORS,
 };
 
+const IMHIST_TYPED_BIN_COUNT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "imhist-typed-integer-bin-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "imhist accepts a typed-integer bin count as a RunMat extension because the public positive-integer form does not enumerate typed storage classes",
+    error_identifier: Some("RunMat:compatibility:ImhistTypedIntegerBinCountExtension"),
+};
+pub const IMHIST_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [IMHIST_TYPED_BIN_COUNT_EXTENSION];
+
 const IMHIST_GRAYSCALE_INTEGER_CLASSES: [BuiltinIntegerClass; 6] = [
     BuiltinIntegerClass::Int8,
     BuiltinIntegerClass::Int16,
@@ -212,7 +221,7 @@ const IMHIST_BIN_COUNT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "n",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "The public form requires a positive integer scalar but does not enumerate typed-integer storage classes; RunMat accepts every native integer scalar exactly after range validation.",
     }];
@@ -225,9 +234,9 @@ const IMHIST_REJECTED_WIDE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
         notes: "Int64 and uint64 are outside both documented image-class surfaces and reject from host or resident metadata before evaluation.",
     }];
 pub const IMHIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(integer_I, n?)", inputs: &IMHIST_GRAYSCALE_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Exact native values are assigned to the documented class-wide half-open bins. [integer-audit-open] The public page does not state the output classes or programmatic gpuArray output residency, so double resident result publication remains provisional." },
-    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(integer_X, map)", inputs: &IMHIST_INDEXED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Host uint8/uint16 indices are counted exactly and the documented gpuArray surface excludes indexed images. [integer-audit-open] The public page calls the outputs numeric arrays without specifying their exact classes." },
-    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(I, integer_n)", inputs: &IMHIST_BIN_COUNT_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "RunMat reads typed n from authoritative integer storage and rejects zero, negative, platform-unrepresentable, or implementation-limit values before allocation. [integer-audit-open] R2026a documents an integer-valued n but not its accepted typed classes or exact output classes." },
+    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(integer_I, n?)", inputs: &IMHIST_GRAYSCALE_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "[integer-audit-open] Exact native values are assigned to the documented class-wide half-open bins. RunMat returns double counts and bin locations and restores programmatic resident results, but the public page does not specify exact output classes or programmatic gpuArray result residency." },
+    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(integer_X, map)", inputs: &IMHIST_INDEXED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "[integer-audit-open] Host uint8/uint16 indices are counted exactly and indexed gpuArray input is documented as unsupported. RunMat returns double arrays, while the public page describes only numeric output arrays." },
+    BuiltinIntegerCapabilityDescriptor { form: "[counts, binLocations] = imhist(I, integer_n)", inputs: &IMHIST_BIN_COUNT_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "[integer-audit-open] R2026a specifies a positive integer-valued n without enumerating typed storage classes. RunMat's all-eight-class typed-n extension reads authoritative scalars exactly and returns double histogram arrays; typed-n acceptance and exact output classes remain evidence-open." },
     BuiltinIntegerCapabilityDescriptor { form: "imhist(int64_or_uint64_image, ...)", inputs: &IMHIST_REJECTED_WIDE_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Unsupported wide image classes reject without a lossy floating conversion or provider access." },
 ];
 
@@ -324,6 +333,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(imhist_type),
     descriptor(crate::builtins::image::imhist::IMHIST_DESCRIPTOR),
+    extensions(crate::builtins::image::imhist::IMHIST_EXTENSIONS),
     integer_capabilities(crate::builtins::image::imhist::IMHIST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::imhist"
 )]
@@ -484,6 +494,12 @@ fn parse_call(image: Value, rest: &[Value]) -> BuiltinResult<ParsedCall> {
 }
 
 fn parse_optional_bin_count(value: &Value) -> BuiltinResult<Option<usize>> {
+    if is_typed_integer_scalar(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMHIST_TYPED_BIN_COUNT_EXTENSION,
+            NAME,
+        )?;
+    }
     if let Some(bins) = integer_scalar_bin_count(value)? {
         validate_bin_count(bins)?;
         return Ok(Some(bins));
@@ -507,6 +523,16 @@ fn parse_optional_bin_count(value: &Value) -> BuiltinResult<Option<usize>> {
     let bins = rounded as usize;
     validate_bin_count(bins)?;
     Ok(Some(bins))
+}
+
+fn is_typed_integer_scalar(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            tensor.integer_storage().is_some()
+        }
+        _ => false,
+    }
 }
 
 fn parse_colormap_bins(value: &Value) -> BuiltinResult<usize> {
@@ -1428,6 +1454,7 @@ mod tests {
 
     #[test]
     fn bin_count_parser_preserves_typed_integer_scalar_bounds() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(
             parse_optional_bin_count(&Value::Int(IntValue::U32(1024))).unwrap(),
             Some(1024)
@@ -1464,7 +1491,7 @@ mod tests {
     }
 
     #[test]
-    fn integer_capabilities_keep_output_residency_and_typed_n_evidence_open() {
+    fn integer_capabilities_keep_unpublished_output_and_typed_n_contracts_open() {
         assert_eq!(IMHIST_INTEGER_CAPABILITIES.len(), 4);
         assert!(IMHIST_INTEGER_CAPABILITIES[..3]
             .iter()
@@ -1472,6 +1499,10 @@ mod tests {
         let typed_n = &IMHIST_INTEGER_CAPABILITIES[2];
         assert_eq!(typed_n.inputs[0].name, "n");
         assert_eq!(typed_n.inputs[0].classes.len(), 8);
+        assert_eq!(
+            typed_n.inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
     }
 
     #[test]

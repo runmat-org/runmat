@@ -133,7 +133,7 @@ pub const RGB2LAB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Authoritative uint8/uint16 samples are normalized before color-space conversion; automatic residency may gather to the documented host implementation. [integer-audit-open] Public documentation specifies normalization and double output but does not state intermediate precision or rounding details.",
+        notes: "Authoritative uint8/uint16 samples are normalized by their full class range before the documented floating color-space conversion and produce double output. Automatic residency may gather to the documented host implementation; the separately gated explicit-gpuArray extension restores output to the exact owner or errors.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "rgb2lab(unsupported_integer_RGB)",
@@ -222,10 +222,11 @@ async fn rgb2lab_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         validate_resident_rgb(handle)?;
         resident_sources.push(handle.clone());
     }
-    let _resident_guard = common::protect_resident_inputs(&resident_sources);
+    let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = common::gather_tensor(NAME, rgb)
         .await
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
+    resident_guard.restore();
     let layout = common::stacked_color_layout(&tensor, NAME)
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
     let input_dtype = tensor.numeric_dtype();
@@ -265,7 +266,11 @@ async fn rgb2lab_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INTERNAL))?;
-    Ok(common::image_value_from_tensor(out))
+    common::restore_resident_numeric_result_for_sources(
+        &resident_sources,
+        common::image_value_from_tensor(out),
+        NAME,
+    )
 }
 
 fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {
@@ -497,6 +502,7 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_builtins::{IntegerStorage, Tensor};
 
@@ -691,9 +697,10 @@ mod tests {
             RGB2LAB_INTEGER_CAPABILITIES[1].inputs[0].availability,
             BuiltinIntegerInputAvailability::Rejected
         );
-        assert!(RGB2LAB_INTEGER_CAPABILITIES[0]
-            .notes
-            .contains("[integer-audit-open]"));
+        assert_eq!(
+            RGB2LAB_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::Double
+        );
     }
 
     #[test]
@@ -719,6 +726,36 @@ mod tests {
             err.identifier(),
             RGB2LAB_EXPLICIT_GPU_EXTENSION.error_identifier
         );
+    }
+
+    #[test]
+    fn rgb2lab_enabled_explicit_gpu_form_restores_output_to_exact_owner() {
+        test_support::with_test_provider(|provider| {
+            let rgb = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3])
+                .expect("RGB");
+            let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload RGB");
+            runmat_accelerate_api::mark_handle_explicit(&source);
+            let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+            let value = block_on(rgb2lab_builtin(
+                Value::GpuTensor(source.clone()),
+                Vec::new(),
+            ))
+            .expect("explicit resident rgb2lab");
+            let Value::GpuTensor(output) = value else {
+                panic!("explicit gpuArray output must remain resident");
+            };
+            assert_eq!(output.device_id, source.device_id);
+            assert_ne!(output.buffer_id, source.buffer_id);
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            provider.free(&output).expect("free output");
+            provider.free(&source).expect("free source");
+            runmat_accelerate_api::clear_handle_metadata(&output);
+            runmat_accelerate_api::clear_handle_metadata(&source);
+        });
     }
 
     #[test]

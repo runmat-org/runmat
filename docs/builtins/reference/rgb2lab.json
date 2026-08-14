@@ -27,11 +27,11 @@
   "tested": {
     "unit": "builtins::image::color::rgb2lab::tests"
   },
-  "description": "`rgb2lab(RGB)` converts RGB image or colormap values to CIE L*a*b* using default sRGB/D65 assumptions. The conversion follows MATLAB-compatible transfer, white-point, and output-shape behavior for supported input forms.",
+  "description": "`rgb2lab(RGB)` converts RGB image or colormap values to CIE L*a*b*. ColorSpace and WhitePoint name-value options select supported source color spaces and reference whites.",
   "behaviors": [
     "Accepts MxNx3 truecolor images and Nx3 colormaps.",
     "Integer RGB inputs are scaled into [0,1] before conversion.",
-    "Name-value options are not implemented in this Tier 1 version."
+    "ColorSpace and WhitePoint name-value options select the supported conversion basis."
   ],
   "examples": [
     {

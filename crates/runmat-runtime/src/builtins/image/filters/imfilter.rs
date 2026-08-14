@@ -175,7 +175,7 @@ const IMFILTER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented int8, int16, int32, uint8, uint16, and uint32 host images are accumulated in binary64 and finalized into the original native class.",
+        notes: "Documented int8, int16, int32, uint8, uint16, and uint32 images retain their authoritative class. Host and automatic-fallback calls accumulate in binary64; explicit gpuArray calls accumulate in binary64 for uint32 and binary32 for the other documented integer classes.",
     }];
 
 pub const IMFILTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -187,7 +187,7 @@ pub const IMFILTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1]
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The host filter sum is evaluated in double precision. Fractional integer results are rounded and out-of-range results saturate before authoritative same-class storage is constructed; resident integer input uses an owner-aware host fallback and preserves explicit residency. [integer-audit-open] Documented GPU accumulation uses double for uint32 and single for the other integer and logical classes; RunMat's current resident-integer fallback uses binary64, so that backend precision delta remains open.",
+        notes: "Host and automatic-placement fallback sums use binary64 so planner placement is transparent. Explicit gpuArray uint32 sums use binary64, while the other documented explicit resident integer classes use binary32 multiplication and accumulation. Fractional results round to nearest and out-of-range results saturate before authoritative same-class storage is constructed; owner-aware fallback preserves explicit residency.",
     }];
 
 fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
@@ -504,6 +504,7 @@ fn imfilter_host_value(
         &kernel_tensor,
         &options,
         output_class,
+        FilterAccumulation::HostDouble,
         IMFILTER_BUILTIN,
     )
     .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
@@ -709,7 +710,22 @@ async fn imfilter_gpu_host_fallback(
         gpu_helpers::download_value_preserving_residency_async(provider, image_handle).await;
     gpu_helpers::restore_handle_metadata(image_handle, &metadata);
     let image = download.map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-    let result = imfilter_host_value(image, kernel.clone(), options.clone())?;
+    let output_class = ImageOutputClass::from_gpu_handle(image_handle)?;
+    let image_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, image)
+        .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
+    let accumulation = fallback_accumulation(
+        output_class,
+        runmat_accelerate_api::handle_is_explicit(image_handle),
+    );
+    let result = apply_imfilter_host(
+        &image_tensor,
+        kernel,
+        options,
+        output_class,
+        accumulation,
+        IMFILTER_BUILTIN,
+    )
+    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
     if !runmat_accelerate_api::handle_is_explicit(image_handle) {
         return Ok(result);
     }
@@ -722,6 +738,24 @@ async fn imfilter_gpu_host_fallback(
             &IMFILTER_ERROR_INTERNAL,
             "explicit gpuArray result could not be restored to its owning provider",
         ))
+    }
+}
+
+fn fallback_accumulation(
+    output_class: ImageOutputClass,
+    explicit_gpu_array: bool,
+) -> FilterAccumulation {
+    if !explicit_gpu_array {
+        FilterAccumulation::HostDouble
+    } else {
+        match output_class {
+            ImageOutputClass::Integer(NumericDType::U32) | ImageOutputClass::Double => {
+                FilterAccumulation::HostDouble
+            }
+            ImageOutputClass::Integer(_) | ImageOutputClass::Logical | ImageOutputClass::Single => {
+                FilterAccumulation::GpuSingle
+            }
+        }
     }
 }
 
@@ -942,9 +976,24 @@ pub struct ImfilterPlan {
     pub kernel_points: Vec<ImfilterKernelPoint>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilterAccumulation {
+    HostDouble,
+    GpuSingle,
+}
+
 impl ImfilterPlan {
     #[inline]
     pub fn evaluate(&self, image_data: &[f64], options: &ImfilterOptions) -> Vec<f64> {
+        self.evaluate_with_accumulation(image_data, options, FilterAccumulation::HostDouble)
+    }
+
+    fn evaluate_with_accumulation(
+        &self,
+        image_data: &[f64],
+        options: &ImfilterOptions,
+        accumulation: FilterAccumulation,
+    ) -> Vec<f64> {
         evaluate_filter(
             &self.output_shape_ext,
             &self.base_offset,
@@ -953,6 +1002,7 @@ impl ImfilterPlan {
             &self.kernel_points,
             options,
             image_data,
+            accumulation,
         )
     }
 }
@@ -1052,11 +1102,12 @@ fn apply_imfilter_host(
     kernel: &Tensor,
     options: &ImfilterOptions,
     output_class: ImageOutputClass,
+    accumulation: FilterAccumulation,
     builtin: &str,
 ) -> BuiltinResult<Value> {
     let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
     let image_values = tensor::tensor_values_f64_cow(image);
-    let data = plan.evaluate(&image_values, options);
+    let data = plan.evaluate_with_accumulation(&image_values, options, accumulation);
     let shape = plan.final_shape;
 
     let storage = match output_class {
@@ -1286,6 +1337,7 @@ fn evaluate_filter(
     kernel_points: &[ImfilterKernelPoint],
     options: &ImfilterOptions,
     image_data: &[f64],
+    accumulation: FilterAccumulation,
 ) -> Vec<f64> {
     let total = tensor::element_count(output_shape);
     let mut out = vec![0.0; total];
@@ -1295,20 +1347,40 @@ fn evaluate_filter(
 
     let mut out_index = vec![0usize; output_shape.len()];
     for out_value in out.iter_mut() {
-        let mut sum = 0.0;
-        for point in kernel_points {
-            let value = sample_with_padding(
-                image_data,
-                image_shape,
-                image_strides,
-                &out_index,
-                base_offset,
-                &point.offsets,
-                options,
-            );
-            sum += point.value * value;
-        }
-        *out_value = sum;
+        *out_value = match accumulation {
+            FilterAccumulation::HostDouble => {
+                let mut sum = 0.0;
+                for point in kernel_points {
+                    let value = sample_with_padding(
+                        image_data,
+                        image_shape,
+                        image_strides,
+                        &out_index,
+                        base_offset,
+                        &point.offsets,
+                        options,
+                    );
+                    sum += point.value * value;
+                }
+                sum
+            }
+            FilterAccumulation::GpuSingle => {
+                let mut sum = 0.0_f32;
+                for point in kernel_points {
+                    let value = sample_with_padding(
+                        image_data,
+                        image_shape,
+                        image_strides,
+                        &out_index,
+                        base_offset,
+                        &point.offsets,
+                        options,
+                    ) as f32;
+                    sum += (point.value as f32) * value;
+                }
+                f64::from(sum)
+            }
+        };
         advance_index(&mut out_index, output_shape);
     }
 
@@ -1538,6 +1610,37 @@ pub(crate) mod tests {
 
         assert_eq!(result.shape, vec![2, 2]);
         assert_eq!(result.materialize_f64(), vec![2.0, 6.0, 4.0, 8.0]);
+    }
+
+    #[test]
+    fn resident_integer_fallback_uses_documented_binary32_accumulation() {
+        let image = simple_tensor(&[16_777_216.0, 1.0, -16_777_216.0], 3, 1);
+        let kernel = simple_tensor(&[1.0, 1.0, 1.0], 3, 1);
+        let options = ImfilterOptions {
+            shape: ImfilterShape::Valid,
+            ..Default::default()
+        };
+        let plan = build_imfilter_plan(&image.shape, &kernel, &options, IMFILTER_BUILTIN)
+            .expect("filter plan");
+        let values = image.materialize_f64();
+        assert_eq!(
+            plan.evaluate_with_accumulation(&values, &options, FilterAccumulation::HostDouble),
+            vec![1.0]
+        );
+        assert_eq!(
+            plan.evaluate_with_accumulation(&values, &options, FilterAccumulation::GpuSingle),
+            vec![0.0]
+        );
+        assert_eq!(
+            fallback_accumulation(ImageOutputClass::Integer(NumericDType::U8), false),
+            FilterAccumulation::HostDouble,
+            "automatic placement must remain numerically transparent"
+        );
+        assert_eq!(
+            fallback_accumulation(ImageOutputClass::Integer(NumericDType::U8), true),
+            FilterAccumulation::GpuSingle,
+            "explicit gpuArray follows the documented GPU precision"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1978,9 +2081,10 @@ pub(crate) mod tests {
             IMFILTER_INTEGER_CAPABILITIES[0].overload,
             BuiltinIntegerOverloadKind::Multiple
         );
-        assert!(IMFILTER_INTEGER_CAPABILITIES[0]
-            .notes
-            .contains("[integer-audit-open]"));
+        assert_eq!(
+            IMFILTER_INTEGER_CAPABILITIES[0].overflow,
+            BuiltinIntegerOverflowRule::Saturate
+        );
 
         let image = Value::Tensor(simple_tensor(&[1.0], 1, 1));
         let kernel = Value::Tensor(simple_tensor(&[1.0], 1, 1));
