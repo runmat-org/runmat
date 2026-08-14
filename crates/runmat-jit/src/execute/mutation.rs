@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use futures::executor::block_on;
 use runmat_mir::{MirIndexing, MirOperand, MirOutputTarget, MirPlace, MirStmtKind};
 use runmat_native_codegen::NativeInstruction;
 use runmat_value::Value;
@@ -146,15 +145,16 @@ fn flatten_place(
 
 fn read_segment(state: &mut HostState, base: Value, segment: &PlaceSegment) -> JitResult<Value> {
     match segment {
-        PlaceSegment::Member(member) => block_on(state.runtime.scope(
+        PlaceSegment::Member(member) => super::sync::complete(
+            &state.runtime,
             runmat_runtime::object::resolve::load_member(
                 base,
                 member.clone(),
                 false,
                 Some(&state.function.name),
             ),
-        ))
-        .map_err(JitError::from),
+            "member read",
+        ),
         PlaceSegment::DynamicMember(member) => {
             let member = super::operand::materialize_operand(state, member)?;
             let member = String::try_from(&member).map_err(|error| {
@@ -163,17 +163,16 @@ fn read_segment(state: &mut HostState, base: Value, segment: &PlaceSegment) -> J
                     error,
                 ))
             })?;
-            block_on(
-                state
-                    .runtime
-                    .scope(runmat_runtime::object::resolve::load_member_dynamic(
-                        base,
-                        member,
-                        false,
-                        Some(&state.function.name),
-                    )),
+            super::sync::complete(
+                &state.runtime,
+                runmat_runtime::object::resolve::load_member_dynamic(
+                    base,
+                    member,
+                    false,
+                    Some(&state.function.name),
+                ),
+                "dynamic member read",
             )
-            .map_err(JitError::from)
         }
         PlaceSegment::Index(indexing) => {
             let values = super::indexing::read_value(state, base, indexing, 1)?;
@@ -194,7 +193,8 @@ fn write_segment(
     allow_init: bool,
 ) -> JitResult<Value> {
     match segment {
-        PlaceSegment::Member(member) => block_on(state.runtime.scope(
+        PlaceSegment::Member(member) => super::sync::complete(
+            &state.runtime,
             runmat_runtime::object::resolve::store_member_traced(
                 base,
                 member.clone(),
@@ -202,8 +202,8 @@ fn write_segment(
                 allow_init,
                 Some(&state.function.name),
             ),
-        ))
-        .map_err(JitError::from),
+            "member write",
+        ),
         PlaceSegment::DynamicMember(member) => {
             let member = super::operand::materialize_operand(state, member)?;
             let member = String::try_from(&member).map_err(|error| {
@@ -212,7 +212,8 @@ fn write_segment(
                     error,
                 ))
             })?;
-            block_on(state.runtime.scope(
+            super::sync::complete(
+                &state.runtime,
                 runmat_runtime::object::resolve::store_member_dynamic_traced(
                     base,
                     member,
@@ -220,8 +221,8 @@ fn write_segment(
                     allow_init,
                     Some(&state.function.name),
                 ),
-            ))
-            .map_err(JitError::from)
+                "dynamic member write",
+            )
         }
         PlaceSegment::Index(indexing) => {
             super::indexing::assign(state, base, indexing, rhs, delete)

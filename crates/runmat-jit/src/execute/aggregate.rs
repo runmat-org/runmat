@@ -1,4 +1,3 @@
-use futures::executor::block_on;
 use runmat_mir::{MirAggregateKind, MirOperand};
 use runmat_types::{MemberName, QualifiedName};
 use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
@@ -33,12 +32,11 @@ pub(super) fn evaluate(
                 .chunks(cols.max(1))
                 .map(|row| row.to_vec())
                 .collect::<Vec<_>>();
-            block_on(
-                state
-                    .runtime
-                    .scope(runmat_runtime::create_matrix_from_values(&matrix_rows)),
+            super::sync::complete(
+                &state.runtime,
+                runmat_runtime::create_matrix_from_values(&matrix_rows),
+                "tensor aggregate construction",
             )
-            .map_err(JitError::from)
         }
     }
 }

@@ -58,6 +58,31 @@ fn cancellation_exits_without_committing_speculative_outputs() {
 }
 
 #[test]
+fn suspending_semantic_call_exits_explicitly_without_nested_executor_or_replay() {
+    let runtime = runtime_context();
+    let activation = runtime.enter();
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(|function, _arguments, requested_outputs| {
+            assert_eq!(function, 9);
+            assert_eq!(requested_outputs, 1);
+            Box::pin(std::future::pending::<
+                Result<Value, runmat_runtime::RuntimeError>,
+            >())
+        }),
+    ));
+    drop(activation);
+    let executor = GenericExecutor::compile(semantic_call_fixture()).unwrap();
+    let error = executor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
+        .expect_err("R13 must reject a real suspension boundary");
+    let JitError::UnsupportedSite(message) = error else {
+        panic!("suspension must remain a typed unsupported-site exit");
+    };
+    assert!(message.contains("requires the R14 continuation cohort"));
+    drop(invoker);
+}
+
+#[test]
 fn generated_branch_uses_shared_truth_semantics_and_exact_edge_values() {
     let executor = GenericExecutor::compile(branch_fixture()).unwrap();
     let execution = executor
@@ -558,6 +583,42 @@ fn call_fixture() -> runmat_native_codegen::NativeAssembly {
                     callee: MirCallee::Static(CallableIdentity::Builtin(BuiltinId("sqrt".into()))),
                     args: vec![MirCallArg::Single(MirOperand::Constant(
                         MirConstant::Number("81".into()),
+                    ))],
+                    arg_spans: vec![span],
+                    syntax: runmat_hir::CallSyntax::Plain,
+                    requested_outputs: RequestedOutputCount::One,
+                    fallback_policy: CallableFallbackPolicy::None,
+                    workspace_first_name: None,
+                    bare_identifier: false,
+                    async_behavior: AsyncBehaviorFact::NeverSuspends,
+                    effects: runmat_builtins::BuiltinEffects::none(),
+                    workspace_effect: None,
+                    environment_effect: None,
+                    purity: runmat_builtins::BuiltinPurity::Pure,
+                    semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                }),
+            },
+            span,
+        }],
+        MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+fn semantic_call_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 3 };
+    lower_body(
+        "semantic_call",
+        1,
+        vec![MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::Call(MirCall {
+                    callee: MirCallee::Static(CallableIdentity::BoundFunction(
+                        runmat_types::FunctionId(9),
+                    )),
+                    args: vec![MirCallArg::Single(MirOperand::Constant(
+                        MirConstant::Number("1".into()),
                     ))],
                     arg_spans: vec![span],
                     syntax: runmat_hir::CallSyntax::Plain,

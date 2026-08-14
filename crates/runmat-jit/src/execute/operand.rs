@@ -95,15 +95,16 @@ pub(super) fn evaluate_rvalue(
         }
         MirRvalue::Member { base, member } => {
             let base = materialize_operand(state, base)?;
-            let value = futures::executor::block_on(state.runtime.scope(
+            let value = super::sync::complete(
+                &state.runtime,
                 runmat_runtime::object::resolve::load_member(
                     base,
                     member.0.clone(),
                     false,
                     Some(&state.function.name),
                 ),
-            ))
-            .map_err(JitError::from)?;
+                "member read",
+            )?;
             Ok(vec![state.arena.insert(value)])
         }
         MirRvalue::DynamicMember { base, member } => {
@@ -115,15 +116,16 @@ pub(super) fn evaluate_rvalue(
                     error,
                 ))
             })?;
-            let value = futures::executor::block_on(state.runtime.scope(
+            let value = super::sync::complete(
+                &state.runtime,
                 runmat_runtime::object::resolve::load_member_dynamic(
                     base,
                     member,
                     false,
                     Some(&state.function.name),
                 ),
-            ))
-            .map_err(JitError::from)?;
+                "dynamic member read",
+            )?;
             Ok(vec![state.arena.insert(value)])
         }
         MirRvalue::WorkspaceFirstStaticProperty {
@@ -200,10 +202,11 @@ fn execute_embedded_statement(
 }
 
 fn logical_truth(state: &HostState, value: &Value, label: &str) -> JitResult<bool> {
-    futures::executor::block_on(state.runtime.scope(
+    super::sync::complete(
+        &state.runtime,
         runmat_runtime::condition::logical_truth_from_value(value, label),
-    ))
-    .map_err(JitError::from)
+        "logical truth evaluation",
+    )
 }
 
 pub(super) fn materialize_operand(state: &mut HostState, operand: &MirOperand) -> JitResult<Value> {

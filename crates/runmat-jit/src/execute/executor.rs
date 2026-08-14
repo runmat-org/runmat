@@ -101,14 +101,15 @@ impl GenericExecutor {
                     .collect::<JitResult<Vec<_>>>()?;
                 Ok(GenericExecution { outputs })
             }
-            NativeExitKind::EXCEPTION => Err(JitError::from(
-                state.last_error.take().unwrap_or_else(|| {
+            NativeExitKind::EXCEPTION => {
+                let error = state.last_error.take().unwrap_or_else(|| {
                     runmat_runtime::runtime_error::semantic_error(
                         "NativeException",
                         "native execution returned an exception without host error state",
                     )
-                }),
-            )),
+                });
+                Err(JitError::from(state.annotate_error(error)))
+            }
             NativeExitKind::CANCELLED => Err(JitError::Cancelled),
             other => Err(JitError::UnsupportedExit(other.0)),
         }

@@ -121,6 +121,30 @@ impl HostState {
         }
     }
 
+    pub fn annotate_error(&self, mut error: RuntimeError) -> RuntimeError {
+        if error.span.is_none() {
+            let start = self.current_source.start as usize;
+            let length = self
+                .current_source
+                .end
+                .saturating_sub(self.current_source.start)
+                .max(1) as usize;
+            error.span = Some((start, length).into());
+        }
+        if error.context.call_frames.is_empty() && error.context.call_stack.is_empty() {
+            let span = error.span.as_ref().map(|span| {
+                let start = span.offset();
+                (start, start + span.len())
+            });
+            error.context.call_frames.push(runmat_runtime::CallFrame {
+                function: self.function.name.clone(),
+                source_id: Some(self.function.source.0 as usize),
+                span,
+            });
+        }
+        error
+    }
+
     pub fn set_local(&mut self, slot: usize, value: NativeValueRef) -> JitResult<()> {
         let local = self
             .locals

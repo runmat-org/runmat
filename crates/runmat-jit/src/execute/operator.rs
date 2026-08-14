@@ -1,9 +1,8 @@
-use futures::executor::block_on;
 use runmat_runtime::native::NativeValueRef;
 use runmat_types::OperatorKind;
 use runmat_value::Value;
 
-use crate::{JitError, JitResult};
+use crate::JitResult;
 
 use super::state::HostState;
 
@@ -27,7 +26,7 @@ pub(super) fn evaluate(
         }
         runmat_runtime::call_builtin_async(name, &arguments).await
     };
-    let value = block_on(state.runtime.scope(future)).map_err(JitError::from)?;
+    let value = super::sync::complete(&state.runtime, future, "operator evaluation")?;
     Ok(state.arena.insert(value))
 }
 

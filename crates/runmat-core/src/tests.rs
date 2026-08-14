@@ -14106,3 +14106,305 @@ fn workspace_state_import_rejects_invalid_payload() {
         "invalid payload should map to replay decode identifier"
     );
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "core-native-test@1",
+        "nativeCore.m",
+        "function [a, b] = nativeCore(x)\nvalues = [10, 20, 30, 40];\na = values(end - 1) + x;\nb = helper(x);\nend\nfunction y = helper(x)\ny = x + 1;\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeCore".into()),
+        arguments: vec![runmat_value::Value::Num(5.0)],
+        requested_outputs: 2,
+    };
+    let established = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("established execution");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("forced generic-native execution");
+    assert_eq!(native, established);
+    assert_eq!(
+        native,
+        runmat_value::Value::OutputList(vec![
+            runmat_value::Value::Num(35.0),
+            runmat_value::Value::Num(6.0),
+        ])
+    );
+
+    for requested_outputs in [0, 1] {
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeCore".into()),
+            arguments: vec![runmat_value::Value::Num(5.0)],
+            requested_outputs,
+        };
+        let established = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established reduced-output execution");
+        let native = block_on(session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native reduced-output execution");
+        assert_eq!(native, established);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_matches_session_state_across_calls() {
+    let source = ExecutableSource::new(
+        "core-native-state-test@1",
+        "nativeState.m",
+        "function [g, p] = nativeState(delta)\nglobal native_shared\npersistent native_count\nif isempty(native_shared)\nnative_shared = 0;\nend\nif isempty(native_count)\nnative_count = 0;\nend\nnative_shared = native_shared + delta;\nnative_count = native_count + 1;\ng = native_shared;\np = native_count;\nend\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile state unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+
+    for (delta, expected) in [
+        (
+            2.0,
+            runmat_value::Value::OutputList(vec![
+                runmat_value::Value::Num(2.0),
+                runmat_value::Value::Num(1.0),
+            ]),
+        ),
+        (
+            3.0,
+            runmat_value::Value::OutputList(vec![
+                runmat_value::Value::Num(5.0),
+                runmat_value::Value::Num(2.0),
+            ]),
+        ),
+    ] {
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeState".into()),
+            arguments: vec![runmat_value::Value::Num(delta)],
+            requested_outputs: 2,
+        };
+        let established = block_on(established_session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established state execution");
+        let native = block_on(native_session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native state execution");
+        assert_eq!(native, established);
+        assert_eq!(native, expected);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_matches_console_effects_exactly_once() {
+    let source = ExecutableSource::new(
+        "core-native-console-test@1",
+        "nativeConsole.m",
+        "function y = nativeConsole(x)\ndisp(x);\ny = x + 1;\nend\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile console unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeConsole".into()),
+        arguments: vec![runmat_value::Value::Num(7.0)],
+        requested_outputs: 1,
+    };
+
+    let established = invoke_executable_with_console(
+        &mut established_session,
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    );
+    let native = invoke_executable_with_console(
+        &mut native_session,
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    );
+    assert_eq!(native, established);
+    assert_eq!(native.0, runmat_value::Value::Num(8.0));
+    assert_eq!(native.1.len(), 1, "disp must execute exactly once");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn invoke_executable_with_console(
+    session: &mut RunMatSession,
+    unit: &ExecutableUnit,
+    invocation: ProcedureInvocation,
+    control: &InvocationControl,
+) -> (
+    runmat_value::Value,
+    Vec<(runmat_runtime::console::ConsoleStream, String)>,
+) {
+    {
+        let _runtime = session.runtime_context().enter();
+        runmat_runtime::console::reset_thread_buffer();
+    }
+    let value =
+        block_on(session.invoke_executable(unit, invocation, control)).expect("console execution");
+    let entries = {
+        let _runtime = session.runtime_context().enter();
+        runmat_runtime::console::take_thread_buffer()
+    };
+    (
+        value,
+        entries
+            .into_iter()
+            .map(|entry| (entry.stream, entry.text))
+            .collect(),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_matches_runtime_cancellation() {
+    let source = ExecutableSource::new(
+        "core-native-cancel-test@1",
+        "nativeCancel.m",
+        "function y = nativeCancel(x)\ny = x + 1;\nend\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile cancellation unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+    established_session
+        .interrupt_handle()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    native_session
+        .interrupt_handle()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeCancel".into()),
+        arguments: vec![runmat_value::Value::Num(2.0)],
+        requested_outputs: 1,
+    };
+    let established = block_on(established_session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect_err("established execution must observe cancellation");
+    let native = block_on(native_session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect_err("native execution must observe cancellation");
+    let RunError::Runtime(established) = established else {
+        panic!("established cancellation must be a runtime error");
+    };
+    let RunError::Runtime(native) = native else {
+        panic!("native cancellation must be a runtime error");
+    };
+    assert_eq!(native.identifier(), established.identifier());
+    assert_eq!(native.identifier(), Some("RunMat:ExecutionCancelled"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_preserves_error_identity_and_source_span() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "core-native-test@1",
+        "nativeBounds.m",
+        "function y = nativeBounds()\nvalues = [1, 2];\ny = values(3);\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeBounds".into()),
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let established = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect_err("established bounds error");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect_err("native bounds error");
+    let RunError::Runtime(established) = established else {
+        panic!("established failure must be runtime semantic error");
+    };
+    let RunError::Runtime(native) = native else {
+        panic!("native failure must be runtime semantic error");
+    };
+    assert_eq!(native.identifier(), established.identifier());
+    assert!(
+        established.span.is_none(),
+        "record the current established executable-invocation baseline"
+    );
+    assert_eq!(native.span.as_ref().map(|span| span.offset()), Some(45));
+    assert!(!native.context.call_frames.is_empty());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_executable_lane_never_replays_unsupported_functions() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "core-native-test@1",
+        "nativeTry.m",
+        "function y = nativeTry(x)\ntry\ny = x + 1;\ncatch\ny = 0;\nend\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeTry".into()),
+        arguments: vec![runmat_value::Value::Num(4.0)],
+        requested_outputs: 1,
+    };
+    assert_eq!(
+        block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established try/catch execution"),
+        runmat_value::Value::Num(5.0)
+    );
+    let error = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect_err("unsupported native terminator must not fall back");
+    let RunError::Runtime(error) = error else {
+        panic!("unsupported native site must remain a runtime failure");
+    };
+    assert_eq!(error.identifier(), Some("RunMat:NativeUnsupportedSite"));
+}

@@ -1,6 +1,25 @@
 use super::*;
 
 impl RunMatSession {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn invoke_generic_native(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        preferred_function: Option<&str>,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+    ) -> std::result::Result<Value, RuntimeError> {
+        crate::generic_native::invoke(
+            unit,
+            preferred_function,
+            arguments,
+            requested_outputs,
+            self.runtime_context
+                .clone()
+                .with_program_revision(Some(unit.revision().program_revision.clone())),
+        )
+    }
+
     /// Invoke one immutable unit while collecting its backend-independent
     /// function and statement coverage sites.
     pub async fn invoke_executable_with_coverage(
@@ -87,6 +106,13 @@ impl RunMatSession {
                         "executable entrypoint does not accept invocation arguments",
                     ));
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
+                    self.invoke_generic_native(unit, None, Vec::new(), 0)
+                } else {
+                    self.invoke_entrypoint(unit).await
+                }
+                #[cfg(target_arch = "wasm32")]
                 self.invoke_entrypoint(unit).await
             }
             crate::ProcedureTarget::Function(name) => {
@@ -96,6 +122,24 @@ impl RunMatSession {
                         format!("executable unit does not contain semantic procedure '{name}'"),
                     )
                 })?;
+                #[cfg(not(target_arch = "wasm32"))]
+                if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
+                    self.invoke_generic_native(
+                        unit,
+                        Some(name.as_str()),
+                        invocation.arguments,
+                        invocation.requested_outputs,
+                    )
+                } else {
+                    self.invoke_procedure(
+                        unit,
+                        function,
+                        invocation.arguments,
+                        invocation.requested_outputs,
+                    )
+                    .await
+                }
+                #[cfg(target_arch = "wasm32")]
                 self.invoke_procedure(
                     unit,
                     function,

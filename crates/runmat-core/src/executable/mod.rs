@@ -9,6 +9,8 @@ mod source_map;
 mod unit;
 
 pub use coverage::CoveragePlan;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use invocation::ExecutableBackendPolicy;
 pub use invocation::{InvocationControl, ProcedureInvocation, ProcedureTarget};
 pub use revision::ExecutableRevision;
 pub use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};

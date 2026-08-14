@@ -5,6 +5,14 @@ use std::sync::{
 
 use runmat_value::Value;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum ExecutableBackendPolicy {
+    #[default]
+    Established,
+    ForcedGenericNative,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcedureTarget {
     Entrypoint,
@@ -40,6 +48,8 @@ impl ProcedureInvocation {
 pub struct InvocationControl {
     cancellation: Option<Arc<AtomicBool>>,
     deadline_unix_ms: Option<u64>,
+    #[cfg(not(target_arch = "wasm32"))]
+    backend: ExecutableBackendPolicy,
 }
 
 impl InvocationControl {
@@ -51,6 +61,17 @@ impl InvocationControl {
     pub fn with_deadline_unix_ms(mut self, deadline_unix_ms: u64) -> Self {
         self.deadline_unix_ms = Some(deadline_unix_ms);
         self
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn force_generic_native(mut self) -> Self {
+        self.backend = ExecutableBackendPolicy::ForcedGenericNative;
+        self
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn backend(&self) -> ExecutableBackendPolicy {
+        self.backend
     }
 
     pub(crate) fn is_cancelled(&self) -> bool {

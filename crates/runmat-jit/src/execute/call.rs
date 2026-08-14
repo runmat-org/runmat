@@ -1,4 +1,3 @@
-use futures::executor::block_on;
 use runmat_mir::{MirCall, MirCallArg, MirCallee};
 use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
 use runmat_value::Value;
@@ -20,39 +19,39 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<V
         })
         .collect::<JitResult<Vec<_>>>()?;
     let requested_outputs = call.requested_outputs.fixed_count();
-    let result =
-        match &call.callee {
-            MirCallee::Static(identity) => {
-                let descriptor = CallableDescriptor::resolved(
-                    identity.clone(),
-                    arguments,
-                    requested_outputs,
-                    call.fallback_policy,
-                    CallableCallKind::Direct,
-                );
-                block_on(state.runtime.scope(
-                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
-                ))
-            }
-            MirCallee::Dynamic(operand) => {
-                let target = materialize_operand(state, operand)?;
-                block_on(
-                    state
-                        .runtime
-                        .scope(runmat_runtime::call_feval_async_with_outputs(
-                            target,
-                            &arguments,
-                            requested_outputs,
-                        )),
-                )
-            }
-            other => {
-                return Err(JitError::UnsupportedSite(format!(
-                    "callee {other:?} requires the super-dispatch cohort"
-                )))
-            }
+    let result = match &call.callee {
+        MirCallee::Static(identity) => {
+            let descriptor = CallableDescriptor::resolved(
+                identity.clone(),
+                arguments,
+                requested_outputs,
+                call.fallback_policy,
+                CallableCallKind::Direct,
+            );
+            super::sync::complete(
+                &state.runtime,
+                runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
+                "resolved call",
+            )
         }
-        .map_err(JitError::from)?;
+        MirCallee::Dynamic(operand) => {
+            let target = materialize_operand(state, operand)?;
+            super::sync::complete(
+                &state.runtime,
+                runmat_runtime::call_feval_async_with_outputs(
+                    target,
+                    &arguments,
+                    requested_outputs,
+                ),
+                "dynamic call",
+            )
+        }
+        other => {
+            return Err(JitError::UnsupportedSite(format!(
+                "callee {other:?} requires the super-dispatch cohort"
+            )))
+        }
+    }?;
     normalize_outputs(result, requested_outputs)
 }
 
@@ -62,16 +61,11 @@ pub(super) fn builtin(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> JitResult<Vec<Value>> {
-    let result = block_on(
-        state
-            .runtime
-            .scope(runmat_runtime::call_builtin_async_with_outputs(
-                name,
-                &arguments,
-                requested_outputs,
-            )),
-    )
-    .map_err(JitError::from)?;
+    let result = super::sync::complete(
+        &state.runtime,
+        runmat_runtime::call_builtin_async_with_outputs(name, &arguments, requested_outputs),
+        "builtin call",
+    )?;
     normalize_outputs(result, requested_outputs)
 }
 

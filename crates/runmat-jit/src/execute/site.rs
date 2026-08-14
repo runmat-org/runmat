@@ -1,4 +1,3 @@
-use futures::executor::block_on;
 use runmat_mir::MirStmtKind;
 use runmat_native_codegen::{
     NativeEdge, NativeEdgeArgument, NativeInstruction, NativeOperation, NativeTerminator,
@@ -194,10 +193,11 @@ fn execute_terminator(
         } => {
             let condition = value_for(state, *condition)?;
             let value = state.arena.get(condition)?;
-            let truth = block_on(state.runtime.scope(
+            let truth = super::sync::complete(
+                &state.runtime,
                 runmat_runtime::condition::logical_truth_from_value(value, "branch condition"),
-            ))
-            .map_err(JitError::from)?;
+                "branch condition",
+            )?;
             if truth {
                 take_edge(state, then_edge, 0, None)
             } else {
@@ -212,19 +212,19 @@ fn execute_terminator(
             let discriminant = state.arena.get(value_for(state, *discriminant)?)?.clone();
             for (index, (case, edge)) in cases.iter().enumerate() {
                 let case = state.arena.get(value_for(state, *case)?)?.clone();
-                let equal = block_on(state.runtime.scope(runmat_runtime::call_builtin_async(
-                    "eq",
-                    &[discriminant.clone(), case],
-                )))
-                .map_err(JitError::from)?;
-                if block_on(state.runtime.scope(
+                let equal = super::sync::complete(
+                    &state.runtime,
+                    runmat_runtime::call_builtin_async("eq", &[discriminant.clone(), case]),
+                    "switch comparison",
+                )?;
+                if super::sync::complete(
+                    &state.runtime,
                     runmat_runtime::condition::logical_truth_from_value(
                         &equal,
                         "switch case comparison",
                     ),
-                ))
-                .map_err(JitError::from)?
-                {
+                    "switch truth evaluation",
+                )? {
                     return take_edge(state, edge, index as u32, None);
                 }
             }
@@ -238,18 +238,17 @@ fn execute_terminator(
         } => {
             if !state.has_for_loop(block) {
                 let source = state.arena.get(value_for(state, *iterable)?)?.clone();
-                let iterator = block_on(
-                    state
-                        .runtime
-                        .scope(runmat_runtime::iteration::ForColumnIterator::new(source)),
-                )
-                .map_err(JitError::from)?;
+                let iterator = super::sync::complete(
+                    &state.runtime,
+                    runmat_runtime::iteration::ForColumnIterator::new(source),
+                    "for iterable capture",
+                )?;
                 state.start_for_loop(block, body.target, iterator);
             }
             let runtime = state.runtime.clone();
             let next = {
                 let active = state.for_loop_mut(block)?;
-                block_on(runtime.scope(active.iterator.next())).map_err(JitError::from)?
+                super::sync::complete(&runtime, active.iterator.next(), "for iteration")?
             };
             if let Some(value) = next {
                 let reference = state.arena.insert(value);
@@ -259,19 +258,19 @@ fn execute_terminator(
             }
         }
         NativeTerminatorKind::Return { values } => {
-            if values.len() > call.requested_outputs as usize || values.len() > call.result_capacity
-            {
+            let requested_outputs = call.requested_outputs as usize;
+            if requested_outputs > values.len() || requested_outputs > call.result_capacity {
                 return Err(JitError::Host(
-                    "native return exceeds the transactional result window".into(),
+                    "native return cannot satisfy the requested output window".into(),
                 ));
             }
-            for (index, value) in values.iter().enumerate() {
+            for (index, value) in values.iter().take(requested_outputs).enumerate() {
                 let reference = value_for(state, *value)?;
                 // SAFETY: NativeCall validation guarantees a writable result
                 // slice of result_capacity elements for this invocation.
                 unsafe { *call.results.add(index) = reference };
             }
-            *exit = NativeExit::completed(values.len() as u32);
+            *exit = NativeExit::completed(call.requested_outputs);
             Ok(NativeSiteOutcome::exit())
         }
         NativeTerminatorKind::Unreachable => Err(JitError::Host(

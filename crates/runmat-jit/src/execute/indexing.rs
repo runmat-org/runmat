@@ -1,4 +1,3 @@
-use futures::executor::block_on;
 use runmat_mir::{MirIndexComponent, MirIndexing, MirOperand};
 use runmat_native_codegen::{NativeIndexBound, NativeIndexExpressionKind, NativeRangeExpression};
 use runmat_runtime::indexing::plan::{build_index_plan, IndexPlan};
@@ -59,70 +58,64 @@ pub(super) fn assign(
             &selectors.numeric,
             rhs,
         )?;
-        return block_on(
-            state
-                .runtime
-                .scope(call_object_index_descriptor_method(descriptor)),
-        )
-        .map_err(JitError::from);
+        return super::sync::complete(
+            &state.runtime,
+            call_object_index_descriptor_method(descriptor),
+            "object indexed assignment",
+        );
     }
-    let plan = block_on(
-        state
-            .runtime
-            .scope(plan_for_assignment(&base, &selectors, !delete)),
+    let plan = super::sync::complete(
+        &state.runtime,
+        plan_for_assignment(&base, &selectors, !delete),
+        "indexed assignment planning",
     )?;
     let updated = match base {
         Value::Tensor(value) => {
             if delete {
                 write_slice::delete_tensor_with_plan(value, &plan, &rhs).map_err(JitError::from)
             } else {
-                block_on(
-                    state
-                        .runtime
-                        .scope(write_slice::assign_tensor_with_plan(value, &plan, &rhs)),
+                super::sync::complete(
+                    &state.runtime,
+                    write_slice::assign_tensor_with_plan(value, &plan, &rhs),
+                    "tensor indexed assignment",
                 )
-                .map_err(JitError::from)
             }
         }
         Value::ComplexTensor(value) => {
             if delete {
                 write_slice::delete_complex_with_plan(value, &plan, &rhs).map_err(JitError::from)
             } else {
-                block_on(
-                    state
-                        .runtime
-                        .scope(write_slice::assign_complex_with_plan(value, &plan, &rhs)),
+                super::sync::complete(
+                    &state.runtime,
+                    write_slice::assign_complex_with_plan(value, &plan, &rhs),
+                    "complex indexed assignment",
                 )
-                .map_err(JitError::from)
             }
         }
         Value::SparseTensor(value) => {
             if delete {
                 write_slice::delete_sparse_with_plan(value, &plan, &rhs).map_err(JitError::from)
             } else {
-                block_on(
-                    state
-                        .runtime
-                        .scope(write_slice::assign_sparse_with_plan(value, &plan, &rhs)),
+                super::sync::complete(
+                    &state.runtime,
+                    write_slice::assign_sparse_with_plan(value, &plan, &rhs),
+                    "sparse indexed assignment",
                 )
-                .map_err(JitError::from)
             }
         }
         Value::GpuTensor(value) => {
             if delete {
-                block_on(
-                    state
-                        .runtime
-                        .scope(write_slice::delete_gpu_slice_with_plan(&value, &plan, &rhs)),
+                super::sync::complete(
+                    &state.runtime,
+                    write_slice::delete_gpu_slice_with_plan(&value, &plan, &rhs),
+                    "GPU indexed deletion",
                 )
-                .map_err(JitError::from)
             } else {
-                block_on(
-                    state
-                        .runtime
-                        .scope(write_slice::assign_gpu_slice_with_plan(&value, &plan, &rhs)),
+                super::sync::complete(
+                    &state.runtime,
+                    write_slice::assign_gpu_slice_with_plan(&value, &plan, &rhs),
+                    "GPU indexed assignment",
                 )
-                .map_err(JitError::from)
             }
         }
         Value::Cell(value) => {
@@ -307,22 +300,18 @@ fn resolve_end_expression(
     dimension_length: usize,
     expression: &runmat_runtime::indexing::EndExpr,
 ) -> JitResult<f64> {
-    let runtime = state.runtime.clone();
-    block_on(
-        runtime.scope(runmat_runtime::indexing::resolve_end_expr_value(
-            dimension_length,
-            expression,
-            |local| {
-                state
-                    .locals
-                    .get(local)
-                    .copied()
-                    .filter(|value| !value.is_null())
-                    .and_then(|value| state.arena.get(value).ok().cloned())
-            },
-        )),
+    super::sync::complete(
+        &state.runtime,
+        runmat_runtime::indexing::resolve_end_expr_value(dimension_length, expression, |local| {
+            state
+                .locals
+                .get(local)
+                .copied()
+                .filter(|value| !value.is_null())
+                .and_then(|value| state.arena.get(value).ok().cloned())
+        }),
+        "end expression resolution",
     )
-    .map_err(JitError::from)
 }
 
 fn selector_dimension_length(shape: &[usize], dims: usize, dimension: usize) -> JitResult<usize> {
@@ -349,16 +338,15 @@ fn read_paren(
                 "Function handle call does not support colon or end selector syntax",
             )));
         }
-        let value = block_on(
-            state
-                .runtime
-                .scope(runmat_runtime::call_feval_async_with_outputs(
-                    base,
-                    &selectors.numeric,
-                    requested_outputs,
-                )),
-        )
-        .map_err(JitError::from)?;
+        let value = super::sync::complete(
+            &state.runtime,
+            runmat_runtime::call_feval_async_with_outputs(
+                base,
+                &selectors.numeric,
+                requested_outputs,
+            ),
+            "function-handle indexed call",
+        )?;
         return normalize_outputs(value, requested_outputs);
     }
     if matches!(base, Value::Object(_) | Value::HandleObject(_)) {
@@ -369,15 +357,18 @@ fn read_paren(
             selectors.end_mask,
             &selectors.numeric,
         )?;
-        let value = block_on(
-            state
-                .runtime
-                .scope(call_object_index_descriptor_method(descriptor)),
-        )
-        .map_err(JitError::from)?;
+        let value = super::sync::complete(
+            &state.runtime,
+            call_object_index_descriptor_method(descriptor),
+            "object indexed read",
+        )?;
         return normalize_outputs(value, requested_outputs);
     }
-    let plan = block_on(state.runtime.scope(plan_for(&base, &selectors)))?;
+    let plan = super::sync::complete(
+        &state.runtime,
+        plan_for(&base, &selectors),
+        "indexed read planning",
+    )?;
     let value = read_with_plan(base, &plan)?;
     normalize_outputs(value, requested_outputs)
 }
@@ -503,12 +494,11 @@ fn assign_logical(
     let updated = if delete {
         write_slice::delete_tensor_with_plan(tensor, plan, rhs).map_err(JitError::from)?
     } else {
-        block_on(
-            state
-                .runtime
-                .scope(write_slice::assign_tensor_with_plan(tensor, plan, rhs)),
-        )
-        .map_err(JitError::from)?
+        super::sync::complete(
+            &state.runtime,
+            write_slice::assign_tensor_with_plan(tensor, plan, rhs),
+            "logical indexed assignment",
+        )?
     };
     match updated {
         Value::Num(value) => Ok(Value::Bool(value != 0.0)),

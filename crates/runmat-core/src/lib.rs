@@ -9,6 +9,8 @@ mod error;
 mod executable;
 mod execution;
 mod fusion;
+#[cfg(not(target_arch = "wasm32"))]
+mod generic_native;
 mod profiling;
 mod session;
 mod source_pool;

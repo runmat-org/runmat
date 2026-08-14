@@ -10,6 +10,7 @@ mod operand;
 mod operator;
 mod site;
 mod state;
+mod sync;
 mod workspace;
 
 pub use executor::{GenericExecution, GenericExecutor};
