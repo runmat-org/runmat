@@ -85,11 +85,7 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
 /// Compute the dimensionality (NDIMS) of a runtime value, with MATLAB semantics.
 pub async fn value_ndims(value: &Value) -> Result<usize, RuntimeError> {
     let dims = value_dimensions(value).await?;
-    if dims.len() < 2 {
-        Ok(2)
-    } else {
-        Ok(dims.len())
-    }
+    Ok(effective_rank(&dims))
 }
 
 /// Convert a dimension vector into a 1×N tensor encoded as `f64`.

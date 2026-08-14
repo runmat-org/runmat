@@ -3,10 +3,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, ResolveContext,
-    SparseTensor, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
+    LogicalArray, NumericDType, ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -31,6 +34,17 @@ const SPARSE_HELPER_DENSE_INPUT_LIMIT: usize = 10_000_000;
 const SPRAND_CONDITION_DENSE_INPUT_LIMIT: usize = 1_000_000;
 const SPRAND_CONDITION_ROTATION_WORK_LIMIT: usize = 50_000_000;
 const SPRAND_CONDITION_MAX_ROTATION_ATTEMPTS: usize = 10_000;
+
+const NONZEROS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented for full and sparse inputs; authoritative elements are filtered without numeric conversion.",
+    }];
+pub const NONZEROS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "v = nonzeros(integer_A)", inputs: &NONZEROS_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Stored nonzero values are copied in column order into a full same-class column. Host, sparse, scalar, and supported real gpuArray inputs preserve exact integer class; automatic residency may gather transparently and explicit residency is restored through the exact owner." }];
 
 const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -356,11 +370,30 @@ fn speye_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "nonzeros,sparse,nonzero,column vector",
     accel = "custom",
     descriptor(crate::builtins::array::creation::sparse::NONZEROS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::sparse::NONZEROS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 async fn nonzeros_builtin(value: Value) -> BuiltinResult<Value> {
-    let value = gpu_helpers::gather_value_async(&value).await?;
-    nonzeros_value(&value)
+    let Value::GpuTensor(source) = value else {
+        return nonzeros_value(&value);
+    };
+    let owner = gpu_helpers::exact_provider_for_handle(&source).ok_or_else(|| {
+        sparse_error(
+            &SPARSE_ERROR_INTERNAL,
+            "nonzeros: no acceleration provider owns the input handle",
+        )
+    })?;
+    let host = gpu_helpers::download_value_preserving_residency_async(owner, &source).await?;
+    let output = nonzeros_value(&host)?;
+    let output = gpu_helpers::restore_class_preserving_value(&source, output, "nonzeros")?;
+    if runmat_accelerate_api::handle_is_explicit(&source) && !matches!(output, Value::GpuTensor(_))
+    {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INTERNAL,
+            "nonzeros: provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(output)
 }
 
 #[runtime_builtin(
@@ -702,13 +735,26 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
         }
         Value::Tensor(tensor) => nonzeros_dense_tensor(tensor),
         Value::ComplexTensor(tensor) => {
-            let data: Vec<(f64, f64)> = tensor
-                .materialize_f64()
-                .iter()
-                .copied()
-                .filter(|(re, im)| is_stored_value(*re) || is_stored_value(*im))
-                .collect();
-            ComplexTensor::new(data.clone(), vec![data.len(), 1])
+            let indices = (0..tensor.len())
+                .filter(|&index| match tensor.complex_storage() {
+                    ComplexStorage::F64(values) => {
+                        let (real, imag) = values[index];
+                        is_stored_value(real) || is_stored_value(imag)
+                    }
+                    ComplexStorage::F32(values) => {
+                        let (real, imag) = values[index];
+                        real.is_nan() || imag.is_nan() || real != 0.0 || imag != 0.0
+                    }
+                    ComplexStorage::Integer(storage) => storage
+                        .is_nonzero_at(index)
+                        .expect("complex integer storage length matches tensor shape"),
+                })
+                .collect::<Vec<_>>();
+            let storage = tensor
+                .complex_storage()
+                .gather(&indices)
+                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}")))?;
+            ComplexTensor::from_complex_storage(storage, vec![indices.len(), 1])
                 .map(Value::ComplexTensor)
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}")))
         }
@@ -716,9 +762,24 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
             let data = logical
                 .data
                 .iter()
-                .filter_map(|&bit| if bit != 0 { Some(1.0) } else { None })
-                .collect();
-            tensor_column(data, "nonzeros")
+                .filter_map(|&bit| if bit != 0 { Some(1) } else { None })
+                .collect::<Vec<_>>();
+            let len = data.len();
+            LogicalArray::new(data, vec![len, 1])
+                .map(Value::LogicalArray)
+                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}")))
+        }
+        Value::CharArray(array) => {
+            let data = array
+                .data
+                .iter()
+                .copied()
+                .filter(|value| *value != '\0')
+                .collect::<Vec<_>>();
+            let len = data.len();
+            CharArray::new(data, len, 1)
+                .map(Value::CharArray)
+                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}")))
         }
         Value::Num(n) => tensor_column(
             if is_stored_value(*n) {
@@ -728,19 +789,46 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
             },
             "nonzeros",
         ),
-        Value::Int(i) => tensor_column(
-            if !i.is_zero() {
-                vec![i.to_f64()]
-            } else {
-                Vec::new()
-            },
-            "nonzeros",
-        ),
-        Value::Bool(b) => tensor_column(if *b { vec![1.0] } else { Vec::new() }, "nonzeros"),
+        Value::Int(i) => integer_tensor_column(integer_storage_from_scalar(i), "nonzeros"),
+        Value::Bool(b) => LogicalArray::new(
+            if *b { vec![1] } else { Vec::new() },
+            vec![usize::from(*b), 1],
+        )
+        .map(Value::LogicalArray)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}"))),
         other => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             format!("nonzeros: unsupported input {other:?}"),
         )),
+    }
+}
+
+fn integer_storage_from_scalar(value: &IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(value) => {
+            IntegerStorage::I8(((*value != 0).then_some(*value)).into_iter().collect())
+        }
+        IntValue::I16(value) => {
+            IntegerStorage::I16(((*value != 0).then_some(*value)).into_iter().collect())
+        }
+        IntValue::I32(value) => {
+            IntegerStorage::I32(((*value != 0).then_some(*value)).into_iter().collect())
+        }
+        IntValue::I64(value) => {
+            IntegerStorage::I64(((*value != 0).then_some(*value)).into_iter().collect())
+        }
+        IntValue::U8(value) => {
+            IntegerStorage::U8(((*value != 0).then_some(*value)).into_iter().collect())
+        }
+        IntValue::U16(value) => {
+            IntegerStorage::U16(((*value != 0).then_some(*value)).into_iter().collect())
+        }
+        IntValue::U32(value) => {
+            IntegerStorage::U32(((*value != 0).then_some(*value)).into_iter().collect())
+        }
+        IntValue::U64(value) => {
+            IntegerStorage::U64(((*value != 0).then_some(*value)).into_iter().collect())
+        }
     }
 }
 
@@ -2952,6 +3040,83 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn nonzeros_preserves_every_integer_class_and_exact_scalar_values() {
+        let cases = [
+            IntegerStorage::I8(vec![0, i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![0, i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![0, i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![0, i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, 1, u8::MAX]),
+            IntegerStorage::U16(vec![0, 1, u16::MAX]),
+            IntegerStorage::U32(vec![0, 1, u32::MAX]),
+            IntegerStorage::U64(vec![0, 1, u64::MAX]),
+        ];
+        for storage in cases {
+            let expected = storage
+                .from_same_class_values(
+                    storage
+                        .exact_values()
+                        .into_iter()
+                        .filter(|value| !value.is_zero())
+                        .collect(),
+                )
+                .expect("same-class expected storage");
+            let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
+            let output =
+                expect_tensor(nonzeros_builtin(Value::Tensor(tensor)).expect("integer nonzeros"));
+            assert_eq!(output.shape, vec![2, 1]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        let scalar = expect_tensor(
+            nonzeros_builtin(Value::Int(IntValue::U64(u64::MAX)))
+                .expect("exact integer scalar nonzeros"),
+        );
+        assert_eq!(
+            scalar.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn nonzeros_preserves_character_logical_and_complex_component_classes() {
+        let characters = CharArray::new(vec!['a', '\0', 'z'], 1, 3).expect("character array");
+        let output = nonzeros_builtin(Value::CharArray(characters)).expect("character nonzeros");
+        assert!(
+            matches!(output, Value::CharArray(array) if array.shape == vec![2, 1] && array.data == vec!['a', 'z'])
+        );
+
+        let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).expect("logical array");
+        let output = nonzeros_builtin(Value::LogicalArray(logical)).expect("logical nonzeros");
+        assert!(
+            matches!(output, Value::LogicalArray(array) if array.shape == vec![2, 1] && array.data == vec![1, 1])
+        );
+
+        let single = ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![(0.0, 0.0), (1.5, 0.0), (0.0, -2.5)]),
+            vec![3, 1],
+        )
+        .expect("single complex tensor");
+        let output =
+            nonzeros_builtin(Value::ComplexTensor(single)).expect("single complex nonzeros");
+        assert!(
+            matches!(output, Value::ComplexTensor(tensor) if tensor.complex_storage() == &ComplexStorage::F32(vec![(1.5, 0.0), (0.0, -2.5)]))
+        );
+
+        let integer = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![0, u64::MAX, 0]),
+            IntegerStorage::U64(vec![0, 0, u64::MAX]),
+        )
+        .expect("paired integer storage");
+        let integer = ComplexTensor::new_integer(integer, vec![3, 1]).expect("complex integer");
+        let output =
+            nonzeros_builtin(Value::ComplexTensor(integer)).expect("integer complex nonzeros");
+        assert!(
+            matches!(output, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.real == IntegerStorage::U64(vec![u64::MAX, 0]) && storage.imag == IntegerStorage::U64(vec![0, u64::MAX])))
+        );
+    }
+
+    #[test]
     fn sparse_triplets_sum_duplicates_and_drop_zeros() {
         let i = Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![4, 1]).unwrap();
         let j = Tensor::new(vec![1.0, 1.0, 1.0, 3.0], vec![4, 1]).unwrap();
@@ -3493,8 +3658,10 @@ pub(crate) mod tests {
         );
 
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
-        let out = expect_tensor(nonzeros_builtin(Value::LogicalArray(logical)).expect("nonzeros"));
-        assert_eq!(out.as_f64_slice().expect("double nonzeros"), &[1.0, 1.0]);
+        let out = nonzeros_builtin(Value::LogicalArray(logical)).expect("nonzeros");
+        assert!(
+            matches!(out, Value::LogicalArray(array) if array.shape == vec![2, 1] && array.data == vec![1, 1])
+        );
 
         let complex =
             ComplexTensor::new(vec![(0.0, 0.0), (1.0, 2.0), (0.0, 3.0)], vec![3, 1]).unwrap();
@@ -3520,6 +3687,44 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn nonzeros_wgpu_integer_fallback_preserves_exact_explicit_residency_and_source() {
+        let _guard = test_support::accel_test_lock();
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("register WGPU provider");
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let source = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+            vec![3, 1],
+        )
+        .expect("integer source");
+        let handle = gpu_helpers::upload_tensor(provider, &source).expect("upload integer source");
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let output =
+            nonzeros_builtin(Value::GpuTensor(handle.clone())).expect("resident integer nonzeros");
+        let Value::GpuTensor(output) = output else {
+            panic!("explicit gpuArray result must remain resident");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&output));
+        let output = block_on(gpu_helpers::download_value_preserving_residency_async(
+            provider, &output,
+        ))
+        .expect("download output");
+        assert!(
+            matches!(output, Value::Tensor(tensor) if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])))
+        );
+        let source = block_on(gpu_helpers::download_value_preserving_residency_async(
+            provider, &handle,
+        ))
+        .expect("source remains live");
+        assert!(
+            matches!(source, Value::Tensor(tensor) if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX])))
+        );
     }
 
     #[test]

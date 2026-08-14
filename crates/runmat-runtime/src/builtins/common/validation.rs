@@ -390,6 +390,7 @@ pub const MUST_BE_NONZERO_LENGTH_TEXT_INTEGER_AUDIT: BuiltinIntegerAuditDescript
 pub const MUST_BE_TEXT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeText is a text validator; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
 pub const MUST_BE_TEXT_SCALAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeTextScalar is a text-shape validator; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
 pub const MUST_BE_VALID_VARIABLE_NAME_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeValidVariableName accepts text names only; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
+pub const NAMEDARGS2CELL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "namedargs2cell accepts only a scalar structure. A top-level integer host or resident value rejects without conversion or provider access, while integer values stored in valid structure fields are preserved exactly as ordinary payloads." };
 
 const MUST_BE_INTEGER_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "mustBeInteger.resident-input",
@@ -2198,6 +2199,7 @@ fn isvarname_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Convert a scalar name-value struct to an alternating name/value cell row.",
     type_resolver(any_type),
     descriptor(self::NAMEDARGS2CELL_DESCRIPTOR),
+    integer_audit(self::NAMEDARGS2CELL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::common::validation"
 )]
 fn namedargs2cell_builtin(value: Value) -> BuiltinResult<Value> {
@@ -3133,6 +3135,38 @@ mod tests {
         assert_eq!(cell.cols, 4);
         assert_eq!(cell.data[0], Value::String("Name".into()));
         assert_eq!(cell.data[2], Value::String("Value".into()));
+    }
+
+    #[test]
+    fn namedargs2cell_rejects_top_level_integers_and_preserves_integer_fields_exactly() {
+        let cases = [
+            IntValue::I8(i8::MIN),
+            IntValue::I16(i16::MIN),
+            IntValue::I32(i32::MIN),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(u8::MAX),
+            IntValue::U16(u16::MAX),
+            IntValue::U32(u32::MAX),
+            IntValue::U64(u64::MAX),
+        ];
+        for value in cases {
+            assert!(namedargs2cell_value(Value::Int(value.clone())).is_err());
+            let mut structure = StructValue::new();
+            structure.insert("Exact", Value::Int(value.clone()));
+            let output = namedargs2cell_value(Value::Struct(structure))
+                .expect("scalar struct with integer field");
+            let Value::Cell(cell) = output else {
+                panic!("expected name-value cell");
+            };
+            assert_eq!(cell.data[1], Value::Int(value));
+        }
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_006,
+        });
+        assert!(namedargs2cell_value(resident).is_err());
     }
 
     #[test]

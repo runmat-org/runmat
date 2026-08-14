@@ -12,10 +12,12 @@
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "f64"
+      "f32",
+      "f64",
+      "integer"
     ],
     "broadcasting": "none",
-    "notes": "`nonzeros` gathers dense GPU input before scanning because sparse helper outputs are host values in this slice."
+    "notes": "Resident input is downloaded non-destructively through its exact owner for host compaction. Supported explicit real, floating-complex, logical, and integer gpuArray results are restored to that owner with class, shape, metadata, provenance, and source lifetime validated."
   },
   "fusion": {
     "elementwise": false,
@@ -25,14 +27,18 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::array::creation::sparse::tests::nonzeros_returns_column_order_for_dense_sparse_logical_and_complex"
+    "unit": "builtins::array::creation::sparse::tests::nonzeros_preserves_every_integer_class_and_exact_scalar_values",
+    "integration": "crates/runmat-vm/tests/integer_datetime_metadata_and_nonzero_semantics.rs",
+    "gpu": "builtins::array::creation::sparse::tests::nonzeros_wgpu_integer_fallback_preserves_exact_explicit_residency_and_source"
   },
   "description": "`nonzeros(A)` returns a full column vector containing the nonzero elements of `A` in column-major order.",
   "behaviors": [
     "Sparse input returns the stored sparse values in CSC column order.",
     "Dense numeric input is scanned in column-major order and zeros are omitted.",
-    "Logical input returns double ones for true elements.",
-    "Complex input returns a complex column vector and omits only elements whose real and imaginary parts are both zero."
+    "All eight integer classes preserve their exact class and values, including wide `int64` and `uint64` elements above `flintmax`.",
+    "Logical input returns a logical column of true elements and character input returns a character column excluding only null characters.",
+    "Complex input returns a same-component-class complex column and omits only elements whose real and imaginary parts are both zero.",
+    "Supported explicit resident real, floating-complex, logical, or integer input returns an explicit resident result through the exact owner; automatic residency may gather transparently and return host data if restoration is unavailable. Typed complex-integer device storage remains unsupported."
   ],
   "examples": [
     {
@@ -75,5 +81,5 @@
       "`A` may be sparse, dense numeric, logical, scalar, or complex numeric."
     ]
   },
-  "gpu_residency": "`nonzeros` gathers dense GPU tensors before scanning. A future provider path can preserve residency for dense GPU reductions and compaction."
+  "gpu_residency": "`nonzeros` currently compacts on the host after an owner-aware non-destructive download. Supported explicit real, floating-complex, logical, and integer gpuArray intent is preserved by uploading the same-class full column result to the exact source owner; failure to preserve explicit residency is an error rather than silent host success. Automatic residency may gather transparently, while typed complex-integer device storage remains unsupported."
 }

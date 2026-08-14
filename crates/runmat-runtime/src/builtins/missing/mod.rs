@@ -150,6 +150,25 @@ const MISSING_ERRORS: [BuiltinErrorDescriptor; 3] = [
     MISSING_ERROR_INTERNAL,
 ];
 
+const MISSING_SHAPED_ARRAY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "missing-shaped-array",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "missing(size...) is a RunMat convenience; the documented MATLAB missing function accepts no input arguments",
+    error_identifier: Some("RunMat:compatibility:MissingShapedArrayExtension"),
+};
+pub const MISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MISSING_SHAPED_ARRAY_EXTENSION];
+
+const MISSING_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "size arguments",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every native integer size is read exactly and checked against nonnegative platform allocation limits; the entire shaped-array syntax is a RunMat-only convenience.",
+    }];
+pub const MISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "missing(integer_size, ...)", inputs: &MISSING_INTEGER_SIZE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "MATLAB-compatible modes reject every argument before provider access because public missing has only a zero-argument syntax. RunMat mode gathers admitted automatic or explicit size controls through their exact owner and creates a host string array." }];
+
 macro_rules! descriptor {
     ($name:ident, $signatures:ident, $mode:expr) => {
         pub const $name: BuiltinDescriptor = BuiltinDescriptor {
@@ -560,9 +579,17 @@ fn internal_error(detail: impl Into<String>) -> RuntimeError {
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::MISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::MISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::MISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if !args.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MISSING_SHAPED_ARRAY_EXTENSION,
+            "missing",
+        )?;
+    }
     let packed = Value::OutputList(args);
     let gathered = gather_if_needed_async(&packed)
         .await
@@ -2801,6 +2828,7 @@ mod tests {
 
     #[test]
     fn missing_constructs_scalar_and_arrays() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let scalar = block_on(missing_builtin(Vec::new())).unwrap();
         assert!(matches!(scalar, Value::StringArray(sa) if sa.data == vec![MISSING_TEXT]));
         let shaped = block_on(missing_builtin(vec![Value::Num(2.0), Value::Num(3.0)])).unwrap();
@@ -2810,7 +2838,46 @@ mod tests {
     }
 
     #[test]
+    fn missing_runmat_shape_extension_reads_every_integer_class_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let cases = [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64(2),
+        ];
+        for size in cases {
+            let result =
+                block_on(missing_builtin(vec![Value::Int(size)])).expect("RunMat shaped missing");
+            assert!(
+                matches!(result, Value::StringArray(array) if array.shape == vec![2, 2] && array.data.len() == 4)
+            );
+        }
+    }
+
+    #[test]
+    fn missing_shaped_extension_gates_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let value = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_005,
+        });
+        let error = block_on(missing_builtin(vec![value]))
+            .expect_err("MATLAB-compatible mode must reject shaped missing");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:MissingShapedArrayExtension")
+        );
+    }
+
+    #[test]
     fn missing_preserves_typed_integer_size_vectors_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let large = 9_007_199_254_740_993_u64;
         let dims = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
 
