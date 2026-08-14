@@ -11,6 +11,7 @@ pub mod execute;
 pub mod invalidation;
 pub mod memory;
 pub mod specialization;
+pub mod tiering;
 
 pub use error::*;
 

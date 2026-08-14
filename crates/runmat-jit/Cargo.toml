@@ -17,6 +17,8 @@ runmat-native-codegen = { workspace = true }
 runmat-types = { workspace = true }
 runmat-value = { workspace = true }
 runmat-time = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

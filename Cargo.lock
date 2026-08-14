@@ -6601,6 +6601,8 @@ dependencies = [
  "runmat-time",
  "runmat-types",
  "runmat-value",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 
