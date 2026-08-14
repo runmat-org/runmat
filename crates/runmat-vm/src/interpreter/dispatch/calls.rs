@@ -80,7 +80,7 @@ pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize
 }
 
 pub struct ExceptionRouteContext<'a> {
-    pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
+    pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
     pub vars: &'a mut Vec<Value>,
     pub last_exception: &'a mut Option<MException>,
     pub pc: &'a mut usize,
@@ -904,7 +904,7 @@ mod tests {
 
     #[test]
     fn handle_builtin_outcome_preserves_ambiguous_import_identifier() {
-        let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
+        let mut try_stack: Vec<crate::interpreter::state::ActiveTryHandler> = Vec::new();
         let mut vars: Vec<Value> = Vec::new();
         let mut last_exception = None;
         let mut pc = 0usize;

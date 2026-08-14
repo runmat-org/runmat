@@ -97,6 +97,7 @@ fn enter_site(
     request: NativeSiteRequest,
 ) -> JitResult<()> {
     state.current_source = runtime_source(source);
+    state.enter_site_block(runmat_native_codegen::NativeBlockId(request.block));
     // SAFETY: NativeCall was validated before entry and its frame/resume
     // backing allocations live for the complete synchronous invocation.
     let frame = unsafe { &mut *call.frame };
@@ -197,7 +198,7 @@ fn execute_terminator(
     exit: &mut NativeExit,
 ) -> JitResult<NativeSiteOutcome> {
     match &terminator.kind {
-        NativeTerminatorKind::Goto { edge } => take_edge(state, edge, 0, None),
+        NativeTerminatorKind::Goto { edge } => take_edge(state, edge, 0, None, None),
         NativeTerminatorKind::Branch {
             condition,
             then_edge,
@@ -211,9 +212,9 @@ fn execute_terminator(
                 "branch condition",
             )?;
             if truth {
-                take_edge(state, then_edge, 0, None)
+                take_edge(state, then_edge, 0, None, None)
             } else {
-                take_edge(state, else_edge, 1, None)
+                take_edge(state, else_edge, 1, None, None)
             }
         }
         NativeTerminatorKind::Switch {
@@ -237,10 +238,10 @@ fn execute_terminator(
                     ),
                     "switch truth evaluation",
                 )? {
-                    return take_edge(state, edge, index as u32, None);
+                    return take_edge(state, edge, index as u32, None, None);
                 }
             }
-            take_edge(state, otherwise, cases.len() as u32, None)
+            take_edge(state, otherwise, cases.len() as u32, None, None)
         }
         NativeTerminatorKind::For {
             iterable,
@@ -264,10 +265,18 @@ fn execute_terminator(
             };
             if let Some(value) = next {
                 let reference = state.arena.insert(value);
-                take_edge(state, body, 0, Some((*binding, reference)))
+                take_edge(state, body, 0, Some((*binding, reference)), None)
             } else {
-                take_edge(state, exit, 1, None)
+                take_edge(state, exit, 1, None, None)
             }
+        }
+        NativeTerminatorKind::TryCatch {
+            try_edge,
+            catch_edge,
+            ..
+        } => {
+            state.enter_exception_handler(try_edge, catch_edge)?;
+            take_edge(state, try_edge, 0, None, None)
         }
         NativeTerminatorKind::Return { values } => {
             let requested_outputs = call.requested_outputs as usize;
@@ -316,11 +325,9 @@ fn execute_terminator(
         NativeTerminatorKind::Unreachable => Err(JitError::Host(
             "reached a Native IR unreachable terminator".into(),
         )),
-        NativeTerminatorKind::TryCatch { .. } | NativeTerminatorKind::Await { .. } => {
-            Err(JitError::UnsupportedSite(
-                "exception/await terminator requires R14 continuation state".into(),
-            ))
-        }
+        NativeTerminatorKind::Await { .. } => Err(JitError::UnsupportedSite(
+            "await terminator requires R14 continuation state".into(),
+        )),
         NativeTerminatorKind::ParFor { .. } | NativeTerminatorKind::Spmd { .. } => {
             Err(JitError::UnsupportedSite(
                 "parallel terminator requires the R27 native parallel executor".into(),
@@ -349,6 +356,7 @@ fn take_edge(
     edge: &NativeEdge,
     index: u32,
     loop_iteration: Option<(runmat_native_codegen::NativeLocalId, NativeValueRef)>,
+    caught_exception: Option<NativeValueRef>,
 ) -> JitResult<NativeSiteOutcome> {
     let parameters = state
         .function
@@ -371,9 +379,12 @@ fn take_edge(
                 .ok_or_else(|| {
                     JitError::Host("native loop iteration edge binding is unavailable".into())
                 })?,
-            NativeEdgeArgument::CaughtException { .. } | NativeEdgeArgument::AwaitResult { .. } => {
+            NativeEdgeArgument::CaughtException { .. } => caught_exception.ok_or_else(|| {
+                JitError::Host("native catch edge has no materialized exception".into())
+            })?,
+            NativeEdgeArgument::AwaitResult { .. } => {
                 return Err(JitError::UnsupportedSite(
-                    "exception/await edge value requires R14 continuation state".into(),
+                    "await edge value requires R14 continuation state".into(),
                 ))
             }
         };
@@ -385,6 +396,30 @@ fn take_edge(
     }
     state.take_control_edge(edge.target);
     Ok(NativeSiteOutcome::edge(index))
+}
+
+pub(super) fn redirect_exception(
+    state: &mut HostState,
+    exception: runmat_runtime::native::NativeException,
+) -> JitResult<Option<runmat_runtime::native::NativeSiteRequest>> {
+    let Some(handler) = state.take_exception_handler() else {
+        return Ok(None);
+    };
+    let reference = NativeValueRef {
+        handle: exception.handle,
+        generation: exception.generation,
+    };
+    if !matches!(
+        state.arena.get(reference)?,
+        runmat_value::Value::MException(_)
+    ) {
+        return Err(JitError::Host(
+            "native exception exit does not reference an MException".into(),
+        ));
+    }
+    let target = handler.catch_edge.target;
+    let _ = take_edge(state, &handler.catch_edge, 1, None, Some(reference))?;
+    state.resume_request_for_block(target).map(Some)
 }
 
 fn value_for(

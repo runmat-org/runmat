@@ -110,9 +110,9 @@ unsafe extern "C" fn execute_site(
                 Ok(())
             }
             Err(JitError::Runtime(error)) => {
-                let exception = state
-                    .arena
-                    .insert(runmat_value::Value::String(error.message().to_string()));
+                let exception = state.arena.insert(runmat_value::Value::MException(
+                    runmat_runtime::runtime_error::exception_from_error(&error),
+                ));
                 state.last_error = Some(*error);
                 // SAFETY: callback outputs are checked and writable.
                 unsafe {

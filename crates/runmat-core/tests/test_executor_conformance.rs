@@ -232,6 +232,10 @@ async fn executable_unit_retains_exact_program_point_analysis() {
         .canonical_identity()
         .is_empty());
     let envelope = unit.portable_envelope().unwrap();
+    assert_eq!(
+        envelope.manifest.revisions.bytecode_schema,
+        runmat_vm::BYTECODE_SCHEMA_VERSION
+    );
     let bytes = envelope.canonical_bytes().unwrap();
     assert_eq!(
         runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes).unwrap(),

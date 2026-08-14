@@ -675,27 +675,20 @@ impl Compiler {
 
         let mut block_starts = HashMap::new();
         let mut pending_jumps: Vec<(usize, BasicBlockId, bool)> = Vec::new();
-        let mut pending_try_entries: Vec<(usize, BasicBlockId, Option<usize>)> = Vec::new();
-        let try_entry_blocks: HashSet<BasicBlockId> = blocks
-            .iter()
-            .filter_map(|block| match block.terminator.kind {
-                MirTerminatorKind::TryCatch { try_block, .. } => Some(try_block),
-                _ => None,
-            })
-            .collect();
+        let mut pending_try_entries: Vec<(usize, usize, BasicBlockId, Option<usize>)> = Vec::new();
+        let exception_scopes = crate::compiler::exceptions::ExceptionScopes::analyze(body);
 
         for (block_index, block) in blocks.iter().enumerate() {
             self.pending_place_mutation = None;
             block_starts.insert(block.id, self.instructions.len());
+            for scope in exception_scopes.leaving_at(block.id) {
+                self.emit(Instr::LeaveTry(*scope));
+            }
             for stmt in &block.statements {
                 self.compile_mir_stmt(stmt)?;
             }
-            let exits_try_scope = try_entry_blocks.contains(&block.id);
             match &block.terminator.kind {
                 MirTerminatorKind::Goto(target) => {
-                    if exits_try_scope {
-                        self.emit(Instr::PopTry);
-                    }
                     let pc = self.emit(Instr::Jump(usize::MAX));
                     pending_jumps.push((pc, *target, false));
                 }
@@ -704,9 +697,6 @@ impl Compiler {
                     then_block,
                     else_block,
                 } => {
-                    if exits_try_scope {
-                        self.emit(Instr::PopTry);
-                    }
                     self.compile_mir_operand(cond)?;
                     let false_pc = self.emit(Instr::JumpIfFalse(usize::MAX));
                     pending_jumps.push((false_pc, *else_block, true));
@@ -718,9 +708,6 @@ impl Compiler {
                     cases,
                     otherwise,
                 } => {
-                    if exits_try_scope {
-                        self.emit(Instr::PopTry);
-                    }
                     let discr_temp = self.alloc_temp();
                     self.compile_mir_operand(discr)?;
                     self.emit(Instr::StoreVar(discr_temp));
@@ -744,8 +731,13 @@ impl Compiler {
                     let catch_var = catch_binding
                         .map(|local| self.mir_local_slot(local))
                         .transpose()?;
-                    let enter_pc = self.emit(Instr::EnterTry(usize::MAX, catch_var));
-                    pending_try_entries.push((enter_pc, *catch_block, catch_var));
+                    let scope = block.id.0;
+                    let enter_pc = self.emit(Instr::EnterTry {
+                        scope,
+                        catch_pc: usize::MAX,
+                        catch_var,
+                    });
+                    pending_try_entries.push((enter_pc, scope, *catch_block, catch_var));
                     let try_pc = self.emit(Instr::Jump(usize::MAX));
                     pending_jumps.push((try_pc, *try_block, false));
                 }
@@ -780,8 +772,8 @@ impl Compiler {
                     .with_identifier(IDENT_MIR_PARALLEL_CAPABILITY_UNSUPPORTED));
                 }
                 MirTerminatorKind::Return(values) => {
-                    if exits_try_scope {
-                        self.emit(Instr::PopTry);
+                    for scope in exception_scopes.active_at(block.id) {
+                        self.emit(Instr::LeaveTry(scope));
                     }
                     if values.is_empty() && block_index + 1 < blocks.len() {
                         self.emit(Instr::Return);
@@ -790,8 +782,8 @@ impl Compiler {
                     }
                 }
                 MirTerminatorKind::Unreachable => {
-                    if exits_try_scope {
-                        self.emit(Instr::PopTry);
+                    for scope in exception_scopes.active_at(block.id) {
+                        self.emit(Instr::LeaveTry(scope));
                     }
                     self.emit(Instr::Return);
                 }
@@ -800,9 +792,6 @@ impl Compiler {
                     result,
                     resume,
                 } => {
-                    if exits_try_scope {
-                        self.emit(Instr::PopTry);
-                    }
                     self.compile_mir_operand(future)?;
                     self.emit(Instr::Await);
                     if let Some(place) = result {
@@ -829,11 +818,18 @@ impl Compiler {
             }
         }
 
-        for (pc, target, catch_var) in pending_try_entries {
+        for (pc, scope, target, catch_var) in pending_try_entries {
             let target_pc = *block_starts
                 .get(&target)
                 .ok_or_else(|| CompileError::new(format!("missing MIR catch block {target:?}")))?;
-            self.patch(pc, Instr::EnterTry(target_pc, catch_var));
+            self.patch(
+                pc,
+                Instr::EnterTry {
+                    scope,
+                    catch_pc: target_pc,
+                    catch_var,
+                },
+            );
         }
 
         Ok(())

@@ -7,7 +7,7 @@ use test_helpers::execute_source;
 fn error_identifier_and_catch() {
     // Emit the message and ensure identifier/message are preserved exactly.
     let vars = execute_source(
-        "try; error(\"RunMat:domainError\", \"bad\"); catch e; id = getfield(e, 'identifier'); msg = getfield(e, 'message'); out_exc = e; end",
+        "try; error(\"RunMat:domainError\", \"bad\"); catch e; id = e.identifier; msg = e.message; out_exc = e; end",
     )
     .unwrap();
     let has_id = vars
@@ -41,7 +41,7 @@ fn nested_try_catch_rethrow() {
 fn catch_and_multi_assign_propagation() {
     // Ensure catch-bound exception can be read and subsequent assignments proceed
     let vars = execute_source(
-        "A=[1 2]; try; x=A(10); catch e; [m,id,ok] = deal(getfield(e,'message'), getfield(e,'identifier'), 1); end",
+        "A=[1 2]; try; x=A(10); catch e; [m,id,ok] = deal(e.message, e.identifier, 1); end",
     )
     .unwrap();
     let has_ok = vars
@@ -84,7 +84,7 @@ fn dot_access_identifier_and_message() {
 fn catch_index_error_and_continue() {
     // Index out of bounds on tensor, caught by try/catch
     let vars = execute_source(
-        "A = [1 2;3 4]; try; x = A(10); catch e; id = getfield(e,'identifier'); msg = getfield(e,'message'); ok=1; end",
+        "A = [1 2;3 4]; try; x = A(10); catch e; id = e.identifier; msg = e.message; ok=1; end",
     )
     .unwrap();
     let has_ok = vars

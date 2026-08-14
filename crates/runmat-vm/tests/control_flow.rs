@@ -124,6 +124,49 @@ fn try_catch_catches_error_from_semantic_function_call() {
 }
 
 #[test]
+fn try_catch_protects_nested_control_flow_blocks() {
+    let caught = execute_source(
+        r#"
+            x = -1;
+            y = 0;
+            try
+                if x < 0
+                    values = [1, 2];
+                    z = values(3);
+                end
+                y = x + 1;
+            catch e
+                y = 7;
+                id = e.identifier;
+            end
+        "#,
+    )
+    .expect("nested try block error must transfer to catch");
+    assert!(has_num(&caught, 7.0));
+    assert!(caught.iter().any(|value| {
+        matches!(value, runmat_value::Value::String(id) if id == "RunMat:IndexOutOfBounds")
+    }));
+
+    let completed = execute_source(
+        r#"
+            x = 1;
+            y = 0;
+            try
+                if x < 0
+                    values = [1, 2];
+                    z = values(3);
+                end
+                y = x + 1;
+            catch
+                y = 7;
+            end
+        "#,
+    )
+    .expect("nested try block success must leave the handler normally");
+    assert!(has_num(&completed, 2.0));
+}
+
+#[test]
 fn nested_break_and_continue_scopes() {
     let vars = execute_source(
         r#"

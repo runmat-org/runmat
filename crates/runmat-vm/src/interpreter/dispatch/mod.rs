@@ -63,7 +63,7 @@ pub struct DispatchState<'a> {
     pub stack: &'a mut Vec<Value>,
     pub vars: &'a mut Vec<Value>,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
-    pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
+    pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
     pub last_exception: &'a mut Option<runmat_value::MException>,
     pub imports: &'a mut Vec<(Vec<String>, bool)>,
     pub global_aliases: &'a mut HashMap<usize, String>,
@@ -796,14 +796,18 @@ pub async fn dispatch_instruction(
             crate::ops::control_flow::jump(*target),
             pc,
         )))),
-        Instr::EnterTry(catch_pc, catch_var) => {
-            crate::ops::control_flow::enter_try(try_stack, *catch_pc, *catch_var);
+        Instr::EnterTry {
+            scope,
+            catch_pc,
+            catch_var,
+        } => {
+            crate::ops::control_flow::enter_try(try_stack, *scope, *catch_pc, *catch_var);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::PopTry => {
-            crate::ops::control_flow::pop_try(try_stack);
+        Instr::LeaveTry(scope) => {
+            crate::ops::control_flow::leave_try(try_stack, *scope);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

@@ -808,8 +808,8 @@ async fn run_interpreter_inner(
             | Instr::StoreLocal(_)
             | Instr::Swap
             | Instr::Pop
-            | Instr::EnterTry(_, _)
-            | Instr::PopTry
+            | Instr::EnterTry { .. }
+            | Instr::LeaveTry(_)
             | Instr::ReturnValue
             | Instr::Return
             | Instr::EnterScope(_)

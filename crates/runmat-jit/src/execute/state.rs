@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_native_codegen::{
-    NativeBlockId, NativeFunction, NativeLocalKind, NativeTerminatorKind, NativeValueId,
+    NativeBlockId, NativeEdge, NativeFunction, NativeLocalKind, NativeTerminatorKind, NativeValueId,
 };
 use runmat_runtime::call::function_abi::{prepare_function_inputs, FunctionInputSpec};
 use runmat_runtime::native::{NativeRoot, NativeRootKind, NativeRootSet, NativeValueRef};
@@ -13,6 +13,11 @@ use crate::{JitError, JitResult};
 pub(super) struct ActiveForLoop {
     pub iterator: runmat_runtime::iteration::ForColumnIterator,
     body_blocks: BTreeSet<NativeBlockId>,
+}
+
+pub(super) struct ActiveExceptionHandler {
+    pub catch_edge: NativeEdge,
+    protected_blocks: BTreeSet<NativeBlockId>,
 }
 
 pub(super) struct HostState {
@@ -27,9 +32,11 @@ pub(super) struct HostState {
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,
     resume_target: Option<runmat_runtime::native::NativeSiteRequest>,
+    current_block: Option<NativeBlockId>,
     global_bindings: BTreeMap<usize, String>,
     persistent_bindings: BTreeMap<usize, String>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
+    active_exception_handlers: Vec<ActiveExceptionHandler>,
 }
 
 impl HostState {
@@ -135,8 +142,10 @@ impl HostState {
             active_for_loops: BTreeMap::new(),
             pending_place_mutation: None,
             resume_target: None,
+            current_block: None,
             global_bindings: BTreeMap::new(),
             persistent_bindings: BTreeMap::new(),
+            active_exception_handlers: Vec::new(),
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
@@ -200,6 +209,64 @@ impl HostState {
         }
         self.resume_target = Some(target);
         Ok(())
+    }
+
+    pub fn enter_site_block(&mut self, block: NativeBlockId) {
+        self.current_block = Some(block);
+    }
+
+    pub fn enter_exception_handler(
+        &mut self,
+        try_edge: &NativeEdge,
+        catch_edge: &NativeEdge,
+    ) -> JitResult<()> {
+        let try_reachable = self.reachable_blocks(try_edge.target)?;
+        let catch_reachable = self.reachable_blocks(catch_edge.target)?;
+        let protected_blocks = try_reachable
+            .difference(&catch_reachable)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if !protected_blocks.contains(&try_edge.target) {
+            return Err(JitError::Host(
+                "native try region has no protected entry block".into(),
+            ));
+        }
+        self.active_exception_handlers.push(ActiveExceptionHandler {
+            catch_edge: catch_edge.clone(),
+            protected_blocks,
+        });
+        Ok(())
+    }
+
+    pub fn take_exception_handler(&mut self) -> Option<ActiveExceptionHandler> {
+        let current = self.current_block?;
+        let index = self
+            .active_exception_handlers
+            .iter()
+            .rposition(|handler| handler.protected_blocks.contains(&current))?;
+        let handler = self.active_exception_handlers.remove(index);
+        self.active_exception_handlers.truncate(index);
+        Some(handler)
+    }
+
+    pub fn resume_request_for_block(
+        &self,
+        block: NativeBlockId,
+    ) -> JitResult<runmat_runtime::native::NativeSiteRequest> {
+        let site = self
+            .function
+            .expected_sites
+            .iter()
+            .find(|site| site.point.block == block.0)
+            .ok_or_else(|| JitError::Host("native resume block has no verified site".into()))?;
+        Ok(runmat_runtime::native::NativeSiteRequest {
+            function: self.function.id.0,
+            block: site.point.block,
+            position: site.point.position,
+            phase: native_site_phase(site.phase),
+            ordinal: site.ordinal,
+            reserved: 0,
+        })
     }
 
     pub fn skip_before_resume(
@@ -330,6 +397,8 @@ impl HostState {
     pub fn take_control_edge(&mut self, target: NativeBlockId) {
         self.active_for_loops
             .retain(|header, active| target == *header || active.body_blocks.contains(&target));
+        self.active_exception_handlers
+            .retain(|handler| handler.protected_blocks.contains(&target));
     }
 
     fn blocks_reaching_header(
@@ -371,6 +440,29 @@ impl HostState {
             }
         }
         reachable_from_body
+    }
+
+    fn reachable_blocks(&self, start: NativeBlockId) -> JitResult<BTreeSet<NativeBlockId>> {
+        if !self.function.blocks.iter().any(|block| block.id == start) {
+            return Err(JitError::Host(
+                "native exception edge targets an unavailable block".into(),
+            ));
+        }
+        let mut reachable = BTreeSet::new();
+        let mut pending = vec![start];
+        while let Some(block) = pending.pop() {
+            if !reachable.insert(block) {
+                continue;
+            }
+            let block = self
+                .function
+                .blocks
+                .iter()
+                .find(|candidate| candidate.id == block)
+                .ok_or_else(|| JitError::Host("native CFG block is unavailable".into()))?;
+            pending.extend(successor_blocks(&block.terminator.kind));
+        }
+        Ok(reachable)
     }
 }
 

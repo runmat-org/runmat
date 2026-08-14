@@ -18,7 +18,7 @@ pub(crate) mod runtime;
 pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
     AsyncMetadata, AwaitSite, Bytecode, EmitLabel, FunctionBytecode, FunctionRegistry, Instr,
-    SpawnSite, StackEffect,
+    SpawnSite, StackEffect, BYTECODE_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{

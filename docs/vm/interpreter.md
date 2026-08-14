@@ -22,7 +22,7 @@ The RunMat interpreter executes the bytecode emitted by the VM compiler. It is a
 | `vars` | Workspace or frame-local variable slots addressed by `LoadVar`, `StoreVar`, and local fallbacks. |
 | `context` | Call stack, local frame storage, instruction pointer metadata, and async task tracking. |
 | `pc` | Program counter into `bytecode.instructions`. |
-| `try_stack` | Stack of catch targets used by `try`/`catch` bytecode. |
+| `try_stack` | Stack of scoped catch targets used by `try`/`catch` bytecode. |
 | `last_exception` | Last caught exception value, used by exception-sensitive built-ins such as `rethrow`. |
 
 ## Execution Loop
@@ -117,12 +117,12 @@ Indexed assignment instructions push the updated base value back onto the stack.
 
 ## Exception Routing
 
-`try`/`catch` is represented directly in bytecode. `EnterTry` pushes a catch target onto `try_stack`, and `PopTry` removes it when the protected region exits normally. If a handler returns `RuntimeError`, the runner calls `redirect_exception_to_catch`.
+`try`/`catch` is represented directly in bytecode. `EnterTry` pushes a compiler-assigned scope and catch target onto `try_stack`. MIR control-flow analysis identifies the complete try-only region, including nested branches, loops, and await continuations. `LeaveTry` removes that exact scope on each normal edge out of the protected region; it does not accidentally remove an enclosing handler or require the try body to fit in one basic block. If a handler returns `RuntimeError`, the runner calls `redirect_exception_to_catch`.
 
 When a catch target exists, the VM:
 
-- Pops the active catch entry.
-- Converts the runtime error into an `MException`.
+- Pops the innermost active catch entry while retaining enclosing handlers.
+- Converts the runtime error into Runtime's canonical `MException`.
 - Stores that exception into the optional catch variable slot.
 - Updates `last_exception`.
 - Sets `pc` to the catch handler.

@@ -38,16 +38,23 @@ pub fn jump(target: usize) -> ControlFlowAction {
 
 #[inline]
 pub fn enter_try(
-    try_stack: &mut Vec<(usize, Option<usize>)>,
+    try_stack: &mut Vec<crate::interpreter::state::ActiveTryHandler>,
+    scope: usize,
     catch_pc: usize,
     catch_var: Option<usize>,
 ) {
-    try_stack.push((catch_pc, catch_var));
+    try_stack.push(crate::interpreter::state::ActiveTryHandler {
+        scope,
+        catch_pc,
+        catch_var,
+    });
 }
 
 #[inline]
-pub fn pop_try(try_stack: &mut Vec<(usize, Option<usize>)>) {
-    let _ = try_stack.pop();
+pub fn leave_try(try_stack: &mut Vec<crate::interpreter::state::ActiveTryHandler>, scope: usize) {
+    if let Some(index) = try_stack.iter().rposition(|handler| handler.scope == scope) {
+        try_stack.remove(index);
+    }
 }
 
 #[inline]

@@ -240,8 +240,12 @@ pub enum Instr {
 
     // Stack and exception-control operations.
     Swap,
-    EnterTry(usize, Option<usize>),
-    PopTry,
+    EnterTry {
+        scope: usize,
+        catch_pc: usize,
+        catch_var: Option<usize>,
+    },
+    LeaveTry(usize),
     Return,
     ReturnValue,
 
@@ -554,10 +558,10 @@ impl Instr {
                 effect(handle + fixed + expanded, 1)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),
-            Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::PopTry => {
+            Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::LeaveTry(_) => {
                 effect(0, 0)
             }
-            Instr::EnterTry(_, _) => effect(0, 0),
+            Instr::EnterTry { .. } => effect(0, 0),
             Instr::Return => effect(0, 0),
             Instr::ReturnValue => effect(1, 0),
             Instr::RegisterImport { .. }

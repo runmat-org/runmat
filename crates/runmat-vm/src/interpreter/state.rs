@@ -13,6 +13,13 @@ pub enum InterpreterOutcome {
     Completed(Vec<Value>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ActiveTryHandler {
+    pub scope: usize,
+    pub catch_pc: usize,
+    pub catch_var: Option<usize>,
+}
+
 #[derive(Debug)]
 pub struct InterpreterState {
     pub bytecode: Bytecode,
@@ -20,7 +27,7 @@ pub struct InterpreterState {
     pub vars: Vec<Value>,
     pub pc: usize,
     pub context: ExecutionContext,
-    pub try_stack: Vec<(usize, Option<usize>)>,
+    pub try_stack: Vec<ActiveTryHandler>,
     pub last_exception: Option<runmat_value::MException>,
     pub imports: Vec<(Vec<String>, bool)>,
     pub global_aliases: HashMap<usize, String>,

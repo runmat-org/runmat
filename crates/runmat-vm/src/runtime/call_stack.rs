@@ -9,13 +9,6 @@ pub fn callstack_limit() -> usize {
     )
 }
 
-pub fn error_namespace() -> String {
-    runmat_runtime::context::legacy::active().map_or_else(
-        || runmat_runtime::context::DEFAULT_ERROR_NAMESPACE.to_string(),
-        |context| context.error_namespace(),
-    )
-}
-
 pub fn attach_call_frames(
     bytecode: &Bytecode,
     current_function_name: &str,

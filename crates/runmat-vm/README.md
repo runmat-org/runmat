@@ -26,6 +26,7 @@ src/
 ### `compiler/`
 - HIR-to-bytecode lowering.
 - `core.rs` holds compiler state and shared emit/error helpers.
+- `exceptions.rs` derives explicit try-scope regions and normal-exit edges from the MIR control-flow graph.
 - `expressions.rs`, `statements.rs`, `lvalues.rs`, `functions.rs`, `classes.rs`, and `imports.rs` own the main lowering concerns.
 - `end_expr.rs` owns lowering-time `end` expression construction.
 
@@ -38,7 +39,7 @@ src/
 
 ### `runtime/`
 - VM adapters for runtime state outside the main interpreter loop.
-- `call_stack.rs` owns call stack limits and error namespace.
+- `call_stack.rs` adapts Runtime-owned call-stack limits and attaches bytecode source frames to errors.
 - `workspace.rs` owns workspace snapshot/import/export plumbing.
 - `globals.rs` synchronizes bytecode slots with Runtime-owned named global/persistent storage.
 - `gc.rs` owns interpreter GC root registration.
@@ -46,6 +47,7 @@ src/
 ### `ops/`
 - Concrete opcode-family semantics.
 - Arithmetic, comparison, arrays, stack, cells, and control-flow execution helpers live here.
+- Try/catch handlers carry an explicit compiler-assigned scope. Normal control-flow edges leave only the scopes whose protected MIR regions they exit, while exceptional edges consume the innermost handler and preserve enclosing handlers.
 
 ### `call/`
 - Bytecode call decoding and interpreter-frame preparation.

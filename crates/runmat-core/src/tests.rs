@@ -12534,11 +12534,13 @@ fn try_catch_uses_semantic_vm() {
         "try/catch should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::EnterTry(_, None))),
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::EnterTry {
+                catch_var: None,
+                ..
+            }
+        )),
         "try/catch should lower to typed exception bytecode"
     );
 
@@ -12561,11 +12563,13 @@ fn try_catch_binding_uses_semantic_vm() {
         "try/catch binding should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::EnterTry(_, Some(_)))),
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::EnterTry {
+                catch_var: Some(_),
+                ..
+            }
+        )),
         "try/catch binding should lower the catch binding into exception bytecode"
     );
 
@@ -14530,36 +14534,114 @@ fn forced_generic_native_executable_lane_preserves_error_identity_and_source_spa
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn forced_generic_native_executable_lane_never_replays_unsupported_functions() {
+fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = ExecutableSource::new(
         "core-native-test@1",
         "nativeTry.m",
-        "function y = nativeTry(x)\ntry\ny = x + 1;\ncatch\ny = 0;\nend\nend\n",
+        "function [y, id] = nativeTry(x)\ntry\nvalues = [1, 2];\nz = values(3);\ny = 99;\nid = 0;\ncatch e\ny = x;\nid = e.identifier;\nend\nend\nfunction y = nativeTryOk(x)\ntry\ny = x + 1;\ncatch\ny = 0;\nend\nend\nfunction [y, id] = nativeNestedTry()\ntry\ntry\nvalues = [1, 2];\nz = values(3);\ncatch inner\nrethrow(inner);\nend\ncatch outer\ny = 7;\nid = outer.identifier;\nend\nend\nfunction [y, id] = nativeNestedControl(x)\nid = 0;\ntry\nif x < 0\nvalues = [1, 2];\nz = values(3);\nend\ny = x + 1;\ncatch e\ny = 0;\nid = e.identifier;\nend\nend\n",
     );
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
-    let invocation = ProcedureInvocation {
-        target: ProcedureTarget::Function("nativeTry".into()),
+    let no_error = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeTryOk".into()),
         arguments: vec![runmat_value::Value::Num(4.0)],
         requested_outputs: 1,
     };
-    assert_eq!(
-        block_on(session.invoke_executable(
-            &unit,
-            invocation.clone(),
-            &InvocationControl::default(),
-        ))
-        .expect("established try/catch execution"),
-        runmat_value::Value::Num(5.0)
-    );
-    let error = block_on(session.invoke_executable(
+    let established_no_error =
+        block_on(session.invoke_executable(&unit, no_error.clone(), &InvocationControl::default()))
+            .expect("established no-error try path");
+    let native_no_error = block_on(session.invoke_executable(
+        &unit,
+        no_error,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native no-error try path");
+    assert_eq!(native_no_error, established_no_error);
+    assert_eq!(native_no_error, runmat_value::Value::Num(5.0));
+
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeTry".into()),
+        arguments: vec![runmat_value::Value::Num(-1.0)],
+        requested_outputs: 2,
+    };
+    let established = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("established caught-error path");
+    let native = block_on(session.invoke_executable(
         &unit,
         invocation,
         &InvocationControl::default().force_generic_native(),
     ))
-    .expect_err("unsupported native terminator must not fall back");
-    let RunError::Runtime(error) = error else {
-        panic!("unsupported native site must remain a runtime failure");
+    .expect("native caught-error path");
+    assert_eq!(native, established);
+    assert_eq!(
+        native,
+        runmat_value::Value::OutputList(vec![
+            runmat_value::Value::Num(-1.0),
+            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+        ])
+    );
+
+    let nested = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeNestedTry".into()),
+        arguments: Vec::new(),
+        requested_outputs: 2,
     };
-    assert_eq!(error.identifier(), Some("RunMat:NativeUnsupportedSite"));
+    let established_nested =
+        block_on(session.invoke_executable(&unit, nested.clone(), &InvocationControl::default()))
+            .expect("established nested catch/rethrow path");
+    let native_nested = block_on(session.invoke_executable(
+        &unit,
+        nested,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native nested catch/rethrow path");
+    assert_eq!(native_nested, established_nested);
+    assert_eq!(
+        native_nested,
+        runmat_value::Value::OutputList(vec![
+            runmat_value::Value::Num(7.0),
+            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+        ])
+    );
+
+    for (argument, expected) in [
+        (
+            -1.0,
+            runmat_value::Value::OutputList(vec![
+                runmat_value::Value::Num(0.0),
+                runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+            ]),
+        ),
+        (
+            4.0,
+            runmat_value::Value::OutputList(vec![
+                runmat_value::Value::Num(5.0),
+                runmat_value::Value::Num(0.0),
+            ]),
+        ),
+    ] {
+        let nested_control = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeNestedControl".into()),
+            arguments: vec![runmat_value::Value::Num(argument)],
+            requested_outputs: 2,
+        };
+        let established = block_on(session.invoke_executable(
+            &unit,
+            nested_control.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established nested-control try path");
+        let native = block_on(session.invoke_executable(
+            &unit,
+            nested_control,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native nested-control try path");
+        assert_eq!(native, established);
+        assert_eq!(native, expected);
+    }
 }

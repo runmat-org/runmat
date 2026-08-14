@@ -17,6 +17,42 @@ pub fn semantic_error(identifier: &str, message: impl Into<String>) -> RuntimeEr
         .build()
 }
 
+/// Materialize the language-level exception value caught by `try`/`catch`.
+///
+/// Executors own control transfer and frame/source decoration; Runtime owns
+/// the stable conversion from its semantic error contract to `MException`.
+pub fn exception_from_error(error: &RuntimeError) -> runmat_value::MException {
+    if let Some(identifier) = error.identifier() {
+        return runmat_value::MException::new(identifier.to_string(), error.message().to_string());
+    }
+    let message = error.message();
+    if let Some(index) = message.rfind(": ") {
+        let (identifier, detail) = message.split_at(index);
+        return runmat_value::MException::new(
+            exception_identifier(identifier),
+            detail.trim_start_matches(':').trim().to_string(),
+        );
+    }
+    if let Some(index) = message.rfind(':') {
+        let (identifier, detail) = message.split_at(index);
+        return runmat_value::MException::new(
+            exception_identifier(identifier),
+            detail.trim_start_matches(':').trim().to_string(),
+        );
+    }
+    runmat_value::MException::new(exception_identifier(""), message.to_string())
+}
+
+fn exception_identifier(identifier: &str) -> String {
+    if identifier.trim().is_empty() {
+        let namespace =
+            crate::context::legacy::error_namespace().unwrap_or_else(|| "RunMat".to_string());
+        format!("{namespace}:error")
+    } else {
+        identifier.trim().to_string()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayErrorKind {
     UnsupportedSchema,
@@ -78,5 +114,21 @@ mod tests {
             semantic_error("IndexOutOfBounds", "bad index").identifier(),
             Some("Acme:IndexOutOfBounds")
         );
+    }
+
+    #[test]
+    fn caught_exception_materialization_preserves_structured_and_legacy_errors() {
+        let structured = semantic_error("IndexOutOfBounds", "bad index");
+        let exception = exception_from_error(&structured);
+        assert_eq!(exception.identifier, "RunMat:IndexOutOfBounds");
+        assert_eq!(exception.message, "bad index");
+
+        let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        context.set_error_namespace("Acme");
+        let _scope = RuntimeContextGuard::enter(context);
+        let legacy = crate::build_runtime_error("legacy detail").build();
+        let exception = exception_from_error(&legacy);
+        assert_eq!(exception.identifier, "Acme:error");
+        assert_eq!(exception.message, "legacy detail");
     }
 }

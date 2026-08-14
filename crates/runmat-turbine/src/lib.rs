@@ -1050,13 +1050,19 @@ impl TurbineEngine {
                     class_name.hash(&mut hasher);
                     property.hash(&mut hasher);
                 }
-                Instr::EnterTry(catch_pc, catch_var) => {
+                Instr::EnterTry {
+                    scope,
+                    catch_pc,
+                    catch_var,
+                } => {
                     "EnterTry".hash(&mut hasher);
+                    scope.hash(&mut hasher);
                     catch_pc.hash(&mut hasher);
                     catch_var.hash(&mut hasher);
                 }
-                Instr::PopTry => {
-                    "PopTry".hash(&mut hasher);
+                Instr::LeaveTry(scope) => {
+                    "LeaveTry".hash(&mut hasher);
+                    scope.hash(&mut hasher);
                 }
                 _ => {
                     "Other".hash(&mut hasher);

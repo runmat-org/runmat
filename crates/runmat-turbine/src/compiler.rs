@@ -997,8 +997,8 @@ impl BytecodeCompiler {
                     | Instr::IndexCell { .. }
                     | Instr::LoadStaticProperty(_, _)
                     | Instr::LoadWorkspaceFirstStaticProperty { .. }
-                    | Instr::EnterTry(_, _)
-                    | Instr::PopTry
+                    | Instr::EnterTry { .. }
+                    | Instr::LeaveTry(_)
                     | Instr::UPlus
                     | Instr::AndAnd(_)
                     | Instr::OrOr(_)

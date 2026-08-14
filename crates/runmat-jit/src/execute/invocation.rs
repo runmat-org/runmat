@@ -73,6 +73,70 @@ impl GenericInvocation {
             self.state.prepare_resume(self.resume)?;
             self.resume_pending = false;
         }
+        loop {
+            let exit = self.enter_once()?;
+            match exit.kind {
+                NativeExitKind::COMPLETED => {
+                    self.terminal = true;
+                    let outputs = self
+                        .results
+                        .iter()
+                        .take(exit.produced_outputs as usize)
+                        .map(|reference| self.state.arena.get(*reference).cloned())
+                        .collect::<JitResult<Vec<_>>>()?;
+                    return Ok(GenericInvocationStep::Completed(GenericExecution {
+                        outputs,
+                    }));
+                }
+                NativeExitKind::EXCEPTION => {
+                    let error = self.state.last_error.take().unwrap_or_else(|| {
+                        runmat_runtime::runtime_error::semantic_error(
+                            "NativeException",
+                            "native execution returned an exception without host error state",
+                        )
+                    });
+                    if let Some(target) =
+                        super::site::redirect_exception(&mut self.state, exit.exception)?
+                    {
+                        self.install_resume_target(target)?;
+                        continue;
+                    }
+                    return Err(JitError::from(self.state.annotate_error(error)));
+                }
+                NativeExitKind::CANCELLED => return Err(JitError::Cancelled),
+                NativeExitKind::SUSPENDED => {
+                    self.resume_pending = true;
+                    return Ok(GenericInvocationStep::Suspended {
+                        continuation: exit.suspension.continuation,
+                        generation: exit.suspension.generation,
+                    });
+                }
+                NativeExitKind::DEOPTIMIZED => {
+                    self.resume_pending = true;
+                    return Ok(GenericInvocationStep::Deoptimized {
+                        reason: exit.deoptimization.reason,
+                        target: exit.deoptimization.target,
+                        guard: exit.deoptimization.guard,
+                    });
+                }
+                other => return Err(JitError::UnsupportedExit(other.0)),
+            }
+        }
+    }
+
+    fn install_resume_target(
+        &mut self,
+        target: runmat_runtime::native::NativeSiteRequest,
+    ) -> JitResult<()> {
+        self.resume.function = target.function;
+        self.resume.block = target.block;
+        self.resume.position = target.position;
+        self.resume.phase = target.phase.0;
+        self.resume.ordinal = target.ordinal;
+        self.state.prepare_resume(self.resume)
+    }
+
+    fn enter_once(&mut self) -> JitResult<NativeExit> {
         self.results.fill(NativeValueRef::NULL);
         let host = super::callbacks::table(&mut self.state);
         host.validate()
@@ -110,46 +174,7 @@ impl GenericInvocation {
         }
         call.validate_exit(&exit)
             .map_err(|error| JitError::Host(error.to_string()))?;
-        match exit.kind {
-            NativeExitKind::COMPLETED => {
-                self.terminal = true;
-                let outputs = self
-                    .results
-                    .iter()
-                    .take(exit.produced_outputs as usize)
-                    .map(|reference| self.state.arena.get(*reference).cloned())
-                    .collect::<JitResult<Vec<_>>>()?;
-                Ok(GenericInvocationStep::Completed(GenericExecution {
-                    outputs,
-                }))
-            }
-            NativeExitKind::EXCEPTION => {
-                let error = self.state.last_error.take().unwrap_or_else(|| {
-                    runmat_runtime::runtime_error::semantic_error(
-                        "NativeException",
-                        "native execution returned an exception without host error state",
-                    )
-                });
-                Err(JitError::from(self.state.annotate_error(error)))
-            }
-            NativeExitKind::CANCELLED => Err(JitError::Cancelled),
-            NativeExitKind::SUSPENDED => {
-                self.resume_pending = true;
-                Ok(GenericInvocationStep::Suspended {
-                    continuation: exit.suspension.continuation,
-                    generation: exit.suspension.generation,
-                })
-            }
-            NativeExitKind::DEOPTIMIZED => {
-                self.resume_pending = true;
-                Ok(GenericInvocationStep::Deoptimized {
-                    reason: exit.deoptimization.reason,
-                    target: exit.deoptimization.target,
-                    guard: exit.deoptimization.guard,
-                })
-            }
-            other => Err(JitError::UnsupportedExit(other.0)),
-        }
+        Ok(exit)
     }
 }
 
