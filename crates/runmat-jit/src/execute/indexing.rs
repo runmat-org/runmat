@@ -452,9 +452,10 @@ fn assign_brace(
     delete: bool,
 ) -> JitResult<Value> {
     if delete {
-        return Err(JitError::UnsupportedSite(
-            "brace deletion requires the complete cell mutation cohort".into(),
-        ));
+        return Err(JitError::from(semantic_error(
+            "UnsupportedCellBraceDeletion",
+            "Cell brace assignment does not support deletion",
+        )));
     }
     let Value::Cell(cell) = base else {
         return Err(JitError::from(semantic_error(

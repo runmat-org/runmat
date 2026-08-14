@@ -14220,6 +14220,41 @@ fn forced_generic_native_executable_lane_matches_session_state_across_calls() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
+    let source = ExecutableSource::new(
+        "core-native-expansion-test@1",
+        "nativeExpansion.m",
+        "function y = nativeExpansion()\nvalues = {10, 20, 30};\ny = addThree(values{:});\nend\nfunction y = addThree(a, b, c)\ny = a + b + c;\nend\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile expansion unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeExpansion".into()),
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let established = block_on(established_session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("established expansion execution");
+    let native = block_on(native_session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native expansion execution");
+    assert_eq!(native, established);
+    assert_eq!(native, runmat_value::Value::Num(60.0));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_console_effects_exactly_once() {
     let source = ExecutableSource::new(
         "core-native-console-test@1",

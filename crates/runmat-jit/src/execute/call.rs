@@ -1,4 +1,5 @@
 use runmat_mir::{MirCall, MirCallArg, MirCallee};
+use runmat_runtime::call::arguments::MaterializedArgument;
 use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
 use runmat_value::Value;
 
@@ -8,16 +9,16 @@ use super::operand::materialize_operand;
 use super::state::HostState;
 
 pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<Value>> {
-    let arguments = call
+    let materialized = call
         .args
         .iter()
-        .map(|argument| match argument {
-            MirCallArg::Single(operand) => materialize_operand(state, operand),
-            MirCallArg::Expansion { .. } => Err(JitError::UnsupportedSite(
-                "comma-separated-list call expansion requires the call-shape cohort".into(),
-            )),
-        })
+        .map(|argument| materialize_argument(state, argument))
         .collect::<JitResult<Vec<_>>>()?;
+    let arguments = super::sync::complete(
+        &state.runtime,
+        runmat_runtime::call::arguments::expand_arguments(materialized),
+        "call argument expansion",
+    )?;
     let requested_outputs = call.requested_outputs.fixed_count();
     let result = match &call.callee {
         MirCallee::Static(identity) => {
@@ -46,13 +47,63 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> JitResult<Vec<V
                 "dynamic call",
             )
         }
-        other => {
-            return Err(JitError::UnsupportedSite(format!(
-                "callee {other:?} requires the super-dispatch cohort"
-            )))
+        MirCallee::SuperConstructor {
+            current_class,
+            super_class,
+        } => {
+            let _outputs = runmat_runtime::output_context::push_output_count(requested_outputs);
+            super::sync::complete(
+                &state.runtime,
+                runmat_runtime::call_super_constructor(
+                    current_class.clone(),
+                    super_class.clone(),
+                    arguments,
+                ),
+                "superclass constructor call",
+            )
+        }
+        MirCallee::SuperMethod {
+            current_class,
+            super_class,
+            method,
+        } => {
+            let _outputs = runmat_runtime::output_context::push_output_count(requested_outputs);
+            super::sync::complete(
+                &state.runtime,
+                runmat_runtime::call_super_method(
+                    current_class.clone(),
+                    super_class.clone(),
+                    method.clone(),
+                    arguments,
+                ),
+                "superclass method call",
+            )
         }
     }?;
     normalize_outputs(result, requested_outputs)
+}
+
+fn materialize_argument(
+    state: &mut HostState,
+    argument: &MirCallArg,
+) -> JitResult<MaterializedArgument> {
+    match argument {
+        MirCallArg::Single(operand) => {
+            materialize_operand(state, operand).map(MaterializedArgument::Single)
+        }
+        MirCallArg::Expansion {
+            base,
+            indices,
+            expand_all,
+        } => Ok(MaterializedArgument::Expansion {
+            base: materialize_operand(state, base)?,
+            indices: indices
+                .iter()
+                .map(|index| materialize_operand(state, index))
+                .collect::<JitResult<Vec<_>>>()?,
+            expand_all: *expand_all,
+        }),
+    }
 }
 
 pub(super) fn builtin(

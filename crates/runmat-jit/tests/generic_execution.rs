@@ -137,6 +137,89 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
 }
 
 #[test]
+fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
+    let runtime = runtime_context();
+    let activation = runtime.enter();
+    runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        name: "NativeParent".into(),
+        parent: None,
+        properties: std::collections::HashMap::new(),
+        methods: [(
+            "increment".into(),
+            runmat_runtime::class_registry::RuntimeMethod {
+                name: "increment".into(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: runmat_types::MemberAccess::Public,
+                function_name: "native_parent_increment".into(),
+                implicit_class_argument: None,
+            },
+        )]
+        .into_iter()
+        .collect(),
+    });
+    runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        name: "NativeChild".into(),
+        parent: Some("NativeParent".into()),
+        properties: std::collections::HashMap::new(),
+        methods: std::collections::HashMap::new(),
+    });
+    let resolver = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
+        Arc::new(|name| (name == "native_parent_increment").then_some(9)),
+    ));
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(|function, arguments, requested_outputs| {
+            assert_eq!(function, 9);
+            assert_eq!(requested_outputs, 1);
+            let value = arguments[0].clone();
+            Box::pin(async move {
+                runmat_runtime::call_builtin_async("plus", &[value, Value::Num(1.0)]).await
+            })
+        }),
+    ));
+    drop(activation);
+
+    let executor = GenericExecutor::compile(super_method_fixture()).unwrap();
+    assert_eq!(
+        executor
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
+            .unwrap()
+            .outputs,
+        vec![Value::Num(6.0)]
+    );
+
+    let runtime = runtime_context();
+    let activation = runtime.enter();
+    runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        name: "NativeParent".into(),
+        parent: None,
+        properties: std::collections::HashMap::new(),
+        methods: std::collections::HashMap::new(),
+    });
+    runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        name: "NativeChild".into(),
+        parent: Some("NativeParent".into()),
+        properties: std::collections::HashMap::new(),
+        methods: std::collections::HashMap::new(),
+    });
+    drop(activation);
+    let constructor = GenericExecutor::compile(super_constructor_fixture()).unwrap();
+    let Value::Object(value) = constructor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
+        .unwrap()
+        .outputs
+        .pop()
+        .unwrap()
+    else {
+        panic!("super constructor must return the active child receiver");
+    };
+    assert_eq!(value.class_name, "NativeChild");
+    drop(invoker);
+    drop(resolver);
+}
+
+#[test]
 fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
     let short = GenericExecutor::compile(short_circuit_fixture()).unwrap();
     assert_eq!(
@@ -621,6 +704,79 @@ fn semantic_call_fixture() -> runmat_native_codegen::NativeAssembly {
                         MirConstant::Number("1".into()),
                     ))],
                     arg_spans: vec![span],
+                    syntax: runmat_hir::CallSyntax::Plain,
+                    requested_outputs: RequestedOutputCount::One,
+                    fallback_policy: CallableFallbackPolicy::None,
+                    workspace_first_name: None,
+                    bare_identifier: false,
+                    async_behavior: AsyncBehaviorFact::NeverSuspends,
+                    effects: runmat_builtins::BuiltinEffects::none(),
+                    workspace_effect: None,
+                    environment_effect: None,
+                    purity: runmat_builtins::BuiltinPurity::Pure,
+                    semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                }),
+            },
+            span,
+        }],
+        MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+fn super_method_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 3 };
+    lower_body(
+        "super_method",
+        1,
+        vec![MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::Call(MirCall {
+                    callee: MirCallee::SuperMethod {
+                        current_class: "NativeChild".into(),
+                        super_class: "NativeParent".into(),
+                        method: "increment".into(),
+                    },
+                    args: vec![MirCallArg::Single(MirOperand::Constant(
+                        MirConstant::Number("5".into()),
+                    ))],
+                    arg_spans: vec![span],
+                    syntax: runmat_hir::CallSyntax::Plain,
+                    requested_outputs: RequestedOutputCount::One,
+                    fallback_policy: CallableFallbackPolicy::None,
+                    workspace_first_name: None,
+                    bare_identifier: false,
+                    async_behavior: AsyncBehaviorFact::NeverSuspends,
+                    effects: runmat_builtins::BuiltinEffects::none(),
+                    workspace_effect: None,
+                    environment_effect: None,
+                    purity: runmat_builtins::BuiltinPurity::Pure,
+                    semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                }),
+            },
+            span,
+        }],
+        MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+fn super_constructor_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 3 };
+    lower_body(
+        "super_constructor",
+        1,
+        vec![MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::Call(MirCall {
+                    callee: MirCallee::SuperConstructor {
+                        current_class: "NativeChild".into(),
+                        super_class: "NativeParent".into(),
+                    },
+                    args: Vec::new(),
+                    arg_spans: Vec::new(),
                     syntax: runmat_hir::CallSyntax::Plain,
                     requested_outputs: RequestedOutputCount::One,
                     fallback_policy: CallableFallbackPolicy::None,

@@ -1,98 +1,12 @@
-use runmat_runtime::call::arguments::ArgumentSpec;
-use runmat_runtime::object::dispatch::call_object_index_descriptor_method_with_outputs;
-use runmat_runtime::object::indexing::{ObjectIndexDescriptor, ObjectIndexSelector};
-use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_runtime::call::arguments::{ArgumentSpec, MaterializedArgument};
+use runmat_runtime::RuntimeError;
 use runmat_value::Value;
-use std::future::Future;
 
-pub fn expand_cell_indices(
-    cell: &runmat_value::CellArray,
-    indices: &[Value],
-) -> Result<Vec<Value>, RuntimeError> {
-    runmat_runtime::object::cell::expand_cell_indices(cell, indices)
-}
-
-pub fn expand_all_cell(cell: &runmat_value::CellArray) -> Result<Vec<Value>, RuntimeError> {
-    runmat_runtime::object::cell::expand_all_cell_values(cell)
-}
-
-pub(crate) async fn expand_brace_values(
-    base: Value,
-    raw_indices: &[Value],
-    pad_to_outputs: Option<usize>,
-) -> Result<Vec<Value>, RuntimeError> {
-    async fn expand_object_brace_values(
-        base: Value,
-        raw_indices: &[Value],
-        pad_to_outputs: Option<usize>,
-    ) -> Result<Vec<Value>, RuntimeError> {
-        let value = call_object_index_descriptor_method_with_outputs(
-            ObjectIndexDescriptor::subsref_brace(
-                base,
-                ObjectIndexSelector::IndexValues {
-                    values: raw_indices.to_vec(),
-                },
-            ),
-            pad_to_outputs.unwrap_or(1),
-        )
-        .await?;
-        Ok(match value {
-            Value::OutputList(values) => values,
-            other => vec![other],
-        })
-    }
-
-    let mut values = match base {
-        Value::Cell(ca) => {
-            if raw_indices.is_empty() {
-                if let Some(out_count) = pad_to_outputs {
-                    runmat_runtime::object::cell::expand_cell_values(&ca, &[], out_count)?
-                } else {
-                    expand_all_cell(&ca)?
-                }
-            } else {
-                expand_cell_indices(&ca, raw_indices)?
-            }
-        }
-        Value::Object(obj) => {
-            expand_object_brace_values(Value::Object(obj), raw_indices, pad_to_outputs).await?
-        }
-        Value::HandleObject(handle) => {
-            expand_object_brace_values(Value::HandleObject(handle), raw_indices, pad_to_outputs)
-                .await?
-        }
-        _ => {
-            return Err(crate::interpreter::errors::mex(
-                "CellExpansionOnNonCell",
-                "Cell expansion on non-cell",
-            ))
-        }
-    };
-    if let Some(out_count) = pad_to_outputs {
-        if values.len() > out_count {
-            values.truncate(out_count);
-        } else {
-            values.resize(out_count, Value::Num(0.0));
-        }
-    }
-    Ok(values)
-}
-
-pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
+pub async fn build_expanded_args_from_specs(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
-    invalid_expand_all_msg: &str,
-    invalid_expand_msg: &str,
-    mut expand_object_all: ExpandObjectAll,
-    mut expand_object_indices: ExpandObjectIndices,
-) -> Result<Vec<Value>, RuntimeError>
-where
-    ExpandObjectAll: FnMut(Value) -> FutAll,
-    ExpandObjectIndices: FnMut(Value, Vec<Value>) -> FutIdx,
-    FutAll: Future<Output = Result<Vec<Value>, RuntimeError>>,
-    FutIdx: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let mut temp: Vec<Value> = Vec::new();
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut arguments = Vec::with_capacity(specs.len());
     for spec in specs.iter().rev() {
         if spec.is_expand {
             let mut indices = Vec::with_capacity(spec.num_indices);
@@ -105,70 +19,24 @@ where
             let base = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-
-            let expanded = if spec.expand_all {
-                match base {
-                    Value::OutputList(outputs) => outputs,
-                    Value::Cell(ca) => expand_all_cell(&ca)?,
-                    other @ Value::Object(_) | other @ Value::HandleObject(_) => {
-                        expand_object_all(other).await?
-                    }
-                    _ => {
-                        return Err(crate::interpreter::errors::mex(
-                            "InvalidExpandAllTarget",
-                            invalid_expand_all_msg,
-                        ))
-                    }
-                }
-            } else {
-                match (base, indices.len()) {
-                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
-                        expand_cell_indices(&ca, &indices)?
-                    }
-                    (Value::OutputList(outputs), 1) | (Value::OutputList(outputs), 2) => {
-                        let cols = outputs.len();
-                        let cell =
-                            build_cell_array_with_shape(outputs, 1, cols, "output-list expansion")?;
-                        expand_cell_indices(&cell, &indices)?
-                    }
-                    (other @ Value::Object(_), _) | (other @ Value::HandleObject(_), _) => {
-                        expand_object_indices(other, indices).await?
-                    }
-                    _ => {
-                        return Err(crate::interpreter::errors::mex(
-                            "InvalidExpandTarget",
-                            invalid_expand_msg,
-                        ))
-                    }
-                }
-            };
-            temp.extend(expanded.into_iter().rev());
+            arguments.push(MaterializedArgument::Expansion {
+                base,
+                indices,
+                expand_all: spec.expand_all,
+            });
         } else {
-            temp.push(stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
-            })?);
+            arguments.push(MaterializedArgument::Single(stack.pop().ok_or_else(
+                || crate::interpreter::errors::mex("StackUnderflow", "stack underflow"),
+            )?));
         }
     }
-    temp.reverse();
-    Ok(temp)
-}
-
-fn build_cell_array_with_shape(
-    values: Vec<Value>,
-    rows: usize,
-    cols: usize,
-    context: &str,
-) -> Result<runmat_value::CellArray, RuntimeError> {
-    runmat_value::CellArray::new(values, rows, cols).map_err(|e| {
-        build_runtime_error(format!("{context}: {e}"))
-            .with_identifier("RunMat:ShapeMismatch")
-            .build()
-    })
+    arguments.reverse();
+    runmat_runtime::call::arguments::expand_arguments(arguments).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_expanded_args_from_specs, ObjectIndexDescriptor, ObjectIndexSelector};
+    use super::build_expanded_args_from_specs;
     use futures::executor::block_on;
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
@@ -181,13 +49,14 @@ mod tests {
         class_defines_member_subsasgn, class_defines_member_subsref,
     };
     use runmat_runtime::object::indexing::{
-        build_object_paren_expr_selector_values, build_object_paren_selector_values, ObjectIndexOp,
-        ObjectParenExprSelectorSpec, OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE,
-        OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF,
-        OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
+        build_object_paren_expr_selector_values, build_object_paren_selector_values,
+        ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector, ObjectParenExprSelectorSpec,
+        OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE, OBJECT_PROTOCOL_KIND_MEMBER,
+        OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON,
+        OBJECT_SELECTOR_END,
     };
     use runmat_types::MemberAccess;
-    use runmat_value::{HandleRef, IntValue, Value};
+    use runmat_value::{IntValue, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -310,13 +179,6 @@ mod tests {
                 SymbolName("origin".to_string())
             ]
         );
-    }
-
-    #[test]
-    fn cell_builder_maps_shape_errors_to_identifier() {
-        let err = super::build_cell_array_with_shape(vec![Value::Num(1.0)], 2, 2, "test")
-            .expect_err("expected shape mismatch");
-        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]
@@ -873,37 +735,6 @@ mod tests {
     }
 
     #[test]
-    fn build_expanded_args_from_specs_accepts_handle_object_expansion() {
-        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("handle target");
-        let handle = HandleRef {
-            class_name: "HandleThing".to_string(),
-            target,
-            valid: true,
-        };
-        let mut stack = vec![Value::HandleObject(handle)];
-        let specs = vec![ArgumentSpec {
-            is_expand: true,
-            num_indices: 0,
-            expand_all: true,
-        }];
-        let expanded = block_on(build_expanded_args_from_specs(
-            &mut stack,
-            &specs,
-            "expand-all failed",
-            "expand-indices failed",
-            |base| async move {
-                match base {
-                    Value::HandleObject(_) => Ok(vec![Value::Num(42.0)]),
-                    other => panic!("expected handle object expansion path, got {other:?}"),
-                }
-            },
-            |_base, _indices| async move { Ok(vec![]) },
-        ))
-        .expect("expanded args");
-        assert_eq!(expanded, vec![Value::Num(42.0)]);
-    }
-
-    #[test]
     fn build_expanded_args_from_specs_supports_output_list_index_expansion() {
         let mut stack = vec![
             Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
@@ -914,30 +745,16 @@ mod tests {
             num_indices: 1,
             expand_all: false,
         }];
-        let expanded = block_on(build_expanded_args_from_specs(
-            &mut stack,
-            &specs,
-            "expand-all failed",
-            "expand-indices failed",
-            |_base| async move { panic!("unexpected object expand-all path") },
-            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
-        ))
-        .expect("expanded args");
+        let expanded =
+            block_on(build_expanded_args_from_specs(&mut stack, &specs)).expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(9.0)]);
 
         let mut stack = vec![
             Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
             Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         ];
-        let expanded = block_on(build_expanded_args_from_specs(
-            &mut stack,
-            &specs,
-            "expand-all failed",
-            "expand-indices failed",
-            |_base| async move { panic!("unexpected object expand-all path") },
-            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
-        ))
-        .expect("expanded args");
+        let expanded =
+            block_on(build_expanded_args_from_specs(&mut stack, &specs)).expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(9.0), Value::Num(2.0)]);
     }
 }

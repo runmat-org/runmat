@@ -892,7 +892,7 @@ fn collect_semantic_outputs(
         if let Some(slot) = func.varargout_slot {
             let available = match result_vars.get(slot) {
                 Some(Value::Cell(cell)) => {
-                    let expanded = crate::call::shared::expand_all_cell(cell)?;
+                    let expanded = runmat_runtime::object::cell::expand_all_cell_values(cell)?;
                     let available = expanded.len();
                     for value in expanded {
                         if values.len() >= requested_outputs {

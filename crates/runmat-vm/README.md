@@ -1,6 +1,6 @@
 # Module Map
 
-`runmat-vm` owns RunMat bytecode compilation, interpreter execution, runtime semantics, and acceleration integration.
+`runmat-vm` owns RunMat bytecode compilation, interpreter execution mechanics, and acceleration integration. Executor-neutral language semantics live in `runmat-runtime`; the VM adapts bytecode stacks, slots, and control flow to those shared operations.
 
 ## Top-level layout
 
@@ -37,10 +37,10 @@ src/
 - `debug.rs` owns interpreter debug tracing helpers.
 
 ### `runtime/`
-- Shared runtime state outside the main interpreter loop.
+- VM adapters for runtime state outside the main interpreter loop.
 - `call_stack.rs` owns call stack limits and error namespace.
 - `workspace.rs` owns workspace snapshot/import/export plumbing.
-- `globals.rs` owns global/persistent storage.
+- `globals.rs` synchronizes bytecode slots with Runtime-owned named global/persistent storage.
 - `gc.rs` owns interpreter GC root registration.
 
 ### `ops/`
@@ -48,12 +48,12 @@ src/
 - Arithmetic, comparison, arrays, stack, cells, and control-flow execution helpers live here.
 
 ### `call/`
-- Call semantics shared by interpreter and lowering.
-- Builtin dispatch, user-function preparation, closures, `feval`, and output shaping.
+- Bytecode call decoding and interpreter-frame preparation.
+- Stack argument specifications are materialized here, while comma-list expansion, callable descriptors, object brace dispatch, and output contracts are delegated to Runtime so VM, native, and browser executors share one language implementation.
 
 ### `indexing/`
-- MATLAB-compatible indexing read/write semantics.
-- Selector normalization, `end` resolution, linear indexing, slice gather, and slice scatter.
+- Bytecode indexing adapters and VM-specific stack/slot coordination.
+- Selector normalization, `end` evaluation, reads, writes, and object/cell dispatch consume the corresponding Runtime-owned semantics.
 
 ### `object/`
 - Object/class member semantics.

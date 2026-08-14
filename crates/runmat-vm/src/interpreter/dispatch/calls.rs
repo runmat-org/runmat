@@ -2,7 +2,7 @@ use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
-use crate::call::shared::{build_expanded_args_from_specs, expand_brace_values};
+use crate::call::shared::build_expanded_args_from_specs;
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
@@ -175,45 +175,21 @@ pub async fn build_builtin_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(
-        stack,
-        specs,
-        "CallBuiltinExpandMulti requires cell or object for expand_all",
-        "CallBuiltinExpandMulti requires cell or object cell access",
-        |base| async move { expand_brace_values(base, &[], None).await },
-        |base, indices| async move { expand_brace_values(base, &indices, None).await },
-    )
-    .await
+    build_expanded_args_from_specs(stack, specs).await
 }
 
 pub async fn build_feval_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(
-        stack,
-        specs,
-        "CallFevalExpandMulti requires cell or object for expand_all",
-        "CallFevalExpandMulti requires cell or object cell access",
-        |base| async move { expand_brace_values(base, &[], None).await },
-        |base, indices| async move { expand_brace_values(base, &indices, None).await },
-    )
-    .await
+    build_expanded_args_from_specs(stack, specs).await
 }
 
 pub async fn build_user_function_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(
-        stack,
-        specs,
-        "CallFunctionExpandMultiOutput requires cell or object for expand_all",
-        "CallFunctionExpandMultiOutput requires cell or object cell access",
-        |base| async move { expand_brace_values(base, &[], None).await },
-        |base, indices| async move { expand_brace_values(base, &indices, None).await },
-    )
-    .await
+    build_expanded_args_from_specs(stack, specs).await
 }
 
 pub fn handle_builtin_outcome(

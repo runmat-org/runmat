@@ -1,5 +1,5 @@
-use crate::call::shared::expand_brace_values;
 use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
+use runmat_runtime::call::arguments::expand_brace_values;
 use runmat_runtime::indexing as runtime_indexing;
 use runmat_runtime::indexing::plan::{
     build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
