@@ -1,11 +1,16 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_native_codegen::{NativeFunction, NativeValueId};
+use runmat_native_codegen::{NativeBlockId, NativeFunction, NativeTerminatorKind, NativeValueId};
 use runmat_runtime::native::{NativeRoot, NativeRootKind, NativeRootSet, NativeValueRef};
 use runmat_runtime::{context::RuntimeContext, RuntimeError};
 
 use crate::memory::ValueArena;
 use crate::{JitError, JitResult};
+
+pub(super) struct ActiveForLoop {
+    pub iterator: runmat_runtime::iteration::ForColumnIterator,
+    body_blocks: BTreeSet<NativeBlockId>,
+}
 
 pub(super) struct HostState {
     pub function: NativeFunction,
@@ -17,6 +22,7 @@ pub(super) struct HostState {
     pub last_error: Option<RuntimeError>,
     pub host_failure: Option<JitError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
+    active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
 }
 
 impl HostState {
@@ -73,6 +79,7 @@ impl HostState {
                 source,
                 ..runmat_runtime::native::NativeSourceLocation::default()
             },
+            active_for_loops: BTreeMap::new(),
         };
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
@@ -106,5 +113,108 @@ impl HostState {
             roots: self.roots.as_ptr(),
             count: self.roots.len(),
         }
+    }
+
+    pub fn has_for_loop(&self, header: NativeBlockId) -> bool {
+        self.active_for_loops.contains_key(&header)
+    }
+
+    pub fn start_for_loop(
+        &mut self,
+        header: NativeBlockId,
+        body: NativeBlockId,
+        iterator: runmat_runtime::iteration::ForColumnIterator,
+    ) {
+        let body_blocks = self.blocks_reaching_header(header, body);
+        self.active_for_loops.insert(
+            header,
+            ActiveForLoop {
+                iterator,
+                body_blocks,
+            },
+        );
+    }
+
+    pub fn for_loop_mut(&mut self, header: NativeBlockId) -> JitResult<&mut ActiveForLoop> {
+        self.active_for_loops
+            .get_mut(&header)
+            .ok_or_else(|| JitError::Host("native for-loop state is unavailable".into()))
+    }
+
+    /// Retire loop snapshots when control leaves their natural loop body.
+    /// This covers `break` and exceptional structured exits as well as normal
+    /// exhaustion, while retaining state across body backedges and `continue`.
+    pub fn take_control_edge(&mut self, target: NativeBlockId) {
+        self.active_for_loops
+            .retain(|header, active| target == *header || active.body_blocks.contains(&target));
+    }
+
+    fn blocks_reaching_header(
+        &self,
+        header: NativeBlockId,
+        body: NativeBlockId,
+    ) -> BTreeSet<NativeBlockId> {
+        let mut reverse = BTreeMap::<NativeBlockId, Vec<NativeBlockId>>::new();
+        for block in &self.function.blocks {
+            for target in successor_blocks(&block.terminator.kind) {
+                reverse.entry(target).or_default().push(block.id);
+            }
+        }
+        let mut reaches_header = BTreeSet::from([header]);
+        let mut pending = vec![header];
+        while let Some(target) = pending.pop() {
+            for predecessor in reverse.get(&target).into_iter().flatten() {
+                if reaches_header.insert(*predecessor) {
+                    pending.push(*predecessor);
+                }
+            }
+        }
+        let mut reachable_from_body = BTreeSet::new();
+        let mut pending = vec![body];
+        while let Some(block) = pending.pop() {
+            if block == header
+                || !reaches_header.contains(&block)
+                || !reachable_from_body.insert(block)
+            {
+                continue;
+            }
+            if let Some(block) = self
+                .function
+                .blocks
+                .iter()
+                .find(|candidate| candidate.id == block)
+            {
+                pending.extend(successor_blocks(&block.terminator.kind));
+            }
+        }
+        reachable_from_body
+    }
+}
+
+fn successor_blocks(kind: &NativeTerminatorKind) -> Vec<NativeBlockId> {
+    match kind {
+        NativeTerminatorKind::Goto { edge } => vec![edge.target],
+        NativeTerminatorKind::Branch {
+            then_edge,
+            else_edge,
+            ..
+        } => vec![then_edge.target, else_edge.target],
+        NativeTerminatorKind::Switch {
+            cases, otherwise, ..
+        } => cases
+            .iter()
+            .map(|(_, edge)| edge.target)
+            .chain(std::iter::once(otherwise.target))
+            .collect(),
+        NativeTerminatorKind::For { body, exit, .. }
+        | NativeTerminatorKind::ParFor { body, exit, .. }
+        | NativeTerminatorKind::Spmd { body, exit, .. } => vec![body.target, exit.target],
+        NativeTerminatorKind::TryCatch {
+            try_edge,
+            catch_edge,
+            ..
+        } => vec![try_edge.target, catch_edge.target],
+        NativeTerminatorKind::Await { resume, .. } => vec![resume.target],
+        NativeTerminatorKind::Return { .. } | NativeTerminatorKind::Unreachable => Vec::new(),
     }
 }

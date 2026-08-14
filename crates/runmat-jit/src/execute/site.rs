@@ -52,7 +52,7 @@ pub(super) fn execute(
             block.terminator.frame_state.side_effect_epoch.0,
             request,
         )?;
-        let outcome = execute_terminator(state, call, &block.terminator, exit)?;
+        let outcome = execute_terminator(state, call, block.id, &block.terminator, exit)?;
         refresh_frame_roots(state, call)?;
         Ok(outcome)
     } else {
@@ -72,7 +72,16 @@ pub(super) fn execute(
                 .map_or(0, |frame| frame.side_effect_epoch.0),
             request,
         )?;
-        execute_instruction(state, &instruction)?;
+        // A MATLAB `for` iterable is evaluated once. Native IR represents its
+        // evaluation as terminator-rvalue sites in the loop header, so a body
+        // backedge must retain their first SSA results instead of replaying
+        // calls or effects before the next column is selected.
+        let retained_for_iterable = request.phase == NativeSitePhase::TERMINATOR_RVALUE
+            && state.has_for_loop(block.id)
+            && matches!(block.terminator.kind, NativeTerminatorKind::For { .. });
+        if !retained_for_iterable {
+            execute_instruction(state, &instruction)?;
+        }
         refresh_frame_roots(state, call)?;
         Ok(NativeSiteOutcome::continue_execution())
     }
@@ -127,17 +136,16 @@ fn runtime_source(
 fn execute_instruction(state: &mut HostState, instruction: &NativeInstruction) -> JitResult<()> {
     match &instruction.operation {
         NativeOperation::Rvalue { value, .. } => {
-            let result = evaluate_rvalue(state, value)?;
-            match instruction.outputs.as_slice() {
-                [] => {}
-                [output] => {
-                    state.values.insert(output.value, result);
-                }
-                _ => {
-                    return Err(JitError::UnsupportedSite(
-                        "multiple rvalue outputs require generic call-shape execution".into(),
-                    ))
-                }
+            let results = evaluate_rvalue(state, value)?;
+            if instruction.outputs.len() != results.len() {
+                return Err(JitError::Host(format!(
+                    "native rvalue produced {} values for {} SSA outputs",
+                    results.len(),
+                    instruction.outputs.len()
+                )));
+            }
+            for (output, result) in instruction.outputs.iter().zip(results) {
+                state.values.insert(output.value, result);
             }
         }
         NativeOperation::Statement(statement) => execute_statement(state, instruction, statement)?,
@@ -183,11 +191,12 @@ fn execute_statement(
 fn execute_terminator(
     state: &mut HostState,
     call: &mut NativeCall,
+    block: runmat_native_codegen::NativeBlockId,
     terminator: &NativeTerminator,
     exit: &mut NativeExit,
 ) -> JitResult<NativeSiteOutcome> {
     match &terminator.kind {
-        NativeTerminatorKind::Goto { edge } => take_edge(state, edge, 0),
+        NativeTerminatorKind::Goto { edge } => take_edge(state, edge, 0, None),
         NativeTerminatorKind::Branch {
             condition,
             then_edge,
@@ -200,9 +209,63 @@ fn execute_terminator(
             ))
             .map_err(JitError::from)?;
             if truth {
-                take_edge(state, then_edge, 0)
+                take_edge(state, then_edge, 0, None)
             } else {
-                take_edge(state, else_edge, 1)
+                take_edge(state, else_edge, 1, None)
+            }
+        }
+        NativeTerminatorKind::Switch {
+            discriminant,
+            cases,
+            otherwise,
+        } => {
+            let discriminant = state.arena.get(value_for(state, *discriminant)?)?.clone();
+            for (index, (case, edge)) in cases.iter().enumerate() {
+                let case = state.arena.get(value_for(state, *case)?)?.clone();
+                let equal = block_on(state.runtime.scope(runmat_runtime::call_builtin_async(
+                    "eq",
+                    &[discriminant.clone(), case],
+                )))
+                .map_err(JitError::from)?;
+                if block_on(state.runtime.scope(
+                    runmat_runtime::condition::logical_truth_from_value(
+                        &equal,
+                        "switch case comparison",
+                    ),
+                ))
+                .map_err(JitError::from)?
+                {
+                    return take_edge(state, edge, index as u32, None);
+                }
+            }
+            take_edge(state, otherwise, cases.len() as u32, None)
+        }
+        NativeTerminatorKind::For {
+            iterable,
+            binding,
+            body,
+            exit,
+        } => {
+            if !state.has_for_loop(block) {
+                let source = state.arena.get(value_for(state, *iterable)?)?.clone();
+                let iterator = block_on(
+                    state
+                        .runtime
+                        .scope(runmat_runtime::iteration::ForColumnIterator::new(source)),
+                )
+                .map_err(JitError::from)?;
+                state.start_for_loop(block, body.target, iterator);
+            }
+            let runtime = state.runtime.clone();
+            let next = {
+                let active = state.for_loop_mut(block)?;
+                block_on(runtime.scope(active.iterator.next())).map_err(JitError::from)?
+            };
+            if let Some(value) = next {
+                let reference = state.arena.insert(value);
+                take_edge(state, body, 0, Some((*binding, reference)))
+            } else {
+                take_edge(state, exit, 1, None)
             }
         }
         NativeTerminatorKind::Return { values } => {
@@ -230,7 +293,12 @@ fn execute_terminator(
     }
 }
 
-fn take_edge(state: &mut HostState, edge: &NativeEdge, index: u32) -> JitResult<NativeSiteOutcome> {
+fn take_edge(
+    state: &mut HostState,
+    edge: &NativeEdge,
+    index: u32,
+    loop_iteration: Option<(runmat_native_codegen::NativeLocalId, NativeValueRef)>,
+) -> JitResult<NativeSiteOutcome> {
     let parameters = state
         .function
         .blocks
@@ -246,6 +314,12 @@ fn take_edge(state: &mut HostState, edge: &NativeEdge, index: u32) -> JitResult<
     for (parameter, argument) in parameters.iter().zip(&edge.arguments) {
         let value = match argument {
             NativeEdgeArgument::Value(value) => value_for(state, *value)?,
+            NativeEdgeArgument::LoopIteration { local } => loop_iteration
+                .filter(|(binding, _)| binding == local)
+                .map(|(_, value)| value)
+                .ok_or_else(|| {
+                    JitError::Host("native loop iteration edge binding is unavailable".into())
+                })?,
             other => {
                 return Err(JitError::UnsupportedSite(format!(
                     "edge argument {other:?} requires structured continuation state"
@@ -258,6 +332,7 @@ fn take_edge(state: &mut HostState, edge: &NativeEdge, index: u32) -> JitResult<
         state.values.insert(parameter.value, value);
         state.locals[parameter.local.0 as usize] = value;
     }
+    state.take_control_edge(edge.target);
     Ok(NativeSiteOutcome::edge(index))
 }
 

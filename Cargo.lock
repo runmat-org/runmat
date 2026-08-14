@@ -6585,6 +6585,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "futures",
+ "runmat-builtins",
  "runmat-execution",
  "runmat-hir",
  "runmat-mir",

@@ -27,5 +27,6 @@ cranelift-native = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-web"] }
 
 [dev-dependencies]
+runmat-builtins = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-hir = { workspace = true }

@@ -42,6 +42,7 @@ pub mod execution;
 pub mod indexing;
 pub mod interaction;
 pub mod interrupt;
+pub mod iteration;
 pub mod native;
 pub mod object;
 pub mod output_context;
