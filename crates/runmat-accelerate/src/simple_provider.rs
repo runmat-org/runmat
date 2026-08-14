@@ -3717,6 +3717,17 @@ impl AccelProvider for InProcessProvider {
         runmat_accelerate_api::SpawnHandleConcurrency::SynchronizedMutation
     }
 
+    fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
+        crate::placement::in_process_capability_snapshot(self)
+    }
+
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        crate::placement::dense_feasibility(&self.capability_snapshot(), query)
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,

@@ -13,6 +13,10 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+mod placement;
+
+pub use placement::*;
+
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);
 type SequenceThresholdFn = fn() -> Option<usize>;
@@ -1543,6 +1547,19 @@ pub trait AccelProvider: Send + Sync {
     /// cross-task sharing should override this.
     fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
         SpawnHandleConcurrency::Reject
+    }
+
+    /// Returns a versioned, side-effect-free description of the provider
+    /// surfaces placement may consider. The default advertises only the
+    /// mandatory floating-point transfer boundary.
+    fn capability_snapshot(&self) -> ProviderCapabilitySnapshot {
+        ProviderCapabilitySnapshot::conservative(self)
+    }
+
+    /// Determines whether a representation-specific operation can execute
+    /// without attempting allocation, compilation, transfer, or dispatch.
+    fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
+        query.conservative_transfer_feasibility(self.precision())
     }
 
     /// Export a shared GPU context handle, allowing downstream systems (plotting, visualization)
@@ -4034,6 +4051,45 @@ mod tests {
             device_id,
             buffer_id: 42,
         }
+    }
+
+    #[test]
+    fn conservative_feasibility_rejects_operations_without_execution() {
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("legacy.elementwise"),
+            family: ProviderOperationFamily::Elementwise,
+            inputs: vec![ProviderRepresentation {
+                element_type: ProviderElementType::F64,
+                storage: ProviderStorage::DenseReal,
+                layout: ProviderLayout::ColumnMajorContiguous,
+                shape: vec![4, 4],
+                residency: ProviderResidency::Host,
+            }],
+            outputs: Vec::new(),
+            workload: ProviderWorkload {
+                elements: Some(16),
+                ..ProviderWorkload::default()
+            },
+        };
+
+        assert!(matches!(
+            PROVIDER_A.query_feasibility(&query),
+            ProviderFeasibility::Rejected {
+                rejection: ProviderRejection {
+                    code: ProviderRejectionCode::UnsupportedOperation,
+                    ..
+                }
+            }
+        ));
+        assert!(!PROVIDER_A
+            .capability_snapshot()
+            .supports(ProviderOperationFamily::Elementwise));
+
+        let snapshot = PROVIDER_A.capability_snapshot();
+        let encoded = serde_json::to_string(&snapshot).expect("serialize capability snapshot");
+        let decoded: ProviderCapabilitySnapshot =
+            serde_json::from_str(&encoded).expect("deserialize capability snapshot");
+        assert_eq!(decoded, snapshot);
     }
 
     #[test]

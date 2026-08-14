@@ -62,3 +62,19 @@ pub fn unix_timestamp_us() -> u128 {
 pub fn unix_timestamp_ns() -> u128 {
     duration_since_epoch().as_nanos()
 }
+
+/// Converts a duration to nanoseconds without truncating on overflow.
+pub fn duration_ns_saturating(duration: Duration) -> u64 {
+    duration.as_nanos().min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_nanoseconds_saturate() {
+        assert_eq!(duration_ns_saturating(Duration::from_nanos(42)), 42);
+        assert_eq!(duration_ns_saturating(Duration::MAX), u64::MAX);
+    }
+}

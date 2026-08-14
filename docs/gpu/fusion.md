@@ -2,7 +2,7 @@
 title: "Fusion Engine & Residency Management"
 category: "GPU Acceleration & Fusion Engine"
 section: "4.1"
-last_updated: "May 28, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # Fusion Engine & Residency Management
@@ -109,6 +109,8 @@ Auto-promotion chooses when host tensors should become GPU tensors before or dur
 ## Barriers and Fallbacks
 
 Fusion is not required for correctness. If a group has a barrier, stack mismatch, unsupported shape, provider error, or unavailable device, execution falls back to ordinary VM bytecode. Sink operations can gather values immediately when runtime semantics require host materialization.
+
+Provider feasibility is checked without executing a candidate. Unsupported operation identities, element types, storage/layout combinations, ranks, shapes, and resource requirements produce structured rejection codes. Placement diagnostics retain bounded, correlated events with stable reason tokens so these fallbacks can be inspected without recording source text or runtime values.
 
 ## Tuning
 

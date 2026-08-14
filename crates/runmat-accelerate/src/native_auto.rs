@@ -1,4 +1,4 @@
-use runmat_time::{system_time_now, Instant};
+use runmat_time::{duration_ns_saturating, system_time_now, Instant};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -10,6 +10,7 @@ use crate::{
     auto_offload_options,
     fusion::{active_fusion, FusionKind},
     fusion_residency,
+    placement::{PlacementAttribute, PlacementEventKind, PlacementTraceContext, PlacementVariant},
     precision::ensure_provider_supports_dtype,
     AutoOffloadLogLevel,
 };
@@ -19,7 +20,9 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-    ProviderPrecision,
+    ProviderElementType, ProviderFeasibility, ProviderFeasibilityQuery, ProviderLayout,
+    ProviderOperationFamily, ProviderOperationIdentity, ProviderPrecision, ProviderRejectionCode,
+    ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
 };
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_runtime::builtins::common::{
@@ -27,7 +30,7 @@ use runmat_runtime::builtins::common::{
     tensor::tensor_element_len,
 };
 use runmat_runtime::gather_if_needed_async;
-use runmat_value::{Tensor, Value};
+use runmat_value::{NumericDType, Tensor, Value};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -118,6 +121,7 @@ pub enum DecisionReason {
     ProfileModel,
     Threshold,
     Disabled,
+    ProviderRejected,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -268,10 +272,90 @@ impl DecisionLog {
 static DECISION_LOG: Lazy<Mutex<DecisionLog>> = Lazy::new(|| Mutex::new(DecisionLog::new()));
 static AUTO_STATE: OnceCell<Mutex<AutoOffloadState>> = OnceCell::new();
 
-fn record_decision(entry: AutoOffloadDecisionEntry) {
+fn record_decision(entry: AutoOffloadDecisionEntry) -> PlacementTraceContext {
+    let trace = crate::placement::begin_trace(&entry.operation, None);
+    let attributes = decision_attributes(&entry);
+    trace.event(
+        PlacementEventKind::Candidate,
+        Some(PlacementVariant::SharedRuntime),
+        Some("legacy_cpu_candidate"),
+        entry.cpu_estimate_ms.and_then(milliseconds_to_nanoseconds),
+        None,
+        &attributes,
+    );
+    trace.event(
+        PlacementEventKind::Candidate,
+        Some(PlacementVariant::ProviderOperation),
+        Some("legacy_provider_candidate"),
+        entry.gpu_estimate_ms.and_then(milliseconds_to_nanoseconds),
+        None,
+        &attributes,
+    );
+    let selected = if entry.decision == AutoOffloadDisposition::Gpu {
+        PlacementVariant::ProviderOperation
+    } else {
+        PlacementVariant::SharedRuntime
+    };
+    trace.event(
+        PlacementEventKind::Selected,
+        Some(selected),
+        Some(decision_reason_token(entry.reason)),
+        None,
+        None,
+        &attributes,
+    );
     if let Ok(mut log) = DECISION_LOG.lock() {
         log.push(entry);
     }
+    trace
+}
+
+fn decision_attributes(entry: &AutoOffloadDecisionEntry) -> Vec<PlacementAttribute> {
+    [
+        (
+            "elements",
+            entry.elements.and_then(|value| u64::try_from(value).ok()),
+        ),
+        (
+            "flops",
+            entry.flops.and_then(|value| u64::try_from(value).ok()),
+        ),
+        (
+            "batch",
+            entry.batch.and_then(|value| u64::try_from(value).ok()),
+        ),
+        (
+            "legacy_threshold",
+            entry.threshold.and_then(|value| u64::try_from(value).ok()),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| {
+        value.map(|value| PlacementAttribute {
+            key: key.to_string(),
+            value,
+        })
+    })
+    .collect()
+}
+
+fn decision_reason_token(reason: DecisionReason) -> &'static str {
+    match reason {
+        DecisionReason::FusionOverride => "legacy_fusion_override",
+        DecisionReason::Residency => "legacy_residency",
+        DecisionReason::SmallBatchGuard => "legacy_small_batch_guard",
+        DecisionReason::ProfileModel => "legacy_profile_model",
+        DecisionReason::Threshold => "legacy_threshold",
+        DecisionReason::Disabled => "legacy_disabled",
+        DecisionReason::ProviderRejected => "provider_feasibility_rejected",
+    }
+}
+
+fn milliseconds_to_nanoseconds(milliseconds: f64) -> Option<u64> {
+    let nanoseconds = milliseconds * 1_000_000.0;
+    nanoseconds
+        .is_finite()
+        .then(|| nanoseconds.max(0.0).min(u64::MAX as f64) as u64)
 }
 
 fn snapshot_decisions() -> Vec<AutoOffloadDecisionEntry> {
@@ -669,6 +753,128 @@ fn element_count_pair(a: &Value, b: &Value) -> Option<usize> {
     Some(la.max(lb))
 }
 
+fn values_are_provider_resident(values: &[&Value]) -> bool {
+    values
+        .iter()
+        .all(|value| matches!(value, Value::GpuTensor(_)))
+}
+
+fn promoted_binary_variant(a: &Value, b: &Value) -> PlacementVariant {
+    if values_are_provider_resident(&[a, b]) {
+        PlacementVariant::ProviderOperation
+    } else {
+        PlacementVariant::SharedRuntime
+    }
+}
+
+fn promoted_unary_variant(value: &Value) -> PlacementVariant {
+    if matches!(value, Value::GpuTensor(_)) {
+        PlacementVariant::ProviderOperation
+    } else {
+        PlacementVariant::SharedRuntime
+    }
+}
+
+fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
+    match dtype {
+        NumericDType::F64 => ProviderElementType::F64,
+        NumericDType::F32 => ProviderElementType::F32,
+        NumericDType::I8 => ProviderElementType::I8,
+        NumericDType::I16 => ProviderElementType::I16,
+        NumericDType::I32 => ProviderElementType::I32,
+        NumericDType::I64 => ProviderElementType::I64,
+        NumericDType::U8 => ProviderElementType::U8,
+        NumericDType::U16 => ProviderElementType::U16,
+        NumericDType::U32 => ProviderElementType::U32,
+        NumericDType::U64 => ProviderElementType::U64,
+    }
+}
+
+fn provider_representation(
+    value: &Value,
+    provider_precision: ProviderPrecision,
+) -> Option<ProviderRepresentation> {
+    let (element_type, storage, shape, residency) = match value {
+        Value::Tensor(tensor) => (
+            provider_element_type(tensor.numeric_dtype()),
+            ProviderStorage::DenseReal,
+            tensor.shape.clone(),
+            ProviderResidency::Host,
+        ),
+        Value::GpuTensor(handle) => {
+            let element_type = if runmat_accelerate_api::handle_is_logical(handle) {
+                ProviderElementType::Logical
+            } else if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
+                ProviderElementType::from(integer_type)
+            } else {
+                let precision =
+                    runmat_accelerate_api::handle_precision(handle).unwrap_or(provider_precision);
+                match runmat_accelerate_api::handle_storage(handle) {
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => {
+                        match precision {
+                            ProviderPrecision::F32 => ProviderElementType::ComplexF32,
+                            ProviderPrecision::F64 => ProviderElementType::ComplexF64,
+                        }
+                    }
+                    _ => ProviderElementType::from(precision),
+                }
+            };
+            let storage = match runmat_accelerate_api::handle_storage(handle) {
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => {
+                    ProviderStorage::DenseComplexInterleaved
+                }
+                _ => ProviderStorage::DenseReal,
+            };
+            (
+                element_type,
+                storage,
+                handle.shape.clone(),
+                ProviderResidency::Device,
+            )
+        }
+        _ => return None,
+    };
+    Some(ProviderRepresentation {
+        element_type,
+        storage,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: shape
+            .into_iter()
+            .map(|extent| u64::try_from(extent).unwrap_or(u64::MAX))
+            .collect(),
+        residency,
+    })
+}
+
+fn provider_rejection_token(code: ProviderRejectionCode) -> &'static str {
+    match code {
+        ProviderRejectionCode::UnsupportedOperation => "provider_operation_unsupported",
+        ProviderRejectionCode::UnsupportedElementType => "provider_element_type_unsupported",
+        ProviderRejectionCode::UnsupportedStorage => "provider_storage_unsupported",
+        ProviderRejectionCode::UnsupportedLayout => "provider_layout_unsupported",
+        ProviderRejectionCode::UnsupportedRank => "provider_rank_unsupported",
+        ProviderRejectionCode::InvalidShape => "provider_shape_invalid",
+        ProviderRejectionCode::ResourceLimit => "provider_resource_limit",
+        ProviderRejectionCode::ProviderUnavailable => "provider_unavailable",
+    }
+}
+
+fn record_provider_rejection(
+    trace: &PlacementTraceContext,
+    rejection: Option<ProviderRejectionCode>,
+) {
+    if let Some(rejection) = rejection {
+        trace.event(
+            PlacementEventKind::Fallback,
+            Some(PlacementVariant::SharedRuntime),
+            Some(provider_rejection_token(rejection)),
+            None,
+            None,
+            &[],
+        );
+    }
+}
+
 pub async fn global() -> Option<&'static NativeAutoOffload> {
     if let Some(existing) = GLOBAL.get() {
         return existing.as_ref();
@@ -792,7 +998,12 @@ impl NativeAutoOffload {
         }
     }
 
-    fn promote_tensor_if_large(&self, value: &Value, threshold: usize) -> Result<Value> {
+    fn promote_tensor_if_large_observed(
+        &self,
+        value: &Value,
+        threshold: usize,
+        trace: Option<&PlacementTraceContext>,
+    ) -> Result<Value> {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
@@ -813,15 +1024,52 @@ impl NativeAutoOffload {
                             element_count, threshold
                         )
                     });
+                    let started = Instant::now();
                     match self.tensor_to_gpu(t) {
-                        Ok(value) => Ok(value),
+                        Ok(value) => {
+                            if let Some(trace) = trace {
+                                trace.event(
+                                    PlacementEventKind::Upload,
+                                    Some(PlacementVariant::ProviderOperation),
+                                    None,
+                                    Some(duration_ns_saturating(started.elapsed())),
+                                    t.len()
+                                        .checked_mul(t.numeric_dtype().byte_size())
+                                        .and_then(|bytes| u64::try_from(bytes).ok()),
+                                    &[],
+                                );
+                            }
+                            Ok(value)
+                        }
                         Err(error) if t.integer_storage().is_some() => {
+                            if let Some(trace) = trace {
+                                trace.event(
+                                    PlacementEventKind::Fallback,
+                                    Some(PlacementVariant::SharedRuntime),
+                                    Some("provider_integer_upload_unsupported"),
+                                    Some(duration_ns_saturating(started.elapsed())),
+                                    None,
+                                    &[],
+                                );
+                            }
                             debug!(
                                 "Auto-offload retaining integer tensor on host: provider has no exact integer upload ({error})"
                             );
                             Ok(value.clone())
                         }
-                        Err(error) => Err(error),
+                        Err(error) => {
+                            if let Some(trace) = trace {
+                                trace.event(
+                                    PlacementEventKind::Fallback,
+                                    Some(PlacementVariant::SharedRuntime),
+                                    Some("provider_upload_failed"),
+                                    Some(duration_ns_saturating(started.elapsed())),
+                                    None,
+                                    &[],
+                                );
+                            }
+                            Err(error)
+                        }
                     }
                 } else {
                     Ok(value.clone())
@@ -891,13 +1139,27 @@ impl NativeAutoOffload {
             BinaryOp::Elementwise => {
                 let elems = element_count_pair(a, b).unwrap_or(0);
                 let eval = self.evaluate_elementwise(elems, &[a, b]);
-                record_decision(decision_entry("elementwise", Some(elems), None, &eval));
+                let (eval, rejection) = self.enforce_provider_feasibility(
+                    eval,
+                    "legacy.elementwise",
+                    ProviderOperationFamily::Elementwise,
+                    &[a, b],
+                    ProviderWorkload {
+                        elements: u64::try_from(elems).ok(),
+                        ..ProviderWorkload::default()
+                    },
+                );
+                let trace =
+                    record_decision(decision_entry("elementwise", Some(elems), None, &eval));
+                record_provider_rejection(&trace, rejection);
                 if eval.recommend_gpu {
                     log_promotion(|| format!("Elementwise offload accepted ({} elems)", elems));
-                    let a_p = self.promote_tensor_if_large(a, 1)?;
-                    let b_p = self.promote_tensor_if_large(b, 1)?;
+                    let a_p = self.promote_tensor_if_large_observed(a, 1, Some(&trace))?;
+                    let b_p = self.promote_tensor_if_large_observed(b, 1, Some(&trace))?;
+                    trace.complete(Some(promoted_binary_variant(&a_p, &b_p)), None);
                     Ok((a_p, b_p))
                 } else {
+                    trace.complete(Some(PlacementVariant::SharedRuntime), None);
                     Ok((a.clone(), b.clone()))
                 }
             }
@@ -909,7 +1171,18 @@ impl NativeAutoOffload {
                     }
                     let flops = ra.saturating_mul(ca).saturating_mul(cb);
                     let eval = self.evaluate_matmul(flops);
-                    record_decision(decision_entry("matmul", None, Some(flops), &eval));
+                    let (eval, rejection) = self.enforce_provider_feasibility(
+                        eval,
+                        "legacy.matmul",
+                        ProviderOperationFamily::MatrixMultiply,
+                        &[a, b],
+                        ProviderWorkload {
+                            flops: u64::try_from(flops).ok(),
+                            ..ProviderWorkload::default()
+                        },
+                    );
+                    let trace = record_decision(decision_entry("matmul", None, Some(flops), &eval));
+                    record_provider_rejection(&trace, rejection);
                     if eval.recommend_gpu {
                         log_promotion(|| {
                             format!(
@@ -917,10 +1190,17 @@ impl NativeAutoOffload {
                                 flops, self.thresholds.matmul_min_flops
                             )
                         });
-                        let a_p = self.promote_tensor_if_large(a, 1)?;
-                        let b_p = self.promote_tensor_if_large(b, 1)?;
+                        let a_p = self.promote_tensor_if_large_observed(a, 1, Some(&trace))?;
+                        let b_p = self.promote_tensor_if_large_observed(b, 1, Some(&trace))?;
+                        let variant = if values_are_provider_resident(&[&a_p, &b_p]) {
+                            PlacementVariant::ProviderLibrary
+                        } else {
+                            PlacementVariant::SharedRuntime
+                        };
+                        trace.complete(Some(variant), None);
                         return Ok((a_p, b_p));
                     }
+                    trace.complete(Some(PlacementVariant::SharedRuntime), None);
                 }
                 Ok((a.clone(), b.clone()))
             }
@@ -937,11 +1217,25 @@ impl NativeAutoOffload {
             UnaryOp::Transpose => "transpose",
             UnaryOp::Generic => "unary",
         };
-        record_decision(decision_entry(op_label, Some(elems), None, &eval));
+        let (eval, rejection) = self.enforce_provider_feasibility(
+            eval,
+            "legacy.elementwise",
+            ProviderOperationFamily::Elementwise,
+            &[v],
+            ProviderWorkload {
+                elements: u64::try_from(elems).ok(),
+                ..ProviderWorkload::default()
+            },
+        );
+        let trace = record_decision(decision_entry(op_label, Some(elems), None, &eval));
+        record_provider_rejection(&trace, rejection);
         if eval.recommend_gpu {
             log_promotion(|| format!("Unary offload accepted ({:?}, {} elems)", op, elems));
-            self.promote_tensor_if_large(v, 1)
+            let value = self.promote_tensor_if_large_observed(v, 1, Some(&trace))?;
+            trace.complete(Some(promoted_unary_variant(&value)), None);
+            Ok(value)
         } else {
+            trace.complete(Some(PlacementVariant::SharedRuntime), None);
             Ok(v.clone())
         }
     }
@@ -952,17 +1246,66 @@ impl NativeAutoOffload {
         }
         let elems = value_len(&args[0]).unwrap_or(0);
         let eval = self.evaluate_reduction(elems);
-        record_decision(decision_entry("reduction", Some(elems), None, &eval));
+        let (eval, rejection) = self.enforce_provider_feasibility(
+            eval,
+            "legacy.reduction",
+            ProviderOperationFamily::Reduction,
+            &[&args[0]],
+            ProviderWorkload {
+                elements: u64::try_from(elems).ok(),
+                ..ProviderWorkload::default()
+            },
+        );
+        let trace = record_decision(decision_entry("reduction", Some(elems), None, &eval));
+        record_provider_rejection(&trace, rejection);
         if !eval.recommend_gpu {
+            trace.complete(Some(PlacementVariant::SharedRuntime), None);
             return Ok(args.to_vec());
         }
         log_promotion(|| format!("Reduction offload accepted ({} elems)", elems));
         let mut out = Vec::with_capacity(args.len());
         if let Some(first) = args.first() {
-            out.push(self.promote_tensor_if_large(first, 1)?);
+            out.push(self.promote_tensor_if_large_observed(first, 1, Some(&trace))?);
             out.extend(args.iter().skip(1).cloned());
         }
+        let variant = out
+            .first()
+            .map(promoted_unary_variant)
+            .unwrap_or(PlacementVariant::SharedRuntime);
+        trace.complete(Some(variant), None);
         Ok(out)
+    }
+
+    fn enforce_provider_feasibility(
+        &self,
+        mut evaluation: DecisionEvaluation,
+        operation: &'static str,
+        family: ProviderOperationFamily,
+        values: &[&Value],
+        workload: ProviderWorkload,
+    ) -> (DecisionEvaluation, Option<ProviderRejectionCode>) {
+        if !evaluation.recommend_gpu {
+            return (evaluation, None);
+        }
+        let inputs = values
+            .iter()
+            .filter_map(|value| provider_representation(value, self.provider.precision()))
+            .collect();
+        let query = ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new(operation),
+            family,
+            inputs,
+            outputs: Vec::new(),
+            workload,
+        };
+        match self.provider.query_feasibility(&query) {
+            ProviderFeasibility::Supported { .. } => (evaluation, None),
+            ProviderFeasibility::Rejected { rejection } => {
+                evaluation.recommend_gpu = false;
+                evaluation.reason = DecisionReason::ProviderRejected;
+                (evaluation, Some(rejection.code))
+            }
+        }
     }
 
     fn evaluate_elementwise(&self, elements: usize, values: &[&Value]) -> DecisionEvaluation {
@@ -1402,6 +1745,42 @@ fn value_kind(value: &Value) -> &'static str {
 mod tests {
     use super::*;
     use runmat_accelerate_api::HostIntegerDataOwned;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct RejectingProvider {
+        uploads: AtomicUsize,
+    }
+
+    impl AccelProvider for RejectingProvider {
+        fn upload(
+            &self,
+            _host: &HostTensorView<'_>,
+        ) -> Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.uploads.fetch_add(1, Ordering::Relaxed);
+            Err(anyhow!(
+                "upload must not execute after feasibility rejection"
+            ))
+        }
+
+        fn download<'a>(
+            &'a self,
+            _handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow!("unused")) })
+        }
+
+        fn free(&self, _handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "rejecting-test-provider".to_string()
+        }
+    }
+
+    static REJECTING_PROVIDER: RejectingProvider = RejectingProvider {
+        uploads: AtomicUsize::new(0),
+    };
 
     #[test]
     fn max_detection_handles_placeholders() {
@@ -1428,7 +1807,7 @@ mod tests {
         let tensor = Tensor::new_integer(expected.clone(), vec![1, 2]).expect("integer tensor");
 
         let promoted = auto
-            .promote_tensor_if_large(&Value::Tensor(tensor), 1)
+            .promote_tensor_if_large_observed(&Value::Tensor(tensor), 1, None)
             .expect("exact integer promotion");
         let Value::GpuTensor(handle) = promoted else {
             panic!("expected resident integer gpuArray");
@@ -1468,6 +1847,33 @@ mod tests {
             .expect("empty integer placeholder");
         assert_eq!(value_len(&Value::Tensor(empty.clone())), Some(0));
         assert!(is_empty_placeholder_value(&Value::Tensor(empty)));
+    }
+
+    #[test]
+    fn feasibility_rejection_prevents_provider_execution_and_is_observable() {
+        crate::placement::reset();
+        REJECTING_PROVIDER.uploads.store(0, Ordering::Relaxed);
+        let thresholds = ThresholdConfig {
+            binary_min_elems: 1,
+            ..ThresholdConfig::default()
+        };
+        let auto = NativeAutoOffload::new(&REJECTING_PROVIDER, thresholds);
+        let tensor = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+
+        let (left, right) = auto
+            .promote_binary(BinaryOp::Elementwise, &tensor, &tensor)
+            .unwrap();
+
+        assert!(matches!(left, Value::Tensor(_)));
+        assert!(matches!(right, Value::Tensor(_)));
+        assert_eq!(REJECTING_PROVIDER.uploads.load(Ordering::Relaxed), 0);
+        let report = crate::placement::report();
+        let trace = report.traces.last().expect("placement trace");
+        assert!(trace.events.iter().any(|event| {
+            event.kind == PlacementEventKind::Fallback
+                && event.reason.as_deref() == Some("provider_operation_unsupported")
+        }));
+        assert!(trace.complete);
     }
 }
 

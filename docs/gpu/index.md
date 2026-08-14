@@ -2,7 +2,7 @@
 title: "GPU Acceleration & Fusion Engine"
 category: "GPU Acceleration & Fusion Engine"
 section: "4.0"
-last_updated: "May 28, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # GPU Acceleration & Fusion Engine
@@ -48,10 +48,11 @@ flowchart TD
 | Component | Role |
 | --- | --- |
 | `runmat-vm/src/accel` | Runtime fusion execution, stack layout, residency cleanup, and VM integration for MIR-gated bytecode windows. |
-| `runmat-accelerate-api` | Provider trait, GPU tensor handles, metadata registries, residency hooks, and exported GPU contexts. |
+| `runmat-accelerate-api` | Provider trait, side-effect-free capability and feasibility contracts, GPU tensor handles, metadata registries, residency hooks, and exported GPU contexts. |
 | `runmat-accelerate/src/fusion.rs` | Graph-level fusion-group detection and fusion pattern classification. |
 | `runmat-accelerate/src/fusion_exec.rs` | Execution of fusion plans through the active provider. |
 | `runmat-accelerate/src/native_auto.rs` | Automatic offload policy and threshold calibration. |
+| `runmat-accelerate/src/placement` | Bounded placement observations plus shared provider capability and feasibility adaptation. |
 | `runmat-accelerate/src/backend/wgpu` | Concrete provider implementation backed by `wgpu`, WGSL shaders, pipeline caches, and buffer residency. |
 | `runmat-accelerate/src/simple_provider.rs` | Host-side fallback/reference provider for unsupported or unavailable GPU paths. |
 
@@ -61,6 +62,10 @@ flowchart TD
 - Auto-promotion: Runtime values can be uploaded into `Value::GpuTensor` when thresholds and residency policy favor device execution.
 - Fusion execution: The VM can execute a compiled `FusionGroupPlan` instead of interpreting each instruction in the group.
 - Host fallback: Unsupported operations gather data back to host or use `SimpleProvider`/runtime CPU implementations.
+
+Before a candidate executes, placement asks the active provider whether the exact operation family and value representations are feasible. The query is side-effect-free: it cannot allocate, compile, transfer, or dispatch work. A structured rejection keeps execution on the shared runtime path without probing the provider by execution.
+
+The Rust API exposes `placement_report()` for local diagnostics. Reports correlate candidate, selection, transfer, completion, and fallback events, retain bounded histories, and use stable reason tokens and numeric attributes. They do not include source text, paths, tensor contents, user identifiers, or arbitrary provider error messages.
 
 ## Fusion and Residency
 

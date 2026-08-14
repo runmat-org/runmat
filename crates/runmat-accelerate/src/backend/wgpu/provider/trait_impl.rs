@@ -29,6 +29,17 @@ impl AccelProvider for WgpuProvider {
         self.spawn_handle_concurrency_exec()
     }
 
+    fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
+        crate::placement::wgpu_capability_snapshot(self)
+    }
+
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        crate::placement::dense_feasibility(&self.capability_snapshot(), query)
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,

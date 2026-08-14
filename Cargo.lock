@@ -6230,6 +6230,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",
+ "runmat-types",
  "runmat-value",
  "runmat-vm",
  "rustfft",

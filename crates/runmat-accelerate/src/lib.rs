@@ -19,6 +19,7 @@ pub mod fusion_residency;
 pub mod graph;
 mod host_lu;
 pub mod native_auto;
+pub mod placement;
 pub mod precision;
 mod reduction_meta;
 pub mod simple_provider;
@@ -37,6 +38,7 @@ pub use native_auto::{
     AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
     ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
 };
+pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;

@@ -15,6 +15,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 
 #### Changed
 * Unified Desktop project and runtime configuration under the canonical Rust `runmat-config` parser, validator, migration, and comment-preserving patch authority across CLI/runtime loading, Tauri, Server migration, and WASM/browser hosts; added nested artifact, run-history, script, notebook, acceleration, and figure-scene settings; made configured artifact roots authoritative throughout Desktop persistence; separated account, device, and project-local preferences; and removed the legacy TypeScript TOML parser/writer and obsolete prototype settings.
+* Changed automatic GPU offload to use side-effect-free provider capability and representation feasibility checks before execution, with structured rejections and bounded correlated placement diagnostics for candidate, selection, transfer, completion, and fallback behavior.
 
 #### Fixed
 * Fixed `try`/`catch` protection across nested control flow and native execution, preserving exact catch bindings, nested-handler and `rethrow` behavior, normal exits, and canonical exception identifiers without replaying completed work.

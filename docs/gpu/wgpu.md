@@ -2,7 +2,7 @@
 title: "wgpu Backend & Accelerate Provider"
 category: "GPU Acceleration & Fusion Engine"
 section: "4.2"
-last_updated: "July 30, 2026"
+last_updated: "August 14, 2026"
 ---
 
 # WGPU Backend & Accelerate Provider
@@ -25,6 +25,8 @@ classDiagram
     linalg()
     random()
     indexing()
+    capability_snapshot()
+    query_feasibility()
     export_context()
   }
 
@@ -97,6 +99,12 @@ flowchart TD
 
 The provider also exposes `export_context` and `export_wgpu_buffer` for zero-copy consumers. Plotting and other GPU-aware subsystems can use those APIs to avoid unnecessary readbacks when the active provider supports them.
 
+## Capability and Feasibility Discovery
+
+`capability_snapshot()` returns a versioned description of the provider device, supported pilot operation identities, element representations, resource limits, and concurrency behavior. `query_feasibility()` accepts one operation identity together with its operation family, input/output representations, and workload dimensions. It returns either a resource estimate or a structured rejection code.
+
+Both calls are observational. Providers must not allocate buffers, compile pipelines, transfer values, submit commands, or synchronize the device while answering them. This lets placement eliminate unsupported candidates before profitability comparison and prevents call-to-discover behavior. Operation identities advertised by the WGPU and in-process providers cover the current transfer, automatic-offload, and fusion pilot paths; they are not an assertion that every builtin has completed systematic placement migration.
+
 ## Operation Categories
 
 | Category | Examples |
@@ -159,6 +167,6 @@ Fallback has two separate correctness obligations:
 - Automatically promoted ordinary values may return to the CPU whenever the planner or provider selects the CPU semantic baseline.
 - An exact integer handle must be downloaded with `download_integer`; fallback must preserve class and values and may re-upload only through `upload_integer`.
 
-`GpuTensorHandle` currently has no provenance bit distinguishing explicit `gpuArray` construction from automatic promotion. Consequently, the shared fallback policy cannot by itself reproduce every MATLAB unsupported-`gpuArray` error or residency rule. That is a compatibility-policy gap, not a reason to disable transparent fallback.
+Handle metadata distinguishes explicit `gpuArray` construction from automatic promotion. Automatically promoted values may transparently return to the shared runtime path after a feasibility rejection; explicit GPU values retain their user-visible residency contract and are not silently reclassified as automatic values.
 
 For how the VM decides when to invoke provider execution, see [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion).
