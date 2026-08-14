@@ -1204,6 +1204,10 @@ mod tests {
             ("quad", "quad-integer-tolerance"),
             ("quad", "quad-logical-numeric"),
             ("quad", "quad-resident-input"),
+            ("loadobj", "loadobj-plain-payload-passthrough"),
+            ("memmapfile", "memmapfile-explicit-gpu-argument"),
+            ("memmapfile", "memmapfile-integer-property-controls"),
+            ("numel", "numel-dimension-selectors"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -1752,6 +1756,8 @@ mod tests {
                 "legend",
                 "lower",
                 "matches",
+                "matlab.metadata.DynamicProperty.delete",
+                "memoize",
                 "mustBeFile",
                 "mustBeFolder",
                 "mustBeNonzeroLengthText",
@@ -1759,6 +1765,7 @@ mod tests {
                 "mustBeTextScalar",
                 "mustBeValidVariableName",
                 "namedargs2cell",
+                "notify",
                 "onCleanup",
                 "pattern",
                 "regexpPattern",

@@ -7,10 +7,13 @@ use std::path::{Path, PathBuf};
 use flate2::read::ZlibDecoder;
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericStorage, SparseTensor, StringArray, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, IntValue,
+    IntegerComplexStorage, IntegerStorage, LogicalArray, NumericStorage, SparseTensor, StringArray,
+    StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -182,6 +185,18 @@ pub const LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &LOAD_ERRORS,
 };
 
+pub const LOAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "integer_value = load(...) or S.integer_field = load(...)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Level-5 MAT integer class tags reconstruct native signed or unsigned storage of the same width and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads; no binary64 compatibility mirror is created.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "load",
@@ -218,6 +233,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::load_type),
     descriptor(crate::builtins::io::mat::load::LOAD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::mat::load::LOAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::mat::load"
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -311,6 +327,15 @@ fn load_error_with_source(
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        return Err(load_error_with(
+            &LOAD_ERROR_INVALID_ARGUMENT,
+            "load: filename, options, and variable selectors must be host text values",
+        ));
+    }
     let mut host_args = Vec::with_capacity(args.len());
     for arg in args {
         host_args.push(gather_if_needed_async(arg).await?);
@@ -1637,6 +1662,33 @@ pub(crate) mod tests {
     use flate2::Compression;
     use futures::executor::block_on;
     use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericDType, StringArray};
+
+    #[test]
+    fn load_integer_capability_declares_exact_native_mat_restoration() {
+        assert_eq!(LOAD_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            LOAD_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+        assert_eq!(
+            LOAD_INTEGER_CAPABILITIES[0].backend,
+            BuiltinIntegerBackendRule::HostOnly
+        );
+    }
+
+    #[test]
+    fn load_rejects_explicit_resident_arguments_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let error = block_on(evaluate(&[Value::GpuTensor(handle.clone())]))
+            .expect_err("explicit resident filename must reject");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+        assert_eq!(error.identifier(), LOAD_ERROR_INVALID_ARGUMENT.identifier);
+    }
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;

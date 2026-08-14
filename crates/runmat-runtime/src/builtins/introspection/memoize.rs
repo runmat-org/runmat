@@ -24,6 +24,11 @@ use crate::{
 };
 
 pub(crate) const MEMOIZED_FUNCTION_CLASS: &str = "MemoizedFunction";
+pub const MEMOIZE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "memoize accepts only a function handle and returns a MemoizedFunction object. Integer values used later as arguments to that object belong to callable cache-key semantics, not to the memoize constructor's public integer surface.",
+};
 const FUNCTION_PROPERTY: &str = "Function";
 const ENABLED_PROPERTY: &str = "Enabled";
 const CACHE_SIZE_PROPERTY: &str = "CacheSize";
@@ -240,6 +245,7 @@ pub const CLEAR_ALL_MEMOIZED_CACHES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescr
     summary = "Create a memoized wrapper around a function handle.",
     keywords = "memoize,MemoizedFunction,function handle,cache",
     descriptor(crate::builtins::introspection::memoize::MEMOIZE_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::memoize::MEMOIZE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
@@ -1208,6 +1214,15 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn memoize_constructor_is_integer_inapplicable() {
+        assert_eq!(
+            MEMOIZE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(MEMOIZE_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
 
     fn counting_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
         Arc::new(move |_function, args, requested_outputs| {

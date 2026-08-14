@@ -8,12 +8,14 @@ use crate::builtins::common::tensor;
 use crate::builtins::structs::type_resolvers::orderfields_type;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, NumericScalar, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, NumericScalar, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -290,6 +292,47 @@ pub const ORDERFIELDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ORDERFIELDS_ERRORS,
 };
 
+const ORDERFIELDS_INTEGER_PAYLOAD_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "S.integer_fields",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer values stored in top-level structure fields are opaque payloads and retain exact class, shape, and value while field definitions are reordered.",
+    }];
+
+const ORDERFIELDS_INTEGER_PERMUTATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "P",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric permutation vector accepts exact integer scalars or vectors containing each field position once; typed values are validated without binary64 conversion.",
+    }];
+
+pub const ORDERFIELDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = orderfields(S_with_integer_fields, ...)",
+        inputs: &ORDERFIELDS_INTEGER_PAYLOAD_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Only top-level field order changes. Nested automatic or explicit resident values remain untouched and retain provenance because their payloads are cloned without provider access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[S, Pout] = orderfields(S, integer_P)",
+        inputs: &ORDERFIELDS_INTEGER_PERMUTATION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The reordered structure preserves field payload classes and the documented Pout permutation is a host double column vector.",
+    },
+];
+
 fn orderfields_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     orderfields_error_with_message(error.message, error)
 }
@@ -312,6 +355,9 @@ fn orderfields_error_with_message(
     keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
     type_resolver(orderfields_type),
     descriptor(crate::builtins::structs::core::orderfields::ORDERFIELDS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::structs::core::orderfields::ORDERFIELDS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::structs::core::orderfields"
 )]
 async fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -520,14 +566,7 @@ fn permutation_tensor(indices: Vec<f64>) -> BuiltinResult<Tensor> {
 }
 
 fn sort_field_names(names: &mut [String]) {
-    names.sort_by(|a, b| {
-        let lower_a = a.to_ascii_lowercase();
-        let lower_b = b.to_ascii_lowercase();
-        match lower_a.cmp(&lower_b) {
-            Ordering::Equal => a.cmp(b),
-            other => other,
-        }
-    });
+    names.sort();
 }
 
 fn extract_reference_struct(value: &Value) -> BuiltinResult<Option<StructValue>> {
@@ -608,6 +647,21 @@ fn extract_name_list(arg: &Value) -> BuiltinResult<Option<Vec<String>>> {
 }
 
 fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<String>>> {
+    if let Value::Int(value) = arg {
+        let index = value
+            .try_to_usize()
+            .ok_or_else(|| orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE))?;
+        return scalar_permutation(current, index).map(Some);
+    }
+    if let Value::Num(value) = arg {
+        if !value.is_finite() || value.fract() != 0.0 {
+            return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_NOT_INTEGER));
+        }
+        if *value < 1.0 || *value > usize::MAX as f64 {
+            return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE));
+        }
+        return scalar_permutation(current, *value as usize).map(Some);
+    }
     let Value::Tensor(tensor) = arg else {
         return Ok(None);
     };
@@ -652,6 +706,16 @@ fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<
         order.push(current[zero_based].clone());
     }
     Ok(Some(order))
+}
+
+fn scalar_permutation(current: &[String], index: usize) -> BuiltinResult<Vec<String>> {
+    if current.len() != 1 {
+        return Err(orderfields_error(&ORDERFIELDS_ERROR_INVALID_PERMUTATION));
+    }
+    if index != 1 {
+        return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE));
+    }
+    Ok(vec![current[0].clone()])
 }
 
 fn ensure_same_field_set(order: &[String], original: &StructValue) -> BuiltinResult<()> {
@@ -893,6 +957,42 @@ pub(crate) mod tests {
         assert_eq!(field_order(&reordered), vec!["second", "first"]);
     }
 
+    #[test]
+    fn scalar_integer_permutation_and_nested_payload_remain_exact() {
+        let mut st = StructValue::new();
+        st.fields.insert(
+            "only".to_string(),
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+        );
+        let result = run_orderfields(
+            Value::Struct(st),
+            vec![Value::Int(runmat_builtins::IntValue::I8(1))],
+        )
+        .expect("scalar permutation");
+        let Value::Struct(result) = result else {
+            panic!("expected struct");
+        };
+        assert_eq!(
+            result.fields.get("only"),
+            Some(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)))
+        );
+        assert_eq!(ORDERFIELDS_INTEGER_CAPABILITIES.len(), 2);
+    }
+
+    #[test]
+    fn default_field_order_uses_documented_ascii_order() {
+        let mut st = StructValue::new();
+        st.fields.insert("b".to_string(), Value::Num(1.0));
+        st.fields.insert("B".to_string(), Value::Num(2.0));
+        st.fields.insert("a".to_string(), Value::Num(3.0));
+        st.fields.insert("A".to_string(), Value::Num(4.0));
+        let Value::Struct(result) = run_orderfields(Value::Struct(st), Vec::new()).expect("order")
+        else {
+            panic!("expected struct");
+        };
+        assert_eq!(field_order(&result), vec!["A", "B", "a", "b"]);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn index_vector_must_be_integers() {
@@ -1036,7 +1136,7 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("x".to_string(), Value::Num(1.0));
 
-        let err = run_orderfields(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err();
+        let err = run_orderfields(Value::Struct(st), vec![Value::Bool(true)]).unwrap_err();
         assert_error_identifier(
             err,
             ORDERFIELDS_ERROR_INVALID_ORDER_ARGUMENT.identifier.unwrap(),

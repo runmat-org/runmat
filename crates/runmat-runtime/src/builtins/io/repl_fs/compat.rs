@@ -184,6 +184,78 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+
+const MEMMAPFILE_INTEGER_CONTROLS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "memmapfile-integer-property-controls",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "typed-integer Writable, Offset, Repeat, or Format-shape property values for memmapfile are a RunMat extension; the public MATLAB page specifies logical/double controls and does not establish typed-integer Format dimensions",
+        error_identifier: Some("RunMat:compatibility:MemmapfileIntegerControlsExtension"),
+    };
+
+const MEMMAPFILE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "memmapfile-explicit-gpu-argument",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "passing an explicit gpuArray argument to host-only memmapfile is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MemmapfileExplicitGpuExtension"),
+};
+
+pub const MEMMAPFILE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
+    MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+];
+
+const MEMMAPFILE_INTEGER_SHAPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Format.shape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat permits a typed-integer shape vector inside a Format cell and parses it from authoritative storage as positive platform dimensions without binary64 conversion; current public evidence does not establish that typed form.",
+    }];
+
+const MEMMAPFILE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Writable, Offset, or Repeat",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat accepts exact typed-integer property controls, but compatibility mode retains the public logical/double property types.",
+    }];
+
+pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "m.Data = memmapfile(..., 'Format', integer_typename)",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching native integer storage; no floating mirror or numeric cast is used.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "m = memmapfile(..., 'Format', {type, integer_shape, field})",
+        inputs: &MEMMAPFILE_INTEGER_SHAPE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "This compatibility-gated typed-shape extension checks dimensions exactly before byte-count arithmetic; the mapped Data class is selected independently by the textual type name.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "m = memmapfile(..., integer_property_control)",
+        inputs: &MEMMAPFILE_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "This compatibility-gated extension parses typed controls exactly. Automatic residency gathers through its owner; explicit residency is separately gated before provider access.",
+    },
+];
 pub const ISFOLDER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
@@ -1329,9 +1401,35 @@ async fn restoredefaultpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::io::repl_fs::compat::MEMMAPFILE_DESCRIPTOR),
+    extensions(crate::builtins::io::repl_fs::compat::MEMMAPFILE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::repl_fs::compat::MEMMAPFILE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+            "memmapfile",
+        )?;
+    }
+    for pair in args.get(1..).unwrap_or_default().chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0], "memmapfile", "option").ok() else {
+            continue;
+        };
+        if matches!(
+            name.to_ascii_lowercase().as_str(),
+            "writable" | "offset" | "repeat" | "format"
+        ) && crate::builtins::common::validation::value_contains_native_integer_class(&pair[1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
+                "memmapfile",
+            )?;
+        }
+    }
     let args = gather_args("memmapfile", &args).await?;
     if args.is_empty() {
         return Err(compat_error(
@@ -2198,6 +2296,23 @@ mod tests {
             Some(&IntegerStorage::U16(vec![1, 2]))
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn memmapfile_integer_controls_are_gated_before_file_access() {
+        assert_eq!(MEMMAPFILE_INTEGER_CAPABILITIES.len(), 3);
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = run(memmapfile_builtin(vec![
+            Value::String("definitely-missing.bin".into()),
+            Value::String("Offset".into()),
+            Value::Int(runmat_builtins::IntValue::U64(0)),
+        ]))
+        .expect_err("typed integer control must be gated");
+        assert_eq!(
+            error.identifier(),
+            MEMMAPFILE_INTEGER_CONTROLS_EXTENSION.error_identifier
+        );
+        drop(strict);
     }
 
     #[test]

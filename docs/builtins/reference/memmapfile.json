@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Host-side file mapping. Automatically resident structural arguments may gather through their exact owner; explicit gpuArray arguments are a separately gated RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -25,9 +25,10 @@
   },
   "description": "Maps file bytes into a MATLAB-compatible memmapfile object with typed Format, Offset, Repeat, Writable metadata, and Data fields.",
   "behaviors": [
-    "Supports scalar Format type names such as uint8, uint16, uint32, single, and double.",
+    "Supports all documented scalar integer Format type names (`int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`) plus `single` and `double`; integer bytes decode directly into matching native storage without floating coercion.",
     "Supports MATLAB-style Format cells such as {type, shape, field}; named formats return Data as a struct field.",
-    "Offset and Repeat are honored for typed reads. Offset beyond end of file is rejected.",
+    "Offset and Repeat are honored for typed reads. Offset beyond end of file is rejected. Typed-integer `Writable`, `Offset`, `Repeat`, and Format-shape controls are exact RunMat extensions and reject in MATLAB-compatible modes because current public evidence specifies logical/double controls and does not establish typed-integer Format dimensions.",
+    "Automatic resident controls gather transparently through their owning provider. Explicit resident arguments reject in compatibility mode before provider access and are admitted only when RunMat extensions are enabled.",
     "The current implementation materializes mapped data into host memory; Writable is recorded but write-through mapping is not implemented yet."
   ],
   "examples": [],

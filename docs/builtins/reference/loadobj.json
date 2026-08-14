@@ -33,7 +33,8 @@
     "RunMat recognizes object envelopes written by `save` and restores their payloads recursively.",
     "If the saved class registers `Class.loadobj`, that method receives the restored payload and its return value becomes the loaded variable.",
     "If no registered `loadobj` method exists and the payload is a scalar struct, RunMat reconstructs an object with the saved class name and payload fields as properties.",
-    "Plain non-envelope inputs pass through recursive struct/cell restoration unchanged.",
+    "In RunMat mode, plain non-envelope scalar and cell inputs pass through recursive restoration unchanged; MATLAB-compatible modes reject this undocumented convenience through the `loadobj-plain-payload-passthrough` compatibility gate.",
+    "All eight integer classes nested in object or structure payloads retain exact scalar or array storage, shape, signedness, and width through recursive restoration and class-specific `loadobj` dispatch; no floating compatibility mirror is created.",
     "Recursion is bounded and reports `RunMat:ObjectSerialization:RecursionLimit` for cyclic or excessively nested payloads."
   ],
   "examples": [

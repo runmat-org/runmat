@@ -34,6 +34,7 @@
     "Class references are ordinary metadata objects to `metaclass` and return metadata for `meta.class`.",
     "Explicit gpuArray inputs return metadata for `gpuArray`; internal automatic residency returns metadata for the underlying host class without gathering provider buffers.",
     "Numeric, logical, cell, struct, function-handle, listener, and MException values return metadata for their RunMat runtime class.",
+    "Every integer scalar and array reports its exact signed class and width (`int8` through `uint64`) from value or coherent resident metadata without reading or converting payload elements.",
     "RunMat does not yet materialize full MATLAB `matlab.metadata.Class` object properties such as `PropertyList`, `MethodList`, or `SuperclassList`; those remain part of the broader metadata-object work."
   ],
   "examples": [

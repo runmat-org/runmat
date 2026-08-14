@@ -89627,6 +89627,18 @@
           "when": "Statement-form load cannot assign values into workspace.",
           "message": "load: workspace assignment failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "integer_value = load(...) or S.integer_field = load(...)",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Level-5 MAT integer class tags reconstruct native signed or unsigned storage of the same width and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads; no binary64 compatibility mirror is created."
+        }
       ]
     },
     {
@@ -89674,6 +89686,70 @@
           "identifier": "RunMat:ObjectSerialization:RecursionLimit",
           "when": "Object serialization nesting exceeds the supported recursion limit.",
           "message": "object serialization: recursion limit exceeded"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "loadobj-plain-payload-passthrough",
+          "mode": "RunMatOnly",
+          "description": "loadobj passthrough for a plain non-object, non-structure payload is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LoadobjPlainPayloadPassthroughExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "b = loadobj(a_with_integer_payload)",
+          "inputs": [
+            {
+              "name": "a.integer_payload",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An object or structure supplied to loadobj may contain fields of every integer class; nested payloads retain exact class, shape, and value through recursive restoration and class loadobj dispatch."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer fields are opaque serialized payloads rather than numeric controls and are never materialized as floating point by the default restoration path."
+        },
+        {
+          "form": "b = loadobj(integer_a)",
+          "inputs": [
+            {
+              "name": "integer_a",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "A direct integer payload is outside the documented object-or-structure surface and is admitted only in RunMat mode as an exact passthrough."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat mode preserves a direct integer scalar or array without conversion; MATLAB-compatible modes reject this undocumented plain-payload form before recursive restoration."
         }
       ]
     },
@@ -92693,7 +92769,11 @@
           "when": "A metadata property assignment uses an unsupported property name or value.",
           "message": "dynamicprops: unsupported dynamic property metadata assignment"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "matlab.metadata.DynamicProperty.delete accepts only a dynamic-property metadata handle. Integer scalars, arrays, nested payloads, and resident numeric handles have no data, control, output-class, or backend role and reject without conversion or provider access."
+      }
     },
     {
       "name": "matlabroot",
@@ -95040,7 +95120,87 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "memmapfile-integer-property-controls",
+          "mode": "RunMatOnly",
+          "description": "typed-integer Writable, Offset, Repeat, or Format-shape property values for memmapfile are a RunMat extension; the public MATLAB page specifies logical/double controls and does not establish typed-integer Format dimensions",
+          "error_identifier": "RunMat:compatibility:MemmapfileIntegerControlsExtension"
+        },
+        {
+          "id": "memmapfile-explicit-gpu-argument",
+          "mode": "RunMatOnly",
+          "description": "passing an explicit gpuArray argument to host-only memmapfile is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MemmapfileExplicitGpuExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "m.Data = memmapfile(..., 'Format', integer_typename)",
+          "inputs": [],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching native integer storage; no floating mirror or numeric cast is used."
+        },
+        {
+          "form": "m = memmapfile(..., 'Format', {type, integer_shape, field})",
+          "inputs": [
+            {
+              "name": "Format.shape",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat permits a typed-integer shape vector inside a Format cell and parses it from authoritative storage as positive platform dimensions without binary64 conversion; current public evidence does not establish that typed form."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "This compatibility-gated typed-shape extension checks dimensions exactly before byte-count arithmetic; the mapped Data class is selected independently by the textual type name."
+        },
+        {
+          "form": "m = memmapfile(..., integer_property_control)",
+          "inputs": [
+            {
+              "name": "Writable, Offset, or Repeat",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat accepts exact typed-integer property controls, but compatibility mode retains the public logical/double property types."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "This compatibility-gated extension parses typed controls exactly. Automatic residency gathers through its owner; explicit residency is separately gated before provider access."
+        }
+      ]
     },
     {
       "name": "memoize",
@@ -95082,7 +95242,11 @@
           "when": "The memoized object target cannot be allocated or accessed.",
           "message": "memoize: internal object storage failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "memoize accepts only a function handle and returns a MemoizedFunction object. Integer values used later as arguments to that object belong to callable cache-key semantics, not to the memoize constructor's public integer surface."
+      }
     },
     {
       "name": "mesh",
@@ -95789,7 +95953,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "mc = metaclass(integer_object)",
+          "inputs": [
+            {
+              "name": "object",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer scalars and arrays are ordinary MATLAB values whose runtime class metadata preserves exact signedness and width; payload data is not inspected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat returns its ClassRef representation of matlab.metadata.Class. Explicit resident values report gpuArray metadata while automatic residency remains transparent, both without gathering payload bytes."
+        }
+      ]
     },
     {
       "name": "mfilename",
@@ -109721,7 +109914,11 @@
           "when": "Target is not an object or handle object.",
           "message": "notify: target must be handle or object"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "The documented handle.notify surface accepts a handle event source, a textual event name, and optionally an event.EventData object. Integer values have no direct data, control, output-class, or backend role; application fields nested inside an event-data object remain ordinary object payloads."
+      }
     },
     {
       "name": "null",
@@ -110228,6 +110425,57 @@
           "identifier": "RunMat:numArgumentsFromSubscript:InvalidContext",
           "when": "The indexing context is not Statement, Expression, or Assignment.",
           "message": "numArgumentsFromSubscript: invalid indexing context"
+        },
+        {
+          "code": "RM.NUM_ARGUMENTS_FROM_SUBSCRIPT.COUNT_NOT_EXACT_DOUBLE",
+          "identifier": "RunMat:numArgumentsFromSubscript:CountNotExactDouble",
+          "when": "The computed argument count cannot be represented exactly by the documented double scalar output.",
+          "message": "numArgumentsFromSubscript: result exceeds exact double range"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "n = numArgumentsFromSubscript(integer_A, S_with_integer_subscripts, indexingContext)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The indexing target may be an array of any integer class; ordinary array cases use only exact shape and container metadata."
+            },
+            {
+              "name": "S.subs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar and vector subscripts are validated directly from authoritative storage, including full-width positive uint64 selectors, without binary64 conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Metadata-decidable target extents do not gather resident payloads. The structural count crosses to double only after exact-range validation."
         }
       ]
     },
@@ -110250,7 +110498,7 @@
           "outputs": [
             {
               "name": "n",
-              "ty": "IntegerScalar",
+              "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
               "description": "Number of elements selected from input."
@@ -110278,7 +110526,7 @@
           "outputs": [
             {
               "name": "n",
-              "ty": "IntegerScalar",
+              "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
               "description": "Number of elements selected from input."
@@ -110328,6 +110576,76 @@
           "identifier": null,
           "when": "No dimensions are provided after parsing.",
           "message": "numel: dimension list must contain at least one element"
+        },
+        {
+          "code": "RM.NUMEL.COUNT_NOT_EXACT_DOUBLE",
+          "identifier": "RunMat:numel:CountNotExactDouble",
+          "when": "The element count cannot be represented exactly by the documented double scalar output.",
+          "message": "numel: result exceeds exact double range"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "numel-dimension-selectors",
+          "mode": "RunMatOnly",
+          "description": "numel(A, dim, ...) dimension-selector syntax is a RunMat extension; MATLAB's public numel syntax accepts only A",
+          "error_identifier": "RunMat:compatibility:NumelDimensionSelectorsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "n = numel(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer scalar and array class is counted from shape metadata; element values are never converted or inspected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "The documented double count is produced only when the exact usize count is representable as binary64; coherent resident shape metadata avoids payload gather."
+        },
+        {
+          "form": "n = numel(A, integer_dim, ...)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat's additional scalar, variadic, and vector dimension selectors parse all eight integer classes exactly as positive structural indices."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "This compatibility-gated RunMat extension multiplies selected extents with checked usize arithmetic and then requires an exact double result."
         }
       ]
     },
@@ -113060,6 +113378,62 @@
           "identifier": "orderfields:InternalError",
           "when": "Internal permutation tensor construction failed.",
           "message": "orderfields: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = orderfields(S_with_integer_fields, ...)",
+          "inputs": [
+            {
+              "name": "S.integer_fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer values stored in top-level structure fields are opaque payloads and retain exact class, shape, and value while field definitions are reordered."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Only top-level field order changes. Nested automatic or explicit resident values remain untouched and retain provenance because their payloads are cloned without provider access."
+        },
+        {
+          "form": "[S, Pout] = orderfields(S, integer_P)",
+          "inputs": [
+            {
+              "name": "P",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric permutation vector accepts exact integer scalars or vectors containing each field position once; typed values are validated without binary64 conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The reordered structure preserves field payload classes and the documented Pout permutation is a host double column vector."
         }
       ]
     },

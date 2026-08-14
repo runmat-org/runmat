@@ -1,7 +1,11 @@
 //! Object save/load customization hooks.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, ObjectInstance, StructValue, Value,
 };
@@ -102,6 +106,57 @@ pub const LOADOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &SERIALIZATION_ERRORS,
 };
+
+const LOADOBJ_PASSTHROUGH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "loadobj-plain-payload-passthrough",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "loadobj passthrough for a plain non-object, non-structure payload is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LoadobjPlainPayloadPassthroughExtension"),
+};
+
+pub const LOADOBJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LOADOBJ_PASSTHROUGH_EXTENSION];
+
+const LOADOBJ_INTEGER_PAYLOAD_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "a.integer_payload",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "An object or structure supplied to loadobj may contain fields of every integer class; nested payloads retain exact class, shape, and value through recursive restoration and class loadobj dispatch.",
+    }];
+
+const LOADOBJ_DIRECT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer_a",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A direct integer payload is outside the documented object-or-structure surface and is admitted only in RunMat mode as an exact passthrough.",
+    }];
+
+pub const LOADOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = loadobj(a_with_integer_payload)",
+        inputs: &LOADOBJ_INTEGER_PAYLOAD_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer fields are opaque serialized payloads rather than numeric controls and are never materialized as floating point by the default restoration path.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = loadobj(integer_a)",
+        inputs: &LOADOBJ_DIRECT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat mode preserves a direct integer scalar or array without conversion; MATLAB-compatible modes reject this undocumented plain-payload form before recursive restoration.",
+    },
+];
 
 fn serialization_error(
     builtin: &'static str,
@@ -415,9 +470,22 @@ pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
     summary = "Restore an object from a serialized representation.",
     keywords = "loadobj,saveobj,object,serialization,mat",
     descriptor(crate::builtins::introspection::object_serialization::LOADOBJ_DESCRIPTOR),
+    extensions(crate::builtins::introspection::object_serialization::LOADOBJ_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::introspection::object_serialization::LOADOBJ_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::object_serialization"
 )]
 pub async fn loadobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    if !matches!(
+        value,
+        Value::Object(_) | Value::HandleObject(_) | Value::Struct(_)
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOADOBJ_PASSTHROUGH_EXTENSION,
+            LOADOBJ_METHOD,
+        )?;
+    }
     restore_value_from_mat_load(value).await
 }
 
@@ -425,7 +493,56 @@ pub async fn loadobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use tempfile::tempdir;
+
+    #[test]
+    fn loadobj_preserves_nested_integer_payloads_without_materialization() {
+        let mut payload = StructValue::new();
+        payload.insert("scalar", Value::Int(IntValue::U64(u64::MAX)));
+        payload.insert(
+            "array",
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+                    .expect("integer payload"),
+            ),
+        );
+        let restored = block_on(loadobj_builtin(Value::Struct(payload))).expect("loadobj");
+        let Value::Struct(restored) = restored else {
+            panic!("expected structure payload");
+        };
+        assert_eq!(
+            restored.fields.get("scalar"),
+            Some(&Value::Int(IntValue::U64(u64::MAX)))
+        );
+        let Value::Tensor(array) = restored.fields.get("array").expect("array") else {
+            panic!("expected integer array");
+        };
+        assert_eq!(
+            array.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))
+        );
+    }
+
+    #[test]
+    fn loadobj_plain_integer_passthrough_is_declared_and_mode_gated() {
+        assert_eq!(LOADOBJ_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(LOADOBJ_EXTENSIONS.len(), 1);
+        let value = Value::Int(IntValue::U64(u64::MAX));
+        let runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(
+            block_on(loadobj_builtin(value.clone())).expect("RunMat passthrough"),
+            value
+        );
+        drop(runmat);
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(loadobj_builtin(value)).expect_err("strict mode must reject");
+        drop(strict);
+        assert_eq!(
+            error.identifier(),
+            LOADOBJ_PASSTHROUGH_EXTENSION.error_identifier
+        );
+    }
 
     #[test]
     fn saveobj_without_overload_returns_property_struct() {
