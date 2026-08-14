@@ -13,10 +13,7 @@ pub(super) struct CompiledGenericUnit {
 }
 
 pub(super) struct PreparedGenericUnit {
-    mir: runmat_mir::MirAssembly,
-    analysis: runmat_mir::analysis::AnalysisStore,
-    manifest: runmat_execution::ExecutableUnitManifest,
-    binding_names: BTreeMap<runmat_types::BindingId, String>,
+    native: crate::NativeCompilationInput,
     program_capture: Vec<u8>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     entrypoint: ProgramFunctionId,
@@ -48,10 +45,7 @@ pub(super) fn prepare(
     preferred_function: Option<&str>,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
 ) -> Result<PreparedGenericUnit, runmat_runtime::RuntimeError> {
-    let envelope = unit
-        .portable_envelope_for(preferred_function)
-        .map_err(|error| super::error::stage("NativeProduct", error))?;
-    let binding_names = unit.binding_names();
+    let native = unit.prepare_native_compilation_for(preferred_function)?;
     let program_capture = serde_json::to_vec(unit.functions()).map_err(|error| {
         super::error::stage(
             "NativeProduct",
@@ -77,12 +71,9 @@ pub(super) fn prepare(
             interpreter_resume_points.insert(*point, pc);
         }
     }
-    let entrypoint = envelope.manifest.identity.entrypoint_function;
+    let entrypoint = native.entrypoint();
     Ok(PreparedGenericUnit {
-        mir: unit.mir().clone(),
-        analysis: unit.analysis().clone(),
-        manifest: envelope.manifest,
-        binding_names,
+        native,
         program_capture,
         interpreter_resume_points,
         entrypoint,
@@ -93,14 +84,9 @@ pub(super) fn prepare(
 pub(super) fn compile_prepared(
     prepared: PreparedGenericUnit,
 ) -> Result<BackgroundCompiledGenericUnit, runmat_runtime::RuntimeError> {
-    let assembly =
-        runmat_native_codegen::lower_executable(runmat_native_codegen::NativeLoweringInput {
-            mir: &prepared.mir,
-            analysis: &prepared.analysis,
-            manifest: &prepared.manifest,
-            binding_names: Some(&prepared.binding_names),
-            target: runmat_native_codegen::NativeTarget::current(),
-        })
+    let assembly = prepared
+        .native
+        .lower(runmat_native_codegen::NativeTarget::current())
         .map_err(|error| super::error::stage("NativeLowering", error))?;
     #[cfg(test)]
     let safepoints = assembly

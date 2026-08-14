@@ -33,6 +33,40 @@ pub struct GenericExecution {
 }
 
 impl GenericExecutor {
+    /// Bind verified Native IR to entrypoints owned by the linked executable.
+    ///
+    /// This is the AOT counterpart of `compile_with_resume_points`: invocation,
+    /// host semantics, workspace publication, cancellation, and deoptimization
+    /// remain identical while executable-memory ownership belongs to the
+    /// process image instead of a JIT module.
+    pub fn from_static_entrypoints(
+        assembly: runmat_native_codegen::NativeAssembly,
+        entrypoints: BTreeMap<ProgramFunctionId, runmat_runtime::native::NativeEntryPoint>,
+        program_capture: Option<Vec<u8>>,
+        interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    ) -> JitResult<Self> {
+        assembly.verify()?;
+        if entrypoints
+            .keys()
+            .any(|function| !assembly.functions.iter().any(|item| item.id == *function))
+        {
+            return Err(JitError::Module(
+                "static entrypoint is absent from the verified Native IR product".into(),
+            ));
+        }
+        let regions = assembly.requirements.regions.clone();
+        Ok(Self {
+            functions: Arc::new(assembly.functions),
+            compiled: CompiledExecutable::from_static(entrypoints)?,
+            program_capture,
+            interpreter_resume_points,
+            regions,
+            compile_duration_ns: 0,
+            entry_profile: None,
+            optimized_regions: Arc::new(Vec::new()),
+        })
+    }
+
     pub fn compile(assembly: runmat_native_codegen::NativeAssembly) -> JitResult<Self> {
         Self::compile_with_program_capture(assembly, None)
     }

@@ -25,7 +25,7 @@ use runmat_jit::{
     invalidation::{DependencyKey, DependencyTracker},
     osr::OsrTarget,
     specialization::GuardEnvironment,
-    GenericExecutor, JitError,
+    GenericCompiler, GenericExecutor, JitError,
 };
 use runmat_mir::{
     AsyncBehaviorFact, BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall,
@@ -196,6 +196,31 @@ fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(41.0)]);
+}
+
+#[test]
+fn linked_static_entrypoint_uses_the_same_invocation_host() {
+    let assembly = fixture();
+    let linked_owner = GenericCompiler::compile(&assembly).unwrap();
+    let function = ProgramFunctionId(0);
+    let entrypoint = linked_owner.entrypoint(function).unwrap();
+    let executor = GenericExecutor::from_static_entrypoints(
+        assembly,
+        BTreeMap::from([(function, entrypoint)]),
+        None,
+        BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(executor.retained_code_bytes(), 0);
+    assert_eq!(
+        executor
+            .invoke(function, Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(41.0)]
+    );
+    drop(linked_owner);
 }
 
 #[test]

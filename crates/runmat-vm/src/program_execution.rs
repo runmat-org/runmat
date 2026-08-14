@@ -83,6 +83,11 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
     if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
         return execute_unit_request(request).await;
     }
+    if request.artifact.form == ExecutableForm::NativeObjectV1 {
+        return ProgramExecutionResponse::Failure {
+            message: "native object programs require a native AOT execution host".into(),
+        };
+    }
     let registry: crate::FunctionRegistry =
         match serde_json::from_slice(&request.artifact.executable_bytes) {
             Ok(registry) => registry,

@@ -1,6 +1,32 @@
 mod support;
 
-use runmat_execution_artifact::{ExecutableForm, ExecutionBundleBuilder, ProgramArtifact};
+use runmat_execution_artifact::{
+    ExecutableForm, ExecutionBundleBuilder, NativeObjectPayload, ProgramArtifact,
+};
+
+#[test]
+fn native_object_artifact_retains_bounded_digest_checked_parts() {
+    let (_temp, _project, revision) = support::frozen_project();
+    let recipe = support::recipe(revision);
+    let payload = NativeObjectPayload::new(
+        "mach-o",
+        br#"{"schema_version":1}"#.to_vec(),
+        b"relocatable-object".to_vec(),
+    )
+    .unwrap();
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::NativeObjectV1,
+        payload.to_canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(artifact.native_object().unwrap(), Some(payload));
+
+    let mut tampered = artifact;
+    let last = tampered.executable_bytes.last_mut().unwrap();
+    *last ^= 1;
+    assert!(tampered.validate_against(&recipe).is_err());
+}
 
 #[test]
 fn recipe_and_materialized_artifact_have_distinct_exact_identities() {

@@ -4,6 +4,7 @@ use cranelift_codegen::settings::Configurable;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, Linkage, Module};
 
+use crate::compile::executable::CompiledCodeOwner;
 use crate::{CompiledExecutable, JitError, JitResult};
 
 pub struct GenericCompiler;
@@ -80,7 +81,9 @@ impl GenericCompiler {
             })
             .collect::<BTreeMap<_, _>>();
         Ok(CompiledExecutable {
-            _module: module,
+            _owner: CompiledCodeOwner::Jit {
+                _module: Box::new(module),
+            },
             entrypoints,
             retained_code_bytes,
         })

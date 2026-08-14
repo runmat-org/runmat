@@ -12,6 +12,11 @@ use runmat_mir::{
     MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminator,
     MirTerminatorKind,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_native_codegen::aot::{
+    emit_relocatable_object, emit_relocatable_object_with_data, NativeObjectData,
+    NativeOptimization,
+};
 use runmat_native_codegen::{
     analyze_liveness, lower_executable, print_native_ir, verify_against_manifest,
     verify_against_mir, NativeLoweringInput, NativeTarget,
@@ -169,6 +174,89 @@ fn lower(mir: &MirAssembly) -> runmat_native_codegen::NativeAssembly {
     let analysis = runmat_mir::analysis::analyze_assembly(mir);
     let manifest = manifest(analysis.revision.schema_version);
     lower_with(mir, &analysis, &manifest).unwrap()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn relocatable_object_is_bound_to_the_exact_native_product() {
+    let assembly = lower(&function(vec![assignment(1)]));
+    let first = emit_relocatable_object(&assembly, NativeOptimization::Speed).unwrap();
+    let second = emit_relocatable_object(&assembly, NativeOptimization::Speed).unwrap();
+
+    first.validate().unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.manifest.target, assembly.target);
+    assert_eq!(
+        first.manifest.object_format,
+        runmat_native_codegen::aot::NativeObjectFormat::for_target(&assembly.target).unwrap()
+    );
+    assert_eq!(
+        first.manifest.executable_cache_key,
+        assembly.executable_cache_key
+    );
+    assert_eq!(first.manifest.native_cache_key, assembly.native_cache_key);
+    assert_eq!(first.manifest.object_bytes, first.bytes.len() as u64);
+    assert_eq!(first.manifest.functions.len(), 1);
+    assert_eq!(first.manifest.functions[0].function, ProgramFunctionId(0));
+    assert_eq!(first.manifest.entrypoint, ProgramFunctionId(0));
+    assert_eq!(first.manifest.functions[0].symbol, "runmat_aot_entry");
+    assert!(first.manifest.data.is_empty());
+
+    let mut tampered = first;
+    tampered.bytes.push(0);
+    assert_eq!(
+        tampered.validate().unwrap_err().code,
+        "native.object.identity"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn relocatable_object_embeds_canonical_bounded_runtime_data() {
+    let assembly = lower(&function(vec![assignment(1)]));
+    let data = vec![
+        NativeObjectData {
+            symbol: "runmat_aot_program".into(),
+            bytes: b"program".to_vec(),
+            alignment: 1,
+        },
+        NativeObjectData {
+            symbol: "runmat_aot_native_ir".into(),
+            bytes: b"native-ir".to_vec(),
+            alignment: 8,
+        },
+    ];
+    let object =
+        emit_relocatable_object_with_data(&assembly, NativeOptimization::Speed, data).unwrap();
+    object.validate().unwrap();
+    assert_eq!(
+        object
+            .manifest
+            .data
+            .iter()
+            .map(|item| item.symbol.as_str())
+            .collect::<Vec<_>>(),
+        ["runmat_aot_native_ir", "runmat_aot_program"]
+    );
+
+    let duplicate = vec![
+        NativeObjectData {
+            symbol: "runmat_aot_program".into(),
+            bytes: vec![1],
+            alignment: 1,
+        },
+        NativeObjectData {
+            symbol: "runmat_aot_program".into(),
+            bytes: vec![2],
+            alignment: 1,
+        },
+    ];
+    assert_eq!(
+        emit_relocatable_object_with_data(&assembly, NativeOptimization::None, duplicate)
+            .unwrap_err()
+            .code,
+        "native.object.data_identity"
+    );
 }
 
 fn lower_with(

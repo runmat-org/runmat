@@ -1,5 +1,7 @@
 mod coverage;
 mod invocation;
+#[cfg(not(target_arch = "wasm32"))]
+mod native;
 mod portable;
 mod revision;
 mod source;
@@ -10,6 +12,8 @@ pub use coverage::CoveragePlan;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use invocation::ExecutableBackendPolicy;
 pub use invocation::{InvocationControl, ProcedureInvocation, ProcedureTarget};
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::NativeCompilationInput;
 pub use revision::ExecutableRevision;
 pub use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 pub use source::ExecutableSource;

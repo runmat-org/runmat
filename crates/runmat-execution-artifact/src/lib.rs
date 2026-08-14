@@ -15,8 +15,8 @@ pub use bundle::{
 pub use error::{ArtifactError, ArtifactResult};
 pub use object::{LogicalObject, ObjectDescriptor, ObjectNamespace};
 pub use program::{
-    ExecutableForm, ProgramArtifact, ProgramArtifactId, ProgramBuildRecipe,
+    ExecutableForm, NativeObjectPayload, ProgramArtifact, ProgramArtifactId, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionRequest,
     ProgramExecutionResponse, ProgramRecipeId, MAX_PROGRAM_EXECUTION_ARGUMENTS,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };

@@ -18,6 +18,9 @@ thiserror = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cranelift = { workspace = true }
 cranelift-codegen = { workspace = true }
+cranelift-module = { workspace = true }
+cranelift-native = { workspace = true }
+cranelift-object = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 target-lexicon = { workspace = true }
 
@@ -31,5 +34,3 @@ wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 cranelift-jit = { workspace = true }
-cranelift-module = { workspace = true }
-cranelift-native = { workspace = true }

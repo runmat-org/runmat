@@ -13,6 +13,7 @@ pub enum ExecutableForm {
     InterpreterScriptV1 = 1,
     TestAttemptV1 = 2,
     ExecutableUnitV3 = 3,
+    NativeObjectV1 = 4,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -27,6 +28,13 @@ pub struct ProgramArtifact {
 }
 
 impl ProgramArtifact {
+    pub fn native_object(&self) -> ArtifactResult<Option<super::NativeObjectPayload>> {
+        if self.form != ExecutableForm::NativeObjectV1 {
+            return Ok(None);
+        }
+        super::NativeObjectPayload::from_canonical_bytes(&self.executable_bytes).map(Some)
+    }
+
     pub fn executable_unit(
         &self,
     ) -> ArtifactResult<Option<runmat_execution::ExecutableUnitEnvelope>> {
@@ -87,6 +95,10 @@ impl ProgramArtifact {
                     "executable unit does not match its exact program revision".into(),
                 ));
             }
+        }
+        if self.form == ExecutableForm::NativeObjectV1 {
+            self.native_object()?
+                .expect("native-object form returns its validated payload");
         }
         Ok(())
     }
