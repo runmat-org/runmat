@@ -1717,6 +1717,30 @@ pub async fn native_integer_value_is_exact_f64_async(value: &Value) -> Result<bo
     Ok(false)
 }
 
+/// Gate a native-integer RunMat extension before provider lookup or gathering,
+/// then prove that its authoritative values can cross a binary64 computation
+/// boundary without rounding.
+pub async fn ensure_runmat_integer_f64_boundary(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+    builtin: &'static str,
+    role: &str,
+) -> BuiltinResult<()> {
+    if !value_has_native_integer_class(value) {
+        return Ok(());
+    }
+    crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
+    if !native_integer_value_is_exact_f64_async(value).await? {
+        return Err(build_runtime_error(format!(
+            "{builtin}: integer {role} values must be exactly representable as double"
+        ))
+        .with_builtin(builtin)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    Ok(())
+}
+
 pub fn must_be_a(value: &Value, class_names: Vec<String>) -> Result<bool, RuntimeError> {
     Ok(class_names
         .iter()

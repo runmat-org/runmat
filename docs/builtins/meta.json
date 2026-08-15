@@ -117237,6 +117237,142 @@
           "when": "RunMat cannot allocate or construct perfcurve outputs.",
           "message": "perfcurve: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "perfcurve-integer-labels",
+          "mode": "RunMatOnly",
+          "description": "perfcurve accepts typed-integer labels and class selections as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PerfcurveIntegerLabelsExtension"
+        },
+        {
+          "id": "perfcurve-integer-scores",
+          "mode": "RunMatOnly",
+          "description": "perfcurve accepts typed-integer classifier scores as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PerfcurveIntegerScoresExtension"
+        },
+        {
+          "id": "perfcurve-integer-numeric-options",
+          "mode": "RunMatOnly",
+          "description": "perfcurve accepts typed-integer numeric option values as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PerfcurveIntegerNumericOptionsExtension"
+        },
+        {
+          "id": "perfcurve-integer-logical-controls",
+          "mode": "RunMatOnly",
+          "description": "perfcurve accepts typed-integer logical controls as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PerfcurveIntegerLogicalControlsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "perfcurve(integer_labels, scores, integer_posclass, 'NegClass', integer_classes)",
+          "inputs": [
+            {
+              "name": "labels, posclass, or NegClass",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents floating numeric, logical, text, cellstr, and categorical labels, but not typed-integer labels. RunMat compares native integer labels exactly without routing them through f64."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Labels retain their authoritative integer payload through class selection, deduplication, ordering, and equality; curve coordinates remain floating outputs."
+        },
+        {
+          "form": "perfcurve(labels, integer_scores, posclass)",
+          "inputs": [
+            {
+              "name": "scores",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents floating classifier scores. RunMat accepts typed integers only when every score is exactly representable in the binary64 computation domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The extension and exactness gate run before provider lookup or gathering, then scores enter the floating ROC computation."
+        },
+        {
+          "form": "perfcurve(..., Name, integer_numeric_value)",
+          "inputs": [
+            {
+              "name": "Weights, Prior, Cost, TVals, or XVals",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat extends the documented floating numeric option domains with typed integers after proving exact binary64 representability."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Weights, priors, costs, and requested threshold or X-coordinate values cross an explicit checked binary64 boundary."
+        },
+        {
+          "form": "perfcurve(..., 'UseNearest', integer_zero_or_one)",
+          "inputs": [
+            {
+              "name": "UseNearest",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts an exact typed-integer zero or one for the logical UseNearest control."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The native integer is interpreted structurally and must be exactly zero or one."
+        }
       ]
     },
     {
@@ -117860,6 +117996,70 @@
           "when": "Internal render preparation fails.",
           "message": "pie: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "pie-integer-values",
+          "mode": "RunMatOnly",
+          "description": "pie accepts typed-integer slice values as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PieIntegerValuesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = pie(integer_X,___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a limits numeric pie values to double. RunMat admits typed integers only when exact binary64 chart geometry is possible."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer values are gated before gather and normalized only after exact conversion to renderer geometry."
+        },
+        {
+          "form": "h = pie(X,integer_explode,___)",
+          "inputs": [
+            {
+              "name": "explode",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric explode mask uses exact zero/nonzero semantics; every native integer class can be evaluated without value conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed explode masks gather exactly and use zero/nonzero classification; their magnitude never enters renderer arithmetic."
+        }
       ]
     },
     {
@@ -118077,6 +118277,116 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "P = pivot(table_with_integer_group_or_data_variables,___)",
+          "inputs": [
+            {
+              "name": "integer grouping or DataVariable table columns",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Implemented grouping keys retain exact native values above flintmax; aggregation crosses only the selected method's explicit result domain."
+        },
+        {
+          "form": "P = pivot(T,Columns=integer_indices,Rows=integer_indices,DataVariable=integer_index,___)",
+          "inputs": [
+            {
+              "name": "Columns, Rows, or DataVariable indices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Public variable-index selectors are exact one-based structural values; logical selectors remain a distinct documented form."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Implemented selector parsing reads native integer storage directly; unsupported portions of the newer name-value grammar remain general pivot surface gaps."
+        },
+        {
+          "form": "P = pivot(T,ColumnsBinMethod=integer_bins,RowsBinMethod=integer_bins,___)",
+          "inputs": [
+            {
+              "name": "ColumnsBinMethod or RowsBinMethod count/edges",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The documented contract is recorded without treating unimplemented general binning syntax as an implicit integer-to-floating boundary."
+        },
+        {
+          "form": "P = pivot(T,IncludeTotals=integer_flag,IncludeMissingGroups=integer_flag,IncludeEmptyGroups=integer_flag,___)",
+          "inputs": [
+            {
+              "name": "IncludeTotals, IncludeMissingGroups, or IncludeEmptyGroups",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public controls admit numeric zero or one alongside logical values and are structural rather than aggregation data."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Only exact zero/one values are compatible; unsupported general options reject before aggregation."
         }
       ]
     },
@@ -119788,6 +120098,109 @@
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "pol2cart: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "pol2cart-integer-theta",
+          "mode": "RunMatOnly",
+          "description": "pol2cart accepts typed-integer angular coordinates as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pol2cartIntegerThetaExtension"
+        },
+        {
+          "id": "pol2cart-integer-rho",
+          "mode": "RunMatOnly",
+          "description": "pol2cart accepts typed-integer radial coordinates as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pol2cartIntegerRhoExtension"
+        },
+        {
+          "id": "pol2cart-integer-z",
+          "mode": "RunMatOnly",
+          "description": "pol2cart accepts typed-integer elevation coordinates as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pol2cartIntegerZExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[x,y] = pol2cart(integer_theta,rho) or [x,y,z] = pol2cart(integer_theta,rho,z)",
+          "inputs": [
+            {
+              "name": "theta",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents real single and double angular coordinates; RunMat admits typed integers only after exact binary64 conversion is proved."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "The angular role is independently gated before provider dispatch and crosses once into the trigonometric domain."
+        },
+        {
+          "form": "[x,y] = pol2cart(theta,integer_rho) or [x,y,z] = pol2cart(theta,integer_rho,z)",
+          "inputs": [
+            {
+              "name": "rho",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents real single and double radial coordinates; RunMat admits typed integers only at its checked floating transform boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "The radial role is independently gated before provider dispatch and floating multiplication."
+        },
+        {
+          "form": "[x,y,z] = pol2cart(theta,rho,integer_z)",
+          "inputs": [
+            {
+              "name": "z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents real single and double elevation coordinates; RunMat admits typed integers only when exact binary64 conversion is possible."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Elevation is independently gated and broadcast only after its exact floating boundary is proved."
+        }
       ]
     },
     {
@@ -119949,6 +120362,116 @@
           "when": "Internal polar histogram construction or rendering fails.",
           "message": "polarhistogram: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = polarhistogram(integer_theta,___) or polarhistogram(table_with_integer_data,datavar,___)",
+          "inputs": [
+            {
+              "name": "theta or selected table data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly documents all eight integer classes for direct theta data and any numeric class for the selected table variable."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative integer samples gather exactly; angular binning and wedge rendering are explicit floating geometry/statistical boundaries."
+        },
+        {
+          "form": "h = polarhistogram(theta,integer_nbins)",
+          "inputs": [
+            {
+              "name": "nbins",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public positive-integer bin count is decoded structurally and bounded by the implementation's allocation limits."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The count selects histogram structure and never becomes sample data."
+        },
+        {
+          "form": "h = polarhistogram(theta,integer_edges) or polarhistogram(BinEdges=integer_edges,BinCounts=integer_counts,___)",
+          "inputs": [
+            {
+              "name": "edges, counts, or numeric bin properties",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Public bin edges, manual counts, limits, widths, and numeric style properties accept numeric values and cross explicit histogram/rendering boundaries."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native values remain authoritative through parsing; histogram counts and rendered coordinates are explicit double outputs of this plotting sink."
+        },
+        {
+          "form": "h = polarhistogram(tbl,integer_datavar,___)",
+          "inputs": [
+            {
+              "name": "datavar variable index",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a permits numeric table-variable indices; these are structural one-based selectors rather than histogram observations."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Table variable selection is a documented structural role; broader table-form support remains a general surface concern, not an implicit numeric conversion."
+        }
       ]
     },
     {
@@ -120081,6 +120604,97 @@
           "identifier": "RunMat:polarplot:Internal",
           "when": "Internal polar line construction or rendering fails unexpectedly.",
           "message": "polarplot: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "polarplot-complex-integer-z",
+          "mode": "RunMatOnly",
+          "description": "polarplot accepts paired complex-integer Z data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolarplotComplexIntegerZExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = polarplot(integer_theta,integer_rho,___) or polarplot(integer_rho,___)",
+          "inputs": [
+            {
+              "name": "theta, rho, or selected real table data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public plotting surface accepts real numeric coordinate data and explicitly permits any real numeric class in selected table variables."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinate storage is read authoritatively; polar-to-Cartesian conversion and rendering are explicit floating geometry boundaries."
+        },
+        {
+          "form": "h = polarplot(complex_integer_Z,___)",
+          "inputs": [
+            {
+              "name": "complex Z components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public evidence does not establish paired complex-integer Z admission. RunMat keeps this useful form behind an explicit compatibility gate and checked renderer boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Componentwise integer Z is gated before conversion to polar renderer geometry."
+        },
+        {
+          "form": "h = polarplot(tbl,integer_thetavar,integer_rhovar,___)",
+          "inputs": [
+            {
+              "name": "thetavar or rhovar variable indices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents numeric scalar/vector table-variable indices; these are exact one-based structural selectors."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Variable selection remains exact; broader table-form implementation is tracked as a general plotting surface concern."
         }
       ]
     },
@@ -120271,6 +120885,89 @@
           "when": "Internal polar scatter construction or rendering fails unexpectedly.",
           "message": "polarscatter: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ps = polarscatter(integer_theta,integer_rho,___)",
+          "inputs": [
+            {
+              "name": "theta and rho",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly lists all eight integer classes for theta and rho coordinate arrays and permits any numeric class in selected table variables."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative coordinates gather exactly; polar conversion and rendering are explicit floating geometry boundaries."
+        },
+        {
+          "form": "ps = polarscatter(theta,rho,integer_sz,integer_c,___)",
+          "inputs": [
+            {
+              "name": "sz and numeric c",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly lists every integer class for marker areas and numeric color data; these values enter explicit renderer metadata boundaries."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Marker sizing, colormap normalization, and renderer buffers are intentional floating boundaries after typed values are parsed from authoritative storage."
+        },
+        {
+          "form": "ps = polarscatter(tbl,integer_thetavar,integer_rhovar,___)",
+          "inputs": [
+            {
+              "name": "thetavar, rhovar, or ColorVariable indices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric table-variable indices are documented one-based structural selectors."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Variable selection remains exact; broader table-form implementation is a general plotting surface concern."
+        }
       ]
     },
     {
@@ -120324,6 +121021,35 @@
           "identifier": "RunMat:pole:Internal",
           "when": "Root calculation or output construction failed.",
           "message": "pole: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "P = pole(sys,integer_J1,...,integer_JN)",
+          "inputs": [
+            {
+              "name": "J1,...,JN model-array indices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility contract is exact one-based model selection. RunMat currently implements singular tf/ss objects only, so the broader model-array overload rejects before any integer conversion can occur."
         }
       ]
     },
@@ -120435,6 +121161,43 @@
           "identifier": "RunMat:polyder:Internal",
           "when": "Runtime fails while building derivative outputs or provider fallback paths.",
           "message": "polyder: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "polyder-integer-coefficients",
+          "mode": "RunMatOnly",
+          "description": "polyder accepts typed-integer coefficient vectors as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolyderIntegerCoefficientsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "d = polyder(integer_p) or d = polyder(integer_a,b) or [q,d] = polyder(integer_a,b)",
+          "inputs": [
+            {
+              "name": "p, a, or b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double polynomial coefficients. RunMat admits typed integers only after exact conversion to the floating polynomial domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Every integer coefficient operand is checked before provider dispatch; derivative, convolution, and quotient arithmetic then use the selected floating precision domain."
         }
       ]
     },
@@ -120735,6 +121498,136 @@
           "identifier": "RunMat:polyfit:Internal",
           "when": "Runtime fails while constructing fit outputs or provider payloads.",
           "message": "polyfit: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "polyfit-integer-x",
+          "mode": "RunMatOnly",
+          "description": "polyfit accepts typed-integer sample locations as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolyfitIntegerXExtension"
+        },
+        {
+          "id": "polyfit-integer-y",
+          "mode": "RunMatOnly",
+          "description": "polyfit accepts typed-integer sample values as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolyfitIntegerYExtension"
+        },
+        {
+          "id": "polyfit-integer-weights",
+          "mode": "RunMatOnly",
+          "description": "polyfit accepts typed-integer observation weights as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolyfitIntegerWeightsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = polyfit(integer_X,Y,n,___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer X is independently gated before provider dispatch and QR fitting."
+        },
+        {
+          "form": "p = polyfit(X,integer_Y,n,___)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer Y is independently gated before provider dispatch and QR fitting."
+        },
+        {
+          "form": "p = polyfit(X,Y,integer_n,___)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public degree is a nonnegative integer scalar. Native integer scalars are decoded directly to usize and never materialized through binary64."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Degree remains exact and structural; it selects Vandermonde width but does not enter numeric fitting data."
+        },
+        {
+          "form": "p = polyfit(X,Y,n,integer_weights)",
+          "inputs": [
+            {
+              "name": "weights",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The implemented weighted overload is a RunMat extension and typed weights cross its checked binary64 least-squares boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer weights are independently gated before weighted least squares."
         }
       ]
     },
@@ -121097,6 +121990,109 @@
           "when": "Runtime fails while building output tensors, deltas, or provider fallbacks.",
           "message": "polyval: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "polyval-integer-coefficients",
+          "mode": "RunMatOnly",
+          "description": "polyval accepts typed-integer polynomial coefficients as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolyvalIntegerCoefficientsExtension"
+        },
+        {
+          "id": "polyval-integer-points",
+          "mode": "RunMatOnly",
+          "description": "polyval accepts typed-integer query points as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolyvalIntegerPointsExtension"
+        },
+        {
+          "id": "polyval-integer-fit-options",
+          "mode": "RunMatOnly",
+          "description": "polyval accepts typed-integer S or mu data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PolyvalIntegerFitOptionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = polyval(integer_p,x,___)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer coefficients are independently gated before provider or host Horner evaluation."
+        },
+        {
+          "form": "y = polyval(p,integer_x,___)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer query points are independently gated before provider or host Horner evaluation."
+        },
+        {
+          "form": "[y,delta] = polyval(p,x,integer_S_or_mu)",
+          "inputs": [
+            {
+              "name": "S or mu numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented fit statistics and scaling vector are floating outputs of polyfit; native integer replacements are a checked RunMat extension."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed integer fit metadata is independently gated and checked recursively before prediction-interval computation."
+        }
       ]
     },
     {
@@ -121178,6 +122174,109 @@
           "identifier": "RunMat:pow2:Internal",
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "pow2: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "pow2-integer-unary-exponent",
+          "mode": "RunMatOnly",
+          "description": "pow2(E) accepts typed-integer exponents as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pow2IntegerUnaryExponentExtension"
+        },
+        {
+          "id": "pow2-integer-significand",
+          "mode": "RunMatOnly",
+          "description": "pow2(X,E) accepts typed-integer significands as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pow2IntegerSignificandExtension"
+        },
+        {
+          "id": "pow2-integer-binary-exponent",
+          "mode": "RunMatOnly",
+          "description": "pow2(X,E) accepts typed-integer exponents as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pow2IntegerBinaryExponentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = pow2(integer_E)",
+          "inputs": [
+            {
+              "name": "E",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double exponent arrays; RunMat admits typed integers only after exact conversion to the floating exp2 domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer exponent arrays bypass floating provider hooks, cross a checked double boundary, and restore automatic residency when supported."
+        },
+        {
+          "form": "Y = pow2(integer_X,E)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double significands; RunMat admits typed integers only after exact binary64 conversion is proved."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Integer significands are independently gated before binary scaling."
+        },
+        {
+          "form": "Y = pow2(X,integer_E)",
+          "inputs": [
+            {
+              "name": "E",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double exponents for the two-input scaling form; native integers are a checked RunMat extension."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Integer binary exponents are independently gated, truncated only according to the public floating exponent rule, and never passed to floating provider hooks as integer handles."
         }
       ]
     },
@@ -121389,6 +122488,43 @@
           "identifier": "RunMat:ppval:Internal",
           "when": "Piecewise-polynomial output assembly fails due to internal tensor construction paths.",
           "message": "ppval: internal interpolation failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ppval-integer-query-points",
+          "mode": "RunMatOnly",
+          "description": "ppval accepts typed-integer query points as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PpvalIntegerQueryPointsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Vq = ppval(pp,integer_Xq)",
+          "inputs": [
+            {
+              "name": "Xq",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double query points. RunMat admits typed integers only when every value is exactly representable at the floating piecewise-polynomial boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer query points are gated before gather and cross once into the polynomial evaluation domain."
         }
       ]
     },
@@ -121831,6 +122967,103 @@
           "when": "RunMat cannot construct prediction outputs.",
           "message": "predict: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "predict-integer-statistical-predictors",
+          "mode": "RunMatOnly",
+          "description": "predict accepts typed-integer statistical-model predictors as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PredictIntegerStatisticalPredictorsExtension"
+        },
+        {
+          "id": "predict-integer-statistical-controls",
+          "mode": "RunMatOnly",
+          "description": "predict accepts typed-integer statistical-model controls as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PredictIntegerStatisticalControlsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ypred = predict(statistical_model,integer_Xnew,___)",
+          "inputs": [
+            {
+              "name": "Xnew for implemented statistical models",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The implemented linear-regression, classification-tree, and linear-classifier references document single, double, or table predictors. RunMat admits typed integer matrices only at a checked model-specific floating boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Statistical integer predictors are gated before gather and model dispatch and must be exactly representable at the binary64 prediction boundary."
+        },
+        {
+          "form": "ypred = predict(statistical_model,Xnew,integer_control,___)",
+          "inputs": [
+            {
+              "name": "Alpha, Subtrees, or other numeric statistical controls",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed integer numeric controls are independently gated; unsupported general options remain ordinary surface gaps rather than silently admitted integer forms."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Numeric statistical controls are separately admitted and checked before the selected model parser runs."
+        },
+        {
+          "form": "Y = predict(deep_learning_network,integer_X,___)",
+          "inputs": [
+            {
+              "name": "X for supported deep-learning network objects",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public deep-learning predict surface explicitly includes all eight integer input classes; the selected network determines output class and conversion behavior."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Deep-learning integer admission is documented and is intentionally not covered by the statistical-model compatibility gates."
+        }
       ]
     },
     {
@@ -122036,6 +123269,43 @@
           "identifier": null,
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "print: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "print-integer-figure-handle",
+          "mode": "RunMatOnly",
+          "description": "print accepts a typed-integer alias for RunMat's numeric figure registry",
+          "error_identifier": "RunMat:compatibility:PrintIntegerFigureHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ok = print(integer_fig,___)",
+          "inputs": [
+            {
+              "name": "fig numeric handle alias",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents a Figure object, not a typed integer. RunMat mode permits an exact nonnegative alias for its numeric graphics registry."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The alias is gated before gather and must map exactly into RunMat's f64-backed graphics handle registry; resolution remains a documented text option such as '-r300'."
         }
       ]
     },

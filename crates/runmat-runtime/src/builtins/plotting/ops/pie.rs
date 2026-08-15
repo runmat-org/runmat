@@ -1,5 +1,9 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Value,
 };
@@ -162,6 +166,52 @@ pub const PIE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PIE_ERRORS,
 };
 
+const PIE_INTEGER_VALUES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pie-integer-values",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pie accepts typed-integer slice values as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PieIntegerValuesExtension"),
+};
+pub const PIE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PIE_INTEGER_VALUES_EXTENSION];
+const PIE_INTEGER_VALUES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a limits numeric pie values to double. RunMat admits typed integers only when exact binary64 chart geometry is possible.",
+    }];
+const PIE_INTEGER_EXPLODE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "explode",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric explode mask uses exact zero/nonzero semantics; every native integer class can be evaluated without value conversion.",
+    }];
+pub const PIE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = pie(integer_X,___)",
+        inputs: &PIE_INTEGER_VALUES_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer values are gated before gather and normalized only after exact conversion to renderer geometry.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = pie(X,integer_explode,___)",
+        inputs: &PIE_INTEGER_EXPLODE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed explode masks gather exactly and use zero/nonzero classification; their magnitude never enters renderer arithmetic.",
+    },
+];
+
 fn pie_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -221,10 +271,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::pie::PIE_DESCRIPTOR),
+    extensions(crate::builtins::plotting::pie::PIE_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::pie::PIE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::pie"
 )]
 pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, args) = parse_axes_target(args).map_err(map_pie_invalid)?;
+    if let Some(values) = args.first() {
+        crate::builtins::common::validation::reject_typed_complex_integer(values, BUILTIN_NAME)?;
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            values,
+            &PIE_INTEGER_VALUES_EXTENSION,
+            BUILTIN_NAME,
+            "slice",
+        )
+        .await?;
+    }
     let (values, explode, labels) = parse_pie_args(args).await.map_err(map_pie_invalid)?;
     let mut chart = PieChart::new(values, None).map_err(|e| pie_invalid(&e))?;
     if let Some(explode) = explode {
@@ -419,6 +481,7 @@ mod tests {
 
     #[test]
     fn pie_values_and_explode_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();

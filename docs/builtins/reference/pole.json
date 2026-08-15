@@ -31,6 +31,7 @@
   },
   "description": "`pole(sys)` returns the roots of the denominator polynomial for a supported SISO `tf` model, or the eigenvalues of the state matrix for an `ss` model.",
   "behaviors": [
+    "Documented positive-integer model-array subscripts are structural; RunMat currently supports singular `tf` and `ss` objects, so broader model-array calls reject before selector conversion.",
     "Supports SISO `tf` objects.",
     "Supports `ss` state-space objects by computing eigenvalues of `A`.",
     "Returns an `N x 1` real vector when all poles are real.",

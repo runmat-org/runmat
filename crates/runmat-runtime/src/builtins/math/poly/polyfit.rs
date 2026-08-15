@@ -4,7 +4,11 @@ use log::{trace, warn};
 use num_complex::Complex64;
 use runmat_accelerate_api::ProviderPolyfitResult;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, StructValue, Tensor, Value,
 };
@@ -195,6 +199,105 @@ pub const POLYFIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POLYFIT_ERRORS,
 };
 
+const POLYFIT_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyfit-integer-x",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyfit accepts typed-integer sample locations as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyfitIntegerXExtension"),
+};
+const POLYFIT_INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyfit-integer-y",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyfit accepts typed-integer sample values as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyfitIntegerYExtension"),
+};
+const POLYFIT_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "polyfit-integer-weights",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "polyfit accepts typed-integer observation weights as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PolyfitIntegerWeightsExtension"),
+};
+pub const POLYFIT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    POLYFIT_INTEGER_X_EXTENSION,
+    POLYFIT_INTEGER_Y_EXTENSION,
+    POLYFIT_INTEGER_WEIGHTS_EXTENSION,
+];
+
+const POLYFIT_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved.",
+    }];
+const POLYFIT_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary.",
+    }];
+const POLYFIT_INTEGER_DEGREE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public degree is a nonnegative integer scalar. Native integer scalars are decoded directly to usize and never materialized through binary64.",
+    }];
+const POLYFIT_INTEGER_WEIGHTS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "weights",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The implemented weighted overload is a RunMat extension and typed weights cross its checked binary64 least-squares boundary.",
+    }];
+pub const POLYFIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(integer_X,Y,n,___)",
+        inputs: &POLYFIT_INTEGER_X_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer X is independently gated before provider dispatch and QR fitting.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(X,integer_Y,n,___)",
+        inputs: &POLYFIT_INTEGER_Y_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer Y is independently gated before provider dispatch and QR fitting.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(X,Y,integer_n,___)",
+        inputs: &POLYFIT_INTEGER_DEGREE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Degree remains exact and structural; it selects Vandermonde width but does not enter numeric fitting data.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = polyfit(X,Y,n,integer_weights)",
+        inputs: &POLYFIT_INTEGER_WEIGHTS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer weights are independently gated before weighted least squares.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyfit",
@@ -255,6 +358,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(polyfit_type),
     descriptor(crate::builtins::math::poly::polyfit::POLYFIT_DESCRIPTOR),
+    extensions(crate::builtins::math::poly::polyfit::POLYFIT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::poly::polyfit::POLYFIT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 async fn polyfit_builtin(
@@ -294,6 +399,29 @@ pub async fn evaluate(
     crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, "polyfit")?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &POLYFIT_INTEGER_X_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &POLYFIT_INTEGER_Y_EXTENSION,
+        BUILTIN_NAME,
+        "Y",
+    )
+    .await?;
+    if let Some(weights) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            weights,
+            &POLYFIT_INTEGER_WEIGHTS_EXTENSION,
+            BUILTIN_NAME,
+            "weights",
+        )
+        .await?;
     }
     let deg = parse_degree(&degree)?;
 
@@ -1077,6 +1205,7 @@ pub(crate) mod tests {
 
     #[test]
     fn polyfit_rejects_typed_complex_integer_inputs() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let typed_complex = Value::ComplexTensor(
             ComplexTensor::new_integer(
                 IntegerComplexStorage::new(
@@ -1160,6 +1289,7 @@ pub(crate) mod tests {
 
     #[test]
     fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![4, 1]).unwrap();
         let y = Tensor::new_integer(IntegerStorage::I16(vec![2, 4, 6, 8]), vec![4, 1]).unwrap();
         let degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();

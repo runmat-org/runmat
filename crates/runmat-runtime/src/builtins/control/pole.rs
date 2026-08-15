@@ -1,8 +1,12 @@
 //! Pole extraction for transfer-function and state-space control models.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -67,6 +71,25 @@ pub const POLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &POLE_ERRORS,
 };
+const POLE_INTEGER_MODEL_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "J1,...,JN model-array indices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation.",
+    }];
+pub const POLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "P = pole(sys,integer_J1,...,integer_JN)",
+        inputs: &POLE_INTEGER_MODEL_INDEX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility contract is exact one-based model selection. RunMat currently implements singular tf/ss objects only, so the broader model-array overload rejects before any integer conversion can occur.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::pole")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -102,6 +125,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "pole,poles,control system,stability,transfer function,state space,tf,ss",
     type_resolver(pole_type),
     descriptor(crate::builtins::control::pole::POLE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::control::pole::POLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::pole"
 )]
 async fn pole_builtin(sys: Value) -> BuiltinResult<Value> {

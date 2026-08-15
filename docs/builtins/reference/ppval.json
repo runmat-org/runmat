@@ -26,6 +26,7 @@
   },
   "description": "`ppval(pp, xq)` evaluates piecewise-polynomial structure `pp` at query points `xq`. Breakpoint selection and output-shape behavior follow MATLAB semantics.",
   "behaviors": [
+    "Typed-integer query points are a RunMat-mode extension and must be exactly representable in double before piecewise-polynomial evaluation.",
     "Accepts pp structures with `form`, `breaks`, `coefs`, `pieces`, `order`, and `dim` fields.",
     "Uses Horner evaluation within each interval.",
     "Extrapolates outside the break range, matching MATLAB pp evaluation behavior."

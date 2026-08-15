@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
@@ -154,6 +158,88 @@ pub const POW2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POW2_ERRORS,
 };
 
+const POW2_INTEGER_UNARY_EXPONENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pow2-integer-unary-exponent",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pow2(E) accepts typed-integer exponents as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Pow2IntegerUnaryExponentExtension"),
+    };
+const POW2_INTEGER_SIGNIFICAND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pow2-integer-significand",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pow2(X,E) accepts typed-integer significands as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pow2IntegerSignificandExtension"),
+};
+const POW2_INTEGER_BINARY_EXPONENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pow2-integer-binary-exponent",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pow2(X,E) accepts typed-integer exponents as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Pow2IntegerBinaryExponentExtension"),
+    };
+pub const POW2_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    POW2_INTEGER_UNARY_EXPONENT_EXTENSION,
+    POW2_INTEGER_SIGNIFICAND_EXTENSION,
+    POW2_INTEGER_BINARY_EXPONENT_EXTENSION,
+];
+const POW2_INTEGER_UNARY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "E",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double exponent arrays; RunMat admits typed integers only after exact conversion to the floating exp2 domain.",
+    }];
+const POW2_INTEGER_SIGNIFICAND_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double significands; RunMat admits typed integers only after exact binary64 conversion is proved.",
+    }];
+const POW2_INTEGER_BINARY_EXPONENT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "E",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double exponents for the two-input scaling form; native integers are a checked RunMat extension.",
+    }];
+pub const POW2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pow2(integer_E)",
+        inputs: &POW2_INTEGER_UNARY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Integer exponent arrays bypass floating provider hooks, cross a checked double boundary, and restore automatic residency when supported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pow2(integer_X,E)",
+        inputs: &POW2_INTEGER_SIGNIFICAND_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Integer significands are independently gated before binary scaling.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pow2(X,integer_E)",
+        inputs: &POW2_INTEGER_BINARY_EXPONENT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Integer binary exponents are independently gated, truncated only according to the public floating exponent rule, and never passed to floating provider hooks as integer handles.",
+    },
+];
+
 fn pow2_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl std::fmt::Display,
@@ -174,12 +260,44 @@ fn pow2_error_with_detail(
     accel = "unary",
     type_resolver(numeric_binary_type),
     descriptor(crate::builtins::math::elementwise::pow2::POW2_DESCRIPTOR),
+    extensions(crate::builtins::math::elementwise::pow2::POW2_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::elementwise::pow2::POW2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::pow2"
 )]
 async fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&first, BUILTIN_NAME)?;
+    for value in &rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     match rest.len() {
-        0 => pow2_unary(first).await,
-        1 => pow2_binary(first, rest.into_iter().next().unwrap()).await,
+        0 => {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                &first,
+                &POW2_INTEGER_UNARY_EXPONENT_EXTENSION,
+                BUILTIN_NAME,
+                "unary exponent",
+            )
+            .await?;
+            pow2_unary(first).await
+        }
+        1 => {
+            let exponent = rest.into_iter().next().expect("one exponent");
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                &first,
+                &POW2_INTEGER_SIGNIFICAND_EXTENSION,
+                BUILTIN_NAME,
+                "significand",
+            )
+            .await?;
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                &exponent,
+                &POW2_INTEGER_BINARY_EXPONENT_EXTENSION,
+                BUILTIN_NAME,
+                "binary exponent",
+            )
+            .await?;
+            pow2_binary(first, exponent).await
+        }
         _ => Err(pow2_error_with_detail(
             &POW2_ERROR_INVALID_ARGUMENT,
             "expected at most two arguments",
@@ -649,6 +767,7 @@ pub(crate) mod tests {
 
     #[test]
     fn pow2_unary_reads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 3]), vec![1, 2]).expect("tensor");
 
@@ -662,6 +781,7 @@ pub(crate) mod tests {
 
     #[test]
     fn pow2_binary_scalar_reads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let mantissa =
             Tensor::new_integer(IntegerStorage::I32(vec![5]), vec![1, 1]).expect("mantissa");
         let exponent =
@@ -674,7 +794,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn pow2_binary_arrays_ignore_poisoned_integer_mirrors() {
+    fn pow2_binary_arrays_reject_lossy_wide_integer_boundaries() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let mantissa = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, 3]),
             vec![1, 2],
@@ -683,17 +804,12 @@ pub(crate) mod tests {
         let exponent =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 4]), vec![1, 2]).expect("exponent");
 
-        let result = pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)])
-            .expect("pow2 scale");
-
-        let Value::Tensor(result) = result else {
-            panic!("expected double tensor result");
-        };
-        assert_eq!(
-            result.materialize_f64(),
-            vec![18_014_398_509_481_986.0, 48.0]
+        let error = pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)])
+            .expect_err("lossy integer significand must reject");
+        assert!(
+            error.message().contains("exactly representable as double"),
+            "{error:?}"
         );
-        assert!(result.integer_storage().is_none());
     }
 
     #[test]
@@ -780,6 +896,7 @@ pub(crate) mod tests {
 
     #[test]
     fn pow2_integer_gpu_paths_bypass_floating_provider_hooks() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let unary = Tensor::new_integer(IntegerStorage::U64(vec![0, 64]), vec![1, 2]).unwrap();
             let unary = gpu_helpers::upload_tensor(provider, &unary).expect("upload unary");
@@ -792,9 +909,8 @@ pub(crate) mod tests {
                 NumericStorage::F64(vec![1.0, 2.0_f64.powi(64)])
             );
 
-            let wide = 9_007_199_254_740_993_u64;
             let mantissa =
-                Tensor::new_integer(IntegerStorage::U64(vec![wide, 3]), vec![1, 2]).unwrap();
+                Tensor::new_integer(IntegerStorage::U64(vec![4, 3]), vec![1, 2]).unwrap();
             let exponent =
                 Tensor::new_integer(IntegerStorage::U64(vec![1, 4]), vec![1, 2]).unwrap();
             let mantissa =
@@ -809,7 +925,23 @@ pub(crate) mod tests {
             };
             assert_eq!(
                 output.into_numeric_storage().unwrap(),
-                NumericStorage::F64(vec![(wide as f64) * 2.0, 48.0])
+                NumericStorage::F64(vec![8.0, 48.0])
+            );
+
+            let wide = 9_007_199_254_740_993_u64;
+            let mantissa =
+                Tensor::new_integer(IntegerStorage::U64(vec![wide, 3]), vec![1, 2]).unwrap();
+            let exponent =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 4]), vec![1, 2]).unwrap();
+            let mantissa =
+                gpu_helpers::upload_tensor(provider, &mantissa).expect("upload wide mantissa");
+            let exponent =
+                gpu_helpers::upload_tensor(provider, &exponent).expect("upload exponent");
+            let error = pow2_builtin(Value::GpuTensor(mantissa), vec![Value::GpuTensor(exponent)])
+                .expect_err("lossy resident significand must reject");
+            assert!(
+                error.message().contains("exactly representable as double"),
+                "{error:?}"
             );
         });
     }
@@ -988,6 +1120,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pow2_binary_broadcast_host() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let mantissa = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let exponent = Value::Int(IntValue::I32(2));
         let result = pow2_builtin(Value::Tensor(mantissa), vec![exponent]).expect("pow2");

@@ -6,7 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
     Value,
 };
@@ -146,6 +150,33 @@ pub const PRINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PRINT_ERRORS,
 };
 
+const PRINT_INTEGER_FIGURE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "print-integer-figure-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "print accepts a typed-integer alias for RunMat's numeric figure registry",
+    error_identifier: Some("RunMat:compatibility:PrintIntegerFigureHandleExtension"),
+};
+pub const PRINT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PRINT_INTEGER_FIGURE_EXTENSION];
+const PRINT_INTEGER_FIGURE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fig numeric handle alias",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB documents a Figure object, not a typed integer. RunMat mode permits an exact nonnegative alias for its numeric graphics registry.",
+    }];
+pub const PRINT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ok = print(integer_fig,___)",
+        inputs: &PRINT_INTEGER_FIGURE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The alias is gated before gather and must map exactly into RunMat's f64-backed graphics handle registry; resolution remains a documented text option such as '-r300'.",
+    }];
+
 pub fn print_type(_args: &[Type], _context: &runmat_builtins::ResolveContext) -> Type {
     Type::Bool
 }
@@ -160,9 +191,21 @@ pub fn print_type(_args: &[Type], _context: &runmat_builtins::ResolveContext) ->
     accel = "metadata",
     type_resolver(print_type),
     descriptor(crate::builtins::plotting::print::PRINT_DESCRIPTOR),
+    extensions(crate::builtins::plotting::print::PRINT_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::print::PRINT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::print"
 )]
 pub async fn print_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+    if let Some(first) = args.first() {
+        crate::builtins::common::validation::reject_typed_complex_integer(first, "print")?;
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            first,
+            &PRINT_INTEGER_FIGURE_EXTENSION,
+            "print",
+            "figure handle",
+        )
+        .await?;
+    }
     let args = gather_values(&args).await?;
     let request = parse_print_args(&args)?;
     let path = request.output_path()?;
@@ -638,6 +681,7 @@ mod tests {
 
     #[test]
     fn print_figure_handle_arg_reads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![5]), vec![1, 1]).unwrap();
 

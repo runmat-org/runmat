@@ -3,7 +3,11 @@
 use log::trace;
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Tensor, Value,
 };
@@ -124,6 +128,35 @@ pub const POLYDER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POLYDER_ERRORS,
 };
 
+const POLYDER_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "polyder-integer-coefficients",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "polyder accepts typed-integer coefficient vectors as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PolyderIntegerCoefficientsExtension"),
+    };
+pub const POLYDER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [POLYDER_INTEGER_COEFFICIENTS_EXTENSION];
+const POLYDER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "p, a, or b",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double polynomial coefficients. RunMat admits typed integers only after exact conversion to the floating polynomial domain.",
+    }];
+pub const POLYDER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "d = polyder(integer_p) or d = polyder(integer_a,b) or [q,d] = polyder(integer_a,b)",
+        inputs: &POLYDER_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every integer coefficient operand is checked before provider dispatch; derivative, convolution, and quotient arithmetic then use the selected floating precision domain.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyder",
@@ -181,15 +214,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyder,polynomial,derivative,product,quotient",
     type_resolver(polyder_type),
     descriptor(crate::builtins::math::poly::polyder::POLYDER_DESCRIPTOR),
+    extensions(crate::builtins::math::poly::polyder::POLYDER_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::poly::polyder::POLYDER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
 async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(polyder_argument_error("polyder: too many input arguments"));
-    }
-    crate::builtins::common::validation::reject_typed_complex_integer(&first, BUILTIN_NAME)?;
-    for value in &rest {
-        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count <= 1 {
@@ -278,6 +309,8 @@ async fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderE
 
 /// Evaluate the quotient rule derivative `[num, den] = polyder(u, v)`.
 pub async fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {
+    gate_coefficient(&u).await?;
+    gate_coefficient(&v).await?;
     if let Some(eval) = try_gpu_quotient(&u, &v).await? {
         return Ok(eval);
     }
@@ -311,6 +344,7 @@ impl PolyderEval {
 }
 
 pub async fn derivative_single(value: Value) -> BuiltinResult<Value> {
+    gate_coefficient(&value).await?;
     if let Some(out) = try_gpu_derivative_single(&value).await? {
         return Ok(out);
     }
@@ -319,12 +353,25 @@ pub async fn derivative_single(value: Value) -> BuiltinResult<Value> {
 }
 
 pub async fn derivative_product(first: Value, second: Value) -> BuiltinResult<Value> {
+    gate_coefficient(&first).await?;
+    gate_coefficient(&second).await?;
     if let Some(out) = try_gpu_derivative_product(&first, &second).await? {
         return Ok(out);
     }
     let p = parse_polynomial("polyder", "P", first).await?;
     let q = parse_polynomial("polyder", "A", second).await?;
     product_derivative(&p, &q)
+}
+
+async fn gate_coefficient(value: &Value) -> BuiltinResult<()> {
+    crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &POLYDER_INTEGER_COEFFICIENTS_EXTENSION,
+        BUILTIN_NAME,
+        "coefficient",
+    )
+    .await
 }
 
 fn quotient_numerator(u: &Polynomial, v: &Polynomial) -> BuiltinResult<Value> {
@@ -614,6 +661,7 @@ pub(crate) mod tests {
 
     #[test]
     fn derivative_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![3, -2, 5, 7]), vec![1, 4]).unwrap();
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder");
@@ -632,7 +680,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn derivative_typed_complex_integer_coefficients_cross_double_boundary_exactly() {
+    fn derivative_typed_complex_integer_coefficients_reject_before_conversion() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::I16(vec![3, -2, 5, 7]),
@@ -643,21 +692,14 @@ pub(crate) mod tests {
         )
         .expect("complex integer tensor");
 
-        let result = derivative_single(Value::ComplexTensor(tensor)).expect("polyder");
-        match result {
-            Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
-                assert!(t
-                    .materialize_f64()
-                    .iter()
-                    .zip([(9.0, 3.0), (-4.0, 0.0), (5.0, -1.0)])
-                    .all(|((re, im), (er, ei))| {
-                        (re - er).abs() < 1e-12 && (im - ei).abs() < 1e-12
-                    }));
-                assert!(t.integer_storage().is_none());
-            }
-            other => panic!("expected complex tensor result, got {other:?}"),
-        }
+        let error = derivative_single(Value::ComplexTensor(tensor))
+            .expect_err("typed complex integer arithmetic must reject");
+        assert!(
+            error
+                .message()
+                .contains("complex numbers with integer types are not supported"),
+            "{error:?}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -682,6 +724,7 @@ pub(crate) mod tests {
 
     #[test]
     fn product_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let p = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -2]), vec![1, 3]).unwrap();
         let a = Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2]).unwrap();
         let result =
@@ -732,6 +775,7 @@ pub(crate) mod tests {
 
     #[test]
     fn quotient_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let u = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, -4]), vec![1, 3]).unwrap();
         let v = Tensor::new_integer(IntegerStorage::I16(vec![1, -1]), vec![1, 2]).unwrap();
         let eval = evaluate_quotient(Value::Tensor(u), Value::Tensor(v)).expect("polyder quotient");
@@ -1088,6 +1132,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_promotes_integers() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = Value::Int(IntValue::I32(5));
         let result = derivative_single(value).expect("polyder int");
         assert_eq!(result, Value::Num(0.0));

@@ -30,6 +30,7 @@
   },
   "description": "`polarhistogram(theta)` bins angular samples in radians and renders each bin as a polar wedge whose radius is the bin count or normalized bin value. Theta values wrap periodically into the selected angular range. The returned handle reuses MATLAB-style histogram object properties such as `BinEdges`, `BinCounts`, `Values`, `Data`, `NumBins`, `BinWidth`, `BinLimits`, `Normalization`, `DisplayStyle`, `FaceColor`, `FaceAlpha`, `EdgeColor`, and `DisplayName`.",
   "behaviors": [
+    "All eight integer classes are accepted for angular data; native values gather authoritatively before the explicit floating binning and rendering boundary, while integer bin counts and table selectors remain structural.",
     "`polarhistogram(theta)` creates a histogram object handle and marks the target axes as polar with equal x/y scaling. With no bin controls it uses six angular bins spanning `[0, 2*pi]`.",
     "`polarhistogram(theta, nbins)` and `polarhistogram(theta, edges)` use the same scalar bin-count and explicit edge-vector semantics as `histcounts`.",
     "Finite theta samples are wrapped into the chosen angular range before binning; non-finite samples are ignored by the histogram counts and exposed as `NaN` in normalized stored `Data`.",

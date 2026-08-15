@@ -60,6 +60,81 @@ pub const GRPSTATS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
     GRPSTATS_INTEGER_SELECTOR_EXTENSION,
 ];
 
+const PIVOT_INTEGER_GROUP_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer grouping or DataVariable table columns",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract.",
+    }];
+const PIVOT_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Columns, Rows, or DataVariable indices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public variable-index selectors are exact one-based structural values; logical selectors remain a distinct documented form.",
+    }];
+const PIVOT_INTEGER_BIN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ColumnsBinMethod or RowsBinMethod count/edges",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation.",
+    }];
+const PIVOT_INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "IncludeTotals, IncludeMissingGroups, or IncludeEmptyGroups",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public controls admit numeric zero or one alongside logical values and are structural rather than aggregation data.",
+    }];
+pub const PIVOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "P = pivot(table_with_integer_group_or_data_variables,___)",
+        inputs: &PIVOT_INTEGER_GROUP_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Implemented grouping keys retain exact native values above flintmax; aggregation crosses only the selected method's explicit result domain.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "P = pivot(T,Columns=integer_indices,Rows=integer_indices,DataVariable=integer_index,___)",
+        inputs: &PIVOT_INTEGER_SELECTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Implemented selector parsing reads native integer storage directly; unsupported portions of the newer name-value grammar remain general pivot surface gaps.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "P = pivot(T,ColumnsBinMethod=integer_bins,RowsBinMethod=integer_bins,___)",
+        inputs: &PIVOT_INTEGER_BIN_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The documented contract is recorded without treating unimplemented general binning syntax as an implicit integer-to-floating boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "P = pivot(T,IncludeTotals=integer_flag,IncludeMissingGroups=integer_flag,IncludeEmptyGroups=integer_flag,___)",
+        inputs: &PIVOT_INTEGER_BOOLEAN_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only exact zero/one values are compatible; unsupported general options reject before aggregation.",
+    },
+];
+
 const GROUPSUMMARY_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "integer grouping variables",
@@ -210,6 +285,7 @@ pub(crate) async fn grpstats_builtin(
     keywords = "pivot,table,reshape,groupsummary",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    integer_capabilities(crate::builtins::table::builtins::analytics::PIVOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn pivot_builtin(

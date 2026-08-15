@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Type, Value,
 };
@@ -125,6 +129,87 @@ pub const POL2CART_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const POL2CART_INTEGER_THETA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pol2cart-integer-theta",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pol2cart accepts typed-integer angular coordinates as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pol2cartIntegerThetaExtension"),
+};
+const POL2CART_INTEGER_RHO_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pol2cart-integer-rho",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pol2cart accepts typed-integer radial coordinates as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pol2cartIntegerRhoExtension"),
+};
+const POL2CART_INTEGER_Z_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pol2cart-integer-z",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pol2cart accepts typed-integer elevation coordinates as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pol2cartIntegerZExtension"),
+};
+pub const POL2CART_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    POL2CART_INTEGER_THETA_EXTENSION,
+    POL2CART_INTEGER_RHO_EXTENSION,
+    POL2CART_INTEGER_Z_EXTENSION,
+];
+
+const POL2CART_INTEGER_THETA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "theta",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents real single and double angular coordinates; RunMat admits typed integers only after exact binary64 conversion is proved.",
+    }];
+const POL2CART_INTEGER_RHO_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "rho",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents real single and double radial coordinates; RunMat admits typed integers only at its checked floating transform boundary.",
+    }];
+const POL2CART_INTEGER_Z_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents real single and double elevation coordinates; RunMat admits typed integers only when exact binary64 conversion is possible.",
+    }];
+pub const POL2CART_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[x,y] = pol2cart(integer_theta,rho) or [x,y,z] = pol2cart(integer_theta,rho,z)",
+        inputs: &POL2CART_INTEGER_THETA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "The angular role is independently gated before provider dispatch and crosses once into the trigonometric domain.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[x,y] = pol2cart(theta,integer_rho) or [x,y,z] = pol2cart(theta,integer_rho,z)",
+        inputs: &POL2CART_INTEGER_RHO_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "The radial role is independently gated before provider dispatch and floating multiplication.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[x,y,z] = pol2cart(theta,rho,integer_z)",
+        inputs: &POL2CART_INTEGER_Z_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Elevation is independently gated and broadcast only after its exact floating boundary is proved.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::pol2cart")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
@@ -169,9 +254,41 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(pol2cart_type),
     descriptor(crate::builtins::math::trigonometry::pol2cart::POL2CART_DESCRIPTOR),
+    extensions(crate::builtins::math::trigonometry::pol2cart::POL2CART_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::trigonometry::pol2cart::POL2CART_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::trigonometry::pol2cart"
 )]
 async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&theta, NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rho, NAME)?;
+    for value in &rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, NAME)?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &theta,
+        &POL2CART_INTEGER_THETA_EXTENSION,
+        NAME,
+        "theta",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &rho,
+        &POL2CART_INTEGER_RHO_EXTENSION,
+        NAME,
+        "rho",
+    )
+    .await?;
+    if let Some(z) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            z,
+            &POL2CART_INTEGER_Z_EXTENSION,
+            NAME,
+            "z",
+        )
+        .await?;
+    }
     let requested_outputs = crate::output_count::current_output_count();
     let mut inputs = Vec::with_capacity(2 + rest.len());
     inputs.push(theta);
@@ -1057,6 +1174,7 @@ mod tests {
 
     #[test]
     fn typed_integer_host_inputs_read_exact_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let theta =
             Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).expect("theta");
         let rho = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
@@ -1103,6 +1221,7 @@ mod tests {
 
     #[test]
     fn mixed_gpu_typed_integer_inputs_upload_exact_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let theta_view = HostTensorView {
                 data: &[0.0, 0.0],
@@ -1135,6 +1254,7 @@ mod tests {
 
     #[test]
     fn mixed_gpu_typed_integer_theta_upload_reads_exact_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let rho_view = HostTensorView {
                 data: &[2.0, 3.0],
