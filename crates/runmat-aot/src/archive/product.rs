@@ -3,8 +3,8 @@ use runmat_execution::{Digest, ProgramEnvironment};
 use crate::{AotError, AotResult};
 
 use super::{
-    RuntimeArchiveEncoding, RuntimeArchiveManifest, MAX_RUNTIME_ARCHIVE_BYTES,
-    MAX_RUNTIME_PAYLOAD_BYTES, RUNTIME_ARCHIVE_SCHEMA_VERSION,
+    RuntimeArchiveCapabilities, RuntimeArchiveEncoding, RuntimeArchiveManifest,
+    MAX_RUNTIME_ARCHIVE_BYTES, MAX_RUNTIME_PAYLOAD_BYTES, RUNTIME_ARCHIVE_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -64,6 +64,7 @@ pub fn build_runtime_archive(
     environment: &ProgramEnvironment,
     native_link_tokens: Vec<String>,
     encoding: RuntimeArchiveEncoding,
+    capabilities: RuntimeArchiveCapabilities,
 ) -> AotResult<RuntimeArchive> {
     let archive_bytes = u64::try_from(archive.len()).map_err(|_| {
         AotError::contract("aot.archive.size", "runtime archive exceeds the host size")
@@ -105,6 +106,7 @@ pub fn build_runtime_archive(
         payload_encoding: encoding,
         payload_digest: Digest::sha256(&payload),
         payload_bytes,
+        capabilities,
         native_link_tokens,
     };
     RuntimeArchive::new(manifest, payload)
@@ -132,6 +134,7 @@ mod tests {
             &environment(),
             vec!["-lm".into()],
             RuntimeArchiveEncoding::Zstd,
+            RuntimeArchiveCapabilities::standalone_host(),
         )
         .unwrap();
         assert_eq!(

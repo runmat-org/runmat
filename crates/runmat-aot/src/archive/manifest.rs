@@ -3,7 +3,7 @@ use runmat_native_codegen::{aot::NATIVE_OBJECT_SCHEMA_VERSION, NativeTarget};
 
 use crate::{AotError, AotResult};
 
-pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 1;
+pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 2;
 pub const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RUNTIME_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_LINK_TOKENS: usize = 256;
@@ -13,6 +13,38 @@ const MAX_LINK_TOKENS: usize = 256;
 pub enum RuntimeArchiveEncoding {
     Raw,
     Zstd,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeArchiveCapabilities {
+    pub static_program_calls: bool,
+    pub runtime_builtins: bool,
+    pub plot_core: bool,
+    pub dynamic_source_loading: bool,
+    pub closed_world_linking: bool,
+}
+
+impl RuntimeArchiveCapabilities {
+    pub fn standalone_host() -> Self {
+        Self {
+            static_program_calls: true,
+            runtime_builtins: true,
+            plot_core: true,
+            dynamic_source_loading: false,
+            closed_world_linking: false,
+        }
+    }
+
+    fn validate(&self) -> AotResult<()> {
+        if !self.static_program_calls || !self.runtime_builtins {
+            return Err(AotError::contract(
+                "aot.archive.capabilities",
+                "runtime archive lacks required standalone execution capabilities",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -31,6 +63,7 @@ pub struct RuntimeArchiveManifest {
     pub payload_encoding: RuntimeArchiveEncoding,
     pub payload_digest: Digest,
     pub payload_bytes: u64,
+    pub capabilities: RuntimeArchiveCapabilities,
     pub native_link_tokens: Vec<String>,
 }
 
@@ -49,6 +82,7 @@ impl RuntimeArchiveManifest {
         self.native_target
             .validate()
             .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?;
+        self.capabilities.validate()?;
         let triple = self
             .target_triple
             .parse::<target_lexicon::Triple>()

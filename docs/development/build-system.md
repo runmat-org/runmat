@@ -18,7 +18,7 @@ The root workspace uses Cargo resolver v2. Workspace dependency versions live in
 | Area | Crates |
 | --- | --- |
 | Language pipeline | `runmat-lexer`, `runmat-parser`, `runmat-hir`, `runmat-mir`, `runmat-static-analysis` |
-| Execution | `runmat-vm`, `runmat-native-codegen`, `runmat-jit`, `runmat-core` |
+| Execution | `runmat-vm`, `runmat-native-codegen`, `runmat-jit`, `runmat-aot-runtime`, `runmat-aot`, `runmat-core` |
 | Runtime | `runmat-runtime`, `runmat-builtins`, `runmat-filesystem`, `runmat-time`, `runmat-config` |
 | Performance systems | `runmat-accelerate`, `runmat-accelerate-api`, `runmat-gc`, `runmat-gc-api`, `runmat-plot` |
 | Host surfaces | `runmat` CLI, `runmat-lsp`, `runmat-wasm`, `runmat-server-client`, `runmat-telemetry`, `runmat-logging` |
@@ -111,6 +111,24 @@ cargo build --locked --release --bin runmat --features blas-lapack,vendored-open
 ```
 
 Linux release builds use the first form. Windows and macOS release builds use the vendored OpenSSL form.
+
+### Native standalone runtime
+
+`runmat compile` links user objects against the exact frontend-free RunMat runtime embedded in the CLI. Building that product is intentionally a two-phase operation so an installed RunMat remains one executable and no mutable SDK archive is placed beside it:
+
+```bash
+scripts/build-runmat-with-aot-runtime.sh --no-default-features --features jit
+```
+
+On Windows PowerShell:
+
+```powershell
+scripts/build-runmat-with-aot-runtime.ps1 --no-default-features --features jit
+```
+
+The first phase builds `runmat-aot-runtime` as a static library from the same Runtime, VM, JIT host, and `Value` implementations used elsewhere. Cargo reports the target's ordered native link requirements. `runmat-aot-pack` validates and compresses the archive and writes a manifest bound to target, native ABI, schema, runtime/catalog identity, capabilities, lengths, digests, and link tokens. The second phase passes that exact pair explicitly to `runmat-aot`'s build script, which embeds it in the ordinary CLI binary. Normal `cargo build` remains smaller and valid, but its compile command reports that the optional native runtime was not embedded.
+
+Set `RUNMAT_BUILD_PROFILE` to select another Cargo profile. The helpers keep intermediate archive products in a private temporary directory and remove them after the CLI build. The embedded payload is never discovered from the installation directory at runtime.
 
 ## WASM And TypeScript Build
 

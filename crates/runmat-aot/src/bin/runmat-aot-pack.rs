@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use runmat_aot::archive::{build_runtime_archive, RuntimeArchiveEncoding, RuntimeArchiveManifest};
+use runmat_aot::archive::{
+    build_runtime_archive, RuntimeArchiveCapabilities, RuntimeArchiveEncoding,
+    RuntimeArchiveManifest,
+};
 
 struct Arguments {
     archive: PathBuf,
@@ -28,6 +31,7 @@ fn run() -> Result<(), String> {
         &environment,
         arguments.native_link_tokens,
         RuntimeArchiveEncoding::Zstd,
+        RuntimeArchiveCapabilities::standalone_host(),
     )
     .map_err(|error| error.to_string())?;
     let manifest = canonical_manifest_json(&product.manifest)?;

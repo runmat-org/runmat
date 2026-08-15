@@ -7,6 +7,14 @@ pub enum AotOptLevel {
     Speed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum AotPolicy {
+    NativeSpecialized,
+    ClosedWorld,
+    DynamicRuntime,
+    Portable,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum ColorMode {
     /// Detect color support for each output stream

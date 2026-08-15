@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{
-    AotOptLevel, CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel,
+    AotOptLevel, AotPolicy, CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel,
 };
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
@@ -249,6 +249,9 @@ pub enum Commands {
         /// Native optimization policy
         #[arg(long, value_enum, default_value = "speed")]
         optimization: AotOptLevel,
+        /// Native runtime composition policy
+        #[arg(long, value_enum, default_value = "native-specialized")]
+        policy: AotPolicy,
         /// Explicit system linker driver
         #[arg(long)]
         linker: Option<PathBuf>,
@@ -438,7 +441,7 @@ pub enum ConfigCommand {
 #[cfg(test)]
 mod tests {
     use super::{Cli, Commands};
-    use crate::cli::{BatchCommand, ClusterCommand, ClusterStateArg};
+    use crate::cli::{AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg};
     use clap::Parser;
 
     #[test]
@@ -460,6 +463,32 @@ mod tests {
             cli.script.as_deref(),
             Some(std::path::Path::new("snapshot"))
         );
+    }
+
+    #[test]
+    fn compile_policy_defaults_to_the_supported_native_profile() {
+        let cli = Cli::try_parse_from(["runmat", "compile", "main.m"]).unwrap();
+        let Some(Commands::Compile { policy, .. }) = cli.command else {
+            panic!("expected compile command");
+        };
+        assert_eq!(policy, AotPolicy::NativeSpecialized);
+    }
+
+    #[test]
+    fn compile_policy_names_every_declared_composition_mode() {
+        for (name, expected) in [
+            ("native-specialized", AotPolicy::NativeSpecialized),
+            ("closed-world", AotPolicy::ClosedWorld),
+            ("dynamic-runtime", AotPolicy::DynamicRuntime),
+            ("portable", AotPolicy::Portable),
+        ] {
+            let cli =
+                Cli::try_parse_from(["runmat", "compile", "main.m", "--policy", name]).unwrap();
+            let Some(Commands::Compile { policy, .. }) = cli.command else {
+                panic!("expected compile command");
+            };
+            assert_eq!(policy, expected);
+        }
     }
 
     #[test]

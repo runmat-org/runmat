@@ -106,6 +106,25 @@ runmat run src/main
 
 Execution uses the same session pipeline as other hosts: parse, lower, compile, run, emit streams, update workspace, and report structured diagnostics.
 
+## Compile
+
+Use `runmat compile` to produce a standalone executable for the current host:
+
+```bash
+runmat compile main.m -o main
+./main
+```
+
+Compilation uses the same project/package composition, HIR, MIR, static analysis, builtin catalog, and Native IR as normal execution. Functions in the entry file and configured project source roots are compiled with their stable program identities; list stable cross-directory sources under `[sources].roots` so they are available to static composition. A runtime-only `addpath` cannot retroactively add source code to an already linked executable.
+
+The default `--policy=native-specialized` emits target-native code and links the matching RunMat runtime archive embedded in the `runmat` binary. The result does not require a separate RunMat installation or SDK directory at runtime. `--optimization=none|size|speed` controls native object optimization; speed is the default.
+
+Three additional policy names reserve distinct product contracts and fail clearly until their complete implementations are available: `closed-world` requires reachability-pruned linking, `dynamic-runtime` requires an embedded frontend and dynamic source loader, and `portable` produces a target-independent artifact instead of a host executable. RunMat does not silently approximate one policy with another.
+
+Temporary object, archive, and response-file inputs are private and removed after linking. Use `--keep-temps` for linker diagnosis, `--linker PATH` to select an explicit supported system linker driver, and `--force` to replace an output. Forced replacement preserves the previous executable until the new link succeeds.
+
+The compiler validates that the embedded runtime matches the current target, native ABI, schema, RunMat version, runtime identity, and builtin catalog before linking. A source build made with ordinary `cargo build` intentionally lacks that large embedded archive; use the two-phase build helper described in [Build System](/docs/runtime/development/build-system) when developing the standalone workflow.
+
 ## Check
 
 Use `runmat check` before running a `.m` script or `.fea` study:

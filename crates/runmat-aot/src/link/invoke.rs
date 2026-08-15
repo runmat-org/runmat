@@ -70,7 +70,7 @@ pub fn link_standalone(
         &archive_path,
         &linked_path,
     )?;
-    let response = super::response::encode(&plan.response_tokens)?;
+    let response = super::response::encode(&plan.response_tokens, plan.driver.family)?;
     std::fs::write(&response_path, response)
         .map_err(|error| AotError::io("write linker response file", &response_path, error))?;
     let result = std::process::Command::new(&plan.driver.path)

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::{
-    cli::{AotOptLevel, Cli},
+    cli::{AotOptLevel, AotPolicy, Cli},
     commands::{package::install_project_for_source, script::resolve_script_input},
     presentation,
 };
@@ -13,6 +13,7 @@ pub struct CompileRequest {
     pub file: PathBuf,
     pub output: Option<PathBuf>,
     pub optimization: AotOptLevel,
+    pub policy: AotPolicy,
     pub linker: Option<PathBuf>,
     pub keep_temps: bool,
     pub force: bool,
@@ -27,6 +28,7 @@ pub async fn execute(
         file,
         output,
         optimization,
+        policy,
         linker,
         keep_temps,
         force,
@@ -41,9 +43,16 @@ pub async fn execute(
     }
     let runtime = runmat_aot::archive::embedded_runtime_archive()?.ok_or_else(|| {
         anyhow::anyhow!(
-            "this RunMat build does not contain a native compile runtime; install an official build or build with scripts/build-runmat-with-aot-runtime.sh"
+            "this RunMat build does not contain a native compile runtime; rebuild it with scripts/build-runmat-with-aot-runtime.sh (or the Windows PowerShell equivalent)"
         )
     })?;
+    let policy = match policy {
+        AotPolicy::NativeSpecialized => runmat_aot::compile::CompilationPolicy::NativeSpecialized,
+        AotPolicy::ClosedWorld => runmat_aot::compile::CompilationPolicy::ClosedWorld,
+        AotPolicy::DynamicRuntime => runmat_aot::compile::CompilationPolicy::DynamicRuntime,
+        AotPolicy::Portable => runmat_aot::compile::CompilationPolicy::Portable,
+    };
+    policy.validate(&runtime.manifest.capabilities)?;
     let source_text = std::fs::read_to_string(&file)
         .with_context(|| format!("failed to read compile entrypoint `{}`", file.display()))?;
     let mut session =

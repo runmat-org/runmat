@@ -2,6 +2,10 @@
 set -euo pipefail
 
 profile="${RUNMAT_BUILD_PROFILE:-release}"
+profile_directory="$profile"
+if [[ "$profile" == "dev" ]]; then
+  profile_directory="debug"
+fi
 build_root="$(mktemp -d "${TMPDIR:-/tmp}/runmat-aot-build.XXXXXX")"
 trap 'rm -rf "$build_root"' EXIT
 rustc_log="$build_root/native-static-libs.log"
@@ -9,7 +13,7 @@ rustc_log="$build_root/native-static-libs.log"
 cargo rustc -p runmat-aot-runtime --profile "$profile" --lib --crate-type staticlib -- --print native-static-libs 2>&1 | tee "$rustc_log"
 
 case "$(uname -s)" in
-  Darwin|Linux) archive="target/$profile/librunmat_aot_runtime.a" ;;
+  Darwin|Linux) archive="target/$profile_directory/librunmat_aot_runtime.a" ;;
   *) echo "scripts/build-runmat-with-aot-runtime.sh supports macOS and Linux hosts; use the PowerShell build on Windows" >&2; exit 1 ;;
 esac
 
