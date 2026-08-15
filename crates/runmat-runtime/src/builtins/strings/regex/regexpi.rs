@@ -2,8 +2,9 @@
 
 use runmat_builtins::Value;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 
@@ -190,6 +191,12 @@ pub const REGEXPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &REGEXPI_ERRORS,
 };
 
+pub const REGEXPI_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "regexpi accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject through the shared regexp admission boundary before gather or provider access.",
+};
+
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -214,6 +221,7 @@ pub async fn evaluate(
     accel = "sink",
     type_resolver(unknown_type),
     descriptor(crate::builtins::strings::regex::regexpi::REGEXPI_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::regex::regexpi::REGEXPI_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
 async fn regexpi_builtin(

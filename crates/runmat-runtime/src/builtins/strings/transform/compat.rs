@@ -15,7 +15,9 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::core::compat::{
     broadcast_flat_index, broadcast_shape, logical_value, pattern_regex, scalar_text, text_items,
 };
@@ -155,6 +157,12 @@ descriptor!(
     &IN_TEXT,
     &OUT_ANY
 );
+pub const SPLITLINES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "splitlines accepts host string, character, or cell text and returns a string or cell text container. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access.",
+    };
 const EXTRACT_BEFORE_ERRORS: [BuiltinErrorDescriptor; 3] = [
     BuiltinErrorDescriptor {
         code: "RM.EXTRACT_BEFORE.INVALID_INPUT",
@@ -860,9 +868,16 @@ async fn strjust_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::SPLITLINES_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::compat::SPLITLINES_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&text) {
+        return Err(transform_error(
+            "splitlines",
+            "splitlines: expected host string, character array, or cell array of character vectors",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("splitlines"))?;

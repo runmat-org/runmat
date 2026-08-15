@@ -41,7 +41,8 @@
     "Each text element must contain a single word. Multi-word elements raise `RunMat:normalizeWords:InvalidInput`.",
     "Missing string values are preserved.",
     "RunMat supports lightweight English and German `tokenizedDocument` normalization. Japanese/Korean MeCab-backed token details, full dictionary-backed and part-of-speech-aware lemmatization, and exact MathWorks dictionary identity remain tracked by the broader Text Analytics compatibility issue.",
-    "English stemming follows a Porter-style algorithm. German stemming is conservative and intended for compatibility with common preprocessing workflows, not exact release-to-release MathWorks dictionary identity."
+    "English stemming follows a Porter-style algorithm. German stemming is conservative and intended for compatibility with common preprocessing workflows, not exact release-to-release MathWorks dictionary identity.",
+    "Integer semantics: `normalizeWords` has no numeric input role. Numeric, logical, symbolic, and provider-resident values are rejected before gather or provider access."
   ],
   "examples": [
     {

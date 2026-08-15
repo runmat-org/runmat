@@ -1,5 +1,5 @@
 //! Shared helpers for string builtins.
-use runmat_builtins::CharArray;
+use runmat_builtins::{CharArray, Value};
 
 /// Canonical display for missing string scalars in MATLAB-compatible output.
 const MISSING_SENTINEL: &str = "<missing>";
@@ -44,6 +44,30 @@ pub(crate) fn char_row_to_string_slice(data: &[char], cols: usize, row: usize) -
     data[start..end].iter().collect()
 }
 
+/// Return `true` when a text-only input contains a numeric, logical, symbolic, or resident value.
+///
+/// Text builtins use this before any gather so unsupported resident values cannot trigger provider
+/// access merely to discover that their class is not part of the public text contract.
+pub(crate) fn contains_numeric_or_resident_text_input(value: &Value) -> bool {
+    match value {
+        Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::Tensor(_)
+        | Value::SparseTensor(_)
+        | Value::LogicalArray(_)
+        | Value::Complex(_, _)
+        | Value::ComplexTensor(_)
+        | Value::Symbolic(_)
+        | Value::GpuTensor(_) => true,
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .any(contains_numeric_or_resident_text_input),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -82,5 +106,20 @@ pub(crate) mod tests {
         let chars: Vec<char> = vec!['A', 'B', 'C', 'D', 'E', 'F'];
         assert_eq!(char_row_to_string_slice(&chars, 3, 0), "ABC");
         assert_eq!(char_row_to_string_slice(&chars, 3, 1), "DEF");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn text_admission_detects_nested_numeric_values() {
+        let numeric = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        assert!(contains_numeric_or_resident_text_input(&numeric));
+        let nested = Value::Cell(
+            runmat_builtins::CellArray::new(vec![Value::String("ok".into()), numeric], 1, 2)
+                .unwrap(),
+        );
+        assert!(contains_numeric_or_resident_text_input(&nested));
+        assert!(!contains_numeric_or_resident_text_input(&Value::String(
+            "text".into()
+        )));
     }
 }

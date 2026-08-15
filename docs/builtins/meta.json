@@ -109125,7 +109125,11 @@
           "when": "Inputs are not a supported normalizeWords form.",
           "message": "normalizeWords: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "normalizeWords accepts tokenizedDocument objects or host string, character, and cell text plus textual Language and Style values. Numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access."
+      }
     },
     {
       "name": "normcdf",
@@ -126423,7 +126427,11 @@
           "when": "The requested word embedding file cannot be read.",
           "message": "Unable to read word embedding file"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "readWordEmbedding accepts a host string scalar, character vector, or one-cell character-vector filename and returns a wordEmbedding object. Numeric, logical, symbolic, and provider-resident filename values reject before gather, provider access, or filesystem access."
+      }
     },
     {
       "name": "readcell",
@@ -127598,7 +127606,11 @@
           "when": "Internal regexp output assembly fails.",
           "message": "regexp: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "regexp accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access."
+      }
     },
     {
       "name": "regexpPattern",
@@ -127791,7 +127803,11 @@
           "when": "Internal regexpi output assembly fails.",
           "message": "regexpi: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "regexpi accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject through the shared regexp admission boundary before gather or provider access."
+      }
     },
     {
       "name": "regexprep",
@@ -128949,7 +128965,11 @@
           "when": "Internal output container construction failed.",
           "message": "replace: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "replace accepts host string, character, cell text, and pattern inputs only and preserves the input text container. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access."
+      }
     },
     {
       "name": "replaceBetween",
@@ -129792,7 +129812,11 @@
           "outputs": []
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "rethrow consumes a caught exception object and has no numeric data, control, class-preserving output, or provider role. Numeric, logical, symbolic, and resident values fail directly without gather or provider access."
+      }
     },
     {
       "name": "reverse",
@@ -138721,7 +138745,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "splitlines accepts host string, character, or cell text and returns a string or cell text container. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access."
+      }
     },
     {
       "name": "spones",
@@ -143258,7 +143286,11 @@
           "when": "Internal output container construction failed.",
           "message": "strip: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strip accepts host string, character, and cell text plus textual direction and strip-character inputs. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access."
+      }
     },
     {
       "name": "strjoin",

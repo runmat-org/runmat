@@ -8,7 +8,8 @@ use std::path::Path;
 
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
@@ -19,6 +20,7 @@ use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     document_shape_from_object, documents_from_object, TOKENIZED_DOCUMENT_CLASS,
@@ -357,6 +359,13 @@ pub const READ_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor 
     errors: &READ_ERRORS,
 };
 
+pub const READ_WORD_EMBEDDING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "readWordEmbedding accepts a host string scalar, character vector, or one-cell character-vector filename and returns a wordEmbedding object. Numeric, logical, symbolic, and provider-resident filename values reject before gather, provider access, or filesystem access.",
+    };
+
 pub const WRITE_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
         label: "writeWordEmbedding(emb, filename)",
@@ -527,9 +536,18 @@ async fn fast_text_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Val
     descriptor(
         crate::builtins::strings::text_analytics::embeddings::READ_WORD_EMBEDDING_DESCRIPTOR
     ),
+    integer_audit(
+        crate::builtins::strings::text_analytics::embeddings::READ_WORD_EMBEDDING_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&filename) {
+        return Err(embedding_error(
+            "readWordEmbedding",
+            "readWordEmbedding: filename must be a host text scalar",
+        ));
+    }
     let filename = gather_if_needed_async(&filename)
         .await
         .map_err(|err| embedding_error("readWordEmbedding", err.to_string()))?;
