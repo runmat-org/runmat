@@ -2,12 +2,15 @@
 
 use glam::Vec4;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
-use runmat_plot::plots::QuiverPlot;
+use runmat_plot::plots::{NumericPlotData, QuiverPlot};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -26,6 +29,34 @@ use super::style::{parse_line_style_args, value_as_f64, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "quiver3";
 
+const QUIVER3_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X/Y/Z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Three-dimensional Quiver coordinate data accept numeric arrays. RunMat retains native class, shape, and exact values as graphics-object source properties.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "U/V/W",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Vector components remain authoritative in native storage until the explicit floating renderer boundary.",
+    },
+];
+pub const QUIVER3_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = quiver3([integer_X,integer_Y,]integer_Z,integer_U,integer_V,integer_W,...)",
+        inputs: &QUIVER3_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native storage is authoritative for XData/YData/ZData/UData/VData/WData and scene persistence. Rendering is an explicit floating geometry boundary; documented gpuArray input executes client-side and gathers through its exact owner.",
+    }];
+
 type Quiver3Args = (
     Option<usize>,
     Value,
@@ -36,7 +67,14 @@ type Quiver3Args = (
     Value,
     Vec<Value>,
 );
-type Quiver3Components = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
+type Quiver3Components = (
+    NumericPlotData,
+    NumericPlotData,
+    NumericPlotData,
+    NumericPlotData,
+    NumericPlotData,
+    NumericPlotData,
+);
 
 const OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -509,6 +547,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::quiver3::QUIVER3_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::quiver3::QUIVER3_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::quiver3"
 )]
 pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -554,7 +593,7 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let axes = target_axes.unwrap_or(axes);
         let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
-        let plot = QuiverPlot::new3d(
+        let plot = QuiverPlot::from_numeric_data3d(
             x_vals.clone(),
             y_vals.clone(),
             z_vals.clone(),
@@ -770,13 +809,6 @@ fn materialize_quiver3_components(
     let w_rows = w.rows;
     let w_cols = w.cols;
     let w_shape = w.shape.clone();
-    let x_values = tensor_helpers::tensor_into_values_f64(x);
-    let y_values = tensor_helpers::tensor_into_values_f64(y);
-    let z_values = tensor_helpers::tensor_into_values_f64(z);
-    let u_values = tensor_helpers::tensor_into_values_f64(u);
-    let v_values = tensor_helpers::tensor_into_values_f64(v);
-    let w_values = tensor_helpers::tensor_into_values_f64(w);
-
     if u_rows != v_rows
         || u_cols != v_cols
         || u_len != v_len
@@ -798,7 +830,7 @@ fn materialize_quiver3_components(
         ));
     }
     if x_len == u_len && y_len == u_len {
-        return Ok((x_values, y_values, z_values, u_values, v_values, w_values));
+        return quiver3_numeric_data(x, y, z, u, v, w);
     }
     let u_is_matrix = u_rows > 1 && u_cols > 1;
     if !u_is_matrix {
@@ -808,27 +840,47 @@ fn materialize_quiver3_components(
                 "quiver3: X, Y, Z, U, V, and W vectors must have the same length",
             ));
         }
-        return Ok((x_values, y_values, z_values, u_values, v_values, w_values));
+        return quiver3_numeric_data(x, y, z, u, v, w);
     }
     let rows = u_rows;
     let cols = u_cols;
     if x_len == rows * cols && y_len == rows * cols {
-        return Ok((x_values, y_values, z_values, u_values, v_values, w_values));
+        return quiver3_numeric_data(x, y, z, u, v, w);
     }
     if x_len == cols && y_len == rows {
-        let mut out_x = Vec::with_capacity(rows * cols);
-        let mut out_y = Vec::with_capacity(rows * cols);
+        let mut x_indices = Vec::with_capacity(rows * cols);
+        let mut y_indices = Vec::with_capacity(rows * cols);
         for col in 0..cols {
             for row in 0..rows {
-                out_x.push(x_values[col]);
-                out_y.push(y_values[row]);
+                x_indices.push(col);
+                y_indices.push(row);
             }
         }
-        return Ok((out_x, out_y, z_values, u_values, v_values, w_values));
+        let x = super::quiver::expand_quiver_axis_tensor(x, &x_indices, rows, cols, BUILTIN_NAME)?;
+        let y = super::quiver::expand_quiver_axis_tensor(y, &y_indices, rows, cols, BUILTIN_NAME)?;
+        return quiver3_numeric_data(x, y, z, u, v, w);
     }
     Err(plotting_error(
         BUILTIN_NAME,
         "quiver3: X and Y must match U/V/W as vectors or meshgrid-style coordinates",
+    ))
+}
+
+fn quiver3_numeric_data(
+    x: Tensor,
+    y: Tensor,
+    z: Tensor,
+    u: Tensor,
+    v: Tensor,
+    w: Tensor,
+) -> crate::BuiltinResult<Quiver3Components> {
+    Ok((
+        super::common::numeric_plot_data(x)?,
+        super::common::numeric_plot_data(y)?,
+        super::common::numeric_plot_data(z)?,
+        super::common::numeric_plot_data(u)?,
+        super::common::numeric_plot_data(v)?,
+        super::common::numeric_plot_data(w)?,
     ))
 }
 
@@ -1006,6 +1058,35 @@ mod tests {
         assert_eq!(quiver.u, vec![6.0, 7.0]);
         assert_eq!(quiver.v, vec![8.0, 9.0]);
         assert_eq!(quiver.w.as_ref().unwrap(), &vec![10.0, 11.0]);
+    }
+
+    #[test]
+    fn quiver3_properties_preserve_wide_integer_source_storage() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        let _ = clear_figure(None);
+        let wide = (1_u64 << 53) + 1;
+        let w = Tensor::new_integer(IntegerStorage::U64(vec![wide, wide + 2]), vec![2])
+            .expect("wide w data");
+        let handle = futures::executor::block_on(quiver3_builtin(vec![
+            Value::Tensor(int_vec_tensor(vec![0, 1])),
+            Value::Tensor(int_vec_tensor(vec![2, 3])),
+            Value::Tensor(int_vec_tensor(vec![4, 5])),
+            Value::Tensor(int_vec_tensor(vec![6, 7])),
+            Value::Tensor(int_vec_tensor(vec![8, 9])),
+            Value::Tensor(w),
+        ]))
+        .expect("quiver3");
+
+        let value =
+            get_builtin(vec![Value::Num(handle), Value::String("WData".into())]).expect("WData");
+        let Value::Tensor(value) = value else {
+            panic!("expected tensor WData")
+        };
+        assert_eq!(
+            value.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, wide + 2]))
+        );
     }
 
     #[test]

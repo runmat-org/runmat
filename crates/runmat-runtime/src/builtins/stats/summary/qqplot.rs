@@ -4,7 +4,11 @@ use std::cmp::Ordering;
 
 use glam::Vec4;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Type, Value,
 };
@@ -131,6 +135,82 @@ pub const QQPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const QQPLOT_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-integer-sample",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts typed-integer sample data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotIntegerSampleExtension"),
+};
+const QQPLOT_INTEGER_PVEC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-integer-pvec",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts a typed-integer quantile vector as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotIntegerPvecExtension"),
+};
+const QQPLOT_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts explicitly GPU-resident inputs as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotExplicitGpuInputExtension"),
+};
+const QQPLOT_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qqplot-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qqplot accepts logical sample or percentage input as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QqplotLogicalInputExtension"),
+};
+pub const QQPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    QQPLOT_INTEGER_SAMPLE_EXTENSION,
+    QQPLOT_INTEGER_PVEC_EXTENSION,
+    QQPLOT_EXPLICIT_GPU_EXTENSION,
+    QQPLOT_LOGICAL_INPUT_EXTENSION,
+];
+const QQPLOT_INTEGER_SAMPLES: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double sample data. RunMat admits typed integers only after exact binary64 representability is proved.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The optional second sample has the same independently gated checked floating boundary as x.",
+    },
+];
+const QQPLOT_INTEGER_PVEC: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "pvec",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "R2026a documents single and double quantile percentages; typed integer percentages cross a checked binary64 normalization boundary.",
+}];
+pub const QQPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = qqplot(integer_x [, integer_y])",
+        inputs: &QQPLOT_INTEGER_SAMPLES,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Quantiles, interpolation, and reference-line geometry are explicit floating boundaries. Automatic residency gathers transparently; explicit undocumented GPU intent is independently gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = qqplot(x,y,integer_pvec)",
+        inputs: &QQPLOT_INTEGER_PVEC,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Typed quantile percentages are a separately gated RunMat extension and are normalized only after exactness and range checks.",
+    },
+];
+
 fn qqplot_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::Unknown
 }
@@ -181,11 +261,14 @@ struct QqplotEvaluation {
     suppress_auto_output = true,
     type_resolver(qqplot_type),
     descriptor(crate::builtins::stats::summary::qqplot::QQPLOT_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::qqplot::QQPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::qqplot::QQPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::qqplot"
 )]
 pub(crate) async fn qqplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (target, args) =
         split_leading_axes_handle(args, NAME).map_err(|err| invalid(format!("qqplot: {err}")))?;
+    ensure_qqplot_boundaries(&args).await?;
     apply_axes_target(target, NAME).map_err(|err| invalid(err.message))?;
 
     let eval = parse_args(args).await?;
@@ -203,6 +286,44 @@ pub(crate) async fn qqplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Tensor::new(handles.clone(), vec![handles.len(), 1])
         .map(Value::Tensor)
         .map_err(|err| internal(format!("qqplot: {err}")))
+}
+
+async fn ensure_qqplot_boundaries(args: &[Value]) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    for (index, value) in args.iter().enumerate() {
+        if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QQPLOT_EXPLICIT_GPU_EXTENSION,
+                NAME,
+            )?;
+        }
+        if value_has_logical_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QQPLOT_LOGICAL_INPUT_EXTENSION,
+                NAME,
+            )?;
+        }
+        if !value_has_native_integer_class(value) {
+            continue;
+        }
+        let extension = if index == 2 {
+            &QQPLOT_INTEGER_PVEC_EXTENSION
+        } else {
+            &QQPLOT_INTEGER_SAMPLE_EXTENSION
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)?;
+        if !native_integer_value_is_exact_f64_async(value).await? {
+            let role = if index == 2 { "pvec" } else { "sample" };
+            return Err(invalid(format!(
+                "qqplot: integer {role} values must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn parse_args(args: Vec<Value>) -> BuiltinResult<QqplotEvaluation> {
@@ -713,6 +834,7 @@ mod tests {
     #[test]
     fn qqplot_accepts_typed_integer_samples_and_pvec() {
         let _guard = setup();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(qqplot_builtin(vec![
             int_tensor(IntegerStorage::I16(vec![0, 10, 20]), 3, 1),
             int_tensor(IntegerStorage::I16(Vec::new()), 0, 0),
@@ -724,6 +846,73 @@ mod tests {
             get_builtin(vec![Value::Num(handles[0]), Value::String("YData".into())]).unwrap(),
         );
         assert_eq!(y, vec![5.0, 10.0, 15.0]);
+    }
+
+    #[test]
+    fn qqplot_integer_extensions_are_gated_and_inexact_values_reject() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![int_tensor(
+            IntegerStorage::I16(vec![1, 2]),
+            2,
+            1,
+        )]))
+        .expect_err("strict mode rejects integer samples");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_INTEGER_SAMPLE_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![
+            tensor(vec![1.0, 2.0], 2, 1),
+            tensor(Vec::new(), 0, 0),
+            int_tensor(IntegerStorage::U8(vec![25, 75]), 1, 2),
+        ]))
+        .expect_err("strict mode rejects integer pvec");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_INTEGER_PVEC_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(qqplot_builtin(vec![int_tensor(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, 2]),
+            2,
+            1,
+        )]))
+        .expect_err("inexact integer sample rejects");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(extensions);
+    }
+
+    #[test]
+    fn qqplot_strict_mode_gates_explicit_gpu_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 444,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![Value::GpuTensor(handle)]))
+            .expect_err("strict mode rejects explicit GPU input before gather");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn qqplot_logical_input_is_a_gated_extension() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(qqplot_builtin(vec![Value::Bool(true)]))
+            .expect_err("strict mode rejects logical sample extension");
+        assert_eq!(
+            error.identifier(),
+            QQPLOT_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[test]

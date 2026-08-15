@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uniform-grid Welch spectral estimation keeps GPU-resident signals on device through segment framing, FFTs, power scaling, averaging, and frequency-grid generation. Explicit-frequency forms fall back to host execution."
+    "notes": "Uniform-grid Welch spectral estimation keeps supported floating GPU-resident signals on device through segment framing, FFTs, power scaling, averaging, and frequency-grid generation. Explicit-frequency and unsupported typed-integer forms use an exact owner-aware host fallback and restore eligible outputs to the input owner; explicit GPU intent fails instead of silently returning host output when the required floating result class cannot be restored."
   },
   "fusion": {
     "elementwise": false,
@@ -34,13 +34,14 @@
   "description": "`pwelch(x)` estimates the power spectral density of a signal by averaging modified periodograms of overlapped, windowed segments. Optional arguments select the window, overlap, FFT length, sampling frequency, frequency range, and spectrum scale.",
   "behaviors": [
     "`pxx = pwelch(x)` returns a one-sided PSD estimate for real inputs and a two-sided estimate for complex inputs.",
-    "Matrix inputs are processed column-wise; `pxx` has one output column per input column.",
+    "Matrix inputs are processed column-wise; `pxx` has one output column per input column. Single input produces single `pxx` and `f` outputs, while double and admitted typed-integer input produce double outputs.",
     "`[pxx, f] = pwelch(...)` also returns the frequency grid. Without `fs`, frequencies are in radians/sample; with `fs`, frequencies are in Hz.",
     "The `window` argument may be a vector or a scalar segment length. A scalar creates a Hamming window of that length; `[]` uses a default Hamming window sized for roughly eight 50%-overlapped sections, capped at 256 samples.",
     "`noverlap` defaults to half the window length and must be less than the window length.",
     "`nfft` defaults to `max(256, length(window))`, must be at least the window length, and controls the FFT grid. A real frequency vector may be supplied in the same position to evaluate the PSD at explicit frequencies.",
     "The optional range selector accepts `'onesided'`, `'twosided'`, or `'centered'`.",
-    "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` omits the density bandwidth normalization."
+    "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` omits the density bandwidth normalization.",
+    "The R2026a compatibility surface documents single and double signal, window, and frequency data. RunMat mode additionally accepts all eight typed-integer classes for the signal and numeric controls after proving every value is exactly representable at the binary64 Welch boundary, and retains logical signal/control admission as a separately declared extension; strict compatibility mode rejects those extensions before provider dispatch."
   ],
   "examples": [
     {

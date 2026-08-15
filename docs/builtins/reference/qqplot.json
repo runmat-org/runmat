@@ -14,7 +14,9 @@
   "notes": [
     "The returned handle vector contains the data line, solid quartile line, and dashed fitted reference line for each plotted series.",
     "For one-sample plots, the reference line is fitted through the first and third quartiles of the theoretical normal quantiles and sample quantiles.",
-    "RunMat supports numeric vector and matrix data. Two-sample matrices are paired by column; a vector can be compared with each column of a matrix. Distribution-object inputs and table variable routing are not part of this compatibility surface yet."
+    "RunMat supports numeric vector and matrix data. Two-sample matrices are paired by column; a vector can be compared with each column of a matrix. Distribution-object inputs and table variable routing are not part of this compatibility surface yet.",
+    "R2026a documents single and double sample and percentage data. RunMat mode additionally accepts all eight typed-integer classes after exact binary64 representability checks and retains logical numeric input as a separately declared extension; strict compatibility mode rejects these extensions.",
+    "Automatically resident inputs gather transparently at the host quantile-and-graphics boundary. Explicit `gpuArray` input is an independently gated RunMat extension because the public compatibility surface does not document GPU input."
   ],
   "examples": [
     {

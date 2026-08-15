@@ -384,6 +384,18 @@ pub enum ScenePlot {
         v: Vec<f64>,
         #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
         w: Option<Vec<f64>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        z_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        u_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        v_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        w_source: Option<SceneNumericData>,
         color_rgba: [f32; 4],
         line_width: f32,
         scale: f32,
@@ -2110,6 +2122,7 @@ impl ScenePlot {
                         "quiver plot has no exportable scene data",
                     ));
                 }
+                let source = quiver.source_data();
                 Self::Quiver {
                     x,
                     y,
@@ -2117,6 +2130,12 @@ impl ScenePlot {
                     u,
                     v,
                     w,
+                    x_source: source.map(|source| source.0.into()),
+                    y_source: source.map(|source| source.1.into()),
+                    z_source: source.and_then(|source| source.2.map(Into::into)),
+                    u_source: source.map(|source| source.3.into()),
+                    v_source: source.map(|source| source.4.into()),
+                    w_source: source.and_then(|source| source.5.map(Into::into)),
                     color_rgba: vec4_to_rgba(quiver.color),
                     line_width: quiver.line_width,
                     scale: quiver.scale,
@@ -2601,21 +2620,30 @@ impl ScenePlot {
                 label: area.label.clone(),
                 visible: area.visible,
             },
-            PlotElement::Quiver(quiver) => Self::Quiver {
-                x: quiver.x.clone(),
-                y: quiver.y.clone(),
-                z: quiver.z.clone(),
-                u: quiver.u.clone(),
-                v: quiver.v.clone(),
-                w: quiver.w.clone(),
-                color_rgba: vec4_to_rgba(quiver.color),
-                line_width: quiver.line_width,
-                scale: quiver.scale,
-                head_size: quiver.head_size,
-                axes_index,
-                label: quiver.label.clone(),
-                visible: quiver.visible,
-            },
+            PlotElement::Quiver(quiver) => {
+                let source = quiver.source_data();
+                Self::Quiver {
+                    x: quiver.x.clone(),
+                    y: quiver.y.clone(),
+                    z: quiver.z.clone(),
+                    u: quiver.u.clone(),
+                    v: quiver.v.clone(),
+                    w: quiver.w.clone(),
+                    x_source: source.map(|source| source.0.into()),
+                    y_source: source.map(|source| source.1.into()),
+                    z_source: source.and_then(|source| source.2.map(Into::into)),
+                    u_source: source.map(|source| source.3.into()),
+                    v_source: source.map(|source| source.4.into()),
+                    w_source: source.and_then(|source| source.5.map(Into::into)),
+                    color_rgba: vec4_to_rgba(quiver.color),
+                    line_width: quiver.line_width,
+                    scale: quiver.scale,
+                    head_size: quiver.head_size,
+                    axes_index,
+                    label: quiver.label.clone(),
+                    visible: quiver.visible,
+                }
+            }
             PlotElement::Surface(surface) => Self::Surface {
                 x: surface.x_data.clone(),
                 y: surface.y_data.clone(),
@@ -3042,6 +3070,12 @@ impl ScenePlot {
                 u,
                 v,
                 w,
+                x_source,
+                y_source,
+                z_source,
+                u_source,
+                v_source,
+                w_source,
                 color_rgba,
                 line_width,
                 scale,
@@ -3050,10 +3084,34 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut quiver = if let (Some(z), Some(w)) = (z, w) {
-                    QuiverPlot::new3d(x, y, z, u, v, w)?
-                } else {
-                    QuiverPlot::new(x, y, u, v)?
+                let mut quiver = match (x_source, y_source, z_source, u_source, v_source, w_source)
+                {
+                    (Some(x), Some(y), Some(z), Some(u), Some(v), Some(w)) => {
+                        QuiverPlot::from_numeric_data3d(
+                            x.try_into()?,
+                            y.try_into()?,
+                            z.try_into()?,
+                            u.try_into()?,
+                            v.try_into()?,
+                            w.try_into()?,
+                        )?
+                    }
+                    (Some(x), Some(y), None, Some(u), Some(v), None) => {
+                        QuiverPlot::from_numeric_data(
+                            x.try_into()?,
+                            y.try_into()?,
+                            u.try_into()?,
+                            v.try_into()?,
+                        )?
+                    }
+                    (None, None, None, None, None, None) => {
+                        if let (Some(z), Some(w)) = (z, w) {
+                            QuiverPlot::new3d(x, y, z, u, v, w)?
+                        } else {
+                            QuiverPlot::new(x, y, u, v)?
+                        }
+                    }
+                    _ => return Err("quiver scene contains partial typed source data".to_string()),
                 }
                 .with_style(rgba_to_vec4(color_rgba), line_width, scale, head_size)
                 .with_label(label.unwrap_or_else(|| "Data".to_string()));
@@ -4360,6 +4418,36 @@ mod tests {
             y.unwrap().storage(),
             &NumericStorage::I64(vec![-(wide as i64), 7])
         );
+    }
+
+    #[test]
+    fn figure_scene_json_roundtrip_preserves_wide_integer_quiver_sources() {
+        let wide = 9_007_199_254_740_993_u64;
+        let i16_data = |values: Vec<i16>| {
+            NumericPlotData::new(NumericStorage::I16(values), vec![1, 2]).unwrap()
+        };
+        let u =
+            NumericPlotData::new(NumericStorage::U64(vec![wide, wide + 2]), vec![1, 2]).unwrap();
+        let quiver = QuiverPlot::from_numeric_data(
+            i16_data(vec![0, 1]),
+            i16_data(vec![2, 3]),
+            u,
+            i16_data(vec![4, 5]),
+        )
+        .unwrap();
+        let mut figure = Figure::new();
+        figure.add_quiver_plot(quiver);
+
+        let json = serde_json::to_string(&FigureScene::capture(&figure)).unwrap();
+        let rebuilt = serde_json::from_str::<FigureScene>(&json)
+            .unwrap()
+            .into_figure()
+            .unwrap();
+        let PlotElement::Quiver(quiver) = rebuilt.plots().next().unwrap() else {
+            panic!("expected quiver")
+        };
+        let (_, _, _, u, _, _) = quiver.source_data().expect("quiver source data");
+        assert_eq!(u.storage(), &NumericStorage::U64(vec![wide, wide + 2]));
     }
 
     #[test]

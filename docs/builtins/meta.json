@@ -124293,6 +124293,130 @@
           "when": "Output tensor construction fails internally.",
           "message": "pwelch: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "pwelch-integer-signal",
+          "mode": "RunMatOnly",
+          "description": "pwelch accepts a typed-integer input signal as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PwelchIntegerSignalExtension"
+        },
+        {
+          "id": "pwelch-integer-numeric-control",
+          "mode": "RunMatOnly",
+          "description": "pwelch accepts typed-integer window, overlap, frequency, DFT-length, or sample-rate controls as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PwelchIntegerNumericControlExtension"
+        },
+        {
+          "id": "pwelch-logical-input",
+          "mode": "RunMatOnly",
+          "description": "pwelch accepts logical signal or numeric-control input as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PwelchLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[pxx,f] = pwelch(integer_x, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double signals. RunMat gates typed-integer signals before provider dispatch and admits only values exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion, resident integers bypass floating provider kernels, and eligible outputs restore through the exact owner."
+        },
+        {
+          "form": "pwelch(x, integer_window_or_numeric_controls)",
+          "inputs": [
+            {
+              "name": "window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A scalar is decoded as an exact structural window length; a vector crosses a checked floating window boundary."
+            },
+            {
+              "name": "noverlap",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The overlap count is an exact structural nonnegative integer."
+            },
+            {
+              "name": "freqSpec/nfft",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A scalar is decoded as an exact structural DFT length; a vector crosses a checked floating frequency-grid boundary."
+            },
+            {
+              "name": "Fs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed sample rates enter frequency scaling only after exact binary64 representability is proved."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed controls are independently gated; scalar lengths and overlap are structural while vector windows, frequency grids, and sample rates cross checked binary64 boundaries."
+        }
       ]
     },
     {
@@ -124393,6 +124517,26 @@
           "identifier": "RunMat:pzmap:Internal",
           "when": "Pole-zero extraction or output construction failed.",
           "message": "pzmap: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[p,z] = pzmap(integer_sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "pzmap accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Model coefficients have already crossed their constructor's model-numeric boundary."
         }
       ]
     },
@@ -124699,6 +124843,104 @@
           "identifier": "RunMat:qqplot:Internal",
           "when": "RunMat cannot construct quantile pairs or plotting primitives.",
           "message": "qqplot: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "qqplot-integer-sample",
+          "mode": "RunMatOnly",
+          "description": "qqplot accepts typed-integer sample data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QqplotIntegerSampleExtension"
+        },
+        {
+          "id": "qqplot-integer-pvec",
+          "mode": "RunMatOnly",
+          "description": "qqplot accepts a typed-integer quantile vector as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QqplotIntegerPvecExtension"
+        },
+        {
+          "id": "qqplot-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "qqplot accepts explicitly GPU-resident inputs as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QqplotExplicitGpuInputExtension"
+        },
+        {
+          "id": "qqplot-logical-input",
+          "mode": "RunMatOnly",
+          "description": "qqplot accepts logical sample or percentage input as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QqplotLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = qqplot(integer_x [, integer_y])",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double sample data. RunMat admits typed integers only after exact binary64 representability is proved."
+            },
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The optional second sample has the same independently gated checked floating boundary as x."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Quantiles, interpolation, and reference-line geometry are explicit floating boundaries. Automatic residency gathers transparently; explicit undocumented GPU intent is independently gated."
+        },
+        {
+          "form": "h = qqplot(x,y,integer_pvec)",
+          "inputs": [
+            {
+              "name": "pvec",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double quantile percentages; typed integer percentages cross a checked binary64 normalization boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Typed quantile percentages are a separately gated RunMat extension and are normalized only after exactness and range checks."
         }
       ]
     },
@@ -126103,6 +126345,51 @@
           "when": "Internal quiver construction or rendering fails unexpectedly.",
           "message": "quiver: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = quiver([integer_X,integer_Y,]integer_U,integer_V,...)",
+          "inputs": [
+            {
+              "name": "X/Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Quiver coordinate data accept numeric arrays, and the public Quiver property contract includes integer numeric types. RunMat retains native class, shape, and exact values as graphics-object source properties."
+            },
+            {
+              "name": "U/V",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Vector components follow the same numeric graphics-data contract and remain authoritative until the explicit floating renderer boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage is authoritative for XData/YData/UData/VData and scene persistence. Rendering is an explicit floating geometry boundary; documented gpuArray input executes client-side and integer buffers gather exactly when the direct floating WGPU path is inapplicable."
+        }
       ]
     },
     {
@@ -126572,6 +126859,51 @@
           "when": "Internal quiver3 construction or rendering fails unexpectedly.",
           "message": "quiver3: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = quiver3([integer_X,integer_Y,]integer_Z,integer_U,integer_V,integer_W,...)",
+          "inputs": [
+            {
+              "name": "X/Y/Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Three-dimensional Quiver coordinate data accept numeric arrays. RunMat retains native class, shape, and exact values as graphics-object source properties."
+            },
+            {
+              "name": "U/V/W",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Vector components remain authoritative in native storage until the explicit floating renderer boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage is authoritative for XData/YData/ZData/UData/VData/WData and scene persistence. Rendering is an explicit floating geometry boundary; documented gpuArray input executes client-side and gathers through its exact owner."
+        }
       ]
     },
     {
@@ -126613,6 +126945,55 @@
           "identifier": "RunMat:rad2deg:Internal",
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "rad2deg: internal error"
+        },
+        {
+          "code": "RM.RAD2DEG.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:rad2deg:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "rad2deg: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rad2deg-integer-input",
+          "mode": "RunMatOnly",
+          "description": "rad2deg with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Rad2degIntegerInputExtension"
+        },
+        {
+          "id": "rad2deg-logical-input",
+          "mode": "RunMatOnly",
+          "description": "rad2deg with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Rad2degLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "D = rad2deg(integer_R)",
+          "inputs": [
+            {
+              "name": "R",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents only single and double input; RunMat mode admits all eight real integer classes after an exactness check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer storage enters one checked binary64 radians-to-degrees boundary. Resident input gathers exactly and restores the double result to its owning provider."
         }
       ]
     },
@@ -130308,6 +130689,71 @@
           "identifier": "RunMat:refline:Internal",
           "when": "RunMat cannot construct or register the reference line.",
           "message": "refline: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "refline-integer-coefficients",
+          "mode": "RunMatOnly",
+          "description": "refline accepts typed-integer slope/intercept coefficients as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReflineIntegerCoefficientsExtension"
+        },
+        {
+          "id": "refline-explicit-gpu-coefficients",
+          "mode": "RunMatOnly",
+          "description": "refline accepts explicitly GPU-resident coefficients as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReflineExplicitGpuCoefficientsExtension"
+        },
+        {
+          "id": "refline-logical-coefficients",
+          "mode": "RunMatOnly",
+          "description": "refline accepts logical slope/intercept coefficients as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReflineLogicalCoefficientsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = refline(integer_coeffs) or refline(integer_m,integer_b)",
+          "inputs": [
+            {
+              "name": "m",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents single and double slopes. RunMat admits typed integers only at a checked binary64 graphics boundary."
+            },
+            {
+              "name": "b/coeffs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The intercept or two-element coefficient vector follows the same independently gated checked floating boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Slope/intercept arithmetic and line geometry are explicit floating boundaries. Automatic residency gathers transparently; explicit undocumented GPU coefficients are independently gated."
         }
       ]
     },

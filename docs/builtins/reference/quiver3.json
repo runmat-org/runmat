@@ -36,8 +36,9 @@
     "`quiver3(Z, U, V, W)` builds default X/Y grid coordinates from the shape of `Z`.",
     "`quiver3(X, Y, Z, U, V, W)` accepts matching coordinate arrays or meshgrid-style X/Y vectors for matrix vector fields.",
     "The returned graphics handle exposes XData, YData, ZData, UData, VData, WData, Color, LineWidth, AutoScaleFactor, MaxHeadSize, Parent, Children, and Type through `get` and style updates through `set`.",
-    "3-D arrow geometry is stored in the shared quiver plot primitive, so replay/export preserves Z/W data and 3-D bounds.",
-    "Changing scale, head size, color, or data properties invalidates cached quiver geometry before the next render."
+    "3-D arrow geometry is stored in the shared quiver plot primitive, while native X/Y/Z/U/V/W source storage remains authoritative so property access and replay/export preserve integer class, shape, and exact values.",
+    "Changing scale, head size, color, or data properties invalidates cached quiver geometry before the next render.",
+    "Integer coordinate and vector inputs retain exact native storage, including 64-bit values beyond binary64's exact range; materialization occurs only at the floating 3-D renderer boundary."
   ],
   "options": [
     "A numeric argument after the vector data controls the arrow scale factor.",

@@ -4171,6 +4171,7 @@ fn get_quiver_property(
         ));
     };
     let has_cpu_data = quiver.has_cpu_vector_data();
+    let source = quiver.source_data();
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
@@ -4187,7 +4188,22 @@ fn get_quiver_property(
             st.insert("LineWidth", Value::Num(quiver.line_width as f64));
             st.insert("AutoScaleFactor", Value::Num(quiver.scale as f64));
             st.insert("MaxHeadSize", Value::Num(quiver.head_size as f64));
-            if has_cpu_data {
+            if let Some((x, y, z, u, v, w)) = source {
+                st.insert("XData", numeric_plot_data_value(x));
+                st.insert("YData", numeric_plot_data_value(y));
+                if quiver_handle.is_3d {
+                    st.insert(
+                        "ZData",
+                        numeric_plot_data_value(z.expect("3-D source ZData")),
+                    );
+                    st.insert(
+                        "WData",
+                        numeric_plot_data_value(w.expect("3-D source WData")),
+                    );
+                }
+                st.insert("UData", numeric_plot_data_value(u));
+                st.insert("VData", numeric_plot_data_value(v));
+            } else if has_cpu_data {
                 st.insert("XData", tensor_from_vec(quiver.x.clone()));
                 st.insert("YData", tensor_from_vec(quiver.y.clone()));
                 if quiver_handle.is_3d {
@@ -4215,19 +4231,27 @@ fn get_quiver_property(
         Some("linewidth") => Ok(Value::Num(quiver.line_width as f64)),
         Some("autoscalefactor") => Ok(Value::Num(quiver.scale as f64)),
         Some("maxheadsize") => Ok(Value::Num(quiver.head_size as f64)),
+        Some("xdata") if source.is_some() => Ok(numeric_plot_data_value(source.unwrap().0)),
+        Some("ydata") if source.is_some() => Ok(numeric_plot_data_value(source.unwrap().1)),
         Some("xdata") if has_cpu_data => Ok(tensor_from_vec(quiver.x.clone())),
         Some("ydata") if has_cpu_data => Ok(tensor_from_vec(quiver.y.clone())),
         Some("zdata") if quiver_handle.is_3d => {
-            if has_cpu_data {
+            if let Some((_, _, Some(z), _, _, _)) = source {
+                Ok(numeric_plot_data_value(z))
+            } else if has_cpu_data {
                 Ok(tensor_from_vec(quiver.z.clone().unwrap_or_default()))
             } else {
                 Err(quiver_data_unavailable_error(builtin))
             }
         }
+        Some("udata") if source.is_some() => Ok(numeric_plot_data_value(source.unwrap().3)),
+        Some("vdata") if source.is_some() => Ok(numeric_plot_data_value(source.unwrap().4)),
         Some("udata") if has_cpu_data => Ok(tensor_from_vec(quiver.u.clone())),
         Some("vdata") if has_cpu_data => Ok(tensor_from_vec(quiver.v.clone())),
         Some("wdata") if quiver_handle.is_3d => {
-            if has_cpu_data {
+            if let Some((_, _, _, _, _, Some(w))) = source {
+                Ok(numeric_plot_data_value(w))
+            } else if has_cpu_data {
                 Ok(tensor_from_vec(quiver.w.clone().unwrap_or_default()))
             } else {
                 Err(quiver_data_unavailable_error(builtin))
@@ -4989,20 +5013,28 @@ fn apply_quiver_data_property(
             format!("{builtin}: {key} length must match existing quiver data length"),
         ));
     }
-    let data = tensor::tensor_values_f64(&tensor);
+    let data = super::common::numeric_plot_data(tensor)
+        .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))?;
+    let component = match key {
+        "xdata" => "x",
+        "ydata" => "y",
+        "zdata" => "z",
+        "udata" => "u",
+        "vdata" => "v",
+        "wdata" => "w",
+        _ => unreachable!("quiver data property was validated"),
+    };
+    let update_error = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let update_error_slot = std::rc::Rc::clone(&update_error);
     super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
-        match key {
-            "xdata" => quiver.x = data,
-            "ydata" => quiver.y = data,
-            "zdata" => quiver.z = Some(data),
-            "udata" => quiver.u = data,
-            "vdata" => quiver.v = data,
-            "wdata" => quiver.w = Some(data),
-            _ => {}
+        if let Err(err) = quiver.set_numeric_component(component, data) {
+            *update_error_slot.borrow_mut() = Some(err);
         }
-        quiver.mark_dirty();
     })
     .map_err(|err| map_figure_error(builtin, err))?;
+    if let Some(err) = update_error.borrow_mut().take() {
+        return Err(plotting_error(builtin, format!("{builtin}: {err}")));
+    }
     Ok(())
 }
 

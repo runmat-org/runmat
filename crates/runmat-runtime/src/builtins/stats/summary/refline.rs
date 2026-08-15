@@ -1,7 +1,11 @@
 //! Reference-line compatibility helper.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Type, Value,
 };
@@ -140,6 +144,61 @@ pub const REFLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const REFLINE_INTEGER_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "refline-integer-coefficients",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "refline accepts typed-integer slope/intercept coefficients as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ReflineIntegerCoefficientsExtension"),
+    };
+const REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "refline-explicit-gpu-coefficients",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "refline accepts explicitly GPU-resident coefficients as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ReflineExplicitGpuCoefficientsExtension"),
+    };
+const REFLINE_LOGICAL_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "refline-logical-coefficients",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "refline accepts logical slope/intercept coefficients as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ReflineLogicalCoefficientsExtension"),
+    };
+pub const REFLINE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    REFLINE_INTEGER_COEFFICIENT_EXTENSION,
+    REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION,
+    REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
+];
+const REFLINE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "m",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents single and double slopes. RunMat admits typed integers only at a checked binary64 graphics boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "b/coeffs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The intercept or two-element coefficient vector follows the same independently gated checked floating boundary.",
+    },
+];
+pub const REFLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = refline(integer_coeffs) or refline(integer_m,integer_b)",
+        inputs: &REFLINE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Slope/intercept arithmetic and line geometry are explicit floating boundaries. Automatic residency gathers transparently; explicit undocumented GPU coefficients are independently gated.",
+    }];
+
 fn refline_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::Unknown
 }
@@ -169,10 +228,13 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(refline_type),
     descriptor(crate::builtins::stats::summary::refline::REFLINE_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::refline::REFLINE_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::refline::REFLINE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::refline"
 )]
 pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (target, args) = split_optional_axes(args)?;
+    let (target, mut args) = split_optional_axes(args)?;
+    normalize_refline_coefficients(&mut args).await?;
     apply_axes_target(target, NAME).map_err(|err| {
         if err.identifier().is_some() {
             err
@@ -248,6 +310,54 @@ pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Tensor(Tensor::new(handles, vec![len, 1]).map_err(
         |err| internal_error(format!("refline: {err}")),
     )?))
+}
+
+async fn normalize_refline_coefficients(args: &mut [Value]) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    let Some(first) = args.first() else {
+        return Ok(());
+    };
+    let first_len = match first {
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor),
+        Value::GpuTensor(handle) => handle.shape.iter().product(),
+        _ => 1,
+    };
+    let count = if first_len == 2 { 1 } else { args.len().min(2) };
+    for value in args.iter_mut().take(count) {
+        if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION,
+                NAME,
+            )?;
+        }
+        if value_has_logical_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
+                NAME,
+            )?;
+        }
+        if value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &REFLINE_INTEGER_COEFFICIENT_EXTENSION,
+                NAME,
+            )?;
+            if !native_integer_value_is_exact_f64_async(value).await? {
+                return Err(invalid_argument(
+                    "refline: integer coefficients must be exactly representable as double",
+                ));
+            }
+        }
+        if matches!(value, Value::GpuTensor(_)) {
+            *value = crate::dispatcher::gather_if_needed_async(value)
+                .await
+                .map_err(|err| invalid_argument(format!("refline: {err}")))?;
+        }
+    }
+    Ok(())
 }
 
 type AxesTarget = Option<(FigureHandle, usize)>;
@@ -572,6 +682,7 @@ mod tests {
     #[test]
     fn refline_reads_typed_integer_coefficients_exactly() {
         let _guard = setup();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let handle = block_on(refline_builtin(vec![int_tensor(
             IntegerStorage::I16(vec![2, -1]),
             1,
@@ -582,6 +693,60 @@ mod tests {
             panic!("expected line handle");
         };
         assert_eq!(y_data(handle), vec![-1.0, 1.0]);
+    }
+
+    #[test]
+    fn refline_integer_extension_is_gated_and_inexact_values_reject() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(refline_builtin(vec![int_tensor(
+            IntegerStorage::I16(vec![2, -1]),
+            1,
+            2,
+        )]))
+        .expect_err("strict mode rejects integer coefficients");
+        assert_eq!(
+            error.identifier(),
+            REFLINE_INTEGER_COEFFICIENT_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(refline_builtin(vec![int_tensor(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, 0]),
+            1,
+            2,
+        )]))
+        .expect_err("inexact integer coefficients reject");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(extensions);
+    }
+
+    #[test]
+    fn refline_strict_mode_gates_explicit_gpu_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 445,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(refline_builtin(vec![Value::GpuTensor(handle)]))
+            .expect_err("strict mode rejects explicit GPU coefficients before gather");
+        assert_eq!(
+            error.identifier(),
+            REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn refline_logical_coefficients_are_a_gated_extension() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(refline_builtin(vec![Value::Bool(true), Value::Bool(false)]))
+            .expect_err("strict mode rejects logical coefficients");
+        assert_eq!(
+            error.identifier(),
+            REFLINE_LOGICAL_COEFFICIENT_EXTENSION.error_identifier
+        );
     }
 
     #[test]
