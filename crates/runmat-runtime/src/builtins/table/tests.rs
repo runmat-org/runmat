@@ -737,6 +737,119 @@ fn spreadsheet_import_options_registers_public_descriptor() {
         .collect::<Vec<_>>();
     assert!(labels.contains(&"opts = spreadsheetImportOptions()"));
     assert!(labels.contains(&"opts = spreadsheetImportOptions(nameValuePairs...)"));
+    assert_eq!(SPREADSHEET_IMPORT_OPTIONS_INTEGER_CAPABILITIES.len(), 2);
+    assert_eq!(SPREADSHEET_IMPORT_OPTIONS_EXTENSIONS.len(), 1);
+}
+
+#[test]
+fn table_import_integer_control_gates_match_documented_forms() {
+    let missing = Value::from("definitely-missing-table-import.csv");
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+    let readtable_error = block_on(readtable_builtin(
+        missing.clone(),
+        vec![
+            Value::from("NumHeaderLines"),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ],
+    ))
+    .expect_err("typed readtable NumHeaderLines must be gated before file access");
+    assert_eq!(
+        readtable_error.identifier(),
+        READTABLE_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+
+    let readcell_error = block_on(readcell_builtin(
+        missing.clone(),
+        vec![
+            Value::from("Range"),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2]).unwrap(),
+            ),
+        ],
+    ))
+    .expect_err("typed readcell Range must be gated before file access");
+    assert_eq!(
+        readcell_error.identifier(),
+        READCELL_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+
+    let readtimetable_error = block_on(readtimetable_builtin(
+        missing,
+        vec![
+            Value::from("Sheet"),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ],
+    ))
+    .expect_err("typed readtimetable Sheet must be gated before file access");
+    assert_eq!(
+        readtimetable_error.identifier(),
+        READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+
+    let spreadsheet_error = block_on(spreadsheet_import_options_builtin(vec![
+        Value::from("DataRange"),
+        Value::Int(runmat_builtins::IntValue::U8(2)),
+    ]))
+    .expect_err("typed spreadsheet location must be gated before option construction");
+    assert_eq!(
+        spreadsheet_error.identifier(),
+        SPREADSHEET_OPTIONS_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
+    );
+}
+
+#[test]
+fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
+    let path = unique_path("table_import_documented_integer_controls");
+    fs::write(&path, "ignored\nA\n9007199254740993\n").expect("write sample");
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+    let table = object(
+        block_on(readtable_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![
+                Value::from("VariableNamesLine"),
+                Value::Int(runmat_builtins::IntValue::U8(2)),
+                Value::from("VariableTypes"),
+                Value::StringArray(StringArray::new(vec!["uint64".into()], vec![1, 1]).unwrap()),
+            ],
+        ))
+        .expect("documented readtable integer line"),
+    );
+    let Value::Tensor(column) = table_member_get(&table, &Value::from("A")).unwrap() else {
+        panic!("expected integer table variable");
+    };
+    assert_eq!(
+        column.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
+    );
+
+    let cells = block_on(readcell_builtin(
+        Value::from(path.to_string_lossy().to_string()),
+        vec![
+            Value::from("NumHeaderLines"),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ],
+    ))
+    .expect("documented readcell integer header count");
+    let Value::Cell(cells) = cells else {
+        panic!("expected cell output");
+    };
+    assert_eq!(
+        cells.get(0, 0).expect("first imported cell"),
+        Value::from("A")
+    );
+
+    let options = block_on(spreadsheet_import_options_builtin(vec![
+        Value::from("NumVariables"),
+        Value::Int(runmat_builtins::IntValue::U8(2)),
+    ]))
+    .expect("documented integer NumVariables");
+    let Value::Struct(options) = options else {
+        panic!("expected options structure");
+    };
+    assert_eq!(options.fields.get("NumVariables"), Some(&Value::Num(2.0)));
+    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -3114,6 +3227,57 @@ fn array_datastore_resident_integer_input_is_mode_gated_and_gathers_exactly() {
             }
         }
     });
+}
+
+#[test]
+fn parquet_datastore_rejects_typed_integer_arguments_before_gather() {
+    assert_eq!(PARQUET_DATASTORE_INTEGER_CAPABILITIES.len(), 1);
+    for value in [
+        Value::Int(runmat_builtins::IntValue::I8(1)),
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        ),
+    ] {
+        let error = block_on(parquet_datastore_builtin(vec![
+            Value::from("sample.parquet"),
+            Value::from("ReadSize"),
+            value,
+        ]))
+        .expect_err("typed integer parquet constructor control must reject");
+        assert!(error.message().contains("typed-integer"));
+    }
+}
+
+#[test]
+fn parquet_datastore_records_supported_double_controls_and_rejects_unknown_options() {
+    let datastore = block_on(parquet_datastore_builtin(vec![
+        Value::from("sample.parquet"),
+        Value::from("ReadSize"),
+        Value::Num(32.0),
+        Value::from("BlockSize"),
+        Value::Num(1_000_000.0),
+    ]))
+    .expect("parquet datastore");
+    let Value::Object(datastore) = datastore else {
+        panic!("expected parquet datastore object");
+    };
+    assert_eq!(
+        datastore.properties.get("ReadSize"),
+        Some(&Value::Num(32.0))
+    );
+    assert_eq!(
+        datastore.properties.get("BlockSize"),
+        Some(&Value::Num(1_000_000.0))
+    );
+
+    let error = block_on(parquet_datastore_builtin(vec![
+        Value::from("sample.parquet"),
+        Value::from("Unknown"),
+        Value::Num(1.0),
+    ]))
+    .expect_err("unknown option must not be ignored");
+    assert!(error.message().contains("unsupported option"));
 }
 
 #[test]

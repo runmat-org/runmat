@@ -115105,6 +115105,26 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "pds = parquetDatastore(location, typed_integer_argument...)",
+          "inputs": [
+            {
+              "name": "ReadSize, BlockSize, location, or other constructor argument",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented ReadSize and BlockSize numeric datatype is double, while locations and other constructor options are text, logical, or objects. Typed-integer host or resident arguments reject before gather and cannot be silently ignored."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The constructor records supported host metadata only. Integer Parquet columns belong to parquetread/read datastore operations, not to this constructor input surface."
+        }
       ]
     },
     {
@@ -129553,6 +129573,72 @@
           "when": "Internal socket/control-flow conversion fails.",
           "message": "read: internal socket error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "data = read(client)",
+          "inputs": [],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The current public worked example, default-datatype table, and transfer note converge on an exact uint8 result when datatype is omitted, despite one contradictory prose sentence on the same page."
+        },
+        {
+          "form": "data = read(client, integer_count)",
+          "inputs": [
+            {
+              "name": "count",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented count inputs. RunMat reads the authoritative scalar exactly, requires a positive value representable as usize, and never routes the count through binary64."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The default result is exact uint8. Networking executes on the host; resident count controls gather automatically before exact validation."
+        },
+        {
+          "form": "data = read(client, integer_count, integer_datatype)",
+          "inputs": [
+            {
+              "name": "count",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented count inputs. RunMat reads the authoritative scalar exactly, requires a positive value representable as usize, and never routes the count through binary64."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "An explicit integer datatype returns that exact native integer class in a host row vector; byte-order decoding never materializes a floating compatibility mirror."
+        }
       ]
     },
     {
@@ -129666,6 +129752,70 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "readcell-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "readcell accepts typed-integer controls whose public datatype tables are floating-only as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReadcellTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = readcell(filename, 'NumHeaderLines', integer_count)",
+          "inputs": [
+            {
+              "name": "NumHeaderLines",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public contract is a positive integer. RunMat accepts every native integer class, reads the authoritative scalar exactly, and bounds-checks it before skipping host input records."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Imported numeric cells retain the documented double scalar representation; the integer header count affects only import structure."
+        },
+        {
+          "form": "C = readcell(filename, typed_integer_extension_controls...)",
+          "inputs": [
+            {
+              "name": "Range, Sheet, NumHeaderLines, or another implemented control whose public datatype list excludes native integers",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public R2026a datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Compatibility mode rejects typed floating-only controls before file access; RunMat mode validates them exactly."
+        }
       ]
     },
     {
@@ -129720,7 +129870,11 @@
           "when": "Internal socket/control-flow conversion fails.",
           "message": "readline: internal socket error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "The documented input is a tcpclient object and the output is text or the documented empty double timeout sentinel. Integer host or resident values are invalid clients and are rejected without numeric conversion or provider dispatch."
+      }
     },
     {
       "name": "readlines",
@@ -129978,6 +130132,103 @@
           "when": "Internal tensor/logical output materialization fails.",
           "message": "readmatrix: unable to construct output matrix"
         }
+      ],
+      "extensions": [
+        {
+          "id": "readmatrix-like-output",
+          "mode": "RunMatOnly",
+          "description": "readmatrix accepts a Like prototype and optional resident result as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReadmatrixLikeOutputExtension"
+        },
+        {
+          "id": "readmatrix-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "readmatrix accepts typed-integer range, header, size, empty-value, and related numeric controls as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReadmatrixTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = readmatrix(filename, 'OutputType', integer_class)",
+          "inputs": [
+            {
+              "name": "OutputType integer class selector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented OutputType selector names any of the eight integer classes. Decimal integer tokens are parsed directly into native storage, including exact int64 and uint64 endpoints, while fractional and exceptional values follow saturating cast rules."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "File I/O and parsing are host operations. Every integer OutputType produces private authoritative native storage with no eager floating compatibility mirror."
+        },
+        {
+          "form": "M = readmatrix(filename, typed_integer_controls...)",
+          "inputs": [
+            {
+              "name": "Range, NumHeaderLines, ExpectedNumVariables, EmptyValue, or related numeric option",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public R2026a datatype tables constrain implemented numeric controls to single/double. RunMat mode retains the typed-integer extension and reads structural values exactly; compatibility mode rejects before gather or file access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed controls are an independently gated extension; ordinary automatic residency may gather transparently for host file I/O."
+        },
+        {
+          "form": "M = readmatrix(filename, 'Like', integer_prototype)",
+          "inputs": [
+            {
+              "name": "Like integer prototype",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Like is not a documented readmatrix option. RunMat mode uses the exact prototype class and owner; integer text is parsed directly in that class rather than through binary64."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Compatibility mode rejects the whole Like extension. RunMat mode preserves host class and attempts explicit owner-resident restoration only when the provider can represent the exact class."
+        }
       ]
     },
     {
@@ -130066,6 +130317,97 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "readtable-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "readtable accepts typed-integer controls whose public datatype tables are floating-only as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReadtableTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = readtable(filename, import_options_with_integer_VariableTypes)",
+          "inputs": [
+            {
+              "name": "VariableTypes integer class",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer variable types parse decimal text directly into private native storage, including exact int64 and uint64 endpoints and saturating conversion of missing, infinite, or out-of-range values."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Each imported integer table variable owns authoritative native storage; table containment does not introduce a floating mirror."
+        },
+        {
+          "form": "T = readtable(filename, 'VariableNamesLine', integer_line)",
+          "inputs": [
+            {
+              "name": "VariableNamesLine",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public datatype table explicitly includes all eight integer classes. RunMat reads the authoritative scalar exactly and bounds-checks it before deriving the zero-based host header offset."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented integer line control affects only host import structure and never selects output class or residency."
+        },
+        {
+          "form": "T = readtable(filename, typed_integer_extension_controls...)",
+          "inputs": [
+            {
+              "name": "Range, Sheet, NumHeaderLines, or another implemented control whose public datatype list excludes native integers",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public R2026a datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The pre-existing typed-control extension is independently gated; ordinary resident arguments may still gather transparently for host I/O."
+        }
       ]
     },
     {
@@ -130132,6 +130474,97 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "readtimetable-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "readtimetable accepts typed-integer controls whose public datatype tables are floating-only as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReadtimetableTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "TT = readtimetable(filename, import_options_with_integer_VariableTypes)",
+          "inputs": [
+            {
+              "name": "VariableTypes integer class",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer variable types are imported directly into exact native table-variable storage before timetable construction."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Timetable containment preserves the exact integer class and payload of imported variables; row-time inference does not coerce unrelated data variables."
+        },
+        {
+          "form": "TT = readtimetable(filename, 'VariableNamesLine', integer_line)",
+          "inputs": [
+            {
+              "name": "VariableNamesLine",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public datatype table explicitly includes all eight integer classes. RunMat reads the authoritative scalar exactly and bounds-checks it before deriving the host header offset."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented line control is an exact host index and does not select output residency."
+        },
+        {
+          "form": "TT = readtimetable(filename, typed_integer_extension_controls...)",
+          "inputs": [
+            {
+              "name": "Range, Sheet, NumHeaderLines, ExpectedNumVariables, boolean numeric flags, or related floating-only control",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed forms outside the public datatype tables remain a gated RunMat extension and are rejected in compatibility mode before gather or file access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Automatic residency may gather transparently for host I/O, but unsupported typed controls cannot bypass the compatibility gate."
         }
       ]
     },
@@ -142644,6 +143077,70 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "spreadsheetimportoptions-typed-integer-location-control",
+          "mode": "RunMatOnly",
+          "description": "spreadsheetImportOptions accepts typed-integer location controls outside documented NumVariables as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SpreadsheetImportOptionsTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "opts = spreadsheetImportOptions('NumVariables', integer_num_vars, ___)",
+          "inputs": [
+            {
+              "name": "NumVariables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive scalar integer is read exactly from every integer class and must fit usize before import-option metadata is allocated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "VariableTypes may name all eight native integer output classes for later readtable use; the options structure itself is host metadata."
+        },
+        {
+          "form": "opts = spreadsheetImportOptions(typed_integer_location_controls...)",
+          "inputs": [
+            {
+              "name": "Range, Sheet, NumHeaderLines, or another implemented control whose public datatype list excludes native integers",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public R2026a datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed location controls beyond NumVariables are a gated RunMat extension and are never rounded through binary64."
+        }
       ]
     },
     {
@@ -151144,6 +151641,70 @@
           "identifier": "RunMat:textscan:Parse",
           "when": "Input text cannot be parsed according to the format specification.",
           "message": "textscan: parse failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "textscan-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "textscan accepts typed-integer file identifiers, repeat counts, and numeric controls as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TextscanTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = textscan(textOrFileID, integer_conversion_format, ___)",
+          "inputs": [
+            {
+              "name": "%d/%i/%u/%x/%b integer conversion specifier",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The format text selects int8/int16/int32/int64 or uint8/uint16/uint32/uint64 through documented decimal, hexadecimal, and binary suffixes; unsuffixed decimal signed/unsigned conversions return int32/uint32, while unsuffixed hexadecimal and binary conversions return uint64."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer fields are parsed directly into authoritative native storage. CollectOutput combines only adjacent numeric columns of the same class, so no mixed-class floating mirror is introduced."
+        },
+        {
+          "form": "C = textscan(typed_integer_file_id, formatSpec, typed_integer_controls...)",
+          "inputs": [
+            {
+              "name": "file identifier, repeat count, HeaderLines, or boolean numeric control",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public forms expose double file identifiers and numeric controls. RunMat mode admits all eight integer classes, validates authoritative scalars structurally, and rejects negative or oversized values without floating conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Compatibility mode rejects the typed-control extension before gather or file access; RunMat mode preserves the pre-existing exact structural behavior. Automatic residency remains a transparent host fallback."
         }
       ]
     },

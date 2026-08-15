@@ -22,6 +22,26 @@ pub(crate) const ARRAY_DATASTORE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor
 pub const ARRAY_DATASTORE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
     [ARRAY_DATASTORE_GPU_INPUT_EXTENSION];
 
+const PARQUET_DATASTORE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ReadSize, BlockSize, location, or other constructor argument",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented ReadSize and BlockSize numeric datatype is double, while locations and other constructor options are text, logical, or objects. Typed-integer host or resident arguments reject before gather and cannot be silently ignored.",
+    }];
+pub const PARQUET_DATASTORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "pds = parquetDatastore(location, typed_integer_argument...)",
+        inputs: &PARQUET_DATASTORE_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The constructor records supported host metadata only. Integer Parquet columns belong to parquetread/read datastore operations, not to this constructor input surface.",
+    }];
+
 const ARRAY_DATASTORE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "A",
@@ -690,19 +710,81 @@ pub(crate) async fn file_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Va
     keywords = "parquetDatastore,datastore,parquet,table",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::PARQUET_DATASTORE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn parquet_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args.iter().any(parquet_value_contains_typed_integer) {
+        return Err(invalid_argument(
+            "parquetDatastore: typed-integer constructor arguments are not supported",
+        ));
+    }
     let args = gather_values(&args).await?;
+    let Some(files) = args.first().cloned() else {
+        return Err(invalid_argument(
+            "parquetDatastore: files location is required",
+        ));
+    };
+    if (args.len() - 1) % 2 != 0 {
+        return Err(invalid_argument(
+            "parquetDatastore: name-value options must be provided in pairs",
+        ));
+    }
+    let mut read_size = Value::from("rowgroup");
+    let mut block_size = Value::Num(128_000_000.0);
+    let mut idx = 1usize;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "parquetDatastore option")?;
+        let value = args[idx + 1].clone();
+        if name.eq_ignore_ascii_case("ReadSize") {
+            read_size = match &value {
+                Value::String(text)
+                    if text.eq_ignore_ascii_case("file")
+                        || text.eq_ignore_ascii_case("rowgroup") =>
+                {
+                    value
+                }
+                Value::CharArray(_) | Value::StringArray(_) => {
+                    let text = scalar_text(&value, "ReadSize")?;
+                    if !text.eq_ignore_ascii_case("file") && !text.eq_ignore_ascii_case("rowgroup")
+                    {
+                        return Err(invalid_argument("parquetDatastore: ReadSize must be 'file', 'rowgroup', or a positive double integer"));
+                    }
+                    Value::String(text)
+                }
+                _ => {
+                    Value::Num(array_datastore_positive_double_integer(&value, "ReadSize")? as f64)
+                }
+            };
+        } else if name.eq_ignore_ascii_case("BlockSize") {
+            block_size =
+                Value::Num(array_datastore_positive_double_integer(&value, "BlockSize")? as f64);
+        } else {
+            return Err(invalid_argument(format!(
+                "parquetDatastore: unsupported option '{name}'"
+            )));
+        }
+        idx += 2;
+    }
     let mut object = ObjectInstance::new(PARQUET_DATASTORE_CLASS.to_string());
-    object.properties.insert(
-        "Files".to_string(),
-        args.first().cloned().unwrap_or_else(|| {
-            Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap())
-        }),
-    );
+    object.properties.insert("Files".to_string(), files);
+    object.properties.insert("ReadSize".to_string(), read_size);
+    object
+        .properties
+        .insert("BlockSize".to_string(), block_size);
     Ok(Value::Object(object))
+}
+
+fn parquet_value_contains_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(parquet_value_contains_typed_integer))
+        || matches!(value, Value::Struct(structure) if structure.fields.values().any(parquet_value_contains_typed_integer))
+        || matches!(value, Value::Object(object) if object.properties.values().any(parquet_value_contains_typed_integer))
 }
 
 #[runtime_builtin(

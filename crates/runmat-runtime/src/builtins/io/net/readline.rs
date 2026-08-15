@@ -1,9 +1,10 @@
 //! MATLAB-compatible `readline` builtin for TCP/IP clients in RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, StructValue, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
@@ -76,6 +77,12 @@ pub const READLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &READLINE_ERRORS,
 };
+pub const READLINE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "The documented input is a tcpclient object and the output is text or the documented empty double timeout sentinel. Integer host or resident values are invalid clients and are rejected without numeric conversion or provider dispatch.",
+    };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -149,6 +156,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "readline,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::readline_type),
     descriptor(crate::builtins::io::net::readline::READLINE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::net::readline::READLINE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::net::readline"
 )]
 async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

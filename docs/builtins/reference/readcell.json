@@ -8,7 +8,7 @@
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests"},
   "description": "`readcell(filename, ...)` imports text or spreadsheet data directly into a cell array without consuming detected table headers.",
-  "behaviors": ["Text and spreadsheet options accepted by `readtable` are reused where they apply.", "Rows are padded to a rectangular cell array.", "Delimited text cells are converted to numeric or logical scalars when they parse cleanly; otherwise they remain strings."],
+  "behaviors": ["Text and spreadsheet options accepted by `readtable` are reused where they apply.", "A typed-integer `NumHeaderLines` is accepted as the documented positive-integer structural control and is read exactly from every native integer class.", "Typed-integer values for controls whose public datatype contract excludes native integers are RunMat-only extensions and are rejected in MATLAB compatibility mode before gathering or file access.", "Rows are padded to a rectangular cell array.", "Delimited text cells are converted to double or logical scalars when they parse cleanly; otherwise they remain strings."],
   "examples": [{"description": "Read cells", "input": "C = readcell('data.csv')", "output": "C = cell array"}],
   "links": [{"label": "readtable", "url": "./readtable"}, {"label": "table2cell", "url": "./table2cell"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}

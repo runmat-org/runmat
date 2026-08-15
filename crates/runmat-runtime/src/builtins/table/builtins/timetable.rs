@@ -21,6 +21,72 @@ pub(crate) const ARRAY2TIMETABLE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor
 pub const ARRAY2TIMETABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
     [ARRAY2TIMETABLE_GPU_INPUT_EXTENSION];
 
+pub(crate) const READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "readtimetable-typed-integer-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "readtimetable accepts typed-integer controls whose public datatype tables are floating-only as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ReadtimetableTypedIntegerControlExtension"),
+    };
+pub const READTIMETABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION];
+const READTIMETABLE_INTEGER_VARIABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "VariableTypes integer class",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented integer variable types are imported directly into exact native table-variable storage before timetable construction.",
+    }];
+const READTIMETABLE_INTEGER_LOCATION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "VariableNamesLine",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public datatype table explicitly includes all eight integer classes. RunMat reads the authoritative scalar exactly and bounds-checks it before deriving the host header offset.",
+    }];
+const READTIMETABLE_INTEGER_EXTENSION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Range, Sheet, NumHeaderLines, ExpectedNumVariables, boolean numeric flags, or related floating-only control",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed forms outside the public datatype tables remain a gated RunMat extension and are rejected in compatibility mode before gather or file access.",
+    }];
+pub const READTIMETABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "TT = readtimetable(filename, import_options_with_integer_VariableTypes)",
+        inputs: &READTIMETABLE_INTEGER_VARIABLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Timetable containment preserves the exact integer class and payload of imported variables; row-time inference does not coerce unrelated data variables.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "TT = readtimetable(filename, 'VariableNamesLine', integer_line)",
+        inputs: &READTIMETABLE_INTEGER_LOCATION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented line control is an exact host index and does not select output residency.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "TT = readtimetable(filename, typed_integer_extension_controls...)",
+        inputs: &READTIMETABLE_INTEGER_EXTENSION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Automatic residency may gather transparently for host I/O, but unsupported typed controls cannot bypass the compatibility gate.",
+    },
+];
+
 const ARRAY2TIMETABLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "X",
@@ -237,9 +303,19 @@ pub(crate) async fn timetable2table_builtin(
     keywords = "readtimetable,timetable,readtable,RowTimes",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::timetable::READTIMETABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::timetable::READTIMETABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn readtimetable_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::io::enforce_table_import_integer_control_gate(
+        &rest,
+        &READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION,
+        "readtimetable",
+        &["VariableNamesLine"],
+    )?;
     let path = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;

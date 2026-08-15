@@ -1,9 +1,13 @@
 //! MATLAB-compatible `read` builtin for TCP/IP clients in RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntegerStorage, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, IntegerStorage, NumericStorage, StructValue, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
@@ -156,6 +160,48 @@ pub const READ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &READ_ERRORS,
 };
 
+const READ_INTEGER_COUNT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "count",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented count inputs. RunMat reads the authoritative scalar exactly, requires a positive value representable as usize, and never routes the count through binary64.",
+    }];
+const READ_NO_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 0] = [];
+pub const READ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "data = read(client)",
+        inputs: &READ_NO_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The current public worked example, default-datatype table, and transfer note converge on an exact uint8 result when datatype is omitted, despite one contradictory prose sentence on the same page.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "data = read(client, integer_count)",
+        inputs: &READ_INTEGER_COUNT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The default result is exact uint8. Networking executes on the host; resident count controls gather automatically before exact validation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "data = read(client, integer_count, integer_datatype)",
+        inputs: &READ_INTEGER_COUNT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "An explicit integer datatype returns that exact native integer class in a host row vector; byte-order decoding never materializes a floating compatibility mirror.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::read")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "read",
@@ -228,6 +274,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "read,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::read_type),
     descriptor(crate::builtins::io::net::read::READ_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::net::read::READ_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::net::read"
 )]
 async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -278,6 +325,14 @@ async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     }
 
     let element_size = options.datatype.element_size();
+    if let ReadMode::Count(count) = options.mode {
+        count.checked_mul(element_size).ok_or_else(|| {
+            read_flow(
+                &READ_ERROR_INVALID_COUNT,
+                "read: count and datatype size exceed the maximum supported byte count",
+            )
+        })?;
+    }
     let mut stream = stream;
     let read_result = perform_read(&mut stream, &options.mode, element_size)?;
 
@@ -504,9 +559,9 @@ fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> Builtin
             Ok(Value::Tensor(tensor))
         }
         DataType::Single | DataType::Double => {
-            let values = numeric_from_bytes(bytes, datatype, order)?;
-            let cols = values.len();
-            let tensor = Tensor::new(values, vec![1, cols])
+            let storage = floating_storage_from_bytes(bytes, datatype, order)?;
+            let cols = storage.len();
+            let tensor = Tensor::from_numeric_storage(storage, vec![1, cols])
                 .map_err(|err| read_flow(&READ_ERROR_INTERNAL, format!("read: {err}")))?;
             Ok(Value::Tensor(tensor))
         }
@@ -520,14 +575,18 @@ fn char_row(bytes: &[u8]) -> Value {
     Value::CharArray(array)
 }
 
-fn numeric_from_bytes(
+fn floating_storage_from_bytes(
     bytes: &[u8],
     datatype: DataType,
     order: ByteOrder,
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<NumericStorage> {
     let size = datatype.element_size();
     if size == 0 {
-        return Ok(Vec::new());
+        return Ok(match datatype {
+            DataType::Single => NumericStorage::F32(Vec::new()),
+            DataType::Double => NumericStorage::F64(Vec::new()),
+            _ => unreachable!("floating storage requested for nonfloating datatype"),
+        });
     }
     if !bytes.len().is_multiple_of(size) {
         return Err(read_flow(
@@ -535,22 +594,26 @@ fn numeric_from_bytes(
             "read: received byte count does not align with datatype size",
         ));
     }
-    let mut out = Vec::with_capacity(bytes.len() / size);
-    let chunks = bytes.chunks_exact(size);
-    for chunk in chunks {
-        let value = match datatype {
-            DataType::Single => f32_from(chunk, order) as f64,
-            DataType::Double => f64_from(chunk, order),
-            _ => {
-                return Err(read_flow(
-                    &READ_ERROR_INTERNAL,
-                    "read: expected a floating-point datatype",
-                ));
-            }
-        };
-        out.push(value);
-    }
-    Ok(out)
+    Ok(match datatype {
+        DataType::Single => NumericStorage::F32(
+            bytes
+                .chunks_exact(size)
+                .map(|chunk| f32_from(chunk, order))
+                .collect(),
+        ),
+        DataType::Double => NumericStorage::F64(
+            bytes
+                .chunks_exact(size)
+                .map(|chunk| f64_from(chunk, order))
+                .collect(),
+        ),
+        _ => {
+            return Err(read_flow(
+                &READ_ERROR_INTERNAL,
+                "read: expected a floating-point datatype",
+            ))
+        }
+    })
 }
 
 fn integer_storage_from_bytes(
@@ -698,20 +761,7 @@ async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
 
 fn parse_count(value: &Value) -> BuiltinResult<usize> {
     if let Value::Int(int) = value {
-        return int.try_to_usize().ok_or_else(|| {
-            let (error, detail) = if int.try_to_u64().is_some() {
-                (
-                    &READ_ERROR_INVALID_COUNT,
-                    "read: count exceeds the maximum supported size",
-                )
-            } else {
-                (
-                    &READ_ERROR_INVALID_COUNT,
-                    "read: count must be a non-negative finite value",
-                )
-            };
-            read_flow(error, detail)
-        });
+        return parse_integer_count(int);
     }
 
     let numeric = match value {
@@ -721,20 +771,7 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
                 .numeric_value_at(0)
                 .expect("scalar tensor has authoritative numeric value");
             if let Some(int) = value.into_int_value() {
-                return int.try_to_usize().ok_or_else(|| {
-                    let (error, detail) = if int.try_to_u64().is_some() {
-                        (
-                            &READ_ERROR_INVALID_COUNT,
-                            "read: count exceeds the maximum supported size",
-                        )
-                    } else {
-                        (
-                            &READ_ERROR_INVALID_COUNT,
-                            "read: count must be a non-negative finite value",
-                        )
-                    };
-                    read_flow(error, detail)
-                });
+                return parse_integer_count(&int);
             }
             value.materialize_f64()
         }
@@ -745,10 +782,10 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
             ))
         }
     };
-    if numeric.is_nan() || numeric.is_sign_negative() {
+    if numeric.is_nan() || numeric <= 0.0 {
         return Err(read_flow(
             &READ_ERROR_INVALID_COUNT,
-            "read: count must be a non-negative finite value",
+            "read: count must be a positive finite integer",
         ));
     }
     if numeric.is_infinite() {
@@ -763,7 +800,35 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
             "read: count exceeds the maximum supported size",
         ));
     }
-    Ok(numeric.trunc() as usize)
+    let parsed = numeric as usize;
+    if parsed as f64 != numeric {
+        return Err(read_flow(
+            &READ_ERROR_INVALID_COUNT,
+            "read: count must be a positive finite integer",
+        ));
+    }
+    Ok(parsed)
+}
+
+fn parse_integer_count(int: &runmat_builtins::IntValue) -> BuiltinResult<usize> {
+    let unsigned = int.try_to_u64().ok_or_else(|| {
+        read_flow(
+            &READ_ERROR_INVALID_COUNT,
+            "read: count must be a positive finite integer",
+        )
+    })?;
+    if unsigned == 0 {
+        return Err(read_flow(
+            &READ_ERROR_INVALID_COUNT,
+            "read: count must be a positive finite integer",
+        ));
+    }
+    usize::try_from(unsigned).map_err(|_| {
+        read_flow(
+            &READ_ERROR_INVALID_COUNT,
+            "read: count exceeds the maximum supported size",
+        )
+    })
 }
 
 fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
@@ -900,6 +965,8 @@ pub(crate) mod tests {
     #[test]
     fn typed_read_count_and_handle_parsers_are_exact() {
         assert_eq!(parse_count(&Value::Int(IntValue::U64(42))).unwrap(), 42);
+        assert!(parse_count(&Value::Int(IntValue::U8(0))).is_err());
+        assert!(parse_count(&Value::Num(2.5)).is_err());
         assert!(parse_count(&Value::Int(IntValue::I8(-1))).is_err());
         let maximum = parse_count(&Value::Int(IntValue::U64(u64::MAX)));
         if usize::BITS == 64 {
@@ -1082,6 +1149,31 @@ pub(crate) mod tests {
                 assert_eq!(tensor.integer_storage(), Some(expected));
             }
         }
+    }
+
+    #[test]
+    fn read_default_uint8_and_explicit_single_output_classes_are_truthful() {
+        let default = bytes_to_value(&[1, 2, 255], DataType::UInt8, ByteOrder::Little)
+            .expect("default decode");
+        let Value::Tensor(default) = default else {
+            panic!("expected default tensor");
+        };
+        assert_eq!(
+            default.integer_storage(),
+            Some(&IntegerStorage::U8(vec![1, 2, 255]))
+        );
+
+        let bytes = [1.25_f32, -2.5_f32]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>();
+        let single =
+            bytes_to_value(&bytes, DataType::Single, ByteOrder::Little).expect("single decode");
+        let Value::Tensor(single) = single else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(single.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(single.materialize_f64(), vec![1.25, -2.5]);
     }
 
     #[test]
