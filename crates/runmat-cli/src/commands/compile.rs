@@ -83,6 +83,13 @@ pub async fn execute(
                 AotOptLevel::Speed => runmat_native_codegen::aot::NativeOptimization::Speed,
             },
             retained_functions: Some(program_link_plan.retained_functions()),
+            runtime_binding_mode: match policy {
+                runmat_aot::compile::CompilationPolicy::ClosedWorld => {
+                    runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld
+                }
+                _ => runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
+            },
+            retained_builtin_bindings: program_link_plan.retained_builtin_bindings.clone(),
         },
     )?;
     let output = output.unwrap_or_else(|| default_output(&file));
@@ -133,6 +140,15 @@ fn print_link_explanation(plan: &runmat_aot::compile::ProgramLinkPlan) {
     println!("Retained runtime families:");
     for family in &plan.retained_runtime_families {
         println!("  {}: {}", family.module, family.reason);
+    }
+    if !plan.retained_builtin_bindings.is_empty() {
+        println!("Retained runtime builtin bindings:");
+        for binding in &plan.retained_builtin_bindings {
+            println!(
+                "  {}#{}: {}",
+                binding.name, binding.variant, binding.native_symbol
+            );
+        }
     }
     if !plan.omitted_runtime_families.is_empty() {
         println!(

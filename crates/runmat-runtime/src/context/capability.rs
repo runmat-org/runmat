@@ -6,6 +6,7 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCapability {
+    Builtin,
     Call,
     Workspace,
     Object,
@@ -22,6 +23,7 @@ pub enum RuntimeCapability {
 impl RuntimeCapability {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Builtin => "builtin",
             Self::Call => "call",
             Self::Workspace => "workspace",
             Self::Object => "object",

@@ -479,6 +479,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let builtin_expr_helper = builtin_expr.clone();
     let doc_expr_helper = doc_expr.clone();
     let (wasm_helper, register_native) = if let Some(variant) = binding_variant_lit {
+        let native_symbol = runmat_builtins::native_binding_symbol(&name_str, &variant.value());
+        let native_symbol = syn::LitStr::new(&native_symbol, proc_macro2::Span::call_site());
+        let native_binding_ident = format_ident!(
+            "__RUNMAT_NATIVE_BINDING_{}",
+            ident.to_string().to_ascii_uppercase()
+        );
         let binding_expr = quote! {
             crate::builtin::RuntimeBuiltinBinding::new(
                 runmat_builtins::BuiltinBindingIdentity {
@@ -499,6 +505,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #binding_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                #[export_name = #native_symbol]
+                static #native_binding_ident: crate::builtin::RuntimeBuiltinBinding = #binding_expr;
             },
         )
     } else {

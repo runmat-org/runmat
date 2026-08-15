@@ -44,13 +44,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn standalone_profile_admits_only_the_implemented_policy() {
+    fn standalone_profile_admits_native_and_closed_world_policies() {
         let capabilities = RuntimeArchiveCapabilities::standalone_host();
         assert!(CompilationPolicy::NativeSpecialized
             .validate(&capabilities)
             .is_ok());
+        assert!(CompilationPolicy::ClosedWorld
+            .validate(&capabilities)
+            .is_ok());
         for policy in [
-            CompilationPolicy::ClosedWorld,
             CompilationPolicy::DynamicRuntime,
             CompilationPolicy::Portable,
         ] {

@@ -21,6 +21,30 @@ pub struct BuiltinBindingIdentity {
     pub variant: &'static str,
 }
 
+const NATIVE_BINDING_SYMBOL_PREFIX: &str = "runmat_builtin_binding_v1_";
+
+/// Stable native symbol exported by the runtime implementation for one
+/// catalog binding. Encoding both identity components byte-for-byte avoids
+/// punctuation folding and the collisions it can introduce.
+pub fn native_binding_symbol(name: &str, variant: &str) -> String {
+    fn append_hex(output: &mut String, value: &str) {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        for byte in value.bytes() {
+            output.push(HEX[usize::from(byte >> 4)] as char);
+            output.push(HEX[usize::from(byte & 0x0f)] as char);
+        }
+    }
+
+    let mut symbol = String::with_capacity(
+        NATIVE_BINDING_SYMBOL_PREFIX.len() + (name.len() + variant.len()) * 2 + 1,
+    );
+    symbol.push_str(NATIVE_BINDING_SYMBOL_PREFIX);
+    append_hex(&mut symbol, name);
+    symbol.push('_');
+    append_hex(&mut symbol, variant);
+    symbol
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinBindingAvailability {
     Required,
@@ -74,5 +98,22 @@ impl BuiltinCatalogEntry {
             purity: self.contract.purity,
             semantic_kind: self.contract.semantic_kind,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_binding_symbol;
+
+    #[test]
+    fn native_binding_symbols_preserve_the_complete_identity() {
+        assert_eq!(
+            native_binding_symbol("DataArray.read", "default"),
+            "runmat_builtin_binding_v1_4461746141727261792e72656164_64656661756c74"
+        );
+        assert_ne!(
+            native_binding_symbol("a.b", "c"),
+            native_binding_symbol("a", "b.c")
+        );
     }
 }

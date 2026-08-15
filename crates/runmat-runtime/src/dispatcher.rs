@@ -325,13 +325,20 @@ async fn call_builtin_async_impl(
     ensure_wasm_builtins_registered();
 
     let _output_guard = crate::output_count::push_output_count(output_count);
-    let matching_bindings = crate::builtin::runtime_builtin_bindings_by_name(name);
+    let scoped_builtin_service = crate::context::legacy::active()
+        .and_then(|context| context.service_ports().builtin().cloned());
+    let matching_bindings = scoped_builtin_service.as_ref().map_or_else(
+        || crate::builtin::runtime_builtin_bindings_by_name(name),
+        |service| service.bindings_by_name(name),
+    );
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
-    for b in builtin_functions() {
-        if b.name == name {
-            matching_builtins.push(b);
+    if scoped_builtin_service.is_none() {
+        for b in builtin_functions() {
+            if b.name == name {
+                matching_builtins.push(b);
+            }
         }
     }
 
@@ -909,6 +916,14 @@ mod tests {
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+    struct EmptyBuiltinService;
+
+    impl crate::context::RuntimeBuiltinService for EmptyBuiltinService {
+        fn bindings_by_name(&self, _name: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
+            Vec::new()
+        }
+    }
+
     #[test]
     fn catalog_backed_builtin_dispatches_without_legacy_authority() {
         assert!(runmat_builtins::builtin_function_by_name("full").is_none());
@@ -917,6 +932,19 @@ mod tests {
             call_builtin("full", std::slice::from_ref(&input)).unwrap(),
             input
         );
+    }
+
+    #[test]
+    fn scoped_builtin_authority_does_not_fall_back_to_global_discovery() {
+        let ports = crate::context::RuntimeServicePorts::default()
+            .with_builtin(std::rc::Rc::new(EmptyBuiltinService));
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(ports);
+        let _scope = runtime.enter();
+        let error = call_builtin("full", &[Value::Num(7.0)]).expect_err("exact registry miss");
+        assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
     #[test]

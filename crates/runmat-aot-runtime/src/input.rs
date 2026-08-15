@@ -3,12 +3,14 @@ const MAX_PROGRAM_BYTES: usize = 512 * 1024 * 1024;
 const MAX_RESUME_POINT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ARGUMENTS: i32 = 16_384;
 pub type AotFunctionResolver = unsafe extern "C" fn(function: u32) -> *const std::ffi::c_void;
+pub type AotBuiltinResolver = unsafe extern "C" fn(binding: u32) -> *const std::ffi::c_void;
 
 /// Borrowed symbols passed across the generated launcher's C ABI boundary.
 pub struct LinkedProcessImage {
     pub argc: i32,
     pub argv: *const *const std::ffi::c_char,
     pub function_resolver: *const std::ffi::c_void,
+    pub builtin_resolver: *const std::ffi::c_void,
     pub native_ir: *const u8,
     pub native_ir_len: u64,
     pub program: *const u8,
@@ -19,6 +21,7 @@ pub struct LinkedProcessImage {
 
 pub struct AotProcessInput {
     pub function_resolver: AotFunctionResolver,
+    pub builtin_resolver: AotBuiltinResolver,
     pub native_ir: Vec<u8>,
     pub program: Vec<u8>,
     pub resume_points: Vec<u8>,
@@ -29,14 +32,16 @@ impl AotProcessInput {
     ///
     /// # Safety
     ///
-    /// `function_resolver` must address a linked resolver with the exact
-    /// `AotFunctionResolver` ABI. Each non-null payload pointer must address at
-    /// least its declared length of readable immutable bytes. A positive
-    /// `argc` requires a valid `argv` pointer.
+    /// `function_resolver` and `builtin_resolver` must address linked resolvers
+    /// with the exact `AotFunctionResolver` and `AotBuiltinResolver` ABIs. Each
+    /// non-null payload pointer must address at least its declared length of
+    /// readable immutable bytes. A positive `argc` requires a valid `argv`
+    /// pointer.
     pub unsafe fn copy_from_linked(input: LinkedProcessImage) -> Result<Self, String> {
         if !(0..=MAX_ARGUMENTS).contains(&input.argc)
             || (input.argc > 0 && input.argv.is_null())
             || input.function_resolver.is_null()
+            || input.builtin_resolver.is_null()
         {
             return Err("standalone launcher arguments are invalid".into());
         }
@@ -45,6 +50,13 @@ impl AotProcessInput {
         let function_resolver = unsafe {
             std::mem::transmute::<*const std::ffi::c_void, AotFunctionResolver>(
                 input.function_resolver,
+            )
+        };
+        // SAFETY: the generated launcher supplies the address of the resolver
+        // emitted with the exact AotBuiltinResolver signature.
+        let builtin_resolver = unsafe {
+            std::mem::transmute::<*const std::ffi::c_void, AotBuiltinResolver>(
+                input.builtin_resolver,
             )
         };
         let native_ir = unsafe {
@@ -73,6 +85,7 @@ impl AotProcessInput {
         }?;
         Ok(Self {
             function_resolver,
+            builtin_resolver,
             native_ir,
             program,
             resume_points,
@@ -110,6 +123,7 @@ mod tests {
                 argc: 0,
                 argv: std::ptr::null(),
                 function_resolver: std::ptr::null(),
+                builtin_resolver: std::ptr::null(),
                 native_ir: std::ptr::null(),
                 native_ir_len: 1,
                 program: one.as_ptr(),
@@ -125,6 +139,7 @@ mod tests {
                 argc: 0,
                 argv: std::ptr::null(),
                 function_resolver: std::ptr::dangling(),
+                builtin_resolver: std::ptr::dangling(),
                 native_ir: one.as_ptr(),
                 native_ir_len: (512_u64 * 1024 * 1024) + 1,
                 program: one.as_ptr(),

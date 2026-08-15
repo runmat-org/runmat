@@ -1,5 +1,6 @@
 //! Process-image runtime host linked into standalone RunMat programs.
 
+mod builtin;
 mod execute;
 mod input;
 mod output;
@@ -19,17 +20,19 @@ pub const EXIT_RUNTIME_FAILURE: i32 = 70;
 ///
 /// # Safety
 ///
-/// `function_resolver` must address a linked resolver with the exact
-/// `AotFunctionResolver` ABI. Every non-null address it returns must identify a
-/// function with Runtime's exact `NativeEntryPoint` ABI. Each payload pointer
-/// must address an immutable allocation of its corresponding declared length
-/// for the duration of this call. When `argc` is positive, `argv` must be a
-/// valid C argument vector.
+/// `function_resolver` and `builtin_resolver` must address linked resolvers with
+/// the exact `AotFunctionResolver` and `AotBuiltinResolver` ABIs. Every non-null
+/// function address must identify Runtime's exact `NativeEntryPoint` ABI, and
+/// every non-null builtin address must identify an immutable
+/// `RuntimeBuiltinBinding`. Each payload pointer must address an immutable
+/// allocation of its corresponding declared length for the duration of this
+/// call. When `argc` is positive, `argv` must be a valid C argument vector.
 #[no_mangle]
 pub unsafe extern "C" fn runmat_aot_main(
     argc: i32,
     argv: *const *const std::ffi::c_char,
     function_resolver: *const std::ffi::c_void,
+    builtin_resolver: *const std::ffi::c_void,
     native_ir: *const u8,
     native_ir_len: u64,
     program: *const u8,
@@ -44,6 +47,7 @@ pub unsafe extern "C" fn runmat_aot_main(
             argc,
             argv,
             function_resolver,
+            builtin_resolver,
             native_ir,
             native_ir_len,
             program,
@@ -52,7 +56,7 @@ pub unsafe extern "C" fn runmat_aot_main(
             resume_points_len,
         };
         // SAFETY: the raw pointers were checked and converted to bounded borrows
-        // above; the function resolver contract is documented on this entry.
+        // above; both resolver contracts are documented on this entry.
         let input = unsafe { AotProcessInput::copy_from_linked(linked) }?;
         execute::execute(input)
     }));

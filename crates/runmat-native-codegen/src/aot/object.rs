@@ -1,14 +1,12 @@
+use crate::{NativeAssembly, NativeCodegenError, NativeCodegenResult};
 use cranelift_codegen::settings::Configurable;
 use cranelift_module::{default_libcall_names, DataDescription, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use runmat_types::ProgramFunctionId;
-
-use crate::{NativeAssembly, NativeCodegenError, NativeCodegenResult};
 
 use super::{
-    NativeObjectData, NativeObjectDataDescriptor, NativeObjectFormat, NativeObjectFunction,
-    NativeObjectManifest, NativeOptimization, RelocatableNativeObject,
-    NATIVE_OBJECT_SCHEMA_VERSION,
+    AotBuiltinBinding, AotRuntimeBindingMode, NativeObjectData, NativeObjectDataDescriptor,
+    NativeObjectFormat, NativeObjectFunction, NativeObjectManifest, NativeOptimization,
+    RelocatableNativeObject, NATIVE_OBJECT_SCHEMA_VERSION,
 };
 
 pub fn emit_relocatable_object(
@@ -21,7 +19,23 @@ pub fn emit_relocatable_object(
 pub fn emit_relocatable_object_with_data(
     assembly: &NativeAssembly,
     optimization: NativeOptimization,
+    embedded_data: Vec<NativeObjectData>,
+) -> NativeCodegenResult<RelocatableNativeObject> {
+    emit_relocatable_object_for_runtime(
+        assembly,
+        optimization,
+        embedded_data,
+        AotRuntimeBindingMode::Dynamic,
+        Vec::new(),
+    )
+}
+
+pub fn emit_relocatable_object_for_runtime(
+    assembly: &NativeAssembly,
+    optimization: NativeOptimization,
     mut embedded_data: Vec<NativeObjectData>,
+    runtime_binding_mode: AotRuntimeBindingMode,
+    mut builtin_bindings: Vec<AotBuiltinBinding>,
 ) -> NativeCodegenResult<RelocatableNativeObject> {
     assembly.verify()?;
     assembly.target.validate()?;
@@ -58,7 +72,7 @@ pub fn emit_relocatable_object_with_data(
 
     for function in &assembly.functions {
         let compiled = crate::cranelift::lower_function(function, &assembly.target)?;
-        let symbol = function_symbol(function.id, entrypoint);
+        let symbol = super::product::function_symbol(function.id, entrypoint);
         let id = module
             .declare_function(&symbol, Linkage::Export, &compiled.ir.signature)
             .map_err(module_error)?;
@@ -140,8 +154,12 @@ pub fn emit_relocatable_object_with_data(
         });
     }
     if !linked_data.is_empty() {
+        builtin_bindings
+            .sort_by(|left, right| (&left.name, &left.variant).cmp(&(&right.name, &right.variant)));
         let resolver = super::launcher::define_resolver(&mut module, &linked_functions)?;
-        super::launcher::define(&mut module, resolver, &linked_data)?;
+        let builtin_resolver =
+            super::launcher::define_builtin_resolver(&mut module, &builtin_bindings)?;
+        super::launcher::define(&mut module, resolver, builtin_resolver, &linked_data)?;
     }
 
     let product = module.finish();
@@ -161,6 +179,7 @@ pub fn emit_relocatable_object_with_data(
         runtime_fingerprint: *assembly.program.runtime_fingerprint(),
         catalog_fingerprint: *assembly.program.catalog_fingerprint(),
         optimization,
+        runtime_binding_mode,
         object_digest: runmat_execution::Digest::sha256(&bytes),
         object_bytes,
         entrypoint,
@@ -170,17 +189,6 @@ pub fn emit_relocatable_object_with_data(
     let object = RelocatableNativeObject { manifest, bytes };
     object.validate()?;
     Ok(object)
-}
-
-pub(super) fn function_symbol(
-    function: ProgramFunctionId,
-    entrypoint: ProgramFunctionId,
-) -> String {
-    if function == entrypoint {
-        super::AOT_ENTRY_SYMBOL.to_string()
-    } else {
-        format!("runmat_native_f{}", function.0)
-    }
 }
 
 fn module_error(error: impl std::fmt::Display) -> NativeCodegenError {

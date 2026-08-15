@@ -40,10 +40,14 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         return Err("standalone entrypoint requires unsupported command-line inputs".into());
     }
     let requested_outputs = function.abi.fixed_outputs.len();
-    let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+    let mut runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_program_revision(Some(assembly.program.clone()));
+    if let Some(builtins) = crate::builtin::resolve(&program, input.builtin_resolver)? {
+        let ports = runtime.service_ports().clone().with_builtin(builtins);
+        runtime = runtime.with_service_ports(ports);
+    }
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {
         // SAFETY: the generated resolver has the exact declared C ABI. It

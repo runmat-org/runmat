@@ -126,6 +126,8 @@ impl NativeCompilationInput {
     pub fn aot_object_data(
         &self,
         assembly: &runmat_native_codegen::NativeAssembly,
+        runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
+        builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
     ) -> Result<
         Vec<runmat_native_codegen::aot::NativeObjectData>,
         runmat_native_codegen::NativeCodegenError,
@@ -145,6 +147,8 @@ impl NativeCompilationInput {
         let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
             assembly,
             runmat_execution::Digest::sha256(&native_ir),
+            runtime_binding_mode,
+            builtin_bindings,
         )?
         .canonical_bytes()?;
         let ordered_resume_points = self
@@ -320,7 +324,11 @@ end
             .iter()
             .all(|region| retained.contains(&region.id.function)));
         let object_data = input
-            .aot_object_data(&assembly)
+            .aot_object_data(
+                &assembly,
+                runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
+                Vec::new(),
+            )
             .expect("build retained AOT object data");
         let program_bytes = &object_data
             .iter()

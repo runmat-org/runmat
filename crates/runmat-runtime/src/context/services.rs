@@ -1,4 +1,5 @@
 use super::{RuntimeCapability, RuntimeCapabilityError};
+use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
 use crate::warning_store::RuntimeWarning;
 use crate::RuntimeError;
@@ -28,6 +29,13 @@ pub trait RuntimeCallService {
     fn source_functions(&self, _source_id: SourceId) -> Vec<(String, usize)> {
         Vec::new()
     }
+}
+
+/// Invocation-scoped builtin authority used by exact compiled products.
+/// When installed, the dispatcher must not fall back to process-global
+/// discovery for a missing name.
+pub trait RuntimeBuiltinService {
+    fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding>;
 }
 
 pub trait RuntimeWorkspaceService {
@@ -156,6 +164,7 @@ pub trait RuntimeParallelService {
 #[derive(Clone, Default)]
 pub struct RuntimeServicePorts {
     call: Option<Rc<dyn RuntimeCallService>>,
+    builtin: Option<Rc<dyn RuntimeBuiltinService>>,
     workspace: Option<Rc<dyn RuntimeWorkspaceService>>,
     object: Option<Rc<dyn RuntimeObjectService>>,
     host: Option<Rc<dyn RuntimeHostService>>,
@@ -172,6 +181,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
         formatter
             .debug_struct("RuntimeServicePorts")
             .field("call", &self.call.is_some())
+            .field("builtin", &self.builtin.is_some())
             .field("workspace", &self.workspace.is_some())
             .field("object", &self.object.is_some())
             .field("host", &self.host.is_some())
@@ -215,6 +225,14 @@ impl RuntimeServicePorts {
         call,
         RuntimeCallService,
         Call
+    );
+    port_accessors!(
+        with_builtin,
+        builtin,
+        require_builtin,
+        builtin,
+        RuntimeBuiltinService,
+        Builtin
     );
     port_accessors!(
         with_workspace,
@@ -312,6 +330,7 @@ mod tests {
         }
         let ports = RuntimeServicePorts::default();
         let failures = [
+            missing(ports.require_builtin("resolve builtin")),
             missing(ports.require_call("invoke")),
             missing(ports.require_workspace("lookup")),
             missing(ports.require_object("class lookup")),
@@ -329,6 +348,7 @@ mod tests {
                 .map(|failure| failure.capability)
                 .collect::<Vec<_>>(),
             vec![
+                RuntimeCapability::Builtin,
                 RuntimeCapability::Call,
                 RuntimeCapability::Workspace,
                 RuntimeCapability::Object,

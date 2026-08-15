@@ -9,6 +9,7 @@ pub type RuntimeBuiltinFuture =
 pub type RuntimeBuiltinImplementation = fn(&[Value]) -> RuntimeBuiltinFuture;
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct RuntimeBuiltinBinding {
     pub identity: BuiltinBindingIdentity,
     pub implementation: RuntimeBuiltinImplementation,

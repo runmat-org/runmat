@@ -6318,6 +6318,7 @@ dependencies = [
 name = "runmat-aot"
 version = "0.6.1"
 dependencies = [
+ "runmat-builtins",
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",

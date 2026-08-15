@@ -13,8 +13,9 @@ build = "build.rs"
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-core = { workspace = true }
+runmat-builtins = { workspace = true }
 runmat-mir = { workspace = true }
-runmat-native-codegen = { workspace = true }
+runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

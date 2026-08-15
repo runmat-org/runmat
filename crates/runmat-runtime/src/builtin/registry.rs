@@ -5,8 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 inventory::collect!(RuntimeBuiltinBinding);
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn runtime_builtin_bindings() -> Vec<&'static RuntimeBuiltinBinding> {
-    inventory::iter::<RuntimeBuiltinBinding>().collect()
+pub fn runtime_builtin_bindings() -> Vec<RuntimeBuiltinBinding> {
+    inventory::iter::<RuntimeBuiltinBinding>()
+        .copied()
+        .collect()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -28,11 +30,11 @@ pub mod wasm_registry {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn runtime_builtin_bindings() -> Vec<&'static RuntimeBuiltinBinding> {
-    wasm_registry::bindings()
+pub fn runtime_builtin_bindings() -> Vec<RuntimeBuiltinBinding> {
+    wasm_registry::bindings().into_iter().copied().collect()
 }
 
-pub fn runtime_builtin_bindings_by_name(name: &str) -> Vec<&'static RuntimeBuiltinBinding> {
+pub fn runtime_builtin_bindings_by_name(name: &str) -> Vec<RuntimeBuiltinBinding> {
     runtime_builtin_bindings()
         .into_iter()
         .filter(|binding| binding.identity.builtin.name.eq_ignore_ascii_case(name))

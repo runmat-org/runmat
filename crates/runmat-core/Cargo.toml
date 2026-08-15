@@ -49,7 +49,7 @@ occt-wasm-host = ["runmat-runtime/occt-wasm-host"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-core"] }
-runmat-native-codegen = { workspace = true }
+runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-native-executor = { workspace = true }
 runmat-jit = { workspace = true }
 futures = "0.3"

@@ -9,6 +9,8 @@ use crate::{AotError, AotResult};
 pub struct NativeObjectOptions {
     pub optimization: NativeOptimization,
     pub retained_functions: Option<BTreeSet<ProgramFunctionId>>,
+    pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
+    pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
 }
 
 impl Default for NativeObjectOptions {
@@ -16,6 +18,8 @@ impl Default for NativeObjectOptions {
         Self {
             optimization: NativeOptimization::Speed,
             retained_functions: None,
+            runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
+            retained_builtin_bindings: Vec::new(),
         }
     }
 }
@@ -42,12 +46,18 @@ pub fn emit_native_object(
         .lower(runmat_native_codegen::NativeTarget::current())
         .map_err(|error| AotError::contract("aot.compile.lower", error.to_string()))?;
     let data = input
-        .aot_object_data(&assembly)
+        .aot_object_data(
+            &assembly,
+            options.runtime_binding_mode,
+            options.retained_builtin_bindings.clone(),
+        )
         .map_err(|error| AotError::contract("aot.compile.data", error.to_string()))?;
-    runmat_native_codegen::aot::emit_relocatable_object_with_data(
+    runmat_native_codegen::aot::emit_relocatable_object_for_runtime(
         &assembly,
         options.optimization,
         data,
+        options.runtime_binding_mode,
+        options.retained_builtin_bindings,
     )
     .map_err(|error| AotError::contract("aot.compile.object", error.to_string()))
 }

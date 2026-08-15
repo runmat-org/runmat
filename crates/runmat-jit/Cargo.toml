@@ -13,7 +13,7 @@ futures = "0.3"
 runmat-mir = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-execution = { workspace = true }
-runmat-native-codegen = { workspace = true }
+runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-native-executor = { workspace = true }
 runmat-types = { workspace = true }
 runmat-time = { workspace = true }

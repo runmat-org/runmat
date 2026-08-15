@@ -69,8 +69,9 @@ mod tests {
         ProgramBuildRecipe, ProgramTargetCohort, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
     };
     use runmat_native_codegen::aot::{
-        NativeObjectFormat, NativeObjectFunction, NativeObjectManifest, NativeOptimization,
-        RelocatableNativeObject, AOT_ENTRY_SYMBOL, NATIVE_OBJECT_SCHEMA_VERSION,
+        AotRuntimeBindingMode, NativeObjectFormat, NativeObjectFunction, NativeObjectManifest,
+        NativeOptimization, RelocatableNativeObject, AOT_ENTRY_SYMBOL,
+        NATIVE_OBJECT_SCHEMA_VERSION,
     };
     use runmat_native_codegen::NativeTarget;
     use runmat_types::ProgramFunctionId;
@@ -94,6 +95,7 @@ mod tests {
                 runtime_fingerprint: runtime,
                 catalog_fingerprint: catalog,
                 optimization: NativeOptimization::Speed,
+                runtime_binding_mode: AotRuntimeBindingMode::Dynamic,
                 object_digest: Digest::sha256(&bytes),
                 object_bytes: bytes.len() as u64,
                 entrypoint: function,

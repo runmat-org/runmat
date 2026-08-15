@@ -3,14 +3,44 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 1;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 1;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 2;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 2;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
 pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
 pub const AOT_RESUME_POINTS_SYMBOL: &str = "runmat_aot_resume_points";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AotRuntimeBindingMode {
+    Dynamic,
+    ClosedWorld,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AotBuiltinBinding {
+    pub name: String,
+    pub variant: String,
+    pub native_symbol: String,
+}
+
+impl AotBuiltinBinding {
+    fn validate(&self) -> Result<(), crate::NativeCodegenError> {
+        if !valid_identity(&self.name, 512)
+            || !valid_identity(&self.variant, 256)
+            || !valid_link_symbol(&self.native_symbol)
+        {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.builtin_binding",
+                "AOT builtin binding identity or native symbol is invalid",
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Frontend- and VM-independent callable inventory embedded in a native AOT
 /// object. The standalone host needs names and source ownership for exact
@@ -22,6 +52,8 @@ pub struct AotProgramManifest {
     pub executable: ExecutableIdentity,
     pub native_ir_digest: Digest,
     pub functions: Vec<AotProgramFunction>,
+    pub runtime_binding_mode: AotRuntimeBindingMode,
+    pub builtin_bindings: Vec<AotBuiltinBinding>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -36,6 +68,8 @@ impl AotProgramManifest {
     pub fn from_assembly(
         assembly: &crate::NativeAssembly,
         native_ir_digest: Digest,
+        runtime_binding_mode: AotRuntimeBindingMode,
+        mut builtin_bindings: Vec<AotBuiltinBinding>,
     ) -> Result<Self, crate::NativeCodegenError> {
         let mut functions = assembly
             .functions
@@ -47,11 +81,15 @@ impl AotProgramManifest {
             })
             .collect::<Vec<_>>();
         functions.sort_by_key(|function| function.function);
+        builtin_bindings
+            .sort_by(|left, right| (&left.name, &left.variant).cmp(&(&right.name, &right.variant)));
         let manifest = Self {
             schema_version: AOT_PROGRAM_MANIFEST_SCHEMA_VERSION,
             executable: assembly.executable_identity.clone(),
             native_ir_digest,
             functions,
+            runtime_binding_mode,
+            builtin_bindings,
         };
         manifest.validate()?;
         Ok(manifest)
@@ -79,6 +117,16 @@ impl AotProgramManifest {
                     || function.name.len() > 512
                     || function.name.chars().any(char::is_control)
             })
+            || self
+                .builtin_bindings
+                .iter()
+                .any(|binding| binding.validate().is_err())
+            || self
+                .builtin_bindings
+                .windows(2)
+                .any(|pair| (&pair[0].name, &pair[0].variant) >= (&pair[1].name, &pair[1].variant))
+            || (self.runtime_binding_mode == AotRuntimeBindingMode::Dynamic
+                && !self.builtin_bindings.is_empty())
         {
             return Err(crate::NativeCodegenError::new(
                 "native.aot.program",
@@ -166,6 +214,7 @@ pub enum NativeOptimization {
 }
 
 impl NativeOptimization {
+    #[cfg(feature = "compiler")]
     pub(super) fn cranelift_name(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -227,6 +276,7 @@ pub struct NativeObjectManifest {
     pub runtime_fingerprint: Digest,
     pub catalog_fingerprint: Digest,
     pub optimization: NativeOptimization,
+    pub runtime_binding_mode: AotRuntimeBindingMode,
     pub object_digest: Digest,
     pub object_bytes: u64,
     pub entrypoint: ProgramFunctionId,
@@ -294,8 +344,7 @@ impl RelocatableNativeObject {
                 .windows(2)
                 .any(|pair| pair[0].function >= pair[1].function)
             || self.manifest.functions.iter().any(|function| {
-                function.symbol
-                    != super::object::function_symbol(function.function, self.manifest.entrypoint)
+                function.symbol != function_symbol(function.function, self.manifest.entrypoint)
             })
             || self
                 .manifest
@@ -320,6 +369,25 @@ impl RelocatableNativeObject {
 pub(super) fn valid_data_symbol(symbol: &str) -> bool {
     symbol.starts_with("runmat_aot_")
         && symbol.len() <= 128
+        && symbol
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+pub(super) fn function_symbol(
+    function: ProgramFunctionId,
+    entrypoint: ProgramFunctionId,
+) -> String {
+    if function == entrypoint {
+        AOT_ENTRY_SYMBOL.to_string()
+    } else {
+        format!("runmat_native_f{}", function.0)
+    }
+}
+
+fn valid_link_symbol(symbol: &str) -> bool {
+    symbol.starts_with("runmat_")
+        && symbol.len() <= 2_048
         && symbol
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
