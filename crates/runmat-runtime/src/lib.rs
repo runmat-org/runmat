@@ -1829,7 +1829,7 @@ mod tests {
 
     #[test]
     fn feval_semantic_function_handle_errors_when_semantic_invoker_unavailable() {
-        let _guard = crate::user_functions::install_semantic_function_invoker(None);
+        let _guard = crate::user_functions::clear_semantic_function_invoker();
         let handle = Value::BoundFunctionHandle {
             name: "function_target".to_string(),
             function: 9043,
@@ -1935,7 +1935,7 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "sin").then_some(245)
             })));
-        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(None);
+        let _invoker_guard = crate::user_functions::clear_semantic_function_invoker();
 
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "sin".to_string(),
@@ -3640,7 +3640,7 @@ mod tests {
 
     #[test]
     fn feval_semantic_closure_errors_when_semantic_invoker_unavailable() {
-        let _guard = crate::user_functions::install_semantic_function_invoker(None);
+        let _guard = crate::user_functions::clear_semantic_function_invoker();
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".to_string(),
             bound_function: Some(9044),

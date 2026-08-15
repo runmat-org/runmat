@@ -7,7 +7,9 @@ use uuid::Uuid;
 
 use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
-use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
+use crate::cli::value_types::{
+    AotOptLevel, CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel,
+};
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
 use crate::cli::{BatchCommand, ClusterCommand, JobCommand, PackageCommand};
@@ -236,6 +238,26 @@ pub enum Commands {
         /// Arguments to pass to script
         #[arg(last = true)]
         args: Vec<String>,
+    },
+    /// Compile a MATLAB program into a standalone native executable
+    Compile {
+        /// MATLAB script or function entrypoint
+        file: PathBuf,
+        /// Output executable path
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Native optimization policy
+        #[arg(long, value_enum, default_value = "speed")]
+        optimization: AotOptLevel,
+        /// Explicit system linker driver
+        #[arg(long)]
+        linker: Option<PathBuf>,
+        /// Retain temporary object, archive, and response-file inputs
+        #[arg(long)]
+        keep_temps: bool,
+        /// Replace an existing output after preserving it until publication succeeds
+        #[arg(short, long)]
+        force: bool,
     },
     /// Check a MATLAB script or FEA document without running it
     Check {

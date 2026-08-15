@@ -1,5 +1,12 @@
 use clap::ValueEnum;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum AotOptLevel {
+    None,
+    Size,
+    Speed,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum ColorMode {
     /// Detect color support for each output stream

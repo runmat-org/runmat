@@ -32,10 +32,6 @@ pub(crate) struct NativeInvocation<'a> {
     pub workspace: Option<runmat_jit::execute::NativeWorkspaceInput>,
 }
 
-// Semantic invokers use Runtime's established Arc callback ABI, while the
-// executable-memory owner, RuntimeContext, and GC Values are deliberately
-// invocation-thread confined. This callback never crosses that thread.
-#[allow(clippy::arc_with_non_send_sync)]
 pub(crate) async fn invoke(
     unit: &ExecutableUnit,
     invocation: NativeInvocation<'_>,
@@ -88,7 +84,7 @@ pub(crate) async fn invoke(
     let semantic_native_functions = native_functions.clone();
     let semantic_unit = unit.clone();
     let invoker =
-        user_functions::install_semantic_function_invoker(Some(Arc::new(
+        user_functions::install_local_semantic_function_invoker(Rc::new(
             move |function, arguments, requested_outputs| {
                 let arguments = arguments.to_vec();
                 let previous_invoker = previous_invoker.clone();
@@ -146,13 +142,13 @@ pub(crate) async fn invoke(
                     }
                 })
             },
-        )));
+        ));
 
     let previous_external_invoker = user_functions::current_external_function_invoker();
     let external_registry = Arc::clone(&registry);
     let external_runtime = runtime.clone();
     let external_invoker =
-        user_functions::install_external_function_invoker(Some(Arc::new(move |call| {
+        user_functions::install_local_external_function_invoker(Rc::new(move |call| {
             let previous = previous_external_invoker.clone();
             let registry = Arc::clone(&external_registry);
             let runtime = external_runtime.clone();
@@ -179,7 +175,7 @@ pub(crate) async fn invoke(
                     format!("external function '{}' is unavailable", call.display_name),
                 ))
             })
-        })));
+        }));
 
     let previous_lexical_invoker = user_functions::current_lexical_function_invoker();
     let lexical_executor = Rc::clone(&published.executor);
@@ -187,7 +183,7 @@ pub(crate) async fn invoke(
     let lexical_native_functions = native_functions.clone();
     let lexical_unit = unit.clone();
     let lexical_invoker =
-        user_functions::install_lexical_function_invoker(Some(Arc::new(move |call| {
+        user_functions::install_local_lexical_function_invoker(Rc::new(move |call| {
             let previous = previous_lexical_invoker.clone();
             let executor = Rc::clone(&lexical_executor);
             let runtime = lexical_runtime.clone();
@@ -226,7 +222,7 @@ pub(crate) async fn invoke(
                     captures: execution.captures,
                 })
             })
-        })));
+        }));
 
     let previous_resolver = user_functions::current_semantic_function_resolver();
     let resolver_registry = Arc::clone(&registry);

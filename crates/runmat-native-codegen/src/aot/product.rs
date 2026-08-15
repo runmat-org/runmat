@@ -107,6 +107,8 @@ pub struct NativeObjectManifest {
     pub object_format: NativeObjectFormat,
     pub executable_cache_key: Digest,
     pub native_cache_key: Digest,
+    pub runtime_fingerprint: Digest,
+    pub catalog_fingerprint: Digest,
     pub optimization: NativeOptimization,
     pub object_digest: Digest,
     pub object_bytes: u64,
@@ -142,6 +144,24 @@ impl RelocatableNativeObject {
                 "native object size exceeds the portable manifest limit",
             )
         })?;
+        if self
+            .manifest
+            .runtime_fingerprint
+            .bytes()
+            .iter()
+            .all(|byte| *byte == 0)
+            || self
+                .manifest
+                .catalog_fingerprint
+                .bytes()
+                .iter()
+                .all(|byte| *byte == 0)
+        {
+            return Err(crate::NativeCodegenError::new(
+                "native.object.environment",
+                "native object runtime and catalog identities must be present",
+            ));
+        }
         if self.bytes.is_empty()
             || self.manifest.object_bytes != object_bytes
             || self.manifest.object_digest != Digest::sha256(&self.bytes)

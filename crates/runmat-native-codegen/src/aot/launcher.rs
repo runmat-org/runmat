@@ -1,15 +1,80 @@
 use std::collections::BTreeMap;
 
-use cranelift::prelude::{AbiParam, FunctionBuilder, FunctionBuilderContext, InstBuilder};
-use cranelift_codegen::ir::{types, UserFuncName};
+use cranelift::prelude::{
+    types, AbiParam, FunctionBuilder, FunctionBuilderContext, InstBuilder, IntCC,
+};
+use cranelift_codegen::ir::UserFuncName;
 use cranelift_module::{DataId, FuncId, Linkage, Module};
 use cranelift_object::ObjectModule;
 
 use crate::{NativeCodegenError, NativeCodegenResult};
 
+pub(super) fn define_resolver(
+    module: &mut ObjectModule,
+    functions: &[(runmat_types::ProgramFunctionId, FuncId)],
+) -> NativeCodegenResult<FuncId> {
+    if functions.is_empty()
+        || functions.len() > 65_536
+        || functions.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+    {
+        return Err(NativeCodegenError::new(
+            "native.object.function_resolver",
+            "launcher functions must be non-empty, bounded, sorted, and unique",
+        ));
+    }
+    let pointer = module.isa().pointer_type();
+    let mut signature = module.make_signature();
+    signature.params.push(AbiParam::new(types::I32));
+    signature.returns.push(AbiParam::new(pointer));
+    let resolver = module
+        .declare_function("runmat_aot_resolve_function", Linkage::Local, &signature)
+        .map_err(module_error)?;
+    let mut context = module.make_context();
+    context.func.signature = signature;
+    context.func.name = UserFuncName::user(1, 1);
+    let linked = functions
+        .iter()
+        .map(|(function, linked)| {
+            (
+                *function,
+                module.declare_func_in_func(*linked, &mut context.func),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut builder_context = FunctionBuilderContext::new();
+    let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
+    let entry = builder.create_block();
+    builder.append_block_params_for_function_params(entry);
+    builder.switch_to_block(entry);
+    let requested = builder.block_params(entry)[0];
+    for (function, linked) in linked {
+        let found = builder.create_block();
+        let next = builder.create_block();
+        let matches = builder
+            .ins()
+            .icmp_imm(IntCC::Equal, requested, i64::from(function.0));
+        builder.ins().brif(matches, found, &[], next, &[]);
+        builder.switch_to_block(found);
+        let address = builder.ins().func_addr(pointer, linked);
+        builder.ins().return_(&[address]);
+        builder.seal_block(found);
+        builder.switch_to_block(next);
+        builder.seal_block(next);
+    }
+    let missing = builder.ins().iconst(pointer, 0);
+    builder.ins().return_(&[missing]);
+    builder.seal_block(entry);
+    builder.finalize();
+    module
+        .define_function(resolver, &mut context)
+        .map_err(module_error)?;
+    module.clear_context(&mut context);
+    Ok(resolver)
+}
+
 pub(super) fn define(
     module: &mut ObjectModule,
-    entrypoint: FuncId,
+    resolver: FuncId,
     data: &BTreeMap<String, (DataId, u64)>,
 ) -> NativeCodegenResult<()> {
     let native_ir = required_data(data, super::AOT_NATIVE_IR_SYMBOL)?;
@@ -50,7 +115,7 @@ pub(super) fn define(
     context.func.signature = main_signature;
     context.func.name = UserFuncName::user(1, 0);
     let runtime = module.declare_func_in_func(runtime, &mut context.func);
-    let native_entry = module.declare_func_in_func(entrypoint, &mut context.func);
+    let resolver = module.declare_func_in_func(resolver, &mut context.func);
     let native_ir_data = module.declare_data_in_func(native_ir.0, &mut context.func);
     let program_data = module.declare_data_in_func(program.0, &mut context.func);
     let resume_data = module.declare_data_in_func(resume_points.0, &mut context.func);
@@ -62,19 +127,19 @@ pub(super) fn define(
     builder.switch_to_block(entry);
     let argc = builder.block_params(entry)[0];
     let argv = builder.block_params(entry)[1];
-    let native_entry = builder.ins().func_addr(pointer, native_entry);
+    let resolver = builder.ins().func_addr(pointer, resolver);
     let native_ir_ptr = builder.ins().symbol_value(pointer, native_ir_data);
     let program_ptr = builder.ins().symbol_value(pointer, program_data);
     let resume_ptr = builder.ins().symbol_value(pointer, resume_data);
-    let native_ir_len = builder.ins().iconst(types::I64, native_ir.1 as i64);
-    let program_len = builder.ins().iconst(types::I64, program.1 as i64);
-    let resume_len = builder.ins().iconst(types::I64, resume_points.1 as i64);
+    let native_ir_len = length_constant(&mut builder, native_ir.1)?;
+    let program_len = length_constant(&mut builder, program.1)?;
+    let resume_len = length_constant(&mut builder, resume_points.1)?;
     let call = builder.ins().call(
         runtime,
         &[
             argc,
             argv,
-            native_entry,
+            resolver,
             native_ir_ptr,
             native_ir_len,
             program_ptr,
@@ -92,6 +157,19 @@ pub(super) fn define(
         .map_err(module_error)?;
     module.clear_context(&mut context);
     Ok(())
+}
+
+fn length_constant(
+    builder: &mut FunctionBuilder<'_>,
+    length: u64,
+) -> NativeCodegenResult<cranelift::prelude::Value> {
+    let length = i64::try_from(length).map_err(|_| {
+        NativeCodegenError::new(
+            "native.object.launcher_data",
+            "launcher data length exceeds the native ABI",
+        )
+    })?;
+    Ok(builder.ins().iconst(types::I64, length))
 }
 
 fn required_data<'a>(

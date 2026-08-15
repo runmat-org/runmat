@@ -3,6 +3,7 @@ pub mod batch;
 pub mod benchmark;
 pub mod bytecode;
 pub mod check;
+pub mod compile;
 pub mod config;
 pub mod fea;
 pub mod gc;

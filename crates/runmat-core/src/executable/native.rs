@@ -63,13 +63,17 @@ impl NativeCompilationInput {
                 format!("failed to encode embedded Native IR: {error}"),
             )
         })?;
-        let resume_points =
-            serde_json::to_vec(&self.interpreter_resume_points).map_err(|error| {
-                runmat_native_codegen::NativeCodegenError::new(
-                    "native.object.resume_points",
-                    format!("failed to encode embedded resume points: {error}"),
-                )
-            })?;
+        let ordered_resume_points = self
+            .interpreter_resume_points
+            .iter()
+            .map(|(point, pc)| (*point, *pc))
+            .collect::<Vec<_>>();
+        let resume_points = serde_json::to_vec(&ordered_resume_points).map_err(|error| {
+            runmat_native_codegen::NativeCodegenError::new(
+                "native.object.resume_points",
+                format!("failed to encode embedded resume points: {error}"),
+            )
+        })?;
         let mut data = Vec::with_capacity(3);
         for blob in [
             runmat_native_codegen::aot::embedded_blob(

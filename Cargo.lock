@@ -6192,6 +6192,7 @@ dependencies = [
  "reqwest 0.12.28",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-aot",
  "runmat-builtins",
  "runmat-config",
  "runmat-core",
@@ -6202,6 +6203,7 @@ dependencies = [
  "runmat-gc",
  "runmat-hir",
  "runmat-mir",
+ "runmat-native-codegen",
  "runmat-package",
  "runmat-package-cache",
  "runmat-package-cache-native",
@@ -6310,6 +6312,22 @@ dependencies = [
  "runmat-meshing-core",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-aot"
+version = "0.6.1"
+dependencies = [
+ "runmat-core",
+ "runmat-execution",
+ "runmat-native-codegen",
+ "runmat-runtime",
+ "serde",
+ "serde_json",
+ "target-lexicon",
+ "tempfile",
+ "thiserror 1.0.69",
+ "zstd",
 ]
 
 [[package]]

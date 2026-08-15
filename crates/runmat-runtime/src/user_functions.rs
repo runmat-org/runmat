@@ -5,6 +5,7 @@ use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
@@ -68,11 +69,11 @@ impl CallableRequest {
 }
 
 runmat_thread_local! {
-    static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Arc<FunctionInvoker>>> =
+    static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Rc<FunctionInvoker>>> =
         const { RefCell::new(None) };
-    static EXTERNAL_FUNCTION_INVOKER: RefCell<Option<Arc<ExternalFunctionInvoker>>> =
+    static EXTERNAL_FUNCTION_INVOKER: RefCell<Option<Rc<ExternalFunctionInvoker>>> =
         const { RefCell::new(None) };
-    static LEXICAL_FUNCTION_INVOKER: RefCell<Option<Arc<LexicalFunctionInvoker>>> =
+    static LEXICAL_FUNCTION_INVOKER: RefCell<Option<Rc<LexicalFunctionInvoker>>> =
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
         const { RefCell::new(None) };
@@ -83,17 +84,17 @@ runmat_thread_local! {
 }
 
 pub struct FunctionInvokerGuard {
-    previous: Option<Arc<FunctionInvoker>>,
+    previous: Option<Rc<FunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct ExternalFunctionInvokerGuard {
-    previous: Option<Arc<ExternalFunctionInvoker>>,
+    previous: Option<Rc<ExternalFunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 pub struct LexicalFunctionInvokerGuard {
-    previous: Option<Arc<LexicalFunctionInvoker>>,
+    previous: Option<Rc<LexicalFunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
@@ -191,6 +192,24 @@ impl Drop for ActiveSemanticFunctionGuard {
 pub fn install_semantic_function_invoker(
     invoker: Option<Arc<FunctionInvoker>>,
 ) -> FunctionInvokerGuard {
+    replace_semantic_function_invoker(invoker.map(|invoker| {
+        Rc::new(move |function, arguments: &[Value], requested_outputs| {
+            invoker(function, arguments, requested_outputs)
+        }) as Rc<FunctionInvoker>
+    }))
+}
+
+pub fn install_local_semantic_function_invoker(
+    invoker: Rc<FunctionInvoker>,
+) -> FunctionInvokerGuard {
+    replace_semantic_function_invoker(Some(invoker))
+}
+
+pub fn clear_semantic_function_invoker() -> FunctionInvokerGuard {
+    replace_semantic_function_invoker(None)
+}
+
+fn replace_semantic_function_invoker(invoker: Option<Rc<FunctionInvoker>>) -> FunctionInvokerGuard {
     if let Some(state) = active_state() {
         let previous = std::mem::replace(&mut state.call.borrow_mut().semantic_invoker, invoker);
         return FunctionInvokerGuard {
@@ -209,6 +228,20 @@ pub fn install_semantic_function_invoker(
 pub fn install_external_function_invoker(
     invoker: Option<Arc<ExternalFunctionInvoker>>,
 ) -> ExternalFunctionInvokerGuard {
+    replace_external_function_invoker(
+        invoker.map(|invoker| Rc::new(move |call| invoker(call)) as Rc<ExternalFunctionInvoker>),
+    )
+}
+
+pub fn install_local_external_function_invoker(
+    invoker: Rc<ExternalFunctionInvoker>,
+) -> ExternalFunctionInvokerGuard {
+    replace_external_function_invoker(Some(invoker))
+}
+
+fn replace_external_function_invoker(
+    invoker: Option<Rc<ExternalFunctionInvoker>>,
+) -> ExternalFunctionInvokerGuard {
     if let Some(state) = active_state() {
         let previous = std::mem::replace(&mut state.call.borrow_mut().external_invoker, invoker);
         return ExternalFunctionInvokerGuard {
@@ -226,6 +259,20 @@ pub fn install_external_function_invoker(
 
 pub fn install_lexical_function_invoker(
     invoker: Option<Arc<LexicalFunctionInvoker>>,
+) -> LexicalFunctionInvokerGuard {
+    replace_lexical_function_invoker(
+        invoker.map(|invoker| Rc::new(move |call| invoker(call)) as Rc<LexicalFunctionInvoker>),
+    )
+}
+
+pub fn install_local_lexical_function_invoker(
+    invoker: Rc<LexicalFunctionInvoker>,
+) -> LexicalFunctionInvokerGuard {
+    replace_lexical_function_invoker(Some(invoker))
+}
+
+fn replace_lexical_function_invoker(
+    invoker: Option<Rc<LexicalFunctionInvoker>>,
 ) -> LexicalFunctionInvokerGuard {
     if let Some(state) = active_state() {
         let previous = std::mem::replace(&mut state.call.borrow_mut().lexical_invoker, invoker);
@@ -289,21 +336,21 @@ pub fn push_active_semantic_function(function: usize) -> ActiveSemanticFunctionG
     ActiveSemanticFunctionGuard { state: None }
 }
 
-pub fn current_semantic_function_invoker() -> Option<Arc<FunctionInvoker>> {
+pub fn current_semantic_function_invoker() -> Option<Rc<FunctionInvoker>> {
     if let Some(state) = active_state() {
         return state.call.borrow().semantic_invoker.clone();
     }
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
-pub fn current_external_function_invoker() -> Option<Arc<ExternalFunctionInvoker>> {
+pub fn current_external_function_invoker() -> Option<Rc<ExternalFunctionInvoker>> {
     if let Some(state) = active_state() {
         return state.call.borrow().external_invoker.clone();
     }
     EXTERNAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
-pub fn current_lexical_function_invoker() -> Option<Arc<LexicalFunctionInvoker>> {
+pub fn current_lexical_function_invoker() -> Option<Rc<LexicalFunctionInvoker>> {
     if let Some(state) = active_state() {
         return state.call.borrow().lexical_invoker.clone();
     }

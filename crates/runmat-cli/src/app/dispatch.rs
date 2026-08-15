@@ -3,7 +3,7 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{
-    accel, batch, benchmark, check, config, gc, job, package, repl, script, test, version,
+    accel, batch, benchmark, check, compile, config, gc, job, package, repl, script, test, version,
 };
 use crate::remote;
 
@@ -53,6 +53,28 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
                 cli,
                 config,
                 json,
+            )
+            .await
+        }
+        Commands::Compile {
+            file,
+            output,
+            optimization,
+            linker,
+            keep_temps,
+            force,
+        } => {
+            compile::execute(
+                compile::CompileRequest {
+                    file,
+                    output,
+                    optimization,
+                    linker,
+                    keep_temps,
+                    force,
+                },
+                cli,
+                config,
             )
             .await
         }

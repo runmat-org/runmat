@@ -586,10 +586,6 @@ async fn run_interpreter(
     Box::pin(run_interpreter_inner(state, initial_vars)).await
 }
 
-// Semantic invokers use the runtime's established Arc callback ABI, while live
-// execution contexts are intentionally thread-confined with the GC-owned Values
-// they contain. The callback never crosses the invocation thread.
-#[allow(clippy::arc_with_non_send_sync)]
 async fn run_interpreter_inner(
     state: InterpreterState,
     initial_vars: &mut Vec<Value>,
@@ -636,7 +632,7 @@ async fn run_interpreter_inner(
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     let registry_for_function_invoker = Arc::clone(&function_registry);
     let _semantic_function_guard =
-        user_functions::install_semantic_function_invoker(Some(Arc::new(
+        user_functions::install_local_semantic_function_invoker(std::rc::Rc::new(
             move |function: usize, args: &[Value], requested_outputs: usize| {
                 let args = args.to_vec();
                 let previous_invoker = previous_semantic_invoker.clone();
@@ -662,7 +658,7 @@ async fn run_interpreter_inner(
                     .map(|(value, _)| value)
                 })
             },
-        )));
+        ));
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
     let registry_for_function_resolver = Arc::clone(&function_registry);
     let _semantic_resolver_guard =

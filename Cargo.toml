@@ -7,6 +7,7 @@ members = [
     "crates/runmat-mir",
     "crates/runmat-native-codegen",
     "crates/runmat-aot-runtime",
+    "crates/runmat-aot",
     "crates/runmat-jit",
     "crates/runmat-vm",
     "crates/runmat-telemetry",
@@ -113,6 +114,7 @@ runmat-hir = { version = "=0.6.1", path = "crates/runmat-hir" }
 runmat-mir = { version = "=0.6.1", path = "crates/runmat-mir" }
 runmat-native-codegen = { version = "=0.6.1", path = "crates/runmat-native-codegen" }
 runmat-aot-runtime = { version = "=0.6.1", path = "crates/runmat-aot-runtime" }
+runmat-aot = { version = "=0.6.1", path = "crates/runmat-aot" }
 runmat-jit = { version = "=0.6.1", path = "crates/runmat-jit" }
 runmat-vm = { version = "=0.6.1", path = "crates/runmat-vm" }
 runmat-async = { version = "=0.6.1", path = "crates/runmat-async" }

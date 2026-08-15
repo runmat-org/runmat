@@ -54,7 +54,7 @@ pub fn emit_relocatable_object_with_data(
         .map_err(module_error)?;
     let mut module = ObjectModule::new(builder);
     let mut functions = Vec::with_capacity(assembly.functions.len());
-    let mut entrypoint_id = None;
+    let mut linked_functions = Vec::with_capacity(assembly.functions.len());
 
     for function in &assembly.functions {
         let compiled = crate::cranelift::lower_function(function, &assembly.target)?;
@@ -68,9 +68,7 @@ pub fn emit_relocatable_object_with_data(
             .define_function(id, &mut context)
             .map_err(module_error)?;
         module.clear_context(&mut context);
-        if function.id == entrypoint {
-            entrypoint_id = Some(id);
-        }
+        linked_functions.push((function.id, id));
         functions.push(NativeObjectFunction {
             function: function.id,
             symbol,
@@ -142,11 +140,8 @@ pub fn emit_relocatable_object_with_data(
         });
     }
     if !linked_data.is_empty() {
-        super::launcher::define(
-            &mut module,
-            entrypoint_id.expect("verified entrypoint was defined"),
-            &linked_data,
-        )?;
+        let resolver = super::launcher::define_resolver(&mut module, &linked_functions)?;
+        super::launcher::define(&mut module, resolver, &linked_data)?;
     }
 
     let product = module.finish();
@@ -163,6 +158,8 @@ pub fn emit_relocatable_object_with_data(
         object_format: NativeObjectFormat::for_target(&assembly.target)?,
         executable_cache_key: assembly.executable_cache_key,
         native_cache_key: assembly.native_cache_key,
+        runtime_fingerprint: *assembly.program.runtime_fingerprint(),
+        catalog_fingerprint: *assembly.program.catalog_fingerprint(),
         optimization,
         object_digest: runmat_execution::Digest::sha256(&bytes),
         object_bytes,
