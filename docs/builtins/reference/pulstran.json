@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "GPU numeric inputs are gathered to the host because `pulstran` combines multiple shifted pulse evaluations and may call arbitrary pulse functions."
+    "notes": "Automatic resident waveform inputs may gather transparently for host evaluation and return through their exact owner. Explicit gpuArray computation inputs are a separately gated RunMat extension; admitted outputs retain explicit residency or fail if the owner cannot preserve double output. Callback payloads are not reclassified as `pulstran` computation inputs."
   },
   "fusion": {
     "elementwise": false,
@@ -33,12 +33,13 @@
   },
   "description": "`pulstran(T, D, FUN, P1, ...)` evaluates a pulse function at `T - D(k)` for each delay and sums the results. `D` may be a delay vector or an N-by-2 delay/amplitude matrix. `pulstran(T, D, P, FS)` uses a sampled prototype pulse `P` with sample rate `FS` and linear interpolation.",
   "behaviors": [
+    "The public contract does not document typed-integer waveform inputs. RunMat mode admits integer `T`, delay/gain data, sampled prototypes, sample rates, and built-in pulse parameters through independent compatibility gates and rejects any value that cannot be represented exactly at the binary64 waveform boundary.",
     "The output shape matches `T`.",
     "Character, string, and function-handle pulse names are accepted. Built-in fast paths cover `rectpuls`, `tripuls`, and `gauspuls`; other function handles are invoked through the normal `feval` path.",
     "A delay vector uses unit amplitude for every pulse.",
     "An N-by-2 delay matrix uses column one as delay and column two as amplitude.",
     "Sampled prototype pulses are linearly interpolated at `FS`; samples outside the prototype support contribute zero.",
-    "Complex and text-valued numeric inputs are rejected with builtin-scoped errors."
+    "Complex and text-valued numeric inputs are rejected with builtin-scoped errors; function-handle callback payloads remain ordinary exact values rather than being reclassified as `pulstran` controls."
   ],
   "examples": [
     {

@@ -39,6 +39,7 @@
     "Negative lower bounds are supported so long as `imin <= imax`.",
     "`randi(___, 'double')` is accepted for MATLAB compatibility and keeps the default double output.",
     "`randi(___, 'single')`, `randi(___, 'logical')`, and the documented integer class names through `uint32` preserve the requested output class; logical output requires the inclusive range to stay within `[0, 1]`.",
+    "All eight integer classes are documented for size controls and are decoded structurally. If sampled bounds exceed the selected output class, conversion saturates values to that class's endpoints.",
     "`int64` and `uint64` output classes are exact RunMat extensions available only in `runmat` compatibility mode.",
     "The bare `randi(bounds, prototype)` shorthand copies prototype shape and class only in `runmat` mode; MATLAB-compatible code uses explicit dimensions and the `like` keyword."
   ],
@@ -93,7 +94,7 @@
     },
     {
       "question": "How do I control the array shape?",
-      "answer": "Pass either explicit dimensions (`randi(9, 4, 2)`) or a size vector (`randi(9, [4 2])`). Providing a `'like'` prototype also copies the prototype's shape automatically."
+      "answer": "Pass either explicit dimensions (`randi(9, 4, 2)`) or a row size vector (`randi(9, [4 2])`). A `'like'` prototype selects class, complexity, and residency but does not copy shape; omitting dimensions returns a scalar."
     },
     {
       "question": "How does `randi` interact with `rng`?",

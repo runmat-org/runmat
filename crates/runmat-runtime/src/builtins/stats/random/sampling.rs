@@ -458,6 +458,103 @@ const RANDSAMPLE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     },
 ];
 
+const RANDSAMPLE_INTEGER_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randsample-integer-range",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "randsample with a typed-integer range limit is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandsampleIntegerRangeExtension"),
+};
+const RANDSAMPLE_INTEGER_POPULATION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "randsample-integer-population",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "randsample with a typed-integer population is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RandsampleIntegerPopulationExtension"),
+    };
+const RANDSAMPLE_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randsample-integer-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "randsample with a typed-integer sample count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandsampleIntegerCountExtension"),
+};
+const RANDSAMPLE_INTEGER_REPLACEMENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "randsample-integer-replacement",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "randsample with a typed-integer replacement flag is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RandsampleIntegerReplacementExtension"),
+    };
+const RANDSAMPLE_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "randsample-integer-weights",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "randsample with typed-integer sampling weights is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RandsampleIntegerWeightsExtension"),
+    };
+pub const RANDSAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    RANDSAMPLE_INTEGER_N_EXTENSION,
+    RANDSAMPLE_INTEGER_POPULATION_EXTENSION,
+    RANDSAMPLE_INTEGER_K_EXTENSION,
+    RANDSAMPLE_INTEGER_REPLACEMENT_EXTENSION,
+    RANDSAMPLE_INTEGER_WEIGHTS_EXTENSION,
+];
+const RANDSAMPLE_INTEGER_RANGE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents single/double n; RunMat typed range limits are exact structural controls and return double sampled indices.",
+    }];
+const RANDSAMPLE_INTEGER_POPULATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "population",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a lists single/double/logical/text/categorical populations; RunMat preserves exact typed-integer population values, orientation, class, and supported residency.",
+    }];
+const RANDSAMPLE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k/replacement/w",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed count, replacement, and weight roles are independently gated; only weights cross a checked binary64 probability boundary.",
+    }];
+pub const RANDSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = randsample(integer_n,k,___)",
+        inputs: &RANDSAMPLE_INTEGER_RANGE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The range form samples 1:n and emits a double column/scalar result.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = randsample(integer_population,k,___)",
+        inputs: &RANDSAMPLE_INTEGER_POPULATION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Sampling copies authoritative values by index and restores resident population output through the exact owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = randsample(...,integer_k,integer_replacement,integer_w)",
+        inputs: &RANDSAMPLE_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Counts and flags remain structural; weights require exact representability before floating probability normalization.",
+    },
+];
+
 const UNIDRND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "r = unidrnd(n)",
@@ -1362,6 +1459,9 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             RandsamplePopulation::Range(parse_positive_usize("randsample", &first, "n")?)
         }
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            RandsamplePopulation::Range(parse_positive_usize("randsample", &first, "n")?)
+        }
         _ => {
             let shape = shape_of_sampled_value(&first).map_err(|err| {
                 sampling_error("randsample", format!("randsample: {}", err.message()))
@@ -1449,12 +1549,85 @@ pub mod randsample {
         keywords = "randsample,random,sample,replacement,weights,statistics",
         type_resolver(super::sampling_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::RANDSAMPLE_EXTENSIONS),
+        integer_capabilities(super::RANDSAMPLE_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::random::sampling::randsample"
     )]
     pub(crate) async fn randsample_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        ensure_randsample_extensions(&args).await?;
+        let resident_population = args.first().and_then(|value| match value {
+            Value::GpuTensor(handle) if tensor::element_count(&handle.shape) > 1 => {
+                Some(handle.clone())
+            }
+            _ => None,
+        });
         let args = super::parse_randsample_args(args).await?;
-        super::randsample_compute(args)
+        let output = super::randsample_compute(args)?;
+        if let Some(source) = resident_population {
+            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&source)
+                .ok_or_else(|| {
+                    sampling_error(
+                        "randsample",
+                        "randsample: resident population owner is unavailable",
+                    )
+                })?;
+            return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+                provider,
+                output,
+                "randsample",
+                &source,
+            );
+        }
+        Ok(output)
     }
+}
+
+async fn ensure_randsample_extensions(args: &[Value]) -> BuiltinResult<()> {
+    if args.len() < 2 {
+        return Ok(());
+    }
+    let first = &args[0];
+    if crate::builtins::common::validation::value_has_native_integer_class(first) {
+        let scalar = match first {
+            Value::Int(_) => true,
+            Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+            Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+            _ => false,
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(
+            if scalar {
+                &RANDSAMPLE_INTEGER_N_EXTENSION
+            } else {
+                &RANDSAMPLE_INTEGER_POPULATION_EXTENSION
+            },
+            "randsample",
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_native_integer_class(&args[1]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RANDSAMPLE_INTEGER_K_EXTENSION,
+            "randsample",
+        )?;
+    }
+    if let Some(replacement) = args.get(2) {
+        if crate::builtins::common::validation::value_has_native_integer_class(replacement) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RANDSAMPLE_INTEGER_REPLACEMENT_EXTENSION,
+                "randsample",
+            )?;
+        }
+    }
+    if let Some(weights) = args.get(3) {
+        crate::builtins::common::validation::reject_typed_complex_integer(weights, "randsample")?;
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            weights,
+            &RANDSAMPLE_INTEGER_WEIGHTS_EXTENSION,
+            "randsample",
+            "weights",
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 async fn parse_shape_args(name: &str, rest: &[Value]) -> BuiltinResult<Vec<usize>> {
@@ -2255,6 +2428,20 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    #[cfg(feature = "wgpu")]
+    fn all_population_integer_storages() -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![1, 2]),
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I64(vec![1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ]
+    }
+
     #[test]
     fn boolean_options_read_every_integer_storage_variant_not_the_float_mirror() {
         for storage in [
@@ -2558,6 +2745,89 @@ mod tests {
                     .all(|value| [10.0, 20.0, 30.0].contains(value)));
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn randsample_restores_exact_integer_population_to_its_owner() {
+        let _lock = random::test_lock().lock().unwrap();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        random::reset_rng();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let base = 9_007_199_254_740_992_u64;
+            let values = [base, base + 1];
+            let shape = [1usize, 2usize];
+            let source = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&values),
+                    shape: &shape,
+                })
+                .expect("upload integer population");
+            runmat_accelerate_api::set_handle_provenance(
+                &source,
+                runmat_accelerate_api::GpuHandleProvenance::Explicit,
+            );
+            let Value::GpuTensor(output) = block_on(randsample::randsample_builtin(vec![
+                Value::GpuTensor(source),
+                Value::Num(2.0),
+            ]))
+            .expect("resident integer population") else {
+                panic!("expected resident output");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let downloaded =
+                block_on(provider.download_integer(&output)).expect("download integer population");
+            let runmat_accelerate_api::HostIntegerDataOwned::U64(mut sampled) = downloaded.data
+            else {
+                panic!("expected uint64 download");
+            };
+            sampled.sort_unstable();
+            assert_eq!(sampled, values);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn randsample_wgpu_preserves_residency_and_class_for_all_integer_populations() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_population_integer_storages() {
+            let expected_dtype = storage.numeric_dtype();
+            let mut expected = storage.exact_values();
+            expected.sort_by_key(|value| format!("{value:?}"));
+            let population = Tensor::new_integer(storage, vec![1, 2]).expect("population");
+            let source = gpu_helpers::upload_tensor(provider, &population).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&source);
+            let output = block_on(randsample::randsample_builtin(vec![
+                Value::GpuTensor(source),
+                Value::Num(2.0),
+            ]))
+            .expect("resident integer population");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            let gathered = test_support::gather(output).expect("gather output");
+            assert_eq!(gathered.numeric_dtype(), expected_dtype);
+            let mut actual = gathered
+                .integer_storage()
+                .expect("integer output")
+                .exact_values();
+            actual.sort_by_key(|value| format!("{value:?}"));
+            assert_eq!(actual, expected);
         }
     }
 

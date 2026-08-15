@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, NumericDType, Tensor, Value,
 };
@@ -11,7 +15,9 @@ use runmat_macros::runtime_builtin;
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random;
-use crate::builtins::common::random_args::{complex_tensor_into_value, extract_dims, keyword_of};
+use crate::builtins::common::random_args::{
+    complex_tensor_into_value, extract_constructor_dimensions, keyword_of,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -195,6 +201,54 @@ pub const RANDN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RANDN_ERRORS,
 };
 
+const RANDN_COLUMN_SIZE_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randn-column-size-vector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "randn with a column size vector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandnColumnSizeVectorExtension"),
+};
+const RANDN_RESIDENT_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randn-resident-size-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "randn with a resident size control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandnResidentSizeControlExtension"),
+};
+pub const RANDN_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    RANDN_COLUMN_SIZE_VECTOR_EXTENSION,
+    RANDN_RESIDENT_SIZE_EXTENSION,
+];
+
+const RANDN_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n/sz1...szN/sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented structural sizes; signed negatives clamp to zero and trailing singleton dimensions normalize away.",
+    }];
+pub const RANDN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = randn(integer_n[,integer_sz2,...])",
+        inputs: &RANDN_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Counts are decoded from authoritative storage and select double or single host/GPU generation without numeric conversion.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = randn(integer_sz)",
+        inputs: &RANDN_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented size vector is a row vector; integer prototypes remain unsupported because randn like supports only single/double numeric class and complexity.",
+    },
+];
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randn")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randn",
@@ -214,6 +268,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     type_resolver(randn_type),
     descriptor(crate::builtins::array::creation::randn::RANDN_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::randn::RANDN_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::randn::RANDN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::randn"
 )]
 async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -239,6 +295,7 @@ impl ParsedRandn {
         let mut saw_dims_arg = false;
         let mut template: Option<RandnTemplate> = None;
         let mut dtype: NumericDType = NumericDType::F64;
+        let mut saw_size_vector = false;
 
         let mut idx = 0;
         while idx < args.len() {
@@ -284,12 +341,39 @@ impl ParsedRandn {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg, "randn").await? {
+            if matches!(arg, Value::GpuTensor(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &RANDN_RESIDENT_SIZE_EXTENSION,
+                    "randn",
+                )?;
+            }
+            if let Some(parsed_dims) = extract_constructor_dimensions(&arg, "randn")
+                .await
+                .map_err(builtin_error)?
+            {
+                if parsed_dims.is_column_vector {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &RANDN_COLUMN_SIZE_VECTOR_EXTENSION,
+                        "randn",
+                    )?;
+                }
+                if parsed_dims.values.len() > 1 {
+                    if saw_size_vector || saw_dims_arg {
+                        return Err(builtin_error(
+                            "randn: a size vector must be the only dimension argument",
+                        ));
+                    }
+                    saw_size_vector = true;
+                } else if saw_size_vector {
+                    return Err(builtin_error(
+                        "randn: a size vector must be the only dimension argument",
+                    ));
+                }
                 saw_dims_arg = true;
                 if dims.is_empty() {
-                    dims = parsed_dims;
+                    dims = parsed_dims.values;
                 } else {
-                    dims.extend(parsed_dims);
+                    dims.extend(parsed_dims.values);
                 }
                 idx += 1;
                 continue;
@@ -543,6 +627,50 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn randn_column_and_resident_size_controls_follow_compatibility_mode() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let column = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![2, 3]), vec![2, 1])
+                    .expect("column size vector"),
+            )
+        };
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::Tensor(output) =
+            block_on(randn_builtin(vec![column()])).expect("RunMat column size")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![2, 3]);
+        drop(_runmat);
+
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(randn_builtin(vec![column()])).expect_err("strict column size");
+        assert_eq!(
+            error.identifier(),
+            RANDN_COLUMN_SIZE_VECTOR_EXTENSION.error_identifier
+        );
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX - 18,
+            buffer_id: 1,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::U8,
+        );
+        let error = block_on(randn_builtin(vec![Value::GpuTensor(handle.clone())]))
+            .expect_err("strict resident size");
+        assert_eq!(
+            error.identifier(),
+            RANDN_RESIDENT_SIZE_EXTENSION.error_identifier
+        );
+        runmat_accelerate_api::clear_handle_metadata(&handle);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

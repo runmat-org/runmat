@@ -1,7 +1,11 @@
 //! MATLAB-compatible `pulstran` builtin for sampled pulse trains.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Value,
 };
@@ -165,6 +169,103 @@ pub const PULSTRAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PULSTRAN_ERRORS,
 };
 
+const PULSTRAN_INTEGER_T_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-integer-time",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with typed-integer sample times is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranIntegerTimeExtension"),
+};
+const PULSTRAN_INTEGER_D_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-integer-delay",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with typed-integer delays or gains is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranIntegerDelayExtension"),
+};
+const PULSTRAN_INTEGER_P_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-integer-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with a typed-integer sampled prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranIntegerPrototypeExtension"),
+};
+const PULSTRAN_INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pulstran-integer-parameter",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pulstran with typed-integer built-in pulse parameters is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PulstranIntegerParameterExtension"),
+    };
+const PULSTRAN_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with an explicit gpuArray computation input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranExplicitGpuInputExtension"),
+};
+pub const PULSTRAN_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    PULSTRAN_INTEGER_T_EXTENSION,
+    PULSTRAN_INTEGER_D_EXTENSION,
+    PULSTRAN_INTEGER_P_EXTENSION,
+    PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+    PULSTRAN_EXPLICIT_GPU_EXTENSION,
+];
+
+const PULSTRAN_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "T",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public page does not document typed-integer sample times; RunMat admits them only at an exact binary64 waveform boundary.",
+    }];
+const PULSTRAN_INTEGER_D_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "D",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "Typed delays and optional gains are independently gated before waveform evaluation.",
+    }];
+const PULSTRAN_INTEGER_P_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "P/FS/built-in pulse parameters",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed sampled prototypes and numeric controls cross checked floating interpolation or pulse-generation boundaries; callback extra arguments remain exact pass-through values.",
+    }];
+pub const PULSTRAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pulstran(integer_T,D,FUN,...) or pulstran(integer_T,D,P,FS)",
+        inputs: &PULSTRAN_INTEGER_T_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Sample times are checked before provider access and converted once for waveform evaluation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pulstran(T,integer_D,FUN,...) or pulstran(T,integer_D,P,FS)",
+        inputs: &PULSTRAN_INTEGER_D_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Delay and gain values are checked independently before summation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pulstran(T,D,integer_P,integer_FS) or built-in pulse with integer parameters",
+        inputs: &PULSTRAN_INTEGER_P_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each typed numeric role is admitted separately; function-handle callback payloads are not reclassified as pulstran computation controls.",
+    },
+];
+
 #[derive(Clone, Copy, Debug)]
 struct PulseInstance {
     delay: f64,
@@ -223,6 +324,8 @@ fn pulstran_error_with_source(
     keywords = "pulstran,pulse train,rectpuls,tripuls,gauspuls,signal processing",
     type_resolver(pulse_train_type),
     descriptor(crate::builtins::math::signal::pulstran::PULSTRAN_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::pulstran::PULSTRAN_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::pulstran::PULSTRAN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::pulstran"
 )]
 async fn pulstran_builtin(
@@ -231,11 +334,117 @@ async fn pulstran_builtin(
     pulse: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    ensure_pulstran_extensions(&t, &d, &pulse, &rest).await?;
+    let gpu_source = pulstran_gpu_source(&t, &d, &pulse, &rest)?;
     let t = real_tensor_arg(t, &PULSTRAN_ERROR_INVALID_INPUT).await?;
     let delays = parse_delays(real_tensor_arg(d, &PULSTRAN_ERROR_INVALID_DELAY).await?)?;
     let source = parse_pulse_source(pulse, rest).await?;
     let y = evaluate_pulse_train(&t, &delays, &source).await?;
-    Ok(tensor_into_value(y))
+    let Some(source) = gpu_source else {
+        return Ok(tensor_into_value(y));
+    };
+    let restored =
+        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(y), BUILTIN_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(&source)
+        && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(pulstran_error_with_detail(
+            &PULSTRAN_ERROR_INTERNAL,
+            "provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(restored)
+}
+
+async fn ensure_pulstran_extensions(
+    t: &Value,
+    d: &Value,
+    pulse: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    crate::builtins::common::validation::reject_typed_complex_integer(t, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(d, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        t,
+        &PULSTRAN_INTEGER_T_EXTENSION,
+        BUILTIN_NAME,
+        "T",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        d,
+        &PULSTRAN_INTEGER_D_EXTENSION,
+        BUILTIN_NAME,
+        "D",
+    )
+    .await?;
+    let sampled = is_numeric_or_gpu(pulse);
+    if sampled && crate::builtins::common::validation::value_has_native_integer_class(pulse) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PULSTRAN_INTEGER_P_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if (sampled || pulse_uses_builtin_parameters(pulse))
+        && rest
+            .iter()
+            .any(|value| crate::builtins::common::validation::value_has_native_integer_class(value))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if pulstran_resident_values(t, d, pulse, rest).any(|value| {
+        matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PULSTRAN_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn pulse_uses_builtin_parameters(pulse: &Value) -> bool {
+    let name = text_scalar(pulse).or_else(|| match pulse {
+        Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => Some(name.clone()),
+        _ => None,
+    });
+    name.is_some_and(|name| {
+        matches!(
+            name.trim().to_ascii_lowercase().as_str(),
+            "rectpuls" | "tripuls" | "gauspuls"
+        )
+    })
+}
+
+fn pulstran_resident_values<'a>(
+    t: &'a Value,
+    d: &'a Value,
+    pulse: &'a Value,
+    rest: &'a [Value],
+) -> impl Iterator<Item = &'a Value> {
+    let uses_controls = is_numeric_or_gpu(pulse) || pulse_uses_builtin_parameters(pulse);
+    std::iter::once(t)
+        .chain(std::iter::once(d))
+        .chain(std::iter::once(pulse).filter(|value| is_numeric_or_gpu(value)))
+        .chain(rest.iter().filter(move |_| uses_controls))
+}
+
+fn pulstran_gpu_source(
+    t: &Value,
+    d: &Value,
+    pulse: &Value,
+    rest: &[Value],
+) -> BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
+    gpu_helpers::select_resident_output_source(
+        pulstran_resident_values(t, d, pulse, rest).filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        BUILTIN_NAME,
+    )
 }
 
 async fn real_tensor_arg(
@@ -346,6 +555,14 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
             format!("got {}", rest.len() + 3),
         ));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&pulse, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &pulse,
+        &PULSTRAN_INTEGER_P_EXTENSION,
+        BUILTIN_NAME,
+        "prototype",
+    )
+    .await?;
     let prototype = real_tensor_arg(pulse, &PULSTRAN_ERROR_INVALID_PULSE).await?;
     if !is_vector_shape(&prototype.shape) {
         return Err(pulstran_error_with_detail(
@@ -355,6 +572,14 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
     }
     let fs = match rest.first() {
         Some(value) => {
+            crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+                BUILTIN_NAME,
+                "FS",
+            )
+            .await?;
             let raw = scalar_f64_from_value_async(value)
                 .await
                 .map_err(|err| pulstran_error_with_detail(&PULSTRAN_ERROR_INVALID_PARAMETER, err))?
@@ -475,6 +700,14 @@ async fn parse_gauspuls_params(rest: &[Value]) -> BuiltinResult<GauspulsParams> 
 }
 
 async fn scalar_arg(value: &Value, label: &str) -> BuiltinResult<f64> {
+    crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+        BUILTIN_NAME,
+        label,
+    )
+    .await?;
     scalar_f64_from_value_async(value)
         .await
         .map_err(|err| {
@@ -613,6 +846,20 @@ mod tests {
         Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor")
     }
 
+    #[cfg(feature = "wgpu")]
+    fn all_integer_storages() -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![0, 1]),
+            IntegerStorage::I16(vec![0, 1]),
+            IntegerStorage::I32(vec![0, 1]),
+            IntegerStorage::I64(vec![0, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        ]
+    }
+
     #[test]
     fn pulstran_rectpuls_named_char_reproduces_pulse_train() {
         let t = Tensor::new(vec![-0.5, 0.0, 0.5, 1.0], vec![1, 4]).unwrap();
@@ -651,6 +898,7 @@ mod tests {
 
     #[test]
     fn pulstran_reads_typed_integer_times_and_delay_amplitudes_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let t = integer_tensor(vec![0, 1], vec![1, 2]);
         let d = integer_tensor(vec![0, 1, 2, 3], vec![2, 2]);
         let pulse =
@@ -705,6 +953,7 @@ mod tests {
 
     #[test]
     fn pulstran_reads_typed_integer_sampled_prototype_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let t = Tensor::new(vec![0.0, 0.5, 1.0, 1.5, 2.0], vec![1, 5]).unwrap();
         let d = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
         let prototype = integer_tensor(vec![0, 1, 0], vec![1, 3]);
@@ -757,6 +1006,92 @@ mod tests {
             err.identifier(),
             PULSTRAN_ERROR_INVALID_PARAMETER.identifier
         );
+    }
+
+    #[test]
+    fn pulstran_automatic_residency_is_transparent_and_explicit_residency_is_gated() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let times = Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("times");
+            let automatic = gpu_helpers::upload_tensor(provider, &times).expect("upload");
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let output = call(
+                Value::GpuTensor(automatic),
+                Value::Num(0.0),
+                Value::from("rectpuls"),
+                vec![Value::Num(0.25)],
+            )
+            .expect("automatic resident input");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected automatic resident output");
+            };
+            assert!(!runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                test_support::gather(output)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![1.0, 0.0]
+            );
+
+            let explicit = gpu_helpers::upload_tensor(provider, &times).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let error = call(
+                Value::GpuTensor(explicit),
+                Value::Num(0.0),
+                Value::from("rectpuls"),
+                vec![Value::Num(0.25)],
+            )
+            .expect_err("strict explicit input");
+            assert_eq!(
+                error.identifier(),
+                PULSTRAN_EXPLICIT_GPU_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn pulstran_wgpu_fallback_enforces_double_residency_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_storages() {
+            let times = Tensor::new_integer(storage, vec![1, 2]).expect("integer times");
+            let handle = gpu_helpers::upload_tensor(provider, &times).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let result = call(
+                Value::GpuTensor(handle),
+                Value::Num(0.0),
+                Value::from("rectpuls"),
+                vec![Value::Num(0.25)],
+            );
+            if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
+                let output = result.expect("resident integer pulstran");
+                let Value::GpuTensor(output_handle) = &output else {
+                    panic!("expected resident output");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+                assert_eq!(
+                    test_support::gather(output)
+                        .expect("gather")
+                        .materialize_f64(),
+                    vec![1.0, 0.0]
+                );
+            } else {
+                let error = result.expect_err("f32 owner cannot preserve double output");
+                assert!(error
+                    .message()
+                    .contains("cannot preserve explicit gpuArray"));
+            }
+        }
     }
 
     #[test]

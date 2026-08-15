@@ -3,9 +3,12 @@
 use runmat_accelerate_api::{GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, IntValue, IntegerStorage, LogicalArray,
-    NumericDType, Tensor, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -390,6 +393,84 @@ pub const RANDI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RANDI_ERRORS,
 };
 
+const RANDI_INTEGER_BOUNDS_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "imax or [imin imax]",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer bounds are decoded exactly and define an inclusive discrete interval without passing through binary64.",
+    }];
+const RANDI_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n/sz1...szN/sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight documented integer size classes are structural; signed negatives clamp to zero.",
+    }];
+const RANDI_INTEGER_PROTOTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "like prototype or integer output class",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The six documented integer output classes through 32 bits preserve native storage; supported resident prototypes preserve their owner and class.",
+    }];
+const RANDI_WIDE_INTEGER_PROTOTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "int64/uint64 like prototype or output class",
+        classes: &[
+            runmat_builtins::BuiltinIntegerClass::Int64,
+            runmat_builtins::BuiltinIntegerClass::Uint64,
+        ],
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a omits int64/uint64 from the documented output class and prototype lists; RunMat preserves both as independently gated exact host extensions.",
+    }];
+pub const RANDI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = randi(integer_imax,...) or randi(integer_[imin imax],...)",
+        inputs: &RANDI_INTEGER_BOUNDS_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Bounds retain signedness and full width through range validation and unbiased sampling.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = randi(bounds,integer_n[,integer_sz2,...]) or randi(bounds,integer_sz)",
+        inputs: &RANDI_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Dimensions are exact allocation controls and never determine sampled payload values.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = randi(bounds,...,integer_typename) or randi(bounds,...,'like',integer_prototype)",
+        inputs: &RANDI_INTEGER_PROTOTYPE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Result class and supported residency follow the documented class/prototype; sampled values outside that class saturate during conversion.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = randi(bounds,...,'int64'|'uint64') or randi(bounds,...,'like',wide_integer_prototype)",
+        inputs: &RANDI_WIDE_INTEGER_PROTOTYPE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The stable randi-wide-integer-output gate preserves exact native int64/uint64 generation without presenting those classes as MATLAB-compatible output forms.",
+    },
+];
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randi",
@@ -410,6 +491,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(randi_type),
     descriptor(crate::builtins::array::creation::randi::RANDI_DESCRIPTOR),
     extensions(crate::builtins::array::creation::randi::RANDI_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::randi::RANDI_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::randi"
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

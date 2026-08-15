@@ -3,8 +3,12 @@
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -294,6 +298,26 @@ pub const RANDPERM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RANDPERM_ERRORS,
 };
 
+const RANDPERM_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n or k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Both counts accept all eight documented integer classes and are decoded exactly before bounded allocation.",
+    }];
+pub const RANDPERM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "p = randperm(integer_n[,integer_k])",
+        inputs: &RANDPERM_INTEGER_COUNT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Ordinary calls return a double row vector; the one-input GPU form is separately resident, while explicit double/like selectors remain declared RunMat extensions.",
+    }];
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randperm",
@@ -314,6 +338,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(randperm_type),
     descriptor(crate::builtins::array::creation::randperm::RANDPERM_DESCRIPTOR),
     extensions(crate::builtins::array::creation::randperm::RANDPERM_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::array::creation::randperm::RANDPERM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

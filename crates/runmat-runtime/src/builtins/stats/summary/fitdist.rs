@@ -315,6 +315,61 @@ const RANDOM_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     },
 ];
 
+const RANDOM_INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "random-integer-parameters",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "random with typed-integer distribution parameters is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandomIntegerParametersExtension"),
+};
+const RANDOM_INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "random-integer-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "random with typed-integer size controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandomIntegerSizeExtension"),
+};
+pub const RANDOM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    RANDOM_INTEGER_PARAMETER_EXTENSION,
+    RANDOM_INTEGER_SIZE_EXTENSION,
+];
+const RANDOM_INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A...D",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single/double named-distribution parameters; typed integers are gated before conversion and must be exactly representable as binary64.",
+    }];
+const RANDOM_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz1...szN or sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents single/double size controls; RunMat typed sizes are exact structural values and do not cross the distribution computation boundary.",
+    }];
+pub const RANDOM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = random(name,integer_A...D,...)",
+        inputs: &RANDOM_INTEGER_PARAMETER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each typed parameter is admitted independently and converted once after exactness validation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = random(pd,integer_sz) or random(name,A...D,integer_sz)",
+        inputs: &RANDOM_INTEGER_SIZE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed sizes gate before provider access and are decoded from authoritative integer storage without floating conversion.",
+    },
+];
+
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FITDIST.INVALID_ARGUMENT",
     identifier: Some("RunMat:fitdist:InvalidArgument"),
@@ -993,9 +1048,13 @@ fn finish_cdf(
     keywords = "random,fitdist,probability distribution,statistics",
     type_resolver(random_type),
     descriptor(crate::builtins::stats::summary::fitdist::RANDOM_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::fitdist::RANDOM_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::fitdist::RANDOM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::fitdist"
 )]
 pub(crate) async fn random_builtin(distribution: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_random_extensions(&distribution, &rest).await?;
+    let gpu_source = random_gpu_source(&distribution, &rest)?;
     let (fit, shape) = if matches!(distribution, Value::Object(_)) {
         (
             distribution_from_value(&distribution)?,
@@ -1006,7 +1065,82 @@ pub(crate) async fn random_builtin(distribution: Value, rest: Vec<Value>) -> Bui
     };
     let len = tensor::element_count(&shape);
     let data = random_samples(&fit, len)?;
-    finish_for(RANDOM_NAME, shape, data)
+    finish_random(shape, data, gpu_source)
+}
+
+fn random_gpu_source(
+    distribution: &Value,
+    rest: &[Value],
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let parameter_count = if matches!(distribution, Value::Object(_)) {
+        0
+    } else {
+        parse_distribution_name_for(RANDOM_NAME, distribution)?
+            .parameter_names()
+            .len()
+    };
+    gpu_helpers::select_resident_output_source(
+        rest.iter()
+            .take(parameter_count)
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            }),
+        RANDOM_NAME,
+    )
+}
+
+fn finish_random(
+    shape: Vec<usize>,
+    data: Vec<f64>,
+    gpu_source: Option<GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let tensor = Tensor::new(data, shape)
+        .map_err(|err| internal_for(RANDOM_NAME, format!("random: {err}")))?;
+    let Some(source) = gpu_source else {
+        return Ok(tensor::tensor_into_value(tensor));
+    };
+    let restored =
+        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), RANDOM_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(&source)
+        && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(internal_for(
+            RANDOM_NAME,
+            "random: provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(restored)
+}
+
+async fn ensure_random_extensions(distribution: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, RANDOM_NAME)?;
+    }
+    let parameter_count = if matches!(distribution, Value::Object(_)) {
+        0
+    } else {
+        parse_distribution_name_for(RANDOM_NAME, distribution)?
+            .parameter_names()
+            .len()
+    };
+    for (index, value) in rest.iter().enumerate() {
+        if index < parameter_count {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &RANDOM_INTEGER_PARAMETER_EXTENSION,
+                RANDOM_NAME,
+                "distribution parameter",
+            )
+            .await?;
+        } else if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RANDOM_INTEGER_SIZE_EXTENSION,
+                RANDOM_NAME,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) async fn icdf_probability_distribution(
@@ -2489,6 +2623,91 @@ mod tests {
         match samples {
             Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn random_restores_parameter_residency_but_not_size_control_residency() {
+        use crate::builtins::common::test_support;
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let parameter = Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1])
+                .expect("integer parameter");
+            let parameter = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&parameter);
+            let output = block_on(random_builtin(
+                Value::String("Normal".into()),
+                vec![
+                    Value::GpuTensor(parameter),
+                    Value::Num(1.0),
+                    Value::Num(2.0),
+                ],
+            ))
+            .expect("resident random output");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident random output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            let gathered = test_support::gather(output).expect("gather random output");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert!(gathered
+                .materialize_f64()
+                .iter()
+                .all(|value| value.is_finite()));
+
+            let size =
+                Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).expect("integer size");
+            let size = gpu_helpers::upload_tensor(provider, &size).expect("upload size");
+            runmat_accelerate_api::mark_handle_explicit(&size);
+            let output = block_on(random_builtin(
+                Value::String("Normal".into()),
+                vec![Value::Num(0.0), Value::Num(1.0), Value::GpuTensor(size)],
+            ))
+            .expect("resident size control");
+            assert!(matches!(output, Value::Tensor(_)));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn random_wgpu_parameter_residency_enforces_double_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_cdf_integer_storages(0) {
+            let parameter = Tensor::new_integer(storage, vec![1, 1]).expect("integer parameter");
+            let handle = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let result = block_on(random_builtin(
+                Value::String("Normal".into()),
+                vec![Value::GpuTensor(handle), Value::Num(1.0), Value::Num(2.0)],
+            ));
+            if provider.precision() == ProviderPrecision::F64 {
+                let output = result.expect("resident random output");
+                let Value::GpuTensor(handle) = &output else {
+                    panic!("expected resident random output");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(handle));
+                let gathered = test_support::gather(output).expect("gather random output");
+                assert_eq!(gathered.shape, vec![2, 2]);
+                assert!(gathered
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
+            } else {
+                let error = result.expect_err("f32 owner cannot preserve double output");
+                assert!(error
+                    .message()
+                    .contains("cannot preserve explicit gpuArray"));
+            }
         }
     }
 

@@ -123968,6 +123968,121 @@
           "when": "Internal tensor construction, callback result materialization, or GPU gather fails.",
           "message": "pulstran: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "pulstran-integer-time",
+          "mode": "RunMatOnly",
+          "description": "pulstran with typed-integer sample times is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PulstranIntegerTimeExtension"
+        },
+        {
+          "id": "pulstran-integer-delay",
+          "mode": "RunMatOnly",
+          "description": "pulstran with typed-integer delays or gains is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PulstranIntegerDelayExtension"
+        },
+        {
+          "id": "pulstran-integer-prototype",
+          "mode": "RunMatOnly",
+          "description": "pulstran with a typed-integer sampled prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PulstranIntegerPrototypeExtension"
+        },
+        {
+          "id": "pulstran-integer-parameter",
+          "mode": "RunMatOnly",
+          "description": "pulstran with typed-integer built-in pulse parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PulstranIntegerParameterExtension"
+        },
+        {
+          "id": "pulstran-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "pulstran with an explicit gpuArray computation input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PulstranExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = pulstran(integer_T,D,FUN,...) or pulstran(integer_T,D,P,FS)",
+          "inputs": [
+            {
+              "name": "T",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public page does not document typed-integer sample times; RunMat admits them only at an exact binary64 waveform boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Sample times are checked before provider access and converted once for waveform evaluation."
+        },
+        {
+          "form": "Y = pulstran(T,integer_D,FUN,...) or pulstran(T,integer_D,P,FS)",
+          "inputs": [
+            {
+              "name": "D",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed delays and optional gains are independently gated before waveform evaluation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Delay and gain values are checked independently before summation."
+        },
+        {
+          "form": "Y = pulstran(T,D,integer_P,integer_FS) or built-in pulse with integer parameters",
+          "inputs": [
+            {
+              "name": "P/FS/built-in pulse parameters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed sampled prototypes and numeric controls cross checked floating interpolation or pulse-generation boundaries; callback extra arguments remain exact pass-through values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each typed numeric role is admitted separately; function-handle callback payloads are not reclassified as pulstran computation controls."
+        }
       ]
     },
     {
@@ -127041,7 +127156,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"double\"",
-              "description": "Class override ('double'|'logical')."
+              "description": "Output class override; int64 and uint64 are RunMat-mode extensions."
             }
           ],
           "outputs": [
@@ -127111,7 +127226,7 @@
               "ty": "LikePrototype",
               "arity": "Required",
               "default": null,
-              "description": "Prototype value when no numeric dimension arguments are provided."
+              "description": "RunMat-only shorthand that copies prototype shape and class without a like keyword."
             }
           ],
           "outputs": [
@@ -127194,6 +127309,108 @@
           "description": "the bare randi(bounds, prototype) shorthand is a RunMat extension",
           "error_identifier": "RunMat:compatibility:RandiImplicitPrototypeExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = randi(integer_imax,...) or randi(integer_[imin imax],...)",
+          "inputs": [
+            {
+              "name": "imax or [imin imax]",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer bounds are decoded exactly and define an inclusive discrete interval without passing through binary64."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "FunctionSpecific",
+          "overload": "Multiple",
+          "notes": "Bounds retain signedness and full width through range validation and unbiased sampling."
+        },
+        {
+          "form": "R = randi(bounds,integer_n[,integer_sz2,...]) or randi(bounds,integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight documented integer size classes are structural; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "Dimensions are exact allocation controls and never determine sampled payload values."
+        },
+        {
+          "form": "R = randi(bounds,...,integer_typename) or randi(bounds,...,'like',integer_prototype)",
+          "inputs": [
+            {
+              "name": "like prototype or integer output class",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The six documented integer output classes through 32 bits preserve native storage; supported resident prototypes preserve their owner and class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "FunctionSpecific",
+          "overload": "FunctionSpecific",
+          "notes": "Result class and supported residency follow the documented class/prototype; sampled values outside that class saturate during conversion."
+        },
+        {
+          "form": "R = randi(bounds,...,'int64'|'uint64') or randi(bounds,...,'like',wide_integer_prototype)",
+          "inputs": [
+            {
+              "name": "int64/uint64 like prototype or output class",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a omits int64/uint64 from the documented output class and prototype lists; RunMat preserves both as independently gated exact host extensions."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The stable randi-wide-integer-output gate preserves exact native int64/uint64 generation without presenting those classes as MATLAB-compatible output forms."
+        }
       ]
     },
     {
@@ -127265,27 +127482,6 @@
               "arity": "Variadic",
               "default": null,
               "description": "Dimension sizes."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Normal random array (mean 0, variance 1)."
-            }
-          ]
-        },
-        {
-          "label": "A = randn(prototype)",
-          "inputs": [
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype value when no numeric dimension arguments are provided."
             }
           ],
           "outputs": [
@@ -127386,6 +127582,76 @@
           "identifier": null,
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "randn: dimension arguments must be numeric and nonnegative"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "randn-column-size-vector",
+          "mode": "RunMatOnly",
+          "description": "randn with a column size vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandnColumnSizeVectorExtension"
+        },
+        {
+          "id": "randn-resident-size-control",
+          "mode": "RunMatOnly",
+          "description": "randn with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandnResidentSizeControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = randn(integer_n[,integer_sz2,...])",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented structural sizes; signed negatives clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "Counts are decoded from authoritative storage and select double or single host/GPU generation without numeric conversion."
+        },
+        {
+          "form": "X = randn(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented structural sizes; signed negatives clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The documented size vector is a row vector; integer prototypes remain unsupported because randn like supports only single/double numeric class and complexity."
         }
       ]
     },
@@ -127490,6 +127756,76 @@
           "identifier": "RunMat:fitdist:Internal",
           "when": "RunMat cannot construct distribution outputs.",
           "message": "fitdist: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "random-integer-parameters",
+          "mode": "RunMatOnly",
+          "description": "random with typed-integer distribution parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandomIntegerParametersExtension"
+        },
+        {
+          "id": "random-integer-size",
+          "mode": "RunMatOnly",
+          "description": "random with typed-integer size controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandomIntegerSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = random(name,integer_A...D,...)",
+          "inputs": [
+            {
+              "name": "A...D",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single/double named-distribution parameters; typed integers are gated before conversion and must be exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each typed parameter is admitted independently and converted once after exactness validation."
+        },
+        {
+          "form": "R = random(pd,integer_sz) or random(name,A...D,integer_sz)",
+          "inputs": [
+            {
+              "name": "sz1...szN or sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents single/double size controls; RunMat typed sizes are exact structural values and do not cross the distribution computation boundary."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed sizes gate before provider access and are decoded from authoritative integer storage without floating conversion."
         }
       ]
     },
@@ -127751,6 +128087,35 @@
           "description": "the randperm \"like\" prototype selector is a RunMat extension",
           "error_identifier": "RunMat:compatibility:RandpermLikeExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = randperm(integer_n[,integer_k])",
+          "inputs": [
+            {
+              "name": "n or k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Both counts accept all eight documented integer classes and are decoded exactly before bounded allocation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "Ordinary calls return a double row vector; the one-input GPU form is separately resident, while explicit double/like selectors remain declared RunMat extensions."
+        }
       ]
     },
     {
@@ -127862,6 +128227,121 @@
           "identifier": "RunMat:randsample:Internal",
           "when": "Internal conversion or allocation fails.",
           "message": "sampling: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "randsample-integer-range",
+          "mode": "RunMatOnly",
+          "description": "randsample with a typed-integer range limit is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandsampleIntegerRangeExtension"
+        },
+        {
+          "id": "randsample-integer-population",
+          "mode": "RunMatOnly",
+          "description": "randsample with a typed-integer population is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandsampleIntegerPopulationExtension"
+        },
+        {
+          "id": "randsample-integer-count",
+          "mode": "RunMatOnly",
+          "description": "randsample with a typed-integer sample count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandsampleIntegerCountExtension"
+        },
+        {
+          "id": "randsample-integer-replacement",
+          "mode": "RunMatOnly",
+          "description": "randsample with a typed-integer replacement flag is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandsampleIntegerReplacementExtension"
+        },
+        {
+          "id": "randsample-integer-weights",
+          "mode": "RunMatOnly",
+          "description": "randsample with typed-integer sampling weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandsampleIntegerWeightsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = randsample(integer_n,k,___)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents single/double n; RunMat typed range limits are exact structural controls and return double sampled indices."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The range form samples 1:n and emits a double column/scalar result."
+        },
+        {
+          "form": "y = randsample(integer_population,k,___)",
+          "inputs": [
+            {
+              "name": "population",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a lists single/double/logical/text/categorical populations; RunMat preserves exact typed-integer population values, orientation, class, and supported residency."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Sampling copies authoritative values by index and restores resident population output through the exact owner."
+        },
+        {
+          "form": "y = randsample(...,integer_k,integer_replacement,integer_w)",
+          "inputs": [
+            {
+              "name": "k/replacement/w",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed count, replacement, and weight roles are independently gated; only weights cross a checked binary64 probability boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Counts and flags remain structural; weights require exact representability before floating probability normalization."
         }
       ]
     },
@@ -129590,6 +130070,82 @@
           "identifier": "RunMat:rectpuls:InternalError",
           "when": "Internal tensor construction or GPU gather fails.",
           "message": "rectpuls: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rectpuls-integer-time",
+          "mode": "RunMatOnly",
+          "description": "rectpuls with typed-integer sample times is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RectpulsIntegerTimeExtension"
+        },
+        {
+          "id": "rectpuls-integer-width",
+          "mode": "RunMatOnly",
+          "description": "rectpuls with a typed-integer width is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RectpulsIntegerWidthExtension"
+        },
+        {
+          "id": "rectpuls-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "rectpuls with an explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RectpulsExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = rectpuls(integer_T,W)",
+          "inputs": [
+            {
+              "name": "T",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double sample times; typed integers are an independently gated RunMat extension."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Typed times reject before provider access unless RunMat extensions are enabled and exact conversion is possible."
+        },
+        {
+          "form": "Y = rectpuls(T,integer_W)",
+          "inputs": [
+            {
+              "name": "W",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public width is a positive floating scalar; typed width storage is admitted only at a checked binary64 boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Width is gated and checked separately from sample-time class."
         }
       ]
     },

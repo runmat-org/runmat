@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "size arguments",
-    "notes": "Sampling currently uses the host RNG and returns CPU arrays."
+    "notes": "Sampling currently uses the host RNG. A resident named-distribution parameter selects its exact owner for restored double output; structural size controls do not select output residency. Explicit parameter residency is preserved or fails terminally if the owner cannot represent the result."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
@@ -18,11 +18,13 @@
   },
   "description": "`random(pd)` and `random(pd,sz...)` generate random samples from a `ProbabilityDistribution` object returned by `fitdist`. `random(distname,params...,sz...)` samples supported named distributions directly.",
   "behaviors": [
+    "The public named-distribution parameters and size controls are single or double. Typed-integer parameters and sizes are separate RunMat-mode extensions; parameters must be exactly representable at the binary64 distribution boundary, while sizes remain structural.",
     "`pd` must be a fitted distribution object returned by `fitdist`, or `distname` must name a supported distribution.",
     "`random(pd)` returns one scalar sample.",
     "`random(pd,m,n,...)` returns an array with the requested size. A vector size argument such as `[m n]` is also accepted.",
     "Named normal, exponential, lognormal, gamma, Weibull, and Poisson distributions are supported with scalar parameters followed by optional size arguments.",
-    "Normal, exponential, lognormal, gamma, Weibull, and Poisson fitted distributions are supported."
+    "Normal, exponential, lognormal, gamma, Weibull, and Poisson fitted distributions are supported.",
+    "Sampling returns double output. Host parameters produce host output, while resident named-distribution parameters restore output through the exact owning provider; broader distribution coverage, array-valued parameter expansion, and class propagation remain general API work rather than integer compatibility claims."
   ],
   "examples": [
     {

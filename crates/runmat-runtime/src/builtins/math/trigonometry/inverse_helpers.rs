@@ -95,6 +95,9 @@ pub(crate) fn upload_value_like_protected(
         .with_builtin(builtin)
         .build());
     }
+    if let Some(provenance) = runmat_accelerate_api::handle_provenance(prototype) {
+        runmat_accelerate_api::set_handle_provenance(handle, provenance);
+    }
     Ok(output)
 }
 

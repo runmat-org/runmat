@@ -30,13 +30,14 @@
     "unit": "builtins::array::rand::tests",
     "integration": "builtins::array::rand::tests::rand_gpu_like_uniform"
   },
-  "description": "`rand` produces uniformly distributed pseudorandom numbers over the open interval (0, 1). It supports MATLAB-compatible size forms, class selection, `'like'` prototypes that control output type and residency, and the legacy `rand('seed', seed)` control form.",
+  "description": "`rand` produces uniformly distributed pseudorandom numbers over the open interval (0, 1). It supports MATLAB-compatible size forms, single/double class selection, `'like'` prototypes that control output type, complexity, and residency, and the legacy `rand('seed', seed)` control form.",
   "behaviors": [
     "`rand()` returns a scalar double drawn from `U(0, 1)`.",
     "`rand(n)` returns an `n × n` double matrix.",
     "`rand(m, n, ...)` returns a dense double array of the requested dimensions.",
-    "`rand(sz)` accepts a size vector (row or column) and returns a tensor whose shape is `sz`.",
-    "`rand(A)` or `rand(___, 'like', A)` matches the shape and residency of `A`, including GPU tensors when an acceleration provider is active.",
+    "`rand(sz)` accepts a documented row size vector; a column size vector is an independently gated RunMat-mode extension.",
+    "All eight integer classes are documented for scalar, separate-dimension, and row-size-vector controls and are decoded structurally from authoritative storage; resident size controls are separately gated RunMat extensions.",
+    "`rand(___, 'like', A)` matches the type, complexity, and residency of `A`, while ordinary size arguments determine shape and omission of size arguments returns a scalar. The old implicit `rand(A)` prototype form is not supported.",
     "`rand(___, 'double')` leaves the output as double precision (default). `'single'` returns single-precision results that mirror MATLAB's behaviour.",
     "`rand('seed', seed)` and `rand(\"seed\", seed)` accept non-negative integer scalar seeds and reset RunMat's shared pseudorandom stream. `rand('seed')` queries a restorable legacy state token for the current stream position; passing that token back to `rand('seed', token)` restores subsequent draws. This legacy control form also synchronizes the active acceleration provider's RNG state when provider hooks are available."
   ],
@@ -81,15 +82,15 @@
     },
     {
       "question": "How do I match the type and device residency of an existing array?",
-      "answer": "Use the `'like', prototype` syntax:\n```matlab:runnable\nA = gpuArray(rand(2,2));\nB = rand(2, 2, 'like', A);\n```\n`B` will be a GPU array with the same type and shape as `A`."
+      "answer": "Use the `'like', prototype` syntax:\n```matlab:runnable\nA = gpuArray(rand(2,2));\nB = rand(2, 2, 'like', A);\n```\n`B` will have the prototype's type, complexity, and residency; the explicit dimensions determine its shape."
     },
     {
       "question": "Can I create N-dimensional arrays with `rand`?",
       "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab:runnable\nT = rand(2, 3, 4);\n```\nThis creates a 2×3×4 tensor of random numbers."
     },
     {
-      "question": "How does `rand(A)` behave?",
-      "answer": "If you call `rand(A)`, where `A` is an array, the result is a new array of random numbers with the same shape as `A`."
+      "question": "Does `rand(A)` infer a prototype from an array?",
+      "answer": "No. Use `rand(..., 'like', A)` to select type, complexity, and residency, and pass dimensions explicitly when the result should have a particular shape."
     },
     {
       "question": "Is the output always dense?",

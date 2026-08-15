@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Value,
 };
@@ -103,6 +107,68 @@ pub const RECTPULS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RECTPULS_ERRORS,
 };
 
+const RECTPULS_INTEGER_T_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rectpuls-integer-time",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rectpuls with typed-integer sample times is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RectpulsIntegerTimeExtension"),
+};
+const RECTPULS_INTEGER_W_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rectpuls-integer-width",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rectpuls with a typed-integer width is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RectpulsIntegerWidthExtension"),
+};
+const RECTPULS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rectpuls-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rectpuls with an explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RectpulsExplicitGpuInputExtension"),
+};
+pub const RECTPULS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    RECTPULS_INTEGER_T_EXTENSION,
+    RECTPULS_INTEGER_W_EXTENSION,
+    RECTPULS_EXPLICIT_GPU_EXTENSION,
+];
+const RECTPULS_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "T",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double sample times; typed integers are an independently gated RunMat extension.",
+    }];
+const RECTPULS_INTEGER_W_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "W",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public width is a positive floating scalar; typed width storage is admitted only at a checked binary64 boundary.",
+    }];
+pub const RECTPULS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = rectpuls(integer_T,W)",
+        inputs: &RECTPULS_INTEGER_T_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Typed times reject before provider access unless RunMat extensions are enabled and exact conversion is possible.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = rectpuls(T,integer_W)",
+        inputs: &RECTPULS_INTEGER_W_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Width is gated and checked separately from sample-time class.",
+    },
+];
+
 fn rectpuls_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rectpuls_error_with_message(error.message, error)
 }
@@ -143,12 +209,9 @@ pub(crate) fn rectpuls_scalar(t: f64, width: f64) -> f64 {
     if t.is_nan() {
         return f64::NAN;
     }
-    let distance = t.abs();
     let half_width = width / 2.0;
-    if distance < half_width {
+    if t >= -half_width && t < half_width {
         1.0
-    } else if distance == half_width {
-        0.5
     } else {
         0.0
     }
@@ -178,20 +241,74 @@ pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
     keywords = "rectpuls,rectangular pulse,pulse train,signal processing",
     type_resolver(numeric_unary_shape_type),
     descriptor(crate::builtins::math::signal::rectpuls::RECTPULS_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::rectpuls::RECTPULS_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::rectpuls::RECTPULS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::rectpuls"
 )]
 async fn rectpuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_rectpuls_extensions(&t, &rest).await?;
+    let gpu_source = rectpuls_gpu_source(&t, &rest)?;
     let width = parse_width(&rest).await?;
-    match t {
-        Value::GpuTensor(handle) => rectpuls_gpu(handle, width).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))
-        }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err(rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))
-        }
-        other => rectpuls_real(other, width),
+    let tensor = rectpuls_input_tensor(t).await?;
+    let output = rectpuls_tensor(tensor, width)
+        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INTERNAL, err))?;
+    let Some(source) = gpu_source else {
+        return Ok(tensor_into_value(output));
+    };
+    let restored =
+        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(output), BUILTIN_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(&source)
+        && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(rectpuls_error_with_detail(
+            &RECTPULS_ERROR_INTERNAL,
+            "provider cannot preserve explicit gpuArray output residency",
+        ));
     }
+    Ok(restored)
+}
+
+async fn ensure_rectpuls_extensions(t: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    crate::builtins::common::validation::reject_typed_complex_integer(t, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        t,
+        &RECTPULS_INTEGER_T_EXTENSION,
+        BUILTIN_NAME,
+        "T",
+    )
+    .await?;
+    if let [width] = rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(width, BUILTIN_NAME)?;
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            width,
+            &RECTPULS_INTEGER_W_EXTENSION,
+            BUILTIN_NAME,
+            "W",
+        )
+        .await?;
+    }
+    if std::iter::once(t)
+        .chain(rest.iter())
+        .any(|value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RECTPULS_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn rectpuls_gpu_source(t: &Value, rest: &[Value]) -> BuiltinResult<Option<GpuTensorHandle>> {
+    gpu_helpers::select_resident_output_source(
+        std::iter::once(t)
+            .chain(rest.iter())
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            }),
+        BUILTIN_NAME,
+    )
 }
 
 async fn parse_width(rest: &[Value]) -> BuiltinResult<f64> {
@@ -213,23 +330,28 @@ async fn parse_width(rest: &[Value]) -> BuiltinResult<f64> {
     }
 }
 
-async fn rectpuls_gpu(handle: GpuTensorHandle, width: f64) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            rectpuls_error_with_source(&RECTPULS_ERROR_INTERNAL, "gpu gather failed", source)
-        })?;
-    rectpuls_tensor(tensor, width)
-        .map(tensor_into_value)
-        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INTERNAL, err))
-}
-
-fn rectpuls_real(value: Value, width: f64) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, err))?;
-    rectpuls_tensor(tensor, width)
-        .map(tensor_into_value)
-        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INTERNAL, err))
+async fn rectpuls_input_tensor(value: Value) -> BuiltinResult<Tensor> {
+    match value {
+        Value::GpuTensor(handle) => {
+            gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|source| {
+                    rectpuls_error_with_source(
+                        &RECTPULS_ERROR_INTERNAL,
+                        "gpu gather failed",
+                        source,
+                    )
+                })
+        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => {
+            Err(rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))
+        }
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+            Err(rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))
+        }
+        other => tensor::value_into_tensor_for(BUILTIN_NAME, other)
+            .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, err)),
+    }
 }
 
 #[cfg(test)]
@@ -257,6 +379,20 @@ mod tests {
         tensor
     }
 
+    #[cfg(feature = "wgpu")]
+    fn all_integer_storages() -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![0, 1]),
+            IntegerStorage::I16(vec![0, 1]),
+            IntegerStorage::I32(vec![0, 1]),
+            IntegerStorage::I64(vec![0, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        ]
+    }
+
     #[test]
     fn rectpuls_type_preserves_input_shape() {
         let out = numeric_unary_shape_type(
@@ -278,16 +414,17 @@ mod tests {
         let input = Tensor::new(vec![-0.5, -0.25, 0.0, 0.25, 0.5, 0.75], vec![1, 6]).unwrap();
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("rectpuls"));
         assert_eq!(out.shape, vec![1, 6]);
-        assert_eq!(out.materialize_f64(), vec![0.5, 1.0, 1.0, 1.0, 0.5, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
     }
 
     #[test]
     fn rectpuls_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
         let out =
             expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("rectpuls"));
         assert_eq!(out.shape, vec![1, 3]);
-        assert_eq!(out.materialize_f64(), vec![0.5, 1.0, 0.5]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -304,6 +441,77 @@ mod tests {
         let err =
             call(Value::CharArray(CharArray::new_row("abc")), Vec::new()).expect_err("text input");
         assert_eq!(err.identifier(), RECTPULS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn rectpuls_automatic_residency_is_transparent_and_explicit_residency_is_gated() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("input");
+            let automatic = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let output = call(Value::GpuTensor(automatic), vec![Value::Num(2.0)])
+                .expect("automatic resident input");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected automatic resident output");
+            };
+            assert!(!runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                test_support::gather(output)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![1.0, 0.0]
+            );
+
+            let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let error = call(Value::GpuTensor(explicit), vec![Value::Num(2.0)])
+                .expect_err("strict explicit input");
+            assert_eq!(
+                error.identifier(),
+                RECTPULS_EXPLICIT_GPU_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn rectpuls_wgpu_fallback_enforces_double_residency_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_storages() {
+            let input = Tensor::new_integer(storage, vec![1, 2]).expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let result = call(Value::GpuTensor(handle), vec![Value::Num(2.0)]);
+            if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
+                let output = result.expect("resident integer rectpuls");
+                let Value::GpuTensor(output_handle) = &output else {
+                    panic!("expected resident output");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+                assert_eq!(
+                    test_support::gather(output)
+                        .expect("gather")
+                        .materialize_f64(),
+                    vec![1.0, 0.0]
+                );
+            } else {
+                let error = result.expect_err("f32 owner cannot preserve double output");
+                assert!(error
+                    .message()
+                    .contains("cannot preserve explicit gpuArray"));
+            }
+        }
     }
 
     #[test]
