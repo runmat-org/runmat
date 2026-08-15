@@ -105,6 +105,11 @@ pub const CLEAR_CACHE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "clearCache accepts only a MemoizedFunction handle and has no public output; integer values may exist inside cached results but are opaque to cache clearing.",
     };
+pub const STATS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "stats accepts only a MemoizedFunction object. Cached integer inputs and outputs are opaque payloads preserved by the cache; the counters produced by stats are metadata, not integer input roles.",
+};
 const STATS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "S = stats(memoizedFcn)",
     inputs: &MEMOIZED_INPUTS,
@@ -361,6 +366,7 @@ pub(crate) async fn clear_cache_builtin(receiver: Value) -> BuiltinResult<Value>
     summary = "Return cache statistics for a MemoizedFunction object.",
     keywords = "memoize,MemoizedFunction,stats,cache",
     descriptor(crate::builtins::introspection::memoize::STATS_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::memoize::STATS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn stats_builtin(receiver: Value) -> BuiltinResult<Value> {

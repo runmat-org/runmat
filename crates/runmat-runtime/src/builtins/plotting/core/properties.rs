@@ -3159,12 +3159,22 @@ fn get_stairs_property(
             format!("{builtin}: invalid stairs handle"),
         ));
     };
+    let x_data = stairs
+        .x_source
+        .as_ref()
+        .map(numeric_plot_data_value)
+        .unwrap_or_else(|| tensor_from_vec(stairs.x.clone()));
+    let y_data = stairs
+        .y_source
+        .as_ref()
+        .map(numeric_plot_data_value)
+        .unwrap_or_else(|| tensor_from_vec(stairs.y.clone()));
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("stairs", stairs_handle.figure, stairs_handle.axes_index);
-            st.insert("XData", tensor_from_vec(stairs.x.clone()));
-            st.insert("YData", tensor_from_vec(stairs.y.clone()));
+            st.insert("XData", x_data.clone());
+            st.insert("YData", y_data.clone());
             st.insert("Color", Value::String(color_to_short_name(stairs.color)));
             st.insert("LineWidth", Value::Num(stairs.line_width as f64));
             if let Some(label) = stairs.label.clone() {
@@ -3178,8 +3188,8 @@ fn get_stairs_property(
             stairs_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(tensor_from_vec(stairs.x.clone())),
-        Some("ydata") => Ok(tensor_from_vec(stairs.y.clone())),
+        Some("xdata") => Ok(x_data),
+        Some("ydata") => Ok(y_data),
         Some("color") => Ok(Value::String(color_to_short_name(stairs.color))),
         Some("linewidth") => Ok(Value::Num(stairs.line_width as f64)),
         Some("displayname") => Ok(Value::String(stairs.label.unwrap_or_default())),
@@ -4009,6 +4019,16 @@ fn get_stem_property(
             format!("{builtin}: invalid stem handle"),
         ));
     };
+    let x_data = stem
+        .x_source
+        .as_ref()
+        .map(numeric_plot_data_value)
+        .unwrap_or_else(|| tensor_from_vec(stem.x.clone()));
+    let y_data = stem
+        .y_source
+        .as_ref()
+        .map(numeric_plot_data_value)
+        .unwrap_or_else(|| tensor_from_vec(stem.y.clone()));
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
@@ -4021,6 +4041,8 @@ fn get_stem_property(
                 )),
             );
             st.insert("Children", handles_value(Vec::new()));
+            st.insert("XData", x_data.clone());
+            st.insert("YData", y_data.clone());
             st.insert("BaseValue", Value::Num(stem.baseline));
             st.insert("BaseLine", Value::Bool(stem.baseline_visible));
             st.insert("LineWidth", Value::Num(stem.line_width as f64));
@@ -4053,6 +4075,8 @@ fn get_stem_property(
             stem_handle.axes_index,
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(x_data),
+        Some("ydata") => Ok(y_data),
         Some("basevalue") => Ok(Value::Num(stem.baseline)),
         Some("baseline") => Ok(Value::Bool(stem.baseline_visible)),
         Some("linewidth") => Ok(Value::Num(stem.line_width as f64)),

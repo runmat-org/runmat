@@ -158,6 +158,86 @@ const MISSING_SHAPED_ARRAY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtens
 };
 pub const MISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MISSING_SHAPED_ARRAY_EXTENSION];
 
+const STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "standardize-missing-integer-data",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "standardizeMissing with a bare typed-integer input array is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:StandardizeMissingIntegerDataExtension"),
+    };
+const STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "standardize-missing-explicit-gpu-indicator",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "standardizeMissing with an explicitly GPU-resident indicator is a RunMat extension",
+        error_identifier: Some(
+            "RunMat:compatibility:StandardizeMissingExplicitGpuIndicatorExtension",
+        ),
+    };
+pub const STANDARDIZE_MISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION,
+    STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION,
+];
+
+const STANDARDIZE_MISSING_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The R2026a array-input datatype table excludes integer arrays. RunMat mode treats a bare integer array as an exact no-op because integer classes have no standard missing value.",
+    }];
+const STANDARDIZE_MISSING_INTEGER_INDICATOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "indicator",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a explicitly states that single, integer, and logical indicators also match double entries of A.",
+    }];
+const STANDARDIZE_MISSING_TABLE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer table variables",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Table input is documented and preserves each variable datatype. Integer variables have no standard missing representation and therefore remain unchanged.",
+    }];
+pub const STANDARDIZE_MISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = standardizeMissing(integer_A, indicator)",
+        inputs: &STANDARDIZE_MISSING_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The RunMat-only bare-array form preserves class, shape, and exact storage. Compatibility admission precedes provider access; automatic residency may gather transparently after admission.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = standardizeMissing(A, integer_indicator)",
+        inputs: &STANDARDIZE_MISSING_INTEGER_INDICATOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer indicators are read from authoritative storage and compared in the documented target-class matching domain. Explicit gpuArray indicators are separately gated; automatic residency remains transparent.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = standardizeMissing(table_with_integer_variables, indicator)",
+        inputs: &STANDARDIZE_MISSING_TABLE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer table variables pass through with exact native storage while supported floating or textual variables are standardized independently.",
+    },
+];
+
 const MISSING_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "size arguments",
@@ -725,16 +805,35 @@ async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::STANDARDIZE_MISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::STANDARDIZE_MISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::STANDARDIZE_MISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn standardize_missing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION,
+            "standardizeMissing",
+        )?;
+    }
+    let indicator = rest
+        .first()
+        .ok_or_else(|| invalid_argument("standardizeMissing: missing indicators argument"))?;
+    if crate::builtins::common::validation::value_contains_explicit_gpu(indicator) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION,
+            "standardizeMissing",
+        )?;
+    }
     let value = gather_if_needed_async(&value).await.map_err(|err| {
         invalid_argument(format!("standardizeMissing: failed to gather input: {err}"))
     })?;
-    let indicators = rest
-        .first()
-        .ok_or_else(|| invalid_argument("standardizeMissing: missing indicators argument"))?;
-    let indicators = indicator_set(indicators)?;
+    let indicator = gather_if_needed_async(indicator).await.map_err(|err| {
+        invalid_argument(format!(
+            "standardizeMissing: failed to gather indicators: {err}"
+        ))
+    })?;
+    let indicators = indicator_set(&indicator)?;
     standardize_missing_value(value, &indicators)
 }
 
@@ -3527,6 +3626,7 @@ mod tests {
 
     #[test]
     fn standardize_missing_reads_indicator_storage_and_does_not_nan_integer_targets() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let marker = Tensor::new_integer(IntegerStorage::I16(vec![-99]), vec![1, 1])
             .expect("integer marker");
         let expected = IntegerStorage::I16(vec![-99, 2]);
@@ -3545,6 +3645,55 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn standardize_missing_integer_data_is_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![-99, 2]), vec![1, 2]).unwrap(),
+        );
+        let error = block_on(standardize_missing_builtin(input, vec![Value::Num(-99.0)]))
+            .expect_err("MATLAB-compatible mode must reject direct integer data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StandardizeMissingIntegerDataExtension")
+        );
+    }
+
+    #[test]
+    fn standardize_missing_documented_integer_indicator_needs_no_extension() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let marker =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![-99]), vec![1, 1]).unwrap());
+        let result = block_on(standardize_missing_builtin(
+            tensor(vec![-99.0, 2.0], vec![1, 2]),
+            vec![marker],
+        ))
+        .expect("documented integer indicator");
+        assert!(
+            matches!(result, Value::Tensor(t) if t.materialize_f64()[0].is_nan() && t.materialize_f64()[1] == 2.0)
+        );
+    }
+
+    #[test]
+    fn standardize_missing_explicit_gpu_indicator_is_gated_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_451_002,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let error = block_on(standardize_missing_builtin(
+            tensor(vec![-99.0, 2.0], vec![1, 2]),
+            vec![Value::GpuTensor(handle)],
+        ))
+        .expect_err("explicit GPU indicator must be gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StandardizeMissingExplicitGpuIndicatorExtension")
+        );
     }
 
     #[test]

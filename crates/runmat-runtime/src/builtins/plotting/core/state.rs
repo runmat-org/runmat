@@ -770,6 +770,8 @@ pub struct StackedPlotHandleState {
     pub line_labels: Vec<String>,
     pub x_data: Vec<f64>,
     pub y_data: Vec<Vec<f64>>,
+    pub x_source: Option<Tensor>,
+    pub y_sources: Vec<Tensor>,
     pub display_variables: Vec<String>,
     pub source_table: Option<StackedSourceTableSnapshot>,
     pub x_variable: Vec<String>,

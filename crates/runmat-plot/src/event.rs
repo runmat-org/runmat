@@ -332,6 +332,10 @@ pub enum ScenePlot {
         x: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
         color_rgba: [f32; 4],
         line_width: f32,
         axes_index: u32,
@@ -343,6 +347,10 @@ pub enum ScenePlot {
         x: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
         #[serde(deserialize_with = "deserialize_f64_lossy")]
         baseline: f64,
         color_rgba: [f32; 4],
@@ -2058,6 +2066,8 @@ impl ScenePlot {
                 Self::Stairs {
                     x,
                     y,
+                    x_source: stairs.x_source.as_ref().map(SceneNumericData::from),
+                    y_source: stairs.y_source.as_ref().map(SceneNumericData::from),
                     color_rgba: vec4_to_rgba(stairs.color),
                     line_width: stairs.line_width,
                     axes_index,
@@ -2078,6 +2088,8 @@ impl ScenePlot {
                 Self::Stem {
                     x,
                     y,
+                    x_source: stem.x_source.as_ref().map(SceneNumericData::from),
+                    y_source: stem.y_source.as_ref().map(SceneNumericData::from),
                     baseline: stem.baseline,
                     color_rgba: vec4_to_rgba(stem.color),
                     line_width: stem.line_width,
@@ -2636,6 +2648,8 @@ impl ScenePlot {
             PlotElement::Stairs(stairs) => Self::Stairs {
                 x: stairs.x.clone(),
                 y: stairs.y.clone(),
+                x_source: stairs.x_source.as_ref().map(SceneNumericData::from),
+                y_source: stairs.y_source.as_ref().map(SceneNumericData::from),
                 color_rgba: vec4_to_rgba(stairs.color),
                 line_width: stairs.line_width,
                 axes_index,
@@ -2645,6 +2659,8 @@ impl ScenePlot {
             PlotElement::Stem(stem) => Self::Stem {
                 x: stem.x.clone(),
                 y: stem.y.clone(),
+                x_source: stem.x_source.as_ref().map(SceneNumericData::from),
+                y_source: stem.y_source.as_ref().map(SceneNumericData::from),
                 baseline: stem.baseline,
                 color_rgba: vec4_to_rgba(stem.color),
                 line_width: stem.line_width,
@@ -3051,13 +3067,21 @@ impl ScenePlot {
             ScenePlot::Stairs {
                 x,
                 y,
+                x_source,
+                y_source,
                 color_rgba,
                 line_width,
                 axes_index,
                 label,
                 visible,
             } => {
-                let mut stairs = StairsPlot::new(x, y)?;
+                let mut stairs = match (x_source, y_source) {
+                    (Some(x_source), Some(y_source)) => StairsPlot::new_with_source(
+                        NumericPlotData::try_from(x_source)?,
+                        NumericPlotData::try_from(y_source)?,
+                    )?,
+                    _ => StairsPlot::new(x, y)?,
+                };
                 stairs.color = rgba_to_vec4(color_rgba);
                 stairs.line_width = line_width;
                 stairs.label = label;
@@ -3067,6 +3091,8 @@ impl ScenePlot {
             ScenePlot::Stem {
                 x,
                 y,
+                x_source,
+                y_source,
                 baseline,
                 color_rgba,
                 line_width,
@@ -3080,7 +3106,13 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut stem = StemPlot::new(x, y)?;
+                let mut stem = match (x_source, y_source) {
+                    (Some(x_source), Some(y_source)) => StemPlot::new_with_source(
+                        NumericPlotData::try_from(x_source)?,
+                        NumericPlotData::try_from(y_source)?,
+                    )?,
+                    _ => StemPlot::new(x, y)?,
+                };
                 stem = stem
                     .with_style(
                         rgba_to_vec4(color_rgba),
@@ -4521,6 +4553,53 @@ mod tests {
         assert_eq!(
             y.unwrap().storage(),
             &NumericStorage::I64(vec![-(wide as i64), 7])
+        );
+    }
+
+    #[test]
+    fn figure_scene_json_roundtrip_preserves_wide_integer_stairs_and_stem_sources() {
+        let wide = 9_007_199_254_740_993_u64;
+        let source = || {
+            (
+                NumericPlotData::new(NumericStorage::U64(vec![wide, wide + 1]), vec![1, 2])
+                    .unwrap(),
+                NumericPlotData::new(NumericStorage::I16(vec![-2, 3]), vec![1, 2]).unwrap(),
+            )
+        };
+        let (stairs_x, stairs_y) = source();
+        let (stem_x, stem_y) = source();
+        let mut figure = Figure::new();
+        figure.add_stairs_plot(StairsPlot::new_with_source(stairs_x, stairs_y).unwrap());
+        figure.add_stem_plot(StemPlot::new_with_source(stem_x, stem_y).unwrap());
+
+        let json = serde_json::to_string(&FigureScene::capture(&figure)).unwrap();
+        assert!(json.contains(&wide.to_string()));
+        let rebuilt = serde_json::from_str::<FigureScene>(&json)
+            .unwrap()
+            .into_figure()
+            .unwrap();
+        let plots = rebuilt.plots().collect::<Vec<_>>();
+        let PlotElement::Stairs(stairs) = plots[0] else {
+            panic!("expected stairs")
+        };
+        let PlotElement::Stem(stem) = plots[1] else {
+            panic!("expected stem")
+        };
+        assert_eq!(
+            stairs.x_source.as_ref().unwrap().storage(),
+            &NumericStorage::U64(vec![wide, wide + 1])
+        );
+        assert_eq!(
+            stairs.y_source.as_ref().unwrap().storage(),
+            &NumericStorage::I16(vec![-2, 3])
+        );
+        assert_eq!(
+            stem.x_source.as_ref().unwrap().storage(),
+            &NumericStorage::U64(vec![wide, wide + 1])
+        );
+        assert_eq!(
+            stem.y_source.as_ref().unwrap().storage(),
+            &NumericStorage::I16(vec![-2, 3])
         );
     }
 

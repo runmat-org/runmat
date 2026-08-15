@@ -147222,6 +147222,70 @@
           "when": "Internal plotting state update fails.",
           "message": "stackedplot: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "stackedplot-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "stackedplot with an explicitly GPU-resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StackedplotExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "s = stackedplot(integer_Y) or stackedplot(integer_X, integer_Y)",
+          "inputs": [
+            {
+              "name": "X, Y, or numeric table variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric data surface includes native integer arrays. Exact source class, shape, and values remain authoritative independently of floating render geometry."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Graphics source properties retain native storage and rendering crosses an explicit floating geometry boundary. Automatic residency gathers transparently; explicit gpuArray input is separately gated because the public page does not document it."
+        },
+        {
+          "form": "s = stackedplot(tbl, integer_vars) or stackedplot(tbl, XVariable=integer_xvar)",
+          "inputs": [
+            {
+              "name": "vars or XVariable",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly documents integer arrays as table-variable selectors. RunMat decodes them as exact one-based structural indices."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Selectors are validated as positive in-range one-based indices without using their floating mirror; selected integer variables retain exact source storage."
+        }
       ]
     },
     {
@@ -147509,6 +147573,35 @@
           "when": "Internal plot construction or rendering fails unexpectedly.",
           "message": "stairs: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = stairs(integer_Y) or stairs(integer_X, integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X and Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "XData and YData retain native storage while rendering deliberately materializes floating geometry. Floating gpuArray inputs can use the direct WGPU sink; integer resident inputs gather exactly through their owner."
+        }
       ]
     },
     {
@@ -147563,6 +147656,103 @@
           "identifier": "RunMat:missing:InternalError",
           "when": "Internal shape or table materialization fails.",
           "message": "missing-value builtin: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "standardize-missing-integer-data",
+          "mode": "RunMatOnly",
+          "description": "standardizeMissing with a bare typed-integer input array is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StandardizeMissingIntegerDataExtension"
+        },
+        {
+          "id": "standardize-missing-explicit-gpu-indicator",
+          "mode": "RunMatOnly",
+          "description": "standardizeMissing with an explicitly GPU-resident indicator is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StandardizeMissingExplicitGpuIndicatorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = standardizeMissing(integer_A, indicator)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The R2026a array-input datatype table excludes integer arrays. RunMat mode treats a bare integer array as an exact no-op because integer classes have no standard missing value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The RunMat-only bare-array form preserves class, shape, and exact storage. Compatibility admission precedes provider access; automatic residency may gather transparently after admission."
+        },
+        {
+          "form": "B = standardizeMissing(A, integer_indicator)",
+          "inputs": [
+            {
+              "name": "indicator",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly states that single, integer, and logical indicators also match double entries of A."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer indicators are read from authoritative storage and compared in the documented target-class matching domain. Explicit gpuArray indicators are separately gated; automatic residency remains transparent."
+        },
+        {
+          "form": "B = standardizeMissing(table_with_integer_variables, indicator)",
+          "inputs": [
+            {
+              "name": "integer table variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Table input is documented and preserves each variable datatype. Integer variables have no standard missing representation and therefore remain unchanged."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer table variables pass through with exact native storage while supported floating or textual variables are standardized independently."
         }
       ]
     },
@@ -147903,6 +148093,35 @@
           "when": "The options argument is not a struct or the field argument is not text.",
           "message": "statget: invalid option"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "val = statget(options, field, integer_defaultData)",
+          "inputs": [
+            {
+              "name": "defaultData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented defaultData role accepts any data type. Native integer class, shape, and exact values are returned unchanged when the selected option is empty."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The integer default is an opaque value carrier rather than a numeric computation. Automatic residency may gather transparently through the owning provider; host values retain exact storage without a floating mirror."
+        }
       ]
     },
     {
@@ -147951,7 +148170,11 @@
           "when": "The memoized object target cannot be allocated or accessed.",
           "message": "memoize: internal object storage failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "stats accepts only a MemoizedFunction object. Cached integer inputs and outputs are opaque payloads preserved by the cache; the counters produced by stats are metadata, not integer input roles."
+      }
     },
     {
       "name": "statset",
@@ -148102,6 +148325,43 @@
           "identifier": "RunMat:statset:InvalidStatfun",
           "when": "The statfun argument is not a supported statistics function name.",
           "message": "statset: invalid statistics function"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "statset-integer-option-value",
+          "mode": "RunMatOnly",
+          "description": "statset with a native typed-integer option value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StatsetIntegerOptionValueExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "options = statset(..., name, integer_value, ...)",
+          "inputs": [
+            {
+              "name": "option values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a lists single/double for numeric option fields and logical for parallel flags. RunMat mode additionally accepts all eight native integer classes after field-specific range validation."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Compatibility admission occurs recursively before any resident option value is gathered. Count fields normalize to double metadata, logical flags normalize to logical, and vector-valued DerivStep retains authoritative native storage in RunMat mode."
         }
       ]
     },
@@ -149311,6 +149571,35 @@
           "when": "Internal plot construction or rendering fails unexpectedly.",
           "message": "stem: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = stem(integer_Y) or stem(integer_X, integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X and Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "XData and YData retain native storage while rendering deliberately materializes floating geometry. Floating gpuArray inputs can use the direct WGPU sink; integer resident inputs gather exactly through their owner."
+        }
       ]
     },
     {
@@ -149537,6 +149826,43 @@
           "when": "Internal response assembly failed.",
           "message": "step: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "step-integer-time",
+          "mode": "RunMatOnly",
+          "description": "step with a native typed-integer time input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StepIntegerTimeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[y,tOut] = step(sys, integer_t_or_tFinal)",
+          "inputs": [
+            {
+              "name": "t or tFinal",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents positive scalar, two-element, and vector time forms without publishing native integer storage classes. RunMat conservatively gates typed integers and requires exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] Compatibility admission and exactness checks occur before provider access. Automatic residency may gather through the exact owner; the host simulator and time/output arrays use the model's binary64 computation domain."
+        }
       ]
     },
     {
@@ -149659,6 +149985,108 @@
           "identifier": "RunMat:stepinfo:Internal",
           "when": "Response simulation or metric assembly failed.",
           "message": "stepinfo: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "stepinfo-integer-sampled-data",
+          "mode": "RunMatOnly",
+          "description": "stepinfo with native typed-integer sampled response data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StepinfoIntegerSampledDataExtension"
+        },
+        {
+          "id": "stepinfo-integer-threshold",
+          "mode": "RunMatOnly",
+          "description": "stepinfo with a native typed-integer threshold option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StepinfoIntegerThresholdExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "info = stepinfo(integer_y, integer_t, integer_yfinal?)",
+          "inputs": [
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public documentation describes numeric response data without a per-storage-class table. RunMat gates typed response samples and proves exact binary64 conversion before computing metrics."
+            },
+            {
+              "name": "t",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed time samples are a conservative extension and must be finite, ordered, shape-compatible, and exactly representable in binary64."
+            },
+            {
+              "name": "yfinal",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed steady-state values are a conservative extension and cross the same checked binary64 metric boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] Every typed positional role is independently admitted and checked before gathering. Metrics are returned as double-valued structure fields because step-response analysis is a floating computation domain."
+        },
+        {
+          "form": "info = stepinfo(..., thresholdName, integer_threshold)",
+          "inputs": [
+            {
+              "name": "SettlingTimeThreshold",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a describes threshold values but does not enumerate typed integer storage. RunMat gates typed values and validates the option-specific floating range."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] Typed thresholds are separately mode-gated and exactly converted before range validation; automatic residency remains transparent after admission."
         }
       ]
     },

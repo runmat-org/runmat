@@ -12,7 +12,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Options are host metadata. gpuArray option values are gathered before lookup."
+    "notes": "Options are host metadata. An automatically resident default value is gathered through its owning provider only when the selected field is empty and the default is needed."
   },
   "fusion": {
     "elementwise": false,
@@ -25,12 +25,13 @@
     "unit": "builtins::stats::options::tests",
     "integration": "crates/runmat-vm/tests/stats_ml.rs"
   },
-  "description": "`statget(options,field)` returns a field value from a statistics options struct. `statget(options,field,defaultData)` returns `defaultData` when the selected field is empty.",
+  "description": "`statget(options,field)` reads one field from a statistics options structure, using case-insensitive unique-prefix matching. Add `defaultData` to supply a value when the recognized field is empty. The default is an opaque value rather than a numeric conversion: any integer class, shape, and exact payload is returned unchanged when selected.",
   "behaviors": [
     "`options` must be a struct, typically created by `statset`.",
     "`field` is matched case-insensitively and can be a unique leading prefix of a known statistics option field.",
     "If the requested field is recognized but empty, `statget` returns the supplied default value when present, otherwise it returns the empty value.",
-    "If the requested field is not recognized or is ambiguous, RunMat returns an empty numeric value for compatibility with loose MATLAB option probing."
+    "If the requested field is not recognized or is ambiguous, RunMat returns an empty numeric value for compatibility with loose MATLAB option probing.",
+    "`defaultData` accepts any data type. Native integer defaults keep their class, shape, and exact values without a floating compatibility mirror."
   ],
   "examples": [
     {

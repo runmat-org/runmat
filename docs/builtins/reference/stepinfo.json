@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`stepinfo` gathers sampled data and computes metrics on the host."
+    "notes": "`stepinfo` computes host-side floating response metrics. Automatically resident admitted sampled data gathers through its exact owning provider after compatibility admission."
   },
   "fusion": {
     "elementwise": false,
@@ -29,14 +29,16 @@
     "unit": "builtins::control::stepinfo::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`stepinfo(sys)` simulates the step response for a supported SISO `tf` model and returns response metrics. `stepinfo(y, t, yfinal)` computes metrics from sampled response data.",
+  "description": "`stepinfo(sys)` simulates a supported SISO transfer-function model and summarizes its response, while `stepinfo(y,t,yfinal)` analyzes supplied samples. The result is a structure of double-valued timing, extrema, and percentage metrics. Public documentation does not publish a native-integer storage table for sampled response, time, steady-state, or threshold roles, so RunMat treats those typed forms as conservative evidence-open extensions and admits them only when every value crosses the binary64 metric boundary exactly.",
   "behaviors": [
     "Supports `stepinfo(sys)` for SISO `tf` models supported by `step`.",
     "Supports sampled forms `stepinfo(y)`, `stepinfo(y, t)`, and `stepinfo(y, t, yfinal)`.",
     "Returns a struct with `RiseTime`, `TransientTime`, `SettlingTime`, `SettlingMin`, `SettlingMax`, `Overshoot`, `Undershoot`, `Peak`, `PeakTime`, and `SteadyStateValue`.",
     "Uses a default settling-time threshold of 2%.",
     "Accepts the name-value option `'SettlingTimeThreshold'` with a scalar value between 0 and 1.",
-    "Rise-time crossings are linearly interpolated between adjacent samples."
+    "Rise-time crossings are linearly interpolated between adjacent samples.",
+    "Typed integer `y`, `t`, and `yfinal` values are one named RunMat extension; typed integer `SettlingTimeThreshold` is independently gated so each argument role has a precise compatibility disposition.",
+    "All admitted typed integers are checked for exact binary64 representation before data is gathered or metrics are computed. The current implementation supports `SettlingTimeThreshold`; other public name-value options remain general control-surface work rather than implied integer support."
   ],
   "examples": [
     {

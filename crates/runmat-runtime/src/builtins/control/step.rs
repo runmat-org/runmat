@@ -3,7 +3,11 @@
 use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, ObjectInstance, Tensor, Value,
 };
@@ -158,6 +162,33 @@ pub const STEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STEP_ERRORS,
 };
 
+const STEP_INTEGER_TIME_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "step-integer-time",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "step with a native typed-integer time input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StepIntegerTimeExtension"),
+};
+pub const STEP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [STEP_INTEGER_TIME_EXTENSION];
+const STEP_INTEGER_TIME_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "t or tFinal",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents positive scalar, two-element, and vector time forms without publishing native integer storage classes. RunMat conservatively gates typed integers and requires exact binary64 representation.",
+    }];
+pub const STEP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[y,tOut] = step(sys, integer_t_or_tFinal)",
+        inputs: &STEP_INTEGER_TIME_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "[integer-audit-open] Compatibility admission and exactness checks occur before provider access. Automatic residency may gather through the exact owner; the host simulator and time/output arrays use the model's binary64 computation domain.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::step")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "step",
@@ -212,9 +243,20 @@ fn step_error_with_message(
     suppress_auto_output = true,
     type_resolver(step_type),
     descriptor(crate::builtins::control::step::STEP_DESCRIPTOR),
+    extensions(crate::builtins::control::step::STEP_EXTENSIONS),
+    integer_capabilities(crate::builtins::control::step::STEP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::step"
 )]
 async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    for value in &rest {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &STEP_INTEGER_TIME_EXTENSION,
+            BUILTIN_NAME,
+            "time",
+        )
+        .await?;
+    }
     if is_statement_form_call() {
         plot_multiple_step_responses(sys, rest).await?;
         return Ok(Value::OutputList(Vec::new()));
@@ -1034,6 +1076,7 @@ mod tests {
 
     #[test]
     fn step_typed_integer_time_inputs_cross_double_boundary_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
         let _guard = crate::output_count::push_output_count(Some(2));
         let result = run_step(
@@ -1052,6 +1095,7 @@ mod tests {
 
     #[test]
     fn step_scalar_final_time_reads_typed_integer_storage_length_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
         let final_time =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
@@ -1063,6 +1107,36 @@ mod tests {
         let time = tensor_data(outputs[1].clone());
         assert_eq!(time.first().copied(), Some(0.0));
         assert_eq!(time.last().copied(), Some(2.0));
+    }
+
+    #[test]
+    fn step_typed_integer_time_is_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let error = run_step(
+            sys,
+            vec![integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1])],
+        )
+        .expect_err("MATLAB-compatible mode must reject typed integer time");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StepIntegerTimeExtension")
+        );
+    }
+
+    #[test]
+    fn step_rejects_wide_integer_time_before_binary64_rounding() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let error = run_step(
+            sys,
+            vec![integer_tensor(
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                vec![1, 1],
+            )],
+        )
+        .expect_err("inexact binary64 conversion must fail");
+        assert!(error.message().contains("exactly representable"));
     }
 
     #[test]
