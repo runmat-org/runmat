@@ -7,7 +7,7 @@ use runmat_types::ProgramFunctionId;
 use crate::ExecutableUnit;
 
 pub(super) struct CompiledGenericUnit {
-    pub executor: Rc<runmat_jit::GenericExecutor>,
+    pub executor: Rc<runmat_native_executor::NativeExecutor>,
     pub entrypoint: ProgramFunctionId,
     #[cfg(test)]
     pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
@@ -20,7 +20,7 @@ pub(super) struct PreparedGenericUnit {
 }
 
 pub(super) struct BackgroundCompiledGenericUnit {
-    pub executor: runmat_jit::GenericExecutor,
+    pub executor: runmat_native_executor::NativeExecutor,
     pub entrypoint: ProgramFunctionId,
     #[cfg(test)]
     pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
@@ -82,13 +82,15 @@ pub(super) fn compile_prepared(
         })
         .collect();
     let executor = match prepared.specialization {
-        Some(profile) => runmat_jit::GenericExecutor::compile_specialized_with_resume_points(
-            assembly,
-            Some(program_capture),
-            interpreter_resume_points,
-            profile,
-        ),
-        None => runmat_jit::GenericExecutor::compile_with_resume_points(
+        Some(profile) => {
+            runmat_jit::GenericCompiler::compile_specialized_executor_with_resume_points(
+                assembly,
+                Some(program_capture),
+                interpreter_resume_points,
+                profile,
+            )
+        }
+        None => runmat_jit::GenericCompiler::compile_executor_with_resume_points(
             assembly,
             Some(program_capture),
             interpreter_resume_points,

@@ -1,17 +1,17 @@
 use std::{rc::Rc, sync::Arc};
 
-use runmat_jit::execute::{GenericExecution, NativeWorkspaceInput};
+use runmat_native_executor::execute::{NativeExecution, NativeWorkspaceInput};
 use runmat_types::ProgramFunctionId;
 use runmat_value::Value;
 
 pub async fn invoke(
-    executor: Rc<runmat_jit::GenericExecutor>,
+    executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
     function: ProgramFunctionId,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
+) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
@@ -24,13 +24,13 @@ pub async fn invoke(
 }
 
 pub async fn invoke_workspace(
-    executor: Rc<runmat_jit::GenericExecutor>,
+    executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
     function: ProgramFunctionId,
     workspace: NativeWorkspaceInput,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
+) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
@@ -51,7 +51,7 @@ struct ProgramInvocationGuards {
 
 impl ProgramInvocationGuards {
     fn install(
-        executor: Rc<runmat_jit::GenericExecutor>,
+        executor: Rc<runmat_native_executor::NativeExecutor>,
         program: &runmat_native_codegen::aot::AotProgramManifest,
         runtime: &runmat_runtime::context::RuntimeContext,
     ) -> Self {

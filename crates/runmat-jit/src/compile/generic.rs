@@ -4,28 +4,27 @@ use cranelift_codegen::settings::Configurable;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, Linkage, Module};
 
-use crate::compile::executable::CompiledCodeOwner;
-use crate::{CompiledExecutable, JitError, JitResult};
+use crate::{JitError, JitResult};
 
 pub struct GenericCompiler;
 
 impl GenericCompiler {
     pub fn compile(
         assembly: &runmat_native_codegen::NativeAssembly,
-    ) -> JitResult<CompiledExecutable> {
+    ) -> JitResult<runmat_native_executor::NativeExecutable> {
         Self::compile_with_optimization(assembly, false)
     }
 
     pub fn compile_specialized(
         assembly: &runmat_native_codegen::NativeAssembly,
-    ) -> JitResult<CompiledExecutable> {
+    ) -> JitResult<runmat_native_executor::NativeExecutable> {
         Self::compile_with_optimization(assembly, true)
     }
 
     fn compile_with_optimization(
         assembly: &runmat_native_codegen::NativeAssembly,
         specialized: bool,
-    ) -> JitResult<CompiledExecutable> {
+    ) -> JitResult<runmat_native_executor::NativeExecutable> {
         assembly.verify()?;
         let mut flags = cranelift_codegen::settings::builder();
         flags
@@ -80,13 +79,8 @@ impl GenericCompiler {
                 (function, entrypoint)
             })
             .collect::<BTreeMap<_, _>>();
-        Ok(CompiledExecutable {
-            _owner: CompiledCodeOwner::Jit {
-                _module: Box::new(module),
-            },
-            entrypoints,
-            retained_code_bytes,
-        })
+        runmat_native_executor::NativeExecutable::owned(entrypoints, retained_code_bytes, module)
+            .map_err(JitError::from)
     }
 }
 

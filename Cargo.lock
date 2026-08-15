@@ -6339,8 +6339,8 @@ version = "0.6.1"
 dependencies = [
  "futures",
  "runmat-execution",
- "runmat-jit",
  "runmat-native-codegen",
+ "runmat-native-executor",
  "runmat-runtime",
  "runmat-types",
  "runmat-value",
@@ -6409,6 +6409,7 @@ dependencies = [
  "runmat-lexer",
  "runmat-mir",
  "runmat-native-codegen",
+ "runmat-native-executor",
  "runmat-package",
  "runmat-parser",
  "runmat-runtime",
@@ -6658,6 +6659,7 @@ dependencies = [
  "runmat-hir",
  "runmat-mir",
  "runmat-native-codegen",
+ "runmat-native-executor",
  "runmat-runtime",
  "runmat-time",
  "runmat-types",
@@ -6871,6 +6873,25 @@ dependencies = [
  "target-lexicon",
  "thiserror 1.0.69",
  "wasm-bindgen-test",
+]
+
+[[package]]
+name = "runmat-native-executor"
+version = "0.6.1"
+dependencies = [
+ "futures",
+ "runmat-builtins",
+ "runmat-execution",
+ "runmat-gc",
+ "runmat-hir",
+ "runmat-mir",
+ "runmat-native-codegen",
+ "runmat-runtime",
+ "runmat-time",
+ "runmat-types",
+ "runmat-value",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

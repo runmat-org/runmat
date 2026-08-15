@@ -3,14 +3,15 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 use runmat_execution::Digest;
 use runmat_types::ProgramFunctionId;
 
-use crate::{invalidation::DependencySnapshot, GenericExecutor};
+use crate::invalidation::DependencySnapshot;
+use runmat_native_executor::NativeExecutor;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EntryKey(pub String);
 
 #[derive(Clone)]
 pub struct PublishedEntry {
-    pub executor: Rc<GenericExecutor>,
+    pub executor: Rc<NativeExecutor>,
     pub entrypoint: ProgramFunctionId,
     pub dependencies: DependencySnapshot,
     pub publication: u64,
@@ -60,7 +61,7 @@ impl EntryCell {
 
     pub(crate) fn publish(
         &self,
-        executor: Rc<GenericExecutor>,
+        executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
     ) -> Result<PublishedEntry, &'static str> {
@@ -86,7 +87,7 @@ impl EntryCell {
     pub(crate) fn publish_specialized(
         &self,
         profile: Digest,
-        executor: Rc<GenericExecutor>,
+        executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
     ) -> Result<PublishedEntry, &'static str> {

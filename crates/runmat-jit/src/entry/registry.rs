@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, rc::Rc};
 use runmat_execution::Digest;
 use runmat_types::ProgramFunctionId;
 
-use crate::{invalidation::DependencySnapshot, tiering::TierAvailability, GenericExecutor};
+use crate::{invalidation::DependencySnapshot, tiering::TierAvailability};
+use runmat_native_executor::NativeExecutor;
 
 use super::{EntryCell, EntryKey, PublishedEntry};
 
@@ -28,7 +29,7 @@ impl EntryRegistry {
     pub fn publish(
         &mut self,
         key: EntryKey,
-        executor: Rc<GenericExecutor>,
+        executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
     ) -> Result<PublishedEntry, &'static str> {
@@ -48,7 +49,7 @@ impl EntryRegistry {
         &mut self,
         key: EntryKey,
         profile: Digest,
-        executor: Rc<GenericExecutor>,
+        executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
     ) -> Result<PublishedEntry, &'static str> {

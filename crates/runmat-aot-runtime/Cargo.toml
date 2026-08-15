@@ -14,8 +14,8 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 futures = "0.3"
 runmat-execution = { workspace = true }
-runmat-jit = { workspace = true }
 runmat-native-codegen = { workspace = true }
+runmat-native-executor = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-types = { workspace = true }
 runmat-value = { workspace = true }

@@ -20,13 +20,13 @@ flowchart TD
   Code["machine code + measured metadata"]
   Admit["dependency, profile, version,<br/>resource, and byte-budget admission"]
   Cell["stable published entry cell"]
-  Host["invocation-owned JIT host"]
+  Host["runmat-native-executor<br/>invocation host"]
   Runtime["runmat-runtime semantics"]
 
   Unit --> Lower --> Verify --> CLIF --> Code --> Admit --> Cell --> Host --> Runtime
 ```
 
-`runmat-native-codegen` owns portable Native IR and machine-code lowering. `runmat-jit` owns compilation policy, publication, executable-memory lifetime, invocation state, deoptimization, OSR, and feedback. `runmat-core` owns session selection, immutable executable products, dependency revisions, and host-visible result/workspace commitment. `runmat-runtime` remains executor-neutral and owns language operations and the versioned native ABI.
+`runmat-native-codegen` owns portable Native IR and machine-code lowering. `runmat-jit` owns adaptive compilation, tiering, publication, invalidation, and dynamically allocated code ownership. `runmat-native-executor` owns entrypoint binding, invocation state, roots, deoptimization, OSR, and semantic host callbacks; linked AOT and JIT entrypoints use that same host without making the AOT runtime depend on JIT policy. `runmat-core` owns session selection, immutable executable products, dependency revisions, and host-visible result/workspace commitment. `runmat-runtime` remains executor-neutral and owns language operations and the versioned native ABI.
 
 ## Native Invocation
 

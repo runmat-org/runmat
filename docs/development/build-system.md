@@ -18,7 +18,7 @@ The root workspace uses Cargo resolver v2. Workspace dependency versions live in
 | Area | Crates |
 | --- | --- |
 | Language pipeline | `runmat-lexer`, `runmat-parser`, `runmat-hir`, `runmat-mir`, `runmat-static-analysis` |
-| Execution | `runmat-vm`, `runmat-native-codegen`, `runmat-jit`, `runmat-aot-runtime`, `runmat-aot`, `runmat-core` |
+| Execution | `runmat-vm`, `runmat-native-codegen`, `runmat-native-executor`, `runmat-jit`, `runmat-aot-runtime`, `runmat-aot`, `runmat-core` |
 | Runtime | `runmat-runtime`, `runmat-builtins`, `runmat-filesystem`, `runmat-time`, `runmat-config` |
 | Performance systems | `runmat-accelerate`, `runmat-accelerate-api`, `runmat-gc`, `runmat-gc-api`, `runmat-plot` |
 | Host surfaces | `runmat` CLI, `runmat-lsp`, `runmat-wasm`, `runmat-server-client`, `runmat-telemetry`, `runmat-logging` |
@@ -34,7 +34,7 @@ The CLI default feature set enables the normal local developer experience:
 | `gui` | Enables native plotting GUI support through `runmat-plot`. |
 | `blas-lapack` | Enables high-performance BLAS/LAPACK operations in `runmat-runtime`. |
 | `wgpu` | Enables the WGPU acceleration path. |
-| `jit` | Enables Core's host-native adaptive JIT selection. Native code generation and policy live in `runmat-native-codegen` and `runmat-jit`. |
+| `jit` | Enables Core's host-native adaptive JIT selection. Machine-code lowering lives in `runmat-native-codegen`, the shared invocation host lives in `runmat-native-executor`, and adaptive compilation and publication live in `runmat-jit`. |
 
 Additional flags matter for specific builds:
 
@@ -126,7 +126,7 @@ On Windows PowerShell:
 scripts/build-runmat-with-aot-runtime.ps1 --no-default-features --features jit
 ```
 
-The first phase builds `runmat-aot-runtime` as a static library from the same Runtime, VM, JIT host, and `Value` implementations used elsewhere. Cargo reports the target's ordered native link requirements. `runmat-aot-pack` validates and compresses the archive and writes a manifest bound to target, native ABI, schema, runtime/catalog identity, capabilities, lengths, digests, and link tokens. The second phase passes that exact pair explicitly to `runmat-aot`'s build script, which embeds it in the ordinary CLI binary. Normal `cargo build` remains smaller and valid, but its compile command reports that the optional native runtime was not embedded.
+The first phase builds `runmat-aot-runtime` as a static library from the same Runtime, native executor, and `Value` implementations used elsewhere. The standalone runtime does not depend on the VM or adaptive JIT crate; linked process-image entrypoints and dynamically allocated JIT entrypoints bind through the same verified executor contract. Cargo reports the target's ordered native link requirements. `runmat-aot-pack` validates and compresses the archive and writes a manifest bound to target, native ABI, schema, runtime/catalog identity, capabilities, lengths, digests, and link tokens. The second phase passes that exact pair explicitly to `runmat-aot`'s build script, which embeds it in the ordinary CLI binary. Normal `cargo build` remains smaller and valid, but its compile command reports that the optional native runtime was not embedded.
 
 Whole-program reachability is computed from canonical MIR, with executable source and binding names supplied by the immutable Core compilation product. AOT consumes that report alongside the builtin catalog's link, placement, provider, and extension contracts; the CLI only renders the resulting plan. `runmat compile --explain-link` prints the retained symbols and reasons, while `--link-plan-json PATH` writes the deterministic program/runtime plan for automated inspection. This keeps source analysis, builtin metadata, artifact identity, and presentation in their owning crates instead of maintaining a second linker-specific registry.
 

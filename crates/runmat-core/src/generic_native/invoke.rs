@@ -15,7 +15,7 @@ pub(crate) struct NativeExecution {
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_entry: Option<runmat_types::ProgramPointId>,
     pub vectorized_regions: u64,
-    pub workspace: Option<runmat_jit::execute::NativeWorkspaceSnapshot>,
+    pub workspace: Option<runmat_native_executor::execute::NativeWorkspaceSnapshot>,
     pub expression: Option<Value>,
 }
 
@@ -29,7 +29,7 @@ pub(crate) struct NativeInvocation<'a> {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
-    pub workspace: Option<runmat_jit::execute::NativeWorkspaceInput>,
+    pub workspace: Option<runmat_native_executor::execute::NativeWorkspaceInput>,
 }
 
 pub(crate) async fn invoke(
@@ -255,7 +255,7 @@ pub(crate) async fn invoke(
     let active = user_functions::push_active_semantic_function(function.0 as usize);
     let osr = osr
         .map(|(target, point)| {
-            runmat_jit::osr::OsrTarget::new(target.executor, function, point)
+            runmat_native_executor::osr::OsrTarget::new(target.executor, function, point)
                 .map_err(|error| super::error::stage("NativeOsrTarget", error))
         })
         .transpose()?;

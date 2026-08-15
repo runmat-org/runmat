@@ -1,41 +1,41 @@
 use std::{collections::BTreeMap, rc::Rc};
 
-use runmat_jit::{
+use runmat_native_executor::{
     deopt::{DeoptimizationPolicy, MaterializedFrame, ResumeTarget},
-    execute::{GenericExecution, GenericInvocationStep},
-    GenericExecutor,
+    execute::{NativeExecution, NativeInvocationStep},
+    NativeExecutor,
 };
 use runmat_value::Value;
 
 use crate::ExecutableUnit;
 
 struct DeoptimizationInvocation {
-    executor: Rc<GenericExecutor>,
+    executor: Rc<NativeExecutor>,
     function: runmat_types::ProgramFunctionId,
     captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
     policy: DeoptimizationPolicy,
-    osr: Option<runmat_jit::osr::OsrTarget>,
-    workspace: Option<runmat_jit::execute::NativeWorkspaceInput>,
+    osr: Option<runmat_native_executor::osr::OsrTarget>,
+    workspace: Option<runmat_native_executor::execute::NativeWorkspaceInput>,
 }
 
 pub(super) struct DeoptimizationRequest {
-    pub executor: Rc<GenericExecutor>,
+    pub executor: Rc<NativeExecutor>,
     pub function: runmat_types::ProgramFunctionId,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
-    pub osr: Option<runmat_jit::osr::OsrTarget>,
-    pub workspace: Option<runmat_jit::execute::NativeWorkspaceInput>,
+    pub osr: Option<runmat_native_executor::osr::OsrTarget>,
+    pub workspace: Option<runmat_native_executor::execute::NativeWorkspaceInput>,
 }
 
 pub(super) async fn invoke(
     unit: &ExecutableUnit,
     request: DeoptimizationRequest,
-) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
+) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let policy = DeoptimizationPolicy {
         target: if request.workspace.is_some() {
             ResumeTarget::GenericNative
@@ -64,7 +64,7 @@ pub(super) async fn invoke(
 async fn invoke_with_policy(
     unit: &ExecutableUnit,
     invocation: DeoptimizationInvocation,
-) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
+) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let DeoptimizationInvocation {
         executor,
         function,
@@ -76,59 +76,52 @@ async fn invoke_with_policy(
         osr,
         workspace,
     } = invocation;
-    let mut invocation = if let Some(workspace) = workspace {
-        if !captures.is_empty() {
-            return Err(super::error::stage(
-                "NativeWorkspace",
-                "interactive entrypoints cannot carry lexical captures",
-            ));
-        }
-        executor.begin_workspace_with_deoptimization_and_osr(
-            function,
-            workspace,
-            arguments,
-            requested_outputs,
-            runtime.clone(),
-            policy,
-            osr,
-        )
-    } else {
-        executor.begin_with_deoptimization_and_osr(
+    if workspace.is_some() && !captures.is_empty() {
+        return Err(super::error::stage(
+            "NativeWorkspace",
+            "interactive entrypoints cannot carry lexical captures",
+        ));
+    }
+    let mut invocation = executor
+        .begin_request(runmat_native_executor::NativeInvocationRequest {
             function,
             captures,
             arguments,
             requested_outputs,
-            runtime.clone(),
-            policy,
-            osr,
-        )
-    }
-    .map_err(super::error::from_jit_error)?;
+            runtime: runtime.clone(),
+            deoptimization: policy,
+            osr_target: osr,
+            workspace,
+        })
+        .map_err(super::error::from_native_executor_error)?;
     loop {
-        match invocation.advance().map_err(super::error::from_jit_error)? {
-            GenericInvocationStep::Completed(execution) => return Ok(execution),
-            GenericInvocationStep::Suspended {
+        match invocation
+            .advance()
+            .map_err(super::error::from_native_executor_error)?
+        {
+            NativeInvocationStep::Completed(execution) => return Ok(execution),
+            NativeInvocationStep::Suspended {
                 continuation,
                 generation,
             } => invocation
                 .resume_suspension(continuation, generation)
                 .await
-                .map_err(super::error::from_jit_error)?,
-            GenericInvocationStep::Deoptimized { target, .. }
+                .map_err(super::error::from_native_executor_error)?,
+            NativeInvocationStep::Deoptimized { target, .. }
                 if target == runmat_runtime::native::NativeResumeKind::GENERIC_NATIVE =>
             {
                 invocation
                     .resume_deoptimization()
-                    .map_err(super::error::from_jit_error)?;
+                    .map_err(super::error::from_native_executor_error)?;
             }
-            GenericInvocationStep::Deoptimized { target, .. }
+            NativeInvocationStep::Deoptimized { target, .. }
                 if target == runmat_runtime::native::NativeResumeKind::OPTIMIZED_NATIVE =>
             {
                 invocation
                     .resume_optimization()
-                    .map_err(super::error::from_jit_error)?;
+                    .map_err(super::error::from_native_executor_error)?;
             }
-            GenericInvocationStep::Deoptimized { frame, .. } => {
+            NativeInvocationStep::Deoptimized { frame, .. } => {
                 return resume_interpreter(unit, frame, requested_outputs, runtime).await;
             }
         }
@@ -140,7 +133,7 @@ async fn resume_interpreter(
     frame: MaterializedFrame,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
+) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let function_id = runmat_hir::FunctionId(frame.function.0 as usize);
     let layout = unit
         .vm_layout()
@@ -289,7 +282,7 @@ async fn resume_interpreter(
             })
         })
         .collect();
-    Ok(GenericExecution {
+    Ok(NativeExecution {
         outputs,
         captures,
         loop_backedges: BTreeMap::new(),
@@ -303,7 +296,7 @@ async fn resume_interpreter(
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_jit::deopt::{DeoptimizationPolicy, FaultInjection, ResumeTarget};
+    use runmat_native_executor::deopt::{DeoptimizationPolicy, FaultInjection, ResumeTarget};
     use runmat_value::Value;
 
     use crate::{ExecutableSource, RunMatSession};

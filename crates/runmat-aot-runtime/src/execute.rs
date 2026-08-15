@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_execution::ExecutableEntrypointKind;
-use runmat_jit::execute::NativeWorkspaceInput;
+use runmat_native_executor::execute::NativeWorkspaceInput;
 use runmat_types::ProgramPointId;
 
 use crate::AotProcessInput;
@@ -65,12 +65,17 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         };
         entrypoints.insert(function.id, entrypoint);
     }
+    let executable = runmat_native_executor::NativeExecutable::linked(entrypoints)
+        .map_err(|error| format!("standalone native entrypoints are invalid: {error}"))?;
     let executor = Rc::new(
-        runmat_jit::GenericExecutor::from_static_entrypoints(
+        runmat_native_executor::NativeExecutor::bind(
             assembly.clone(),
-            entrypoints,
-            Some(input.program.clone()),
-            resume_points,
+            executable,
+            runmat_native_executor::NativeExecutorOptions {
+                program_capture: Some(input.program.clone()),
+                interpreter_resume_points: resume_points,
+                ..runmat_native_executor::NativeExecutorOptions::default()
+            },
         )
         .map_err(|error| format!("standalone native host initialization failed: {error}"))?,
     );

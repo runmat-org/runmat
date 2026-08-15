@@ -19,13 +19,9 @@ use runmat_hir::{
     FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span, WorkspaceEffect,
 };
 use runmat_jit::{
-    deopt::{DeoptimizationPolicy, FaultInjection, ResumeTarget},
     entry::{EntryKey, EntryRegistry},
-    execute::{NativeWorkspaceBinding, NativeWorkspaceInput},
     invalidation::{DependencyKey, DependencyTracker},
-    osr::OsrTarget,
-    specialization::GuardEnvironment,
-    GenericCompiler, GenericExecutor, JitError,
+    GenericCompiler, JitError,
 };
 use runmat_mir::{
     AsyncBehaviorFact, BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall,
@@ -35,6 +31,13 @@ use runmat_mir::{
     MirTerminator, MirTerminatorKind,
 };
 use runmat_native_codegen::{lower_executable, NativeLoweringInput, NativeTarget};
+use runmat_native_executor::{
+    deopt::{DeoptimizationPolicy, FaultInjection, ResumeTarget},
+    execute::{NativeWorkspaceBinding, NativeWorkspaceInput},
+    osr::OsrTarget,
+    specialization::GuardEnvironment,
+    NativeExecutable, NativeExecutor, NativeExecutorError, NativeExecutorOptions,
+};
 use runmat_runtime::{context::RuntimeContext, execution::RuntimeExecutionService};
 use runmat_types::{
     AliasFact, BindingId, BuiltinId, CallableFallbackPolicy, CallableIdentity,
@@ -46,6 +49,12 @@ use runmat_types::{
     PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 use runmat_value::Value;
+
+fn compile_executor(
+    assembly: runmat_native_codegen::NativeAssembly,
+) -> Result<NativeExecutor, JitError> {
+    GenericCompiler::compile_executor_with_resume_points(assembly, None, BTreeMap::new())
+}
 
 #[test]
 fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
@@ -61,7 +70,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
     let key = EntryKey("project/main".into());
     let mut registry = EntryRegistry::default();
     let stable_cell = registry.cell(key.clone());
-    let first_executor = Rc::new(GenericExecutor::compile(fixture()).unwrap());
+    let first_executor = Rc::new(compile_executor(fixture()).unwrap());
     let first = registry
         .publish(
             key.clone(),
@@ -79,7 +88,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
         .publish_specialized(
             key.clone(),
             first_profile,
-            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program, &provider]),
         )
@@ -88,7 +97,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
         .publish_specialized(
             key.clone(),
             second_profile,
-            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program, &provider]),
         )
@@ -131,7 +140,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
     assert!(!stable_cell.is_published());
     assert_eq!(registry.retained_cell_count(), 1);
 
-    let second_executor = Rc::new(GenericExecutor::compile(fixture()).unwrap());
+    let second_executor = Rc::new(compile_executor(fixture()).unwrap());
     let second = registry
         .publish(
             key,
@@ -157,7 +166,7 @@ fn completed_specialization_retires_only_replaceable_code_to_make_room() {
     registry
         .publish(
             key.clone(),
-            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program]),
         )
@@ -166,12 +175,12 @@ fn completed_specialization_retires_only_replaceable_code_to_make_room() {
         .publish_specialized(
             key.clone(),
             Digest::sha256(b"old"),
-            Rc::new(GenericExecutor::compile(fixture()).unwrap()),
+            Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program]),
         )
         .unwrap();
-    let replacement = GenericExecutor::compile(fixture()).unwrap();
+    let replacement = compile_executor(fixture()).unwrap();
     assert_eq!(
         registry
             .make_room_for_specialized(
@@ -190,7 +199,7 @@ fn completed_specialization_retires_only_replaceable_code_to_make_room() {
 
 #[test]
 fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
-    let executor = GenericExecutor::compile(fixture()).unwrap();
+    let executor = compile_executor(fixture()).unwrap();
     assert!(executor.retained_code_bytes() > 0);
     let execution = executor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -204,11 +213,10 @@ fn linked_static_entrypoint_uses_the_same_invocation_host() {
     let linked_owner = GenericCompiler::compile(&assembly).unwrap();
     let function = ProgramFunctionId(0);
     let entrypoint = linked_owner.entrypoint(function).unwrap();
-    let executor = GenericExecutor::from_static_entrypoints(
+    let executor = NativeExecutor::bind(
         assembly,
-        BTreeMap::from([(function, entrypoint)]),
-        None,
-        BTreeMap::new(),
+        NativeExecutable::linked(BTreeMap::from([(function, entrypoint)])).unwrap(),
+        NativeExecutorOptions::default(),
     )
     .unwrap();
 
@@ -227,7 +235,7 @@ fn linked_static_entrypoint_uses_the_same_invocation_host() {
 fn generic_executor_describes_only_its_real_cpu_candidate() {
     let region = fixture_region(ValueFact::scalar(ValueKindFact::String));
     let region_id = region.id;
-    let executor = GenericExecutor::compile(fixture_with_regions(vec![region])).unwrap();
+    let executor = compile_executor(fixture_with_regions(vec![region])).unwrap();
     let candidate = executor
         .cpu_candidate(region_id, 4, Some(42))
         .expect("retained region candidate");
@@ -253,7 +261,7 @@ fn generic_executor_describes_only_its_real_cpu_candidate() {
 #[test]
 fn failed_representation_guard_materializes_and_resumes_exact_native_state() {
     let region = fixture_region(ValueFact::scalar(ValueKindFact::String));
-    let executor = GenericExecutor::compile(fixture_with_regions(vec![region])).unwrap();
+    let executor = compile_executor(fixture_with_regions(vec![region])).unwrap();
     let mut invocation = executor
         .begin_with_deoptimization(
             ProgramFunctionId(0),
@@ -264,7 +272,7 @@ fn failed_representation_guard_materializes_and_resumes_exact_native_state() {
             DeoptimizationPolicy::default(),
         )
         .unwrap();
-    let runmat_jit::execute::GenericInvocationStep::Deoptimized {
+    let runmat_native_executor::execute::NativeInvocationStep::Deoptimized {
         reason,
         target,
         frame,
@@ -285,7 +293,7 @@ fn failed_representation_guard_materializes_and_resumes_exact_native_state() {
     assert_eq!(frame.locals[0].value, Some(Value::Num(41.0)));
 
     invocation.resume_deoptimization().unwrap();
-    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+    let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
         invocation.advance().unwrap()
     else {
         panic!("retired guard must resume at the exact generic-native site")
@@ -363,7 +371,7 @@ fn injected_failure_at_every_guard_materializes_and_resumes_exact_state() {
             ..DeoptimizationPolicy::default()
         }
         .inject(FaultInjection::Guard(guard));
-        let executor = GenericExecutor::compile(assembly.clone()).unwrap();
+        let executor = compile_executor(assembly.clone()).unwrap();
         let mut invocation = executor
             .begin_with_deoptimization(
                 function,
@@ -374,14 +382,14 @@ fn injected_failure_at_every_guard_materializes_and_resumes_exact_state() {
                 policy,
             )
             .unwrap();
-        let runmat_jit::execute::GenericInvocationStep::Deoptimized { frame, .. } =
+        let runmat_native_executor::execute::NativeInvocationStep::Deoptimized { frame, .. } =
             invocation.advance().unwrap()
         else {
             panic!("selected guard must deoptimize")
         };
         assert_eq!(frame.locals[0].value, Some(Value::Num(41.0)));
         invocation.resume_deoptimization().unwrap();
-        let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+        let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
             invocation.advance().unwrap()
         else {
             panic!("retired guard must resume at the exact native site")
@@ -398,7 +406,7 @@ fn interpreter_target_is_selected_only_for_verified_empty_stack_resume_points() 
         position: 1,
     };
     let region = fixture_region(ValueFact::scalar(ValueKindFact::String));
-    let executor = GenericExecutor::compile_with_resume_points(
+    let executor = GenericCompiler::compile_executor_with_resume_points(
         fixture_with_regions(vec![region]),
         None,
         BTreeMap::from([(point, 7)]),
@@ -418,8 +426,9 @@ fn interpreter_target_is_selected_only_for_verified_empty_stack_resume_points() 
             policy,
         )
         .unwrap();
-    let runmat_jit::execute::GenericInvocationStep::Deoptimized { target, frame, .. } =
-        invocation.advance().unwrap()
+    let runmat_native_executor::execute::NativeInvocationStep::Deoptimized {
+        target, frame, ..
+    } = invocation.advance().unwrap()
     else {
         panic!("mismatched representation guard must deoptimize")
     };
@@ -455,7 +464,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
         ));
         drop(activation);
 
-        let executor = GenericExecutor::compile(assembly.clone()).unwrap();
+        let executor = compile_executor(assembly.clone()).unwrap();
         let policy = DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(safepoint));
         let mut invocation = executor
             .begin_with_deoptimization(
@@ -467,7 +476,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
                 policy,
             )
             .unwrap();
-        let runmat_jit::execute::GenericInvocationStep::Deoptimized { frame, .. } =
+        let runmat_native_executor::execute::NativeInvocationStep::Deoptimized { frame, .. } =
             invocation.advance().unwrap()
         else {
             panic!("selected safepoint must deoptimize")
@@ -478,7 +487,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
         }
 
         invocation.resume_deoptimization().unwrap();
-        let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+        let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
             invocation.advance().unwrap()
         else {
             panic!("safepoint deoptimization must resume")
@@ -536,7 +545,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
         .filter_map(|instruction| instruction.safepoint)
         .nth(1)
         .expect("second semantic call safepoint");
-    let executor = GenericExecutor::compile(assembly).unwrap();
+    let executor = compile_executor(assembly).unwrap();
     let policy =
         DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(second_safepoint));
     let mut invocation = executor
@@ -549,7 +558,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
             policy,
         )
         .unwrap();
-    let runmat_jit::execute::GenericInvocationStep::Deoptimized { frame, .. } =
+    let runmat_native_executor::execute::NativeInvocationStep::Deoptimized { frame, .. } =
         invocation.advance().unwrap()
     else {
         panic!("second safepoint must deoptimize")
@@ -564,7 +573,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
         .expect("transfer handle ownership to native arena");
 
     invocation.resume_deoptimization().unwrap();
-    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+    let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
         invocation.advance().unwrap()
     else {
         panic!("GC-stressed deoptimization must resume")
@@ -579,14 +588,14 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
 
 #[test]
 fn cancellation_exits_without_committing_speculative_outputs() {
-    let executor = GenericExecutor::compile(fixture()).unwrap();
+    let executor = compile_executor(fixture()).unwrap();
     let runtime = runtime_context();
     runtime
         .cancellation()
         .store(true, std::sync::atomic::Ordering::Relaxed);
     assert!(matches!(
         executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime),
-        Err(JitError::Cancelled)
+        Err(NativeExecutorError::Cancelled)
     ));
 }
 
@@ -604,11 +613,11 @@ fn suspending_semantic_call_exits_explicitly_without_nested_executor_or_replay()
         }),
     ));
     drop(activation);
-    let executor = GenericExecutor::compile(semantic_call_fixture()).unwrap();
+    let executor = compile_executor(semantic_call_fixture()).unwrap();
     let error = executor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
         .expect_err("R13 must reject a real suspension boundary");
-    let JitError::UnsupportedSite(message) = error else {
+    let NativeExecutorError::UnsupportedSite(message) = error else {
         panic!("suspension must remain a typed unsupported-site exit");
     };
     assert!(message.contains("requires the R14 continuation cohort"));
@@ -617,7 +626,7 @@ fn suspending_semantic_call_exits_explicitly_without_nested_executor_or_replay()
 
 #[test]
 fn generated_branch_uses_shared_truth_semantics_and_exact_edge_values() {
-    let executor = GenericExecutor::compile(branch_fixture()).unwrap();
+    let executor = compile_executor(branch_fixture()).unwrap();
     let execution = executor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
@@ -626,7 +635,7 @@ fn generated_branch_uses_shared_truth_semantics_and_exact_edge_values() {
 
 #[test]
 fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
-    let operator = GenericExecutor::compile(binary_fixture()).unwrap();
+    let operator = compile_executor(binary_fixture()).unwrap();
     assert_eq!(
         operator
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -635,7 +644,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
         vec![Value::Num(42.0)]
     );
 
-    let range = GenericExecutor::compile(range_fixture()).unwrap();
+    let range = compile_executor(range_fixture()).unwrap();
     let output = range
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap()
@@ -647,7 +656,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
     };
     assert_eq!(range.materialize_f64(), vec![1.0, 2.0, 3.0]);
 
-    let call = GenericExecutor::compile(call_fixture()).unwrap();
+    let call = compile_executor(call_fixture()).unwrap();
     assert_eq!(
         call.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
             .unwrap()
@@ -655,7 +664,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
         vec![Value::Num(9.0)]
     );
 
-    let aggregate = GenericExecutor::compile(aggregate_fixture()).unwrap();
+    let aggregate = compile_executor(aggregate_fixture()).unwrap();
     let Value::Tensor(matrix) = aggregate
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap()
@@ -713,7 +722,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     ));
     drop(activation);
 
-    let executor = GenericExecutor::compile(super_method_fixture()).unwrap();
+    let executor = compile_executor(super_method_fixture()).unwrap();
     assert_eq!(
         executor
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
@@ -737,7 +746,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
         methods: std::collections::HashMap::new(),
     });
     drop(activation);
-    let constructor = GenericExecutor::compile(super_constructor_fixture()).unwrap();
+    let constructor = compile_executor(super_constructor_fixture()).unwrap();
     let Value::Object(value) = constructor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
         .unwrap()
@@ -754,7 +763,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
 
 #[test]
 fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
-    let short = GenericExecutor::compile(short_circuit_fixture()).unwrap();
+    let short = compile_executor(short_circuit_fixture()).unwrap();
     assert_eq!(
         short
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -763,7 +772,7 @@ fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
         vec![Value::Bool(true)]
     );
 
-    let switch = GenericExecutor::compile(switch_fixture()).unwrap();
+    let switch = compile_executor(switch_fixture()).unwrap();
     assert_eq!(
         switch
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -775,7 +784,7 @@ fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
 
 #[test]
 fn generic_for_iterates_captured_columns_through_compiled_backedges() {
-    let executor = GenericExecutor::compile(for_fixture()).unwrap();
+    let executor = compile_executor(for_fixture()).unwrap();
     let execution = executor
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
@@ -798,11 +807,11 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
             .then_some(block.terminator.site.point)
         })
         .expect("for fixture must expose a loop header");
-    let generic = GenericExecutor::compile(assembly.clone()).unwrap();
+    let generic = compile_executor(assembly.clone()).unwrap();
     let profile =
         runmat_jit::tiering::RepresentationProfile::from_facts(Vec::new(), usize::MAX).unwrap();
     let optimized = Rc::new(
-        GenericExecutor::compile_specialized_with_resume_points(
+        GenericCompiler::compile_specialized_executor_with_resume_points(
             assembly,
             None,
             BTreeMap::new(),
@@ -812,24 +821,25 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
     );
     let target = OsrTarget::new(Rc::clone(&optimized), ProgramFunctionId(0), point).unwrap();
     let mut invocation = generic
-        .begin_with_deoptimization_and_osr(
-            ProgramFunctionId(0),
-            Vec::new(),
-            Vec::new(),
-            1,
-            runtime_context(),
-            DeoptimizationPolicy::default(),
-            Some(target),
-        )
+        .begin_request(runmat_native_executor::NativeInvocationRequest {
+            function: ProgramFunctionId(0),
+            captures: Vec::new(),
+            arguments: Vec::new(),
+            requested_outputs: 1,
+            runtime: runtime_context(),
+            deoptimization: DeoptimizationPolicy::default(),
+            osr_target: Some(target),
+            workspace: None,
+        })
         .unwrap();
     let transfer = invocation.advance().unwrap();
     assert!(matches!(
         transfer,
-        runmat_jit::execute::GenericInvocationStep::Deoptimized { target, .. }
+        runmat_native_executor::execute::NativeInvocationStep::Deoptimized { target, .. }
             if target == runmat_runtime::native::NativeResumeKind::OPTIMIZED_NATIVE
     ));
     invocation.resume_optimization().unwrap();
-    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+    let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
         invocation.advance().unwrap()
     else {
         panic!("optimized continuation must complete")
@@ -842,7 +852,7 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
 
 #[test]
 fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
-    let indexing = GenericExecutor::compile(index_fixture()).unwrap();
+    let indexing = compile_executor(index_fixture()).unwrap();
     assert_eq!(
         indexing
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -851,7 +861,7 @@ fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
         vec![Value::Num(20.0)]
     );
 
-    let member = GenericExecutor::compile(member_fixture()).unwrap();
+    let member = compile_executor(member_fixture()).unwrap();
     assert_eq!(
         member
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -863,7 +873,7 @@ fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
 
 #[test]
 fn generic_index_and_member_mutations_publish_updated_root_values() {
-    let indexing = GenericExecutor::compile(index_assignment_fixture()).unwrap();
+    let indexing = compile_executor(index_assignment_fixture()).unwrap();
     let Value::Tensor(updated) = indexing
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap()
@@ -875,7 +885,7 @@ fn generic_index_and_member_mutations_publish_updated_root_values() {
     };
     assert_eq!(updated.materialize_f64(), vec![10.0, 99.0, 30.0]);
 
-    let member = GenericExecutor::compile(member_assignment_fixture()).unwrap();
+    let member = compile_executor(member_assignment_fixture()).unwrap();
     let Value::Struct(updated) = member
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap()
@@ -887,7 +897,7 @@ fn generic_index_and_member_mutations_publish_updated_root_values() {
     };
     assert_eq!(updated.fields.get("answer"), Some(&Value::Num(42.0)));
 
-    let multi = GenericExecutor::compile(multi_assignment_fixture()).unwrap();
+    let multi = compile_executor(multi_assignment_fixture()).unwrap();
     assert_eq!(
         multi
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -909,7 +919,7 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
         );
     }));
 
-    let global = GenericExecutor::compile(workspace_binding_fixture(
+    let global = compile_executor(workspace_binding_fixture(
         "global_counter",
         "shared",
         WorkspaceEffect::MutatesGlobal,
@@ -929,7 +939,7 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
         );
     }));
 
-    let persistent = GenericExecutor::compile(workspace_binding_fixture(
+    let persistent = compile_executor(workspace_binding_fixture(
         "persistent_counter",
         "calls",
         WorkspaceEffect::MutatesPersistent,
@@ -955,16 +965,22 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
 
 #[test]
 fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() {
-    let executor = GenericExecutor::compile(workspace_binding_fixture(
+    let executor = compile_executor(workspace_binding_fixture(
         "interactive",
         "counter",
         WorkspaceEffect::None,
     ))
     .unwrap();
     let mut invocation = executor
-        .begin_workspace_with_deoptimization_and_osr(
-            ProgramFunctionId(0),
-            NativeWorkspaceInput {
+        .begin_request(runmat_native_executor::NativeInvocationRequest {
+            function: ProgramFunctionId(0),
+            captures: Vec::new(),
+            arguments: Vec::new(),
+            requested_outputs: 1,
+            runtime: runtime_context(),
+            deoptimization: DeoptimizationPolicy::default(),
+            osr_target: None,
+            workspace: Some(NativeWorkspaceInput {
                 values: BTreeMap::from([("counter".into(), Value::Num(41.0))]),
                 local_names: BTreeMap::from([(BindingId(0), "counter".into())]),
                 bindings: vec![NativeWorkspaceBinding {
@@ -972,15 +988,10 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
                     name: "counter".into(),
                     value: Value::Num(41.0),
                 }],
-            },
-            Vec::new(),
-            1,
-            runtime_context(),
-            DeoptimizationPolicy::default(),
-            None,
-        )
+            }),
+        })
         .unwrap();
-    let runmat_jit::execute::GenericInvocationStep::Completed(execution) =
+    let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
         invocation.advance().unwrap()
     else {
         panic!("interactive native invocation should complete")
@@ -994,7 +1005,7 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
 
 #[test]
 fn generic_workspace_first_static_property_prefers_named_local_binding() {
-    let executor = GenericExecutor::compile(workspace_first_static_fixture()).unwrap();
+    let executor = compile_executor(workspace_first_static_fixture()).unwrap();
     assert_eq!(
         executor
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -1006,7 +1017,7 @@ fn generic_workspace_first_static_property_prefers_named_local_binding() {
 
 #[test]
 fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape() {
-    let scalar = GenericExecutor::compile(end_scalar_fixture()).unwrap();
+    let scalar = compile_executor(end_scalar_fixture()).unwrap();
     assert_eq!(
         scalar
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
@@ -1015,7 +1026,7 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
         vec![Value::Num(30.0)]
     );
 
-    let range = GenericExecutor::compile(end_range_fixture()).unwrap();
+    let range = compile_executor(end_range_fixture()).unwrap();
     let Value::Tensor(selected) = range
         .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap()
@@ -1041,7 +1052,7 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
         }),
     ));
     drop(activation);
-    let called = GenericExecutor::compile(end_call_fixture()).unwrap();
+    let called = compile_executor(end_call_fixture()).unwrap();
     assert_eq!(
         called
             .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)

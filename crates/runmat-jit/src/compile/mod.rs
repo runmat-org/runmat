@@ -1,5 +1,4 @@
-mod executable;
 mod generic;
+mod product;
 
-pub use executable::CompiledExecutable;
 pub use generic::GenericCompiler;

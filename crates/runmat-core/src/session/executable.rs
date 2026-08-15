@@ -96,7 +96,7 @@ impl RunMatSession {
         &self,
         unit: &crate::ExecutableUnit,
     ) -> Option<(
-        runmat_jit::execute::NativeWorkspaceInput,
+        runmat_native_executor::execute::NativeWorkspaceInput,
         runmat_jit::tiering::RepresentationProfile,
     )> {
         if !self.native_tiering_enabled {
@@ -116,7 +116,7 @@ impl RunMatSession {
             .map(|(binding, name)| (*binding, name.clone()))
             .filter_map(|(binding, name)| {
                 values.get(&name).cloned().map(|value| {
-                    runmat_jit::execute::NativeWorkspaceBinding {
+                    runmat_native_executor::execute::NativeWorkspaceBinding {
                         binding,
                         name,
                         value,
@@ -124,7 +124,7 @@ impl RunMatSession {
                 })
             })
             .collect();
-        let workspace = runmat_jit::execute::NativeWorkspaceInput {
+        let workspace = runmat_native_executor::execute::NativeWorkspaceInput {
             values,
             local_names,
             bindings,
@@ -142,7 +142,7 @@ impl RunMatSession {
     pub(super) async fn invoke_tiered_interactive(
         &mut self,
         unit: &crate::ExecutableUnit,
-        workspace: &runmat_jit::execute::NativeWorkspaceInput,
+        workspace: &runmat_native_executor::execute::NativeWorkspaceInput,
         profile: &runmat_jit::tiering::RepresentationProfile,
     ) -> std::result::Result<Option<crate::generic_native::NativeExecution>, RuntimeError> {
         let published = self

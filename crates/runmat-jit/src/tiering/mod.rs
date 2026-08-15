@@ -6,7 +6,7 @@ mod policy;
 
 pub use config::{CompilationMode, TieringConfig};
 pub use feedback::{
-    RepresentationProfile, TierFeedbackSnapshot, TierProfileSnapshot, TierSiteId, TierSiteSnapshot,
-    TieringSession,
+    TierFeedbackSnapshot, TierProfileSnapshot, TierSiteId, TierSiteSnapshot, TieringSession,
 };
 pub use policy::{TierAvailability, TierDecision};
+pub use runmat_native_executor::RepresentationProfile;

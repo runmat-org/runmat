@@ -2,7 +2,8 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use runmat_execution::Digest;
-use runmat_types::{ProgramFunctionId, ProgramPointId, ValueFact};
+use runmat_native_executor::RepresentationProfile;
+use runmat_types::{ProgramFunctionId, ProgramPointId};
 use serde::{Deserialize, Serialize};
 
 use super::policy::decide;
@@ -31,29 +32,6 @@ impl TierSiteId {
             return Err("tier site identity is invalid");
         }
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RepresentationProfile {
-    pub digest: Digest,
-    pub facts: Vec<ValueFact>,
-}
-
-impl RepresentationProfile {
-    pub fn from_facts(facts: Vec<ValueFact>, max_bytes: usize) -> Result<Self, &'static str> {
-        if facts.len() > 64 {
-            return Err("tier representation profile has too many values");
-        }
-        let encoded = serde_json::to_vec(&facts)
-            .map_err(|_| "tier representation profile could not be encoded")?;
-        if encoded.len() > max_bytes {
-            return Err("tier representation profile exceeds its byte bound");
-        }
-        Ok(Self {
-            digest: Digest::sha256(encoded),
-            facts,
-        })
     }
 }
 
