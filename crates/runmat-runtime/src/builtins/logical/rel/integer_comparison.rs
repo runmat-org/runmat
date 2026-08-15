@@ -660,6 +660,28 @@ fn compare_real_values(lhs: RealValue, rhs: RealValue) -> Option<Ordering> {
     }
 }
 
+/// Compares two native real numeric scalars without routing either integer
+/// operand through binary64. Every `f32` value is represented exactly as
+/// `f64`, so the mixed floating path retains the same ordering semantics as
+/// the array relational operators.
+pub(crate) fn compare_numeric_scalars_exact(
+    lhs: NumericScalar,
+    rhs: NumericScalar,
+) -> Option<Ordering> {
+    fn real(value: NumericScalar) -> RealValue {
+        match value {
+            NumericScalar::F64(value) => RealValue::Float(value),
+            NumericScalar::F32(value) => RealValue::Float(f64::from(value)),
+            value => RealValue::Integer(
+                value
+                    .into_int_value()
+                    .expect("nonfloating NumericScalar must contain an integer"),
+            ),
+        }
+    }
+    compare_real_values(real(lhs), real(rhs))
+}
+
 fn compare_complex_real(
     complex: &ComplexOperand<'_>,
     real: &RealOperand<'_>,

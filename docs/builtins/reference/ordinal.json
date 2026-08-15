@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Ordinal categorical arrays are host metadata objects."
+    "notes": "Ordinal compatibility objects are host metadata. Automatic residency gathers transparently; explicit gpuArray host construction is a declared RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -19,14 +19,16 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::table::tests::ordinal_constructor_sets_ordered_categorical_semantics",
-    "integration": "crates/runmat-vm/tests/tables_timetables.rs"
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
-  "description": "`ordinal(A)` creates a categorical object whose categories are ordered. It is a compatibility constructor equivalent to `categorical(..., 'Ordinal', true)`.",
+  "description": "`ordinal(X)` creates an ordered compatibility object from the sorted unique levels of `X`. Labels, explicit levels, and numeric bin edges follow the public ordinal argument order.",
   "behaviors": [
     "String, char, cellstr, numeric, and logical inputs are accepted through the same label conversion path as `categorical`.",
-    "`ordinal(A)` derives sorted unique categories from non-missing labels.",
-    "`ordinal(A, categories)` uses the supplied category order and marks labels not present in that list as missing.",
-    "`ordinal(A, valueset, catnames)` maps source values through `valueset` and stores the corresponding category names from `catnames`.",
+    "`ordinal(X)` derives sorted unique levels from non-missing values and creates default labels.",
+    "`ordinal(X, labels)` assigns the supplied text labels to the sorted unique levels; duplicate labels merge levels.",
+    "`ordinal(X, labels, levels)` uses the explicit comparable level vector and marks source values absent from it as undefined.",
+    "`ordinal(X, labels, [], edges)` bins numeric source values into left-closed, right-open intervals, with the final edge included in the last bin.",
+    "Integer source values, explicit levels, and edges use exact native comparison across all eight classes. Default numeric display labels retain the established five-significant-digit formatting and collision rejection.",
     "The returned object has class `categorical`, stores one-based category codes, and has its `Ordinal` metadata flag set to true.",
     "Equality and relational operators compare category order; categorical-to-categorical comparisons require matching category lists.",
     "`min` and `max` reduce ordinal categorical arrays by category order and return categorical results; undefined elements follow the numeric `NaN` behavior of `includenan` and `omitnan`, and multi-output forms return numeric indices."

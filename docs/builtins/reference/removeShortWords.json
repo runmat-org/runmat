@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`removeShortWords` filters host text-model objects and does not use provider kernels."
+    "notes": "`removeShortWords` filters host text-model objects. Automatic residency for a numeric control gathers transparently; explicit gpuArray host fallback is a declared RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -25,13 +25,13 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::strings::text_analytics::documents::tests",
-    "integration": null
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
   "description": "`removeShortWords(documents, len)` removes tokens whose character length is less than or equal to `len` from RunMat `tokenizedDocument` compatibility objects. `removeShortWords(bag, len)` removes matching vocabulary columns from RunMat `bagOfWords` objects.",
   "behaviors": [
     "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
     "`bag` must be a RunMat `bagOfWords` object created by `bagOfWords`.",
-    "`len` must be a positive integer scalar.",
+    "`len` must be a positive integer scalar and accepts every integer class without a floating conversion.",
     "For tokenized documents, the result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",
     "For bag-of-words models, the result preserves document row count and removes count columns for words with length less than or equal to `len`.",
     "`removeStopWords`, `removeWords`, and `removeLongWords` are implemented separately for other tokenized-document filtering workflows. Table-backed custom token filters remain tracked by the Text Analytics umbrella."

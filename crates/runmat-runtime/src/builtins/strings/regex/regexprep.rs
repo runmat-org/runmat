@@ -4,8 +4,13 @@ use std::sync::Arc;
 
 use regex::{Captures, Regex, RegexBuilder};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericScalar,
 };
 use runmat_builtins::{CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
@@ -46,6 +51,52 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "regexprep";
+
+const REGEXPREP_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "regexprep-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "regexprep host fallback for explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RegexprepExplicitGpuInputExtension"),
+};
+const REGEXPREP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [REGEXPREP_EXPLICIT_GPU_EXTENSION];
+const REGEXPREP_INTEGER_OCCURRENCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented Nth-occurrence option accepts every integer class and is validated exactly as a positive scalar before regex execution.",
+    }];
+const REGEXPREP_INTEGER_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "str/expression/replace",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Regex text roles reject integer host and resident values before gather or numeric-to-text conversion.",
+    }];
+pub const REGEXPREP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = regexprep(subject, pattern, replacement, integer_N)",
+        inputs: &REGEXPREP_INTEGER_OCCURRENCE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "N selects exactly one eligible match without entering the floating domain. Automatic residency gathers transparently; explicit gpuArray fallback is separately gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = regexprep(integer_subject_or_pattern_or_replacement, ...)",
+        inputs: &REGEXPREP_INTEGER_TEXT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer data is not text and never triggers provider access or implicit decimal formatting in these roles.",
+    },
+];
 
 const REGEXPREP_OUTPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -176,6 +227,8 @@ fn with_builtin_context(mut err: RuntimeError) -> RuntimeError {
     summary = "Regular expression replacement with MATLAB-compatible semantics.",
     keywords = "regexprep,regex,replace,substitute",
     accel = "sink",
+    extensions(REGEXPREP_EXTENSIONS),
+    integer_capabilities(REGEXPREP_INTEGER_CAPABILITIES),
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::regex::regexprep::REGEXPREP_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::regex::regexprep"
@@ -186,6 +239,26 @@ async fn regexprep_builtin(
     replacement: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if [(&subject), (&pattern), (&replacement)]
+        .into_iter()
+        .any(crate::builtins::common::validation::value_contains_native_integer_class)
+    {
+        return Err(runtime_error_for(
+            "regexprep: subject, pattern, and replacement must be text",
+        ));
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&subject)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&pattern)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&replacement)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &REGEXPREP_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let subject = gather_if_needed_async(&subject)
         .await
         .map_err(with_builtin_context)?;
@@ -195,7 +268,15 @@ async fn regexprep_builtin(
     let replacement = gather_if_needed_async(&replacement)
         .await
         .map_err(with_builtin_context)?;
-    let options = RegexprepOptions::parse(BUILTIN_NAME, &rest)?;
+    let mut gathered_rest = Vec::with_capacity(rest.len());
+    for value in rest {
+        gathered_rest.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(with_builtin_context)?,
+        );
+    }
+    let options = RegexprepOptions::parse(BUILTIN_NAME, &gathered_rest)?;
 
     let subjects = SubjectCollection::collect(BUILTIN_NAME, subject).await?;
     let patterns = PatternCollection::collect(BUILTIN_NAME, pattern, &subjects).await?;
@@ -228,6 +309,7 @@ struct RegexprepOptions {
     multi_line: bool,
     dot_all: bool,
     once: bool,
+    nth: Option<usize>,
     emptymatch: EmptyMatchPolicy,
     preserve_case: bool,
 }
@@ -238,10 +320,16 @@ impl RegexprepOptions {
         let mut multi_line = false;
         let mut dot_all = false;
         let mut once = false;
+        let mut nth = None;
         let mut emptymatch = EmptyMatchPolicy::Remove;
         let mut preserve_case = false;
         let mut idx = 0usize;
         while idx < rest.len() {
+            if let Some(occurrence) = parse_occurrence_option(&rest[idx], builtin)? {
+                nth = Some(occurrence);
+                idx += 1;
+                continue;
+            }
             let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
                 runtime_error_for(format!(
                     "{builtin}: expected option string, got {:?}",
@@ -337,10 +425,54 @@ impl RegexprepOptions {
             multi_line,
             dot_all,
             once,
+            nth,
             emptymatch,
             preserve_case,
         })
     }
+}
+
+fn parse_occurrence_option(value: &Value, builtin: &'static str) -> BuiltinResult<Option<usize>> {
+    let numeric = match value {
+        Value::Num(value) => Some(NumericScalar::F64(*value)),
+        Value::Int(value) => Some(NumericScalar::from(value.clone())),
+        Value::Tensor(tensor) => {
+            if tensor.len() != 1 {
+                return Err(runtime_error_for(format!(
+                    "{builtin}: occurrence option must be a positive integer scalar"
+                )));
+            }
+            tensor.numeric_value_at(0)
+        }
+        _ => None,
+    };
+    let Some(numeric) = numeric else {
+        return Ok(None);
+    };
+    let occurrence = match numeric {
+        NumericScalar::F64(value) => positive_occurrence_float(value),
+        NumericScalar::F32(value) => positive_occurrence_float(f64::from(value)),
+        value => value
+            .into_int_value()
+            .and_then(|value| value.try_to_usize())
+            .filter(|value| *value > 0),
+    }
+    .ok_or_else(|| {
+        runtime_error_for(format!(
+            "{builtin}: occurrence option must be a positive integer scalar"
+        ))
+    })?;
+    Ok(Some(occurrence))
+}
+
+fn positive_occurrence_float(value: f64) -> Option<usize> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -808,6 +940,7 @@ fn replace_with_policy(
     let mut output = String::new();
     let mut last = 0usize;
     let mut replaced = 0usize;
+    let mut occurrence = 0usize;
     for caps in regex.captures_iter(text) {
         let mat = match caps.get(0) {
             Some(m) => m,
@@ -816,12 +949,16 @@ fn replace_with_policy(
         if options.emptymatch == EmptyMatchPolicy::Remove && mat.start() == mat.end() {
             continue;
         }
+        occurrence += 1;
+        if options.nth.is_some_and(|target| occurrence != target) {
+            continue;
+        }
         output.push_str(&text[last..mat.start()]);
         let replacement = template.expand(&caps, options.preserve_case);
         output.push_str(&replacement);
         last = mat.end();
         replaced += 1;
-        if options.once {
+        if options.once || options.nth.is_some() {
             break;
         }
     }
@@ -1048,7 +1185,7 @@ fn parse_toggle(value: Option<&Value>) -> Option<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
     #[test]
     fn regexprep_descriptor_signatures_cover_core_forms() {
@@ -1167,6 +1304,70 @@ pub(crate) mod tests {
             Value::StringArray(sa) => assert_eq!(sa.data[0], "aXYbaba"),
             other => panic!("unexpected result {other:?}"),
         }
+    }
+
+    #[test]
+    fn regexprep_integer_occurrence_option_is_exact_and_class_complete() {
+        for occurrence in [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64(2),
+        ] {
+            let result = run_regexprep(
+                Value::String("a a a".into()),
+                Value::String("a".into()),
+                Value::String("X".into()),
+                vec![Value::Int(occurrence)],
+            )
+            .expect("Nth occurrence");
+            assert_eq!(result, Value::String("a X a".into()));
+        }
+
+        let occurrence =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).unwrap());
+        assert_eq!(
+            run_regexprep(
+                Value::String("a a a".into()),
+                Value::String("a".into()),
+                Value::String("X".into()),
+                vec![occurrence],
+            )
+            .expect("typed occurrence tensor"),
+            Value::String("a a X".into())
+        );
+    }
+
+    #[test]
+    fn regexprep_rejects_invalid_integer_occurrence_options() {
+        for occurrence in [
+            Value::Int(IntValue::I8(0)),
+            Value::Int(IntValue::I64(-1)),
+            Value::Num(1.5),
+        ] {
+            let error = run_regexprep(
+                Value::String("a a".into()),
+                Value::String("a".into()),
+                Value::String("X".into()),
+                vec![occurrence],
+            )
+            .expect_err("invalid occurrence");
+            assert!(error.message().contains("positive integer scalar"));
+        }
+        assert_eq!(
+            run_regexprep(
+                Value::String("a a".into()),
+                Value::String("a".into()),
+                Value::String("X".into()),
+                vec![Value::Int(IntValue::U64(u64::MAX))],
+            )
+            .expect("valid occurrence beyond available matches"),
+            Value::String("a a".into())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

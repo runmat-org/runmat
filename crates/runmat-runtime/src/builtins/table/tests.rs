@@ -3266,6 +3266,13 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
             )
             .unwrap(),
         ),
+        Value::StringArray(
+            StringArray::new(
+                vec!["low".into(), "medium".into(), "high".into()],
+                vec![1, 3],
+            )
+            .unwrap(),
+        ),
     ]))
     .unwrap();
     assert!(matches!(
@@ -3375,6 +3382,90 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         block_on(isordinal_builtin(Value::Num(1.0))).unwrap(),
         Value::Bool(false)
     ));
+}
+
+#[test]
+fn ordinal_constructor_preserves_adjacent_wide_integer_levels() {
+    let lower = (1_u64 << 53) + 1;
+    let upper = lower + 1;
+    let source = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![upper, lower, upper]), vec![3, 1]).unwrap(),
+    );
+    let labels = Value::StringArray(
+        StringArray::new(vec!["lower".into(), "upper".into()], vec![1, 2]).unwrap(),
+    );
+    let levels = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![lower, upper]), vec![1, 2]).unwrap(),
+    );
+    let Value::Object(ordinal) =
+        block_on(ordinal_builtin(vec![source, labels, levels])).expect("ordinal")
+    else {
+        panic!("ordinal object")
+    };
+    let categories = match ordinal.properties.get("Categories") {
+        Some(Value::StringArray(array)) => array.data.clone(),
+        other => panic!("categories {other:?}"),
+    };
+    assert_eq!(categories, vec!["lower", "upper"]);
+    assert_eq!(
+        crate::builtins::table::categorical_labels(&Value::Object(ordinal)).unwrap(),
+        vec!["upper", "lower", "upper"]
+    );
+}
+
+#[test]
+fn ordinal_constructor_accepts_every_integer_level_class() {
+    for storage in [
+        IntegerStorage::I8(vec![2, 1]),
+        IntegerStorage::I16(vec![2, 1]),
+        IntegerStorage::I32(vec![2, 1]),
+        IntegerStorage::I64(vec![2, 1]),
+        IntegerStorage::U8(vec![2, 1]),
+        IntegerStorage::U16(vec![2, 1]),
+        IntegerStorage::U32(vec![2, 1]),
+        IntegerStorage::U64(vec![2, 1]),
+    ] {
+        let source = Value::Tensor(Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap());
+        let levels = Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).unwrap());
+        let labels = Value::StringArray(
+            StringArray::new(vec!["second".into(), "first".into()], vec![1, 2]).unwrap(),
+        );
+        let Value::Object(ordinal) =
+            block_on(ordinal_builtin(vec![source, labels, levels])).expect("ordinal")
+        else {
+            panic!("ordinal object")
+        };
+        assert_eq!(
+            crate::builtins::table::categorical_labels(&Value::Object(ordinal)).unwrap(),
+            vec!["second", "first"]
+        );
+    }
+}
+
+#[test]
+fn ordinal_constructor_bins_adjacent_wide_integer_edges_exactly() {
+    let lower = (1_u64 << 53) + 1;
+    let middle = lower + 1;
+    let upper = middle + 1;
+    let source = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![lower, middle, upper]), vec![3, 1]).unwrap(),
+    );
+    let labels = Value::StringArray(
+        StringArray::new(vec!["first".into(), "second".into()], vec![1, 2]).unwrap(),
+    );
+    let empty = Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap());
+    let edges = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![lower, middle, upper]), vec![1, 3]).unwrap(),
+    );
+    let Value::Object(ordinal) =
+        block_on(ordinal_builtin(vec![source, labels, empty, edges])).expect("ordinal")
+    else {
+        panic!("ordinal object")
+    };
+    assert_eq!(
+        crate::builtins::table::categorical_labels(&Value::Object(ordinal)).unwrap(),
+        vec!["first", "second", "second"]
+    );
 }
 
 #[test]

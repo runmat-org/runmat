@@ -7,7 +7,8 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
@@ -314,6 +315,90 @@ pub const BAG_OF_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         notes: "Counts remain authoritative through nonnegative-integer validation and vocabulary-column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object.",
     }];
 
+const REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
+    text_control_gpu_extension(
+        "removeshortwords-explicit-gpu-input",
+        "removeShortWords host fallback for explicit gpuArray input is a RunMat extension",
+        "RunMat:compatibility:RemoveShortWordsExplicitGpuInputExtension",
+    );
+const REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
+    text_control_gpu_extension(
+        "removelongwords-explicit-gpu-input",
+        "removeLongWords host fallback for explicit gpuArray input is a RunMat extension",
+        "RunMat:compatibility:RemoveLongWordsExplicitGpuInputExtension",
+    );
+const REMOVE_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = text_control_gpu_extension(
+    "removewords-explicit-gpu-input",
+    "removeWords host fallback for explicit gpuArray input is a RunMat extension",
+    "RunMat:compatibility:RemoveWordsExplicitGpuInputExtension",
+);
+const fn text_control_gpu_extension(
+    id: &'static str,
+    description: &'static str,
+    error_identifier: &'static str,
+) -> BuiltinExtensionDescriptor {
+    BuiltinExtensionDescriptor {
+        id,
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description,
+        error_identifier: Some(error_identifier),
+    }
+}
+const REMOVE_SHORT_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION];
+const REMOVE_LONG_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION];
+const REMOVE_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [REMOVE_WORDS_EXPLICIT_GPU_EXTENSION];
+
+const TEXT_LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "len",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented positive-integer word-length threshold accepts every integer class and is validated exactly against platform bounds.",
+    }];
+const REMOVE_WORDS_INDEX_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "idx",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented numeric vocabulary indices accept all eight integer classes and are read exactly before one-based bounds validation and deduplication.",
+    }];
+pub const REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [text_length_integer_capability(
+        "newDocumentsOrBag = removeShortWords(documentsOrBag, integer_len)",
+    )];
+pub const REMOVE_LONG_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [text_length_integer_capability(
+        "newDocumentsOrBag = removeLongWords(documentsOrBag, integer_len)",
+    )];
+const fn text_length_integer_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs: &TEXT_LENGTH_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The exact threshold controls host text filtering only. Automatic residency gathers transparently; explicit gpuArray arguments are separately gated.",
+    }
+}
+pub const REMOVE_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "newDocumentsOrBag = removeWords(documentsOrBag, integer_idx)",
+        inputs: &REMOVE_WORDS_INDEX_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact positive indices select vocabulary entries without binary64 collapse; logical masks remain a distinct documented selector form.",
+    }];
+
 pub const REMOVE_SHORT_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
         label: "newDocumentsOrBag = removeShortWords(documentsOrBag, len)",
@@ -550,11 +635,21 @@ async fn bag_of_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Remove short words from tokenized documents or bag-of-words models.",
     keywords = "removeShortWords,text analytics,tokenizedDocument,bagOfWords",
     accel = "sink",
+    extensions(REMOVE_SHORT_WORDS_EXTENSIONS),
+    integer_capabilities(REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_SHORT_WORDS_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION,
+            "removeShortWords",
+        )?;
+    }
     let value = gather_if_needed_async(&value).await.map_err(|err| {
         text_analytics_error("removeShortWords", format!("removeShortWords: {err}"))
     })?;
@@ -601,11 +696,21 @@ async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<V
     summary = "Remove long words from tokenized documents or bag-of-words models.",
     keywords = "removeLongWords,text analytics,tokenizedDocument,bagOfWords",
     accel = "sink",
+    extensions(REMOVE_LONG_WORDS_EXTENSIONS),
+    integer_capabilities(REMOVE_LONG_WORDS_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_LONG_WORDS_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 async fn remove_long_words_builtin(value: Value, len: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION,
+            "removeLongWords",
+        )?;
+    }
     let value = gather_if_needed_async(&value).await.map_err(|err| {
         text_analytics_error("removeLongWords", format!("removeLongWords: {err}"))
     })?;
@@ -646,11 +751,22 @@ async fn remove_long_words_builtin(value: Value, len: Value) -> BuiltinResult<Va
     summary = "Remove selected words from tokenized documents or bag-of-words models.",
     keywords = "removeWords,text analytics,tokenizedDocument,bagOfWords,filter",
     accel = "sink",
+    extensions(REMOVE_WORDS_EXTENSIONS),
+    integer_capabilities(REMOVE_WORDS_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_WORDS_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &REMOVE_WORDS_EXPLICIT_GPU_EXTENSION,
+            "removeWords",
+        )?;
+    }
     let gathered = gather_args(args, "removeWords").await?;
     let (value, selector, options) = parse_remove_words_args(gathered)?;
     match value {
@@ -1356,7 +1472,7 @@ fn parse_remove_words_selector(value: &Value) -> BuiltinResult<RemoveWordsSelect
                 len: array.data.len(),
             })
         }
-        Value::Num(_) | Value::Tensor(_) => {
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) => {
             parse_remove_words_indices(value).map(RemoveWordsSelector::Indices)
         }
         _ => words_from_word_vector(value, "removeWords").map(RemoveWordsSelector::Words),
@@ -1365,8 +1481,18 @@ fn parse_remove_words_selector(value: &Value) -> BuiltinResult<RemoveWordsSelect
 
 fn parse_remove_words_indices(value: &Value) -> BuiltinResult<Vec<usize>> {
     let raw = match value {
-        Value::Num(value) => vec![*value],
-        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor),
+        Value::Num(value) => vec![NumericScalar::F64(*value)],
+        Value::Int(value) => vec![NumericScalar::from(value.clone())],
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                tensor.numeric_value_at(index).ok_or_else(|| {
+                    text_analytics_error(
+                        "removeWords",
+                        "removeWords: invalid numeric vocabulary-index storage",
+                    )
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
         other => {
             return Err(text_analytics_error(
                 "removeWords",
@@ -1380,18 +1506,29 @@ fn parse_remove_words_indices(value: &Value) -> BuiltinResult<Vec<usize>> {
     let mut seen = HashSet::new();
     let mut indices = Vec::new();
     for value in raw {
-        if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        let Some(index) = positive_remove_word_index(value) else {
             return Err(text_analytics_error(
                 "removeWords",
-                format!("removeWords: vocabulary indices must be positive integers, got {value}"),
+                format!("removeWords: vocabulary indices must be positive integers, got {value:?}"),
             ));
-        }
-        let idx = value as usize - 1;
+        };
+        let idx = index - 1;
         if seen.insert(idx) {
             indices.push(idx);
         }
     }
     Ok(indices)
+}
+
+fn positive_remove_word_index(value: NumericScalar) -> Option<usize> {
+    match value {
+        NumericScalar::F64(value) => positive_platform_usize(value),
+        NumericScalar::F32(value) => positive_platform_usize(f64::from(value)),
+        value => value
+            .into_int_value()?
+            .try_to_usize()
+            .filter(|value| *value > 0),
+    }
 }
 
 fn logical_indices(array: &LogicalArray) -> Vec<usize> {
@@ -4066,6 +4203,22 @@ mod tests {
         assert_eq!(
             parse_remove_words_indices(&Value::Tensor(tensor)).expect("indices"),
             vec![0, 2]
+        );
+    }
+
+    #[test]
+    fn remove_words_indices_do_not_collapse_adjacent_wide_uint64_values() {
+        let lower = (1_u64 << 53) + 3;
+        let upper = lower + 1;
+        let tensor = poisoned_integer_vector(IntegerStorage::U64(vec![lower, upper]), vec![1, 2]);
+        assert_eq!(
+            parse_remove_words_indices(&Value::Tensor(tensor)).expect("wide indices"),
+            vec![lower as usize - 1, upper as usize - 1]
+        );
+        assert_eq!(
+            parse_remove_words_indices(&Value::Int(runmat_builtins::IntValue::U64(upper)))
+                .expect("scalar index"),
+            vec![upper as usize - 1]
         );
     }
 

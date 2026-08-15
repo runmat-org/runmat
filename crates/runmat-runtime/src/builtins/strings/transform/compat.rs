@@ -14,7 +14,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
 };
@@ -478,6 +477,54 @@ descriptor!(
     &IN_TEXT_REST,
     &OUT_ANY
 );
+const REPLACE_BETWEEN_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "replacebetween-explicit-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "replaceBetween host fallback for explicit gpuArray input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ReplaceBetweenExplicitGpuInputExtension"),
+    };
+const REPLACE_BETWEEN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [REPLACE_BETWEEN_EXPLICIT_GPU_EXTENSION];
+const REPLACE_BETWEEN_POSITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "startPos/endPos",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented numeric positions accept all eight integer classes and are read exactly as one-based inclusive boundaries.",
+    }];
+const REPLACE_BETWEEN_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "str/newText",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Source and replacement text reject integer and resident numeric values before gather or implicit formatting.",
+    }];
+pub const REPLACE_BETWEEN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "newStr = replaceBetween(str, integer_startPos, integer_endPos, newText)",
+        inputs: &REPLACE_BETWEEN_POSITION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Positions remain exact through range and ordering validation; output preserves the host text container. Automatic residency gathers transparently, while explicit gpuArray fallback is separately gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "newStr = replaceBetween(integer_str, start, end, integer_newText)",
+        inputs: &REPLACE_BETWEEN_TEXT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer data is outside the public text roles and is never converted to decimal text.",
+    },
+];
 const ERASE_URLS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "newStr = eraseURLs(str)",
@@ -993,6 +1040,8 @@ async fn insert_after_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Va
     summary = "Replace text between positions or boundary markers.",
     keywords = "replaceBetween,string,text,boundary",
     accel = "sink",
+    extensions(REPLACE_BETWEEN_EXTENSIONS),
+    integer_capabilities(REPLACE_BETWEEN_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::REPLACE_BETWEEN_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::compat"
@@ -1004,6 +1053,24 @@ async fn replace_between_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult
             "replaceBetween: expected start, end, and replacement text",
         ));
     }
+    if contains_numeric_or_resident_text_input(&text)
+        || contains_numeric_or_resident_text_input(&rest[2])
+    {
+        return Err(transform_error(
+            "replaceBetween",
+            "replaceBetween: source and replacement must be text",
+        ));
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&text)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &REPLACE_BETWEEN_EXPLICIT_GPU_EXTENSION,
+            "replaceBetween",
+        )?;
+    }
     let start = gather_if_needed_async(&rest[0])
         .await
         .map_err(map_flow("replaceBetween"))?;
@@ -1013,21 +1080,24 @@ async fn replace_between_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult
     let replacement = gather_if_needed_async(&rest[2])
         .await
         .map_err(map_flow("replaceBetween"))?;
-    let replacement = scalar_text(&replacement, "replaceBetween")?;
-    let start = Boundary::from_value(&start, "replaceBetween")?;
-    let stop = Boundary::from_value(&stop, "replaceBetween")?;
+    let replacements = TextList::from_value(&replacement, "replaceBetween")?;
+    let starts = BoundaryList::from_value(&start, "replaceBetween")?;
+    let stops = BoundaryList::from_value(&stop, "replaceBetween")?;
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("replaceBetween"))?;
-    map_text_try_preserve(text, "replaceBetween", |s| {
-        let (replace_start, replace_end) = replacement_span_between(s, &start, &stop)?;
-        Ok(format!(
-            "{}{}{}",
-            &s[..replace_start],
-            replacement,
-            &s[replace_end..]
-        ))
-    })
+    let text_shape = boundary_text_shape(&text)
+        .ok_or_else(|| transform_error("replaceBetween", "replaceBetween: expected text input"))?;
+    if !shape_is_scalar_or_same(&starts.shape, &text_shape)
+        || !shape_is_scalar_or_same(&stops.shape, &text_shape)
+        || !shape_is_scalar_or_same(&replacements.shape, &text_shape)
+    {
+        return Err(transform_error(
+            "replaceBetween",
+            "replaceBetween: start, end, and newText must be scalar or match str",
+        ));
+    }
+    map_text_with_replacements(text, &starts, &stops, &replacements)
 }
 
 #[runtime_builtin(
@@ -1532,25 +1602,6 @@ impl BoundaryList {
     }
 }
 
-impl Boundary {
-    fn from_value(value: &Value, fn_name: &str) -> BuiltinResult<Self> {
-        if let Some(integer) = tensor::scalar_integer_value(value) {
-            return parse_boundary_integer(integer, fn_name).map(Self::Position);
-        }
-        match value {
-            Value::Num(n) if n.is_finite() && *n > 0.0 && n.fract() == 0.0 => {
-                parse_boundary_float(*n, fn_name).map(Self::Position)
-            }
-            Value::Num(_) => Err(transform_error(
-                fn_name,
-                format!("{fn_name}: numeric boundaries must be positive integer scalars"),
-            )),
-            Value::Object(_) => Ok(Self::Pattern(pattern_regex(value, fn_name)?)),
-            _ => Ok(Self::Text(scalar_text(value, fn_name)?)),
-        }
-    }
-}
-
 fn parse_boundary_integer(value: IntValue, fn_name: &str) -> BuiltinResult<usize> {
     value
         .try_to_usize()
@@ -1871,6 +1922,133 @@ fn map_text_with_insertions(
     }
 }
 
+fn map_text_with_replacements(
+    value: Value,
+    starts: &BoundaryList,
+    stops: &BoundaryList,
+    replacements: &TextList,
+) -> BuiltinResult<Value> {
+    match value {
+        Value::String(text) => {
+            if is_missing_string(&text) {
+                Ok(Value::String(text))
+            } else {
+                replace_between_one(&text, starts.at(0), stops.at(0), replacements.at(0))
+                    .map(Value::String)
+            }
+        }
+        Value::StringArray(array) => StringArray::new(
+            array
+                .data
+                .into_iter()
+                .enumerate()
+                .map(|(index, text)| {
+                    if is_missing_string(&text) {
+                        Ok(text)
+                    } else {
+                        replace_between_one(
+                            &text,
+                            starts.at(index),
+                            stops.at(index),
+                            replacements.at(index),
+                        )
+                    }
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
+            array.shape,
+        )
+        .map(Value::StringArray)
+        .map_err(|error| transform_error("replaceBetween", error)),
+        Value::CharArray(array) => {
+            let rows = (0..array.rows)
+                .map(|row| {
+                    replace_between_one(
+                        &char_row_to_string_slice(&array.data, array.cols, row),
+                        starts.at(row),
+                        stops.at(row),
+                        replacements.at(row),
+                    )
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            char_rows(rows, "replaceBetween")
+        }
+        Value::Cell(cell) => {
+            let values = cell
+                .data
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    map_text_cell_replacement(
+                        value,
+                        starts.at(index),
+                        stops.at(index),
+                        replacements.at(index),
+                    )
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            make_cell_with_shape(values, cell.shape)
+                .map_err(|error| transform_error("replaceBetween", error))
+        }
+        other => Err(transform_error(
+            "replaceBetween",
+            format!("replaceBetween: expected text input, got {other:?}"),
+        )),
+    }
+}
+
+fn map_text_cell_replacement(
+    value: Value,
+    start: &Boundary,
+    stop: &Boundary,
+    replacement: &str,
+) -> BuiltinResult<Value> {
+    match value {
+        Value::CharArray(array) if array.rows <= 1 => {
+            let text = if array.rows == 0 {
+                String::new()
+            } else {
+                char_row_to_string_slice(&array.data, array.cols, 0)
+            };
+            replace_between_one(&text, start, stop, replacement)
+                .map(|text| Value::CharArray(CharArray::new_row(&text)))
+        }
+        Value::String(text) => {
+            replace_between_one(&text, start, stop, replacement).map(Value::String)
+        }
+        Value::StringArray(array) if array.data.len() == 1 => {
+            replace_between_one(&array.data[0], start, stop, replacement).map(Value::String)
+        }
+        Value::Cell(cell) => {
+            let values = cell
+                .data
+                .into_iter()
+                .map(|value| map_text_cell_replacement(value, start, stop, replacement))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            make_cell_with_shape(values, cell.shape)
+                .map_err(|error| transform_error("replaceBetween", error))
+        }
+        other => Err(transform_error(
+            "replaceBetween",
+            format!("replaceBetween: expected character vectors in cell input, got {other:?}"),
+        )),
+    }
+}
+
+fn replace_between_one(
+    text: &str,
+    start: &Boundary,
+    stop: &Boundary,
+    replacement: &str,
+) -> BuiltinResult<String> {
+    let (replace_start, replace_end) = replacement_span_between(text, start, stop)?;
+    Ok(format!(
+        "{}{}{}",
+        &text[..replace_start],
+        replacement,
+        &text[replace_end..]
+    ))
+}
+
 fn map_text_cell_insertion(
     value: Value,
     boundary: &Boundary,
@@ -2038,56 +2216,6 @@ fn map_text_preserve(
                 .data
                 .into_iter()
                 .map(|value| map_text_preserve(value, fn_name, map))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            make_cell_with_shape(values, cell.shape).map_err(|e| transform_error(fn_name, e))
-        }
-        other => Err(transform_error(
-            fn_name,
-            format!("{fn_name}: expected text input, got {other:?}"),
-        )),
-    }
-}
-
-fn map_text_try_preserve(
-    value: Value,
-    fn_name: &str,
-    map: impl Fn(&str) -> BuiltinResult<String> + Copy,
-) -> BuiltinResult<Value> {
-    match value {
-        Value::String(text) => {
-            if is_missing_string(&text) {
-                Ok(Value::String(text))
-            } else {
-                Ok(Value::String(map(&text)?))
-            }
-        }
-        Value::StringArray(array) => StringArray::new(
-            array
-                .data
-                .into_iter()
-                .map(|text| {
-                    if is_missing_string(&text) {
-                        Ok(text)
-                    } else {
-                        map(&text)
-                    }
-                })
-                .collect::<BuiltinResult<Vec<_>>>()?,
-            array.shape,
-        )
-        .map(Value::StringArray)
-        .map_err(|e| transform_error(fn_name, e)),
-        Value::CharArray(array) => {
-            let rows = (0..array.rows)
-                .map(|row| map(&char_row_to_string_slice(&array.data, array.cols, row)))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            char_rows(rows, fn_name)
-        }
-        Value::Cell(cell) => {
-            let values = cell
-                .data
-                .into_iter()
-                .map(|value| map_text_try_preserve(value, fn_name, map))
                 .collect::<BuiltinResult<Vec<_>>>()?;
             make_cell_with_shape(values, cell.shape).map_err(|e| transform_error(fn_name, e))
         }
@@ -2419,6 +2547,53 @@ mod tests {
             .unwrap(),
             Value::String("aXe".into())
         );
+    }
+
+    #[test]
+    fn replace_between_accepts_all_integer_position_classes_and_same_size_arrays() {
+        for position in [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64(2),
+        ] {
+            assert_eq!(
+                block(replace_between_builtin(
+                    Value::String("abc".into()),
+                    vec![
+                        Value::Int(position.clone()),
+                        Value::Int(position),
+                        Value::String("X".into()),
+                    ],
+                ))
+                .expect("integer positions"),
+                Value::String("aXc".into())
+            );
+        }
+
+        let text = Value::StringArray(
+            StringArray::new(vec!["abcde".into(), "vwxyz".into()], vec![2, 1]).unwrap(),
+        );
+        let starts = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![2, 1]).unwrap(),
+        );
+        let stops = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).unwrap(),
+        );
+        let replacements =
+            Value::StringArray(StringArray::new(vec!["X".into(), "Q".into()], vec![2, 1]).unwrap());
+        let Value::StringArray(output) = block(replace_between_builtin(
+            text,
+            vec![starts, stops, replacements],
+        ))
+        .expect("same-size positions") else {
+            panic!("string array")
+        };
+        assert_eq!(output.data, vec!["aXe", "vwQ"]);
     }
 
     #[test]

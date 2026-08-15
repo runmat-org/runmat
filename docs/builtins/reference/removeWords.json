@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`removeWords` filters host text-model objects and does not use provider kernels."
+    "notes": "`removeWords` filters host text-model objects. Automatic residency gathers transparently; explicit gpuArray host fallback is a declared RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -25,14 +25,14 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::strings::text_analytics::documents::tests",
-    "integration": null
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
   "description": "`removeWords(documents, words)` removes selected tokens from RunMat `tokenizedDocument` compatibility objects. `removeWords(bag, words)` removes matching vocabulary columns from RunMat `bagOfWords` objects. `words` can also be numeric 1-based vocabulary indices or a logical mask the same length as the object's vocabulary.",
   "behaviors": [
     "`documents` must be a RunMat `tokenizedDocument` object created by `tokenizedDocument`.",
     "`bag` must be a RunMat `bagOfWords` object created by `bagOfWords`.",
     "`words` can be a string vector, character vector, or cell array of character vectors. A character vector is treated as one word.",
-    "`idx` can be a numeric vector of positive integer vocabulary positions or a logical array whose length matches the object's `Vocabulary`.",
+    "`idx` can be a numeric vector of positive integer vocabulary positions from any integer class, or a logical array whose length matches the object's `Vocabulary`; native positions remain exact through bounds and duplicate checks.",
     "`removeWords(___, 'IgnoreCase', true)` removes string-selected or index-selected vocabulary words without case sensitivity. The default is case-sensitive.",
     "For tokenized documents, the result preserves `Shape`, `TokenizeMethod`, and `Language` metadata while recomputing document lengths and vocabulary.",
     "For bag-of-words models, the result preserves document row count and removes matching count columns."

@@ -110534,6 +110534,70 @@
           "when": "Internal char-array assembly failed.",
           "message": "num2str: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "num2str-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "num2str host formatting for explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Num2strExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "txt = num2str(integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are formatted directly from authoritative native storage; paired complex-integer components retain exact decimal text as well."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Default and custom formatting preserve exact signed and unsigned decimal values without a binary64 mirror. Automatic residency gathers through its owner; explicit gpuArray fallback is separately gated."
+        },
+        {
+          "form": "txt = num2str(A, integer_p[, \"local\"])",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The precision control accepts every integer class and is range checked exactly before conversion to a bounded host usize."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Precision is accepted only in the supported bounded range and does not determine output numeric storage."
+        }
       ]
     },
     {
@@ -112038,6 +112102,125 @@
           "when": "Internal conversion or allocation fails.",
           "message": "encoding: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "onehotdecode-integer-logical-encoded-input",
+          "mode": "RunMatOnly",
+          "description": "onehotdecode with integer or logical encoded probability data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OnehotdecodeIntegerLogicalEncodedInputExtension"
+        },
+        {
+          "id": "onehotdecode-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "onehotdecode host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OnehotdecodeExplicitGpuInputExtension"
+        },
+        {
+          "id": "onehotdecode-logical-cell-output",
+          "mode": "RunMatOnly",
+          "description": "onehotdecode logical or cellstr output types are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:OnehotdecodeLogicalCellOutputExtension"
+        },
+        {
+          "id": "onehotdecode-outputtype-alias",
+          "mode": "RunMatOnly",
+          "description": "onehotdecode OutputType/Typename name-value aliases are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:OnehotdecodeOutputTypeAliasExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = onehotdecode(B, integer_classes, featureDim, ...)",
+          "inputs": [
+            {
+              "name": "classes",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Class vectors accept all eight integer classes and retain exact values through selection, categorical rendering, and requested numeric output conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Argmax is computed in the documented floating probability domain, then selects exact integer class labels; numeric typename conversion follows shared assignment casting."
+        },
+        {
+          "form": "A = onehotdecode(B, classes, integer_featureDim, ...)",
+          "inputs": [
+            {
+              "name": "featureDim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positive singleton-dimension selector accepts every integer class and is validated exactly before shape arithmetic."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The exact dimension identifies the probability-vector axis and does not alter class values."
+        },
+        {
+          "form": "A = onehotdecode(B, classes, featureDim, integer_typename)",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Every signed and unsigned integer typename returns authoritative native storage; numeric output requires numeric classes."
+        },
+        {
+          "form": "A = onehotdecode(integer_B, classes, featureDim, ...)",
+          "inputs": [
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents only single and double probability arrays; RunMat mode retains integer and logical zero/one arrays as a checked extension."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "This checked RunMat-only form admits exact integer zero/one probabilities; compatibility modes reject it before gather or provider access."
+        }
       ]
     },
     {
@@ -112156,6 +112339,86 @@
           "identifier": "RunMat:onehotencode:Internal",
           "when": "Internal conversion or allocation fails.",
           "message": "encoding: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "onehotencode-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "onehotencode host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OnehotencodeExplicitGpuInputExtension"
+        },
+        {
+          "id": "onehotencode-outputtype-alias",
+          "mode": "RunMatOnly",
+          "description": "onehotencode OutputType/Typename name-value aliases are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:OnehotencodeOutputTypeAliasExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = onehotencode(integer_A, featureDim, ClassNames=integer_classes)",
+          "inputs": [
+            {
+              "name": "A/ClassNames",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric labels and ClassNames accept all eight integer classes and are compared from authoritative native values without binary64 collapse."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact class matching produces zero/one vectors; missing or excluded labels require single or double output because integer and logical classes cannot represent NaN."
+        },
+        {
+          "form": "B = onehotencode(A, integer_featureDim, ...)",
+          "inputs": [
+            {
+              "name": "featureDim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positive singleton-dimension selector accepts every integer class and is validated exactly before shape arithmetic."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The exact one-based dimension controls only output shape. Automatic residency gathers transparently; explicit gpuArray fallback is separately gated."
+        },
+        {
+          "form": "B = onehotencode(..., integer_typename)",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Every signed and unsigned integer typename constructs native same-class zero/one storage without a floating compatibility mirror."
         }
       ]
     },
@@ -113744,6 +114007,129 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ordinal-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "ordinal host construction for explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OrdinalExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = ordinal(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric input accepts all eight integer classes; exact native values determine sorted ordinal levels and labels."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact integer identity determines levels and codes before default labels cross the documented display-only five-significant-digit boundary; colliding display labels reject. Automatic residency gathers transparently, while explicit gpuArray input is gated."
+        },
+        {
+          "form": "B = ordinal(integer_X, labels, integer_levels)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer source values retain exact identity while levels are assigned."
+            },
+            {
+              "name": "levels",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Explicit numeric levels accept all eight integer classes and are matched through the same exact categorical construction path."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Source and level vectors preserve exact signedness, width, and value identity until the opaque ordinal metadata object is assembled."
+        },
+        {
+          "form": "B = ordinal(integer_X, labels, [], integer_edges)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric source accepts all eight integer classes and is compared directly with each bin edge."
+            },
+            {
+              "name": "edges",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric edge vector accepts all eight integer classes; strict ordering and half-open bin membership use exact mixed-class numeric comparison."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Strictly increasing edges are compared without a binary64 mirror; bins are left-closed and right-open except that the last bin includes the final edge, and duplicate textual labels merge bins."
         }
       ]
     },
@@ -127911,6 +128297,61 @@
           "when": "Internal regex replacement or output reconstruction fails.",
           "message": "regexprep: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "regexprep-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "regexprep host fallback for explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RegexprepExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = regexprep(subject, pattern, replacement, integer_N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented Nth-occurrence option accepts every integer class and is validated exactly as a positive scalar before regex execution."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "N selects exactly one eligible match without entering the floating domain. Automatic residency gathers transparently; explicit gpuArray fallback is separately gated."
+        },
+        {
+          "form": "out = regexprep(integer_subject_or_pattern_or_replacement, ...)",
+          "inputs": [
+            {
+              "name": "str/expression/replace",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Regex text roles reject integer host and resident values before gather or numeric-to-text conversion."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer data is not text and never triggers provider access or implicit decimal formatting in these roles."
+        }
       ]
     },
     {
@@ -128557,6 +128998,43 @@
           "when": "Inputs do not match a supported removeLongWords form.",
           "message": "removeLongWords: invalid input"
         }
+      ],
+      "extensions": [
+        {
+          "id": "removelongwords-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "removeLongWords host fallback for explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RemoveLongWordsExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newDocumentsOrBag = removeLongWords(documentsOrBag, integer_len)",
+          "inputs": [
+            {
+              "name": "len",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive-integer word-length threshold accepts every integer class and is validated exactly against platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The exact threshold controls host text filtering only. Automatic residency gathers transparently; explicit gpuArray arguments are separately gated."
+        }
       ]
     },
     {
@@ -128599,6 +129077,43 @@
           "identifier": "RunMat:textAnalyticsDocuments:InvalidInput",
           "when": "Inputs do not match a supported Text Analytics document or model helper form.",
           "message": "Text Analytics document helper received invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "removeshortwords-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "removeShortWords host fallback for explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RemoveShortWordsExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newDocumentsOrBag = removeShortWords(documentsOrBag, integer_len)",
+          "inputs": [
+            {
+              "name": "len",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive-integer word-length threshold accepts every integer class and is validated exactly against platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The exact threshold controls host text filtering only. Automatic residency gathers transparently; explicit gpuArray arguments are separately gated."
         }
       ]
     },
@@ -128783,6 +129298,43 @@
           "identifier": "RunMat:removeWords:InvalidInput",
           "when": "Inputs do not match a supported removeWords form.",
           "message": "removeWords: invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "removewords-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "removeWords host fallback for explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RemoveWordsExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newDocumentsOrBag = removeWords(documentsOrBag, integer_idx)",
+          "inputs": [
+            {
+              "name": "idx",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented numeric vocabulary indices accept all eight integer classes and are read exactly before one-based bounds validation and deduplication."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact positive indices select vocabulary entries without binary64 collapse; logical masks remain a distinct documented selector form."
         }
       ]
     },
@@ -129005,7 +129557,62 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "replacebetween-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "replaceBetween host fallback for explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ReplaceBetweenExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = replaceBetween(str, integer_startPos, integer_endPos, newText)",
+          "inputs": [
+            {
+              "name": "startPos/endPos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented numeric positions accept all eight integer classes and are read exactly as one-based inclusive boundaries."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Positions remain exact through range and ordering validation; output preserves the host text container. Automatic residency gathers transparently, while explicit gpuArray fallback is separately gated."
+        },
+        {
+          "form": "newStr = replaceBetween(integer_str, start, end, integer_newText)",
+          "inputs": [
+            {
+              "name": "str/newText",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Source and replacement text reject integer and resident numeric values before gather or implicit formatting."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer data is outside the public text roles and is never converted to decimal text."
+        }
+      ]
     },
     {
       "name": "repmat",

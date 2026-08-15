@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Always formats on the CPU. GPU tensors are gathered to host memory before conversion."
+    "notes": "Formatting runs on the CPU. Automatic residency gathers transparently; explicit gpuArray host fallback is a declared RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -25,7 +25,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::strings::core::num2str::tests",
-    "integration": "builtins::strings::core::num2str::tests::num2str_gpu_tensor_roundtrip"
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
   "description": "`num2str(X, ...)` converts numeric values to character arrays using default or custom formatting. Precision, complex formatting, and row-wise matrix output behavior follow MATLAB semantics.",
   "behaviors": [
@@ -35,6 +35,8 @@
     "A trailing `'local'` argument switches the decimal separator to the one inferred from the active locale (or the `RUNMAT_DECIMAL_SEPARATOR` environment variable).",
     "Vector inputs return single-row character arrays; matrices return one textual row per numeric row.",
     "Empty matrices return empty character arrays that match MATLAB's dimension rules.",
+    "All eight integer classes and logical input are accepted. Integer values are formatted from native storage, including values outside the exact binary64 range.",
+    "The numeric precision argument accepts every integer class and is validated exactly before conversion to a formatting control.",
     "Non-numeric types raise MATLAB-compatible errors."
   ],
   "examples": [
