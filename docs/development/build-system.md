@@ -128,6 +128,8 @@ scripts/build-runmat-with-aot-runtime.ps1 --no-default-features --features jit
 
 The first phase builds `runmat-aot-runtime` as a static library from the same Runtime, VM, JIT host, and `Value` implementations used elsewhere. Cargo reports the target's ordered native link requirements. `runmat-aot-pack` validates and compresses the archive and writes a manifest bound to target, native ABI, schema, runtime/catalog identity, capabilities, lengths, digests, and link tokens. The second phase passes that exact pair explicitly to `runmat-aot`'s build script, which embeds it in the ordinary CLI binary. Normal `cargo build` remains smaller and valid, but its compile command reports that the optional native runtime was not embedded.
 
+Whole-program reachability is computed from canonical MIR, with executable source and binding names supplied by the immutable Core compilation product. AOT consumes that report alongside the builtin catalog's link, placement, provider, and extension contracts; the CLI only renders the resulting plan. `runmat compile --explain-link` prints the retained symbols and reasons, while `--link-plan-json PATH` writes the deterministic program/runtime plan for automated inspection. This keeps source analysis, builtin metadata, artifact identity, and presentation in their owning crates instead of maintaining a second linker-specific registry.
+
 Set `RUNMAT_BUILD_PROFILE` to select another Cargo profile. The helpers keep intermediate archive products in a private temporary directory and remove them after the CLI build. The embedded payload is never discovered from the installation directory at runtime.
 
 ## WASM And TypeScript Build

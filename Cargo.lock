@@ -6320,8 +6320,10 @@ version = "0.6.1"
 dependencies = [
  "runmat-core",
  "runmat-execution",
+ "runmat-mir",
  "runmat-native-codegen",
  "runmat-runtime",
+ "runmat-types",
  "serde",
  "serde_json",
  "target-lexicon",

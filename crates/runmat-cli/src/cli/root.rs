@@ -252,6 +252,12 @@ pub enum Commands {
         /// Native runtime composition policy
         #[arg(long, value_enum, default_value = "native-specialized")]
         policy: AotPolicy,
+        /// Explain why program symbols and runtime families are retained
+        #[arg(long)]
+        explain_link: bool,
+        /// Write the deterministic reachability and link plan as JSON
+        #[arg(long, value_name = "PATH")]
+        link_plan_json: Option<PathBuf>,
         /// Explicit system linker driver
         #[arg(long)]
         linker: Option<PathBuf>,
@@ -489,6 +495,32 @@ mod tests {
             };
             assert_eq!(policy, expected);
         }
+    }
+
+    #[test]
+    fn compile_link_explanation_outputs_parse_together() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "compile",
+            "main.m",
+            "--explain-link",
+            "--link-plan-json",
+            "build/main.link.json",
+        ])
+        .unwrap();
+        let Some(Commands::Compile {
+            explain_link,
+            link_plan_json,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected compile command");
+        };
+        assert!(explain_link);
+        assert_eq!(
+            link_plan_json.as_deref(),
+            Some(std::path::Path::new("build/main.link.json"))
+        );
     }
 
     #[test]

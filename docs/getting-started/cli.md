@@ -123,6 +123,8 @@ Three additional policy names reserve distinct product contracts and fail clearl
 
 Temporary object, archive, and response-file inputs are private and removed after linking. Use `--keep-temps` for linker diagnosis, `--linker PATH` to select an explicit supported system linker driver, and `--force` to replace an output. Forced replacement preserves the previous executable until the new link succeeds.
 
+Use `--explain-link` to see the exact program functions, builtins, classes, method boundaries, providers, extensions, and runtime families retained by compilation, together with the direct, finite-dynamic, or unknown reason for each edge. Use `--link-plan-json PATH` to write the same deterministic report for CI or tooling. The JSON includes the program, runtime archive, builtin catalog, target, policy, capability, and reachability identities used by that compilation; `--force` is required to replace an existing report.
+
 The compiler validates that the embedded runtime matches the current target, native ABI, schema, RunMat version, runtime identity, and builtin catalog before linking. A source build made with ordinary `cargo build` intentionally lacks that large embedded archive; use the two-phase build helper described in [Build System](/docs/runtime/development/build-system) when developing the standalone workflow.
 
 ## Check

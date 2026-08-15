@@ -76,6 +76,31 @@ impl ExecutableUnit {
         &self.mir
     }
 
+    /// Deterministic whole-program retention facts for link planning and
+    /// explanations. Human-readable source and binding names are supplied by
+    /// this immutable executable rather than reconstructed by downstream
+    /// artifact producers.
+    pub fn reachability_report(&self) -> runmat_mir::analysis::ReachabilityReport {
+        let sources = self
+            .source_map
+            .entries()
+            .iter()
+            .filter_map(|entry| {
+                u32::try_from(entry.source_id).ok().map(|source_id| {
+                    (
+                        runmat_types::ProgramSourceId(source_id),
+                        entry.relative_path.clone(),
+                    )
+                })
+            })
+            .collect();
+        let names = runmat_mir::analysis::ReachabilityNames {
+            sources,
+            bindings: self.binding_names(),
+        };
+        runmat_mir::analysis::analyze_reachability(&self.mir, &names)
+    }
+
     /// Exact VM layout shared by interpreter state materialization and native frames.
     pub fn vm_layout(&self) -> &runmat_vm::VmAssemblyLayout {
         &self.layout

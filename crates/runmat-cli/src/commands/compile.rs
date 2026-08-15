@@ -14,6 +14,8 @@ pub struct CompileRequest {
     pub output: Option<PathBuf>,
     pub optimization: AotOptLevel,
     pub policy: AotPolicy,
+    pub explain_link: bool,
+    pub link_plan_json: Option<PathBuf>,
     pub linker: Option<PathBuf>,
     pub keep_temps: bool,
     pub force: bool,
@@ -29,6 +31,8 @@ pub async fn execute(
         output,
         optimization,
         policy,
+        explain_link,
+        link_plan_json,
         linker,
         keep_temps,
         force,
@@ -63,6 +67,13 @@ pub async fn execute(
         .compile_executable_unit(source, None)
         .await
         .map_err(|error| anyhow::anyhow!(error))?;
+    let program_link_plan = runmat_aot::compile::build_program_link_plan(&unit, &runtime, policy)?;
+    if explain_link {
+        print_link_explanation(&program_link_plan);
+    }
+    if let Some(path) = link_plan_json.as_deref() {
+        write_link_plan(path, &program_link_plan, force)?;
+    }
     let object = runmat_aot::emit_native_object(
         &unit,
         runmat_aot::NativeObjectOptions {
@@ -71,6 +82,7 @@ pub async fn execute(
                 AotOptLevel::Size => runmat_native_codegen::aot::NativeOptimization::SpeedAndSize,
                 AotOptLevel::Speed => runmat_native_codegen::aot::NativeOptimization::Speed,
             },
+            retained_functions: Some(program_link_plan.retained_functions()),
         },
     )?;
     let output = output.unwrap_or_else(|| default_output(&file));
@@ -92,6 +104,88 @@ pub async fn execute(
     if let Some(temporary) = linked.retained_temps {
         println!("Temporary link inputs: {}", temporary.display());
     }
+    Ok(())
+}
+
+fn print_link_explanation(plan: &runmat_aot::compile::ProgramLinkPlan) {
+    println!("Link policy: {:?}", plan.policy);
+    println!("Target: {}", plan.target_triple);
+    println!("Reachable program and runtime symbols:");
+    for node in &plan.reachability.nodes {
+        println!(
+            "  [{:?}] {} :: {} ({})",
+            node.certainty, node.module, node.symbol, node.id
+        );
+        for edge in plan
+            .reachability
+            .edges
+            .iter()
+            .filter(|edge| edge.to == node.id)
+        {
+            let source = edge.from.as_deref().unwrap_or("link root");
+            if let Some(detail) = edge.detail.as_deref() {
+                println!("    <- {source}: {:?} ({detail})", edge.reason);
+            } else {
+                println!("    <- {source}: {:?}", edge.reason);
+            }
+        }
+    }
+    println!("Retained runtime families:");
+    for family in &plan.retained_runtime_families {
+        println!("  {}: {}", family.module, family.reason);
+    }
+    if !plan.omitted_runtime_families.is_empty() {
+        println!(
+            "Omitted runtime families: {}",
+            plan.omitted_runtime_families.join(", ")
+        );
+    }
+}
+
+fn write_link_plan(
+    path: &Path,
+    plan: &runmat_aot::compile::ProgramLinkPlan,
+    overwrite: bool,
+) -> Result<()> {
+    if path.exists() && !overwrite {
+        anyhow::bail!(
+            "link-plan output `{}` already exists; pass --force to replace it",
+            path.display()
+        );
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    if let Some(parent) = parent {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create link-plan directory `{}`",
+                parent.display()
+            )
+        })?;
+    }
+    let directory = parent.unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(directory).with_context(|| {
+        format!(
+            "failed to create temporary link plan in `{}`",
+            directory.display()
+        )
+    })?;
+    serde_json::to_writer_pretty(temporary.as_file_mut(), plan)
+        .context("failed to encode link plan")?;
+    use std::io::Write as _;
+    temporary
+        .as_file_mut()
+        .write_all(b"\n")
+        .context("failed to finish link plan")?;
+    temporary
+        .as_file_mut()
+        .sync_all()
+        .context("failed to sync link plan")?;
+    temporary
+        .persist(path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("failed to publish link plan `{}`", path.display()))?;
     Ok(())
 }
 

@@ -44,6 +44,85 @@ impl NativeCompilationInput {
         &self.interpreter_resume_points
     }
 
+    pub fn retain_functions(
+        mut self,
+        retained: &std::collections::BTreeSet<runmat_types::ProgramFunctionId>,
+    ) -> Result<Self, runmat_runtime::RuntimeError> {
+        if !retained.contains(&self.entrypoint) {
+            return Err(native_product_error(
+                "native retention set omits the executable entrypoint".into(),
+            ));
+        }
+        let retained_local = retained
+            .iter()
+            .map(|function| {
+                usize::try_from(function.0)
+                    .map(runmat_hir::FunctionId)
+                    .map_err(|_| native_product_error("function identity exceeds this host".into()))
+            })
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+        self.mir
+            .bodies
+            .retain(|function, _| retained_local.contains(function));
+        self.mir
+            .functions
+            .retain(|function, _| retained_local.contains(function));
+        self.mir
+            .entrypoints
+            .retain(|function| retained_local.contains(function));
+        self.analysis
+            .functions
+            .retain(|function| retained.contains(&function.function));
+        self.analysis
+            .program_points
+            .retain(|point| retained.contains(&point.point.function));
+        self.analysis
+            .regions
+            .retain(|region| retained.contains(&region.contract.id.function));
+        for class in &mut self.analysis.classes {
+            class.methods.retain(|function| retained.contains(function));
+        }
+        self.interpreter_resume_points
+            .retain(|point, _| retained.contains(&point.function));
+        self.manifest
+            .regions
+            .retain(|region| retained.contains(&region.id.function));
+        self.manifest
+            .parallel
+            .parfor_regions
+            .retain(|region| retained.contains(&region.id.0.function));
+        self.manifest
+            .parallel
+            .spmd_regions
+            .retain(|region| retained.contains(&region.id.0.function));
+        self.manifest
+            .parallel
+            .distributed_values
+            .retain(|value| retained.contains(&value.id.function));
+        self.manifest
+            .parallel
+            .collectives
+            .retain(|collective| retained.contains(&collective.id.region.0.function));
+        let mut registry: runmat_vm::FunctionRegistry =
+            serde_json::from_slice(&self.program_capture).map_err(|error| {
+                native_product_error(format!("failed to decode native program capture: {error}"))
+            })?;
+        registry
+            .functions
+            .retain(|function, _| retained_local.contains(function));
+        registry
+            .names
+            .retain(|_, function| retained_local.contains(function));
+        registry.source_functions.retain(|_, functions| {
+            functions.retain(|function| retained_local.contains(function));
+            !functions.is_empty()
+        });
+        self.program_capture = serde_json::to_vec(&registry).map_err(|error| {
+            native_product_error(format!("failed to encode retained native program: {error}"))
+        })?;
+        Ok(self)
+    }
+
     pub fn aot_object_data(
         &self,
         assembly: &runmat_native_codegen::NativeAssembly,
@@ -150,4 +229,90 @@ fn native_product_error(message: String) -> runmat_runtime::RuntimeError {
     runmat_runtime::build_runtime_error(message)
         .with_identifier("RunMat:NativeProduct")
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use futures::executor::block_on;
+
+    use crate::{ExecutableSource, RunMatSession};
+
+    #[test]
+    fn native_retention_prunes_code_analysis_contracts_and_registry_together() {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-retention-test@1",
+                "retention.m",
+                r#"
+helper(11)
+function output = helper(input)
+  output = abs(input) + 1;
+  function output = unused_nested(input)
+    output = input * 100;
+  end
+end
+"#,
+            ),
+            None,
+        ))
+        .expect("compile retention fixture");
+        let report = unit.reachability_report();
+        assert!(report
+            .nodes
+            .iter()
+            .all(|node| node.symbol != "unused_nested"));
+        let retained = report
+            .retained_function_ids()
+            .map(|function| {
+                u32::try_from(function)
+                    .map(runmat_types::ProgramFunctionId)
+                    .expect("portable function identity")
+            })
+            .collect::<BTreeSet<_>>();
+        let input = unit
+            .prepare_native_compilation()
+            .expect("prepare native input")
+            .retain_functions(&retained)
+            .expect("retain reachable functions");
+
+        assert_eq!(input.mir.bodies.len(), 2);
+        assert_eq!(input.mir.functions.len(), 2);
+        assert!(input
+            .analysis
+            .functions
+            .iter()
+            .all(|function| retained.contains(&function.function)));
+        assert!(input
+            .analysis
+            .program_points
+            .iter()
+            .all(|point| retained.contains(&point.point.function)));
+        assert!(input
+            .analysis
+            .regions
+            .iter()
+            .all(|region| retained.contains(&region.contract.id.function)));
+        assert!(input
+            .manifest
+            .regions
+            .iter()
+            .all(|region| retained.contains(&region.id.function)));
+        let registry: runmat_vm::FunctionRegistry =
+            serde_json::from_slice(&input.program_capture).expect("decode retained registry");
+        assert_eq!(registry.functions.len(), 1);
+        assert!(registry.names.contains_key("helper"));
+        assert!(!registry.names.contains_key("unused_nested"));
+        let assembly = input
+            .lower(runmat_native_codegen::NativeTarget::current())
+            .expect("lower retained Native IR");
+        assert_eq!(assembly.functions.len(), 2);
+        assert!(assembly
+            .requirements
+            .regions
+            .iter()
+            .all(|region| retained.contains(&region.id.function)));
+    }
 }
