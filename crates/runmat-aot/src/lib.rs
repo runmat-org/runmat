@@ -8,3 +8,5 @@ mod object;
 
 pub use error::{AotError, AotResult};
 pub use object::{emit_native_object, NativeObjectOptions};
+mod artifact;
+pub use artifact::materialize_native_object_artifact;

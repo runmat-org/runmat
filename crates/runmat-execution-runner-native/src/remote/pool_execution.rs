@@ -27,17 +27,30 @@ pub(super) enum RemotePoolExecutionOutcome {
     Indeterminate(String),
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct RemotePoolExecution<'a> {
+    pub(super) control: &'a dyn DriverControlPlane,
+    pub(super) authority: &'a DriverAuthority,
+    pub(super) run_key: &'a RunKeyMaterial,
+    pub(super) bundle_archive: Vec<u8>,
+    pub(super) request: ProgramExecutionRequest,
+    pub(super) desired_workers: u32,
+    pub(super) resources: AllocationResources,
+    pub(super) cancellation: tokio::sync::watch::Receiver<bool>,
+}
+
 pub(super) async fn execute(
-    control: &dyn DriverControlPlane,
-    authority: &DriverAuthority,
-    run_key: &RunKeyMaterial,
-    bundle_archive: Vec<u8>,
-    request: ProgramExecutionRequest,
-    desired_workers: u32,
-    resources: AllocationResources,
-    mut cancellation: tokio::sync::watch::Receiver<bool>,
+    execution: RemotePoolExecution<'_>,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let RemotePoolExecution {
+        control,
+        authority,
+        run_key,
+        bundle_archive,
+        request,
+        desired_workers,
+        resources,
+        mut cancellation,
+    } = execution;
     let scope_id = ExecutionScopeId::derive(&[authority.run_id.as_bytes(), b"remote-root"]);
     let pool_id = PoolId::derive(&[authority.run_id.as_bytes(), b"remote-pool"]);
     let pool_inventory = pool_inventory(&resources, desired_workers)?;

@@ -7,7 +7,17 @@ use runmat_execution_artifact::{
 #[test]
 fn native_object_artifact_retains_bounded_digest_checked_parts() {
     let (_temp, _project, revision) = support::frozen_project();
-    let recipe = support::recipe(revision);
+    let mut recipe = support::recipe(revision);
+    recipe.target = runmat_execution_artifact::ProgramTarget::native(
+        "native-object-v1-test",
+        runmat_execution_artifact::NativeTargetIdentity {
+            architecture: "aarch64".into(),
+            operating_system: "macos".into(),
+            pointer_width: 64,
+            abi: "runmat-native-abi-v1".into(),
+            object_format: "mach-o".into(),
+        },
+    );
     let payload = NativeObjectPayload::new(
         "mach-o",
         br#"{"schema_version":1}"#.to_vec(),

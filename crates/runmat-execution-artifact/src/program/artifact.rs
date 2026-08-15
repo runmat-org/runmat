@@ -2,8 +2,10 @@ use minicbor::Encoder;
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-use super::{ProgramArtifactId, ProgramBuildRecipe, ProgramRecipeId};
+use super::{ProgramArtifactId, ProgramBuildRecipe, ProgramRecipeId, ProgramTarget};
 use crate::{ArtifactError, ArtifactResult};
+
+pub const PROGRAM_ARTIFACT_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,7 +24,7 @@ pub struct ProgramArtifact {
     pub schema_version: u16,
     pub id: ProgramArtifactId,
     pub recipe_id: ProgramRecipeId,
-    pub target_profile: String,
+    pub target: ProgramTarget,
     pub form: ExecutableForm,
     pub executable_bytes: Vec<u8>,
 }
@@ -57,12 +59,13 @@ impl ProgramArtifact {
                 "program artifact executable is empty".into(),
             ));
         }
-        let id = derive_id(recipe_id, &recipe.target_profile, form, &executable_bytes)?;
+        recipe.target.validate_form(form)?;
+        let id = derive_id(recipe_id, &recipe.target, form, &executable_bytes)?;
         let artifact = Self {
-            schema_version: 1,
+            schema_version: PROGRAM_ARTIFACT_SCHEMA_VERSION,
             id,
             recipe_id,
-            target_profile: recipe.target_profile.clone(),
+            target: recipe.target.clone(),
             form,
             executable_bytes,
         };
@@ -71,13 +74,13 @@ impl ProgramArtifact {
     }
 
     pub fn validate_against(&self, recipe: &ProgramBuildRecipe) -> ArtifactResult<()> {
-        if self.schema_version != 1
+        if self.schema_version != PROGRAM_ARTIFACT_SCHEMA_VERSION
             || self.recipe_id != recipe.id()?
-            || self.target_profile != recipe.target_profile
+            || self.target != recipe.target
             || self.id
                 != derive_id(
                     self.recipe_id,
-                    &self.target_profile,
+                    &self.target,
                     self.form,
                     &self.executable_bytes,
                 )?
@@ -89,6 +92,7 @@ impl ProgramArtifact {
                 "program artifact does not converge with its exact recipe".into(),
             ));
         }
+        self.target.validate_form(self.form)?;
         if let Some(envelope) = self.executable_unit()? {
             if envelope.manifest.identity.program != recipe.program_revision {
                 return Err(ArtifactError::Identity(
@@ -97,8 +101,17 @@ impl ProgramArtifact {
             }
         }
         if self.form == ExecutableForm::NativeObjectV1 {
-            self.native_object()?
+            let payload = self
+                .native_object()?
                 .expect("native-object form returns its validated payload");
+            let native = self.target.native.as_ref().ok_or_else(|| {
+                ArtifactError::Invalid("native object artifact has no native target".into())
+            })?;
+            if payload.object_format != native.object_format {
+                return Err(ArtifactError::Identity(
+                    "native object format differs from its target identity".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -106,16 +119,22 @@ impl ProgramArtifact {
 
 fn derive_id(
     recipe_id: ProgramRecipeId,
-    target_profile: &str,
+    target: &ProgramTarget,
     form: ExecutableForm,
     executable_bytes: &[u8],
 ) -> ArtifactResult<ProgramArtifactId> {
-    let mut bytes = b"runmat-program-artifact-v1\0".to_vec();
+    let mut bytes = b"runmat-program-artifact-v2\0".to_vec();
     let mut encoder = Encoder::new(&mut bytes);
     encoder
         .array(4)
         .and_then(|encoder| encoder.bytes(recipe_id.0.bytes()))
-        .and_then(|encoder| encoder.str(target_profile))
+        .and_then(|encoder| {
+            encoder.bytes(
+                &target
+                    .canonical_bytes()
+                    .map_err(|_| minicbor::encode::Error::message("invalid program target"))?,
+            )
+        })
         .and_then(|encoder| encoder.u8(form as u8))
         .and_then(|encoder| encoder.bytes(executable_bytes))
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;

@@ -298,7 +298,9 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         let (recipe, artifact, arguments) = runmat_vm::materialize_deferred_call(
             &call,
             future.outputs.clone(),
-            "wasm32-browser-interpreter-bytecode-v1",
+            runmat_execution_artifact::ProgramTarget::portable(
+                "wasm32-browser-interpreter-bytecode-v1",
+            ),
         )?;
         let sequence = state.next_task;
         state.next_task = sequence.wrapping_add(1);

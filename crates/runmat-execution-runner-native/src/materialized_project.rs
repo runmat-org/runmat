@@ -130,14 +130,14 @@ mod tests {
         )
         .unwrap();
         let recipe = ProgramBuildRecipe {
-            schema_version: 1,
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision.clone(),
             entrypoint: "helper".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
             },
             execution_mode: "interpreter".into(),
-            target_profile: "portable".into(),
+            target: runmat_execution_artifact::ProgramTarget::portable("portable"),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),

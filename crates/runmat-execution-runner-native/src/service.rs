@@ -327,10 +327,10 @@ fn materialize_call(
     runmat_vm::materialize_deferred_call(
         call,
         outputs,
-        format!(
+        runmat_execution_artifact::ProgramTarget::portable(format!(
             "{}-{}-interpreter-bytecode-v1",
             std::env::consts::ARCH,
             std::env::consts::OS
-        ),
+        )),
     )
 }

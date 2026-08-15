@@ -10,7 +10,7 @@ use crate::materialized_project::MaterializedProject;
 
 pub(super) struct InstalledBundle {
     pub(super) bundle: ExecutionBundle,
-    pub(super) materialized_project: Arc<MaterializedProject>,
+    pub(super) materialized_project: Option<Arc<MaterializedProject>>,
     pub(super) digest: Digest,
     pub(super) receipt: RemoteBundleReceipt,
 }
@@ -44,10 +44,12 @@ fn materialize(
     bundle: ExecutionBundle,
     stored_bytes: u64,
 ) -> Result<InstalledBundle, String> {
-    let materialized_project = Arc::new(
-        MaterializedProject::from_bundle(&bundle)
-            .map_err(|error| format!("remote bundle could not be materialized: {error}"))?,
-    );
+    let materialized_project = bundle
+        .requires_source_project()
+        .then(|| MaterializedProject::from_bundle(&bundle))
+        .transpose()
+        .map_err(|error| format!("remote bundle could not be materialized: {error}"))?
+        .map(Arc::new);
     let receipt = RemoteBundleReceipt {
         bundle_digest,
         bundle_identity: bundle.identity().map_err(|error| error.to_string())?,

@@ -121,9 +121,12 @@ fn every_source_kind_converges_into_one_portable_credential_free_closure() {
         .build()
         .unwrap();
 
-    let kinds = bundle
-        .manifest
-        .project_handoff
+    let runmat_execution_artifact::BundleCodeClosure::SourceProject { handoff } =
+        &bundle.manifest.code_closure
+    else {
+        panic!("source bundle lost its project handoff");
+    };
+    let kinds = handoff
         .project
         .graph
         .packages
@@ -287,14 +290,14 @@ fn revision(project: &FrozenProject) -> ProgramRevision {
 
 fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
     ProgramBuildRecipe {
-        schema_version: 1,
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision,
         entrypoint: "root_answer".into(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target_profile: "portable-package-closure-v1".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-package-closure-v1"),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),

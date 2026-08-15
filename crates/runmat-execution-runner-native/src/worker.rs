@@ -45,14 +45,16 @@ mod tests {
         )
         .unwrap();
         let recipe = ProgramBuildRecipe {
-            schema_version: 1,
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision,
             entrypoint: "0".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
             },
             execution_mode: "interpreter".into(),
-            target_profile: "test-interpreter-bytecode-v1".into(),
+            target: runmat_execution_artifact::ProgramTarget::portable(
+                "test-interpreter-bytecode-v1",
+            ),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),

@@ -20,7 +20,7 @@ pub use remote::{
     run_remote_driver_from_env, run_remote_worker_from_env, run_remote_worker_quic,
     run_remote_worker_relay, QuicRemoteWorkerChannel, RelayRemoteWorkerChannel, RemoteAttempt,
     RemoteBundleReceipt, RemotePoolDriver, RemoteTaskCompletion, RemoteValueReceipt,
-    RemoteWorkerChannel,
+    RemoteWorkerChannel, RemoteWorkerRelayRequest,
 };
 pub use service::NativeExecutionService;
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};

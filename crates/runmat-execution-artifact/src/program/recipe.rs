@@ -4,8 +4,10 @@ use minicbor::Encoder;
 use runmat_execution::{Digest, OutputContract, ProgramRevision};
 use serde::{Deserialize, Serialize};
 
-use super::ProgramRecipeId;
+use super::{ProgramRecipeId, ProgramTarget};
 use crate::{ArtifactError, ArtifactResult, ObjectDescriptor};
+
+pub const PROGRAM_BUILD_RECIPE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +17,7 @@ pub struct ProgramBuildRecipe {
     pub entrypoint: String,
     pub outputs: OutputContract,
     pub execution_mode: String,
-    pub target_profile: String,
+    pub target: ProgramTarget,
     pub features: BTreeSet<String>,
     pub compile_options: BTreeSet<String>,
     pub source_objects: Vec<ObjectDescriptor>,
@@ -27,10 +29,9 @@ impl ProgramBuildRecipe {
         self.program_revision
             .validate()
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-        if self.schema_version != 1
+        if self.schema_version != PROGRAM_BUILD_RECIPE_SCHEMA_VERSION
             || !valid_token(&self.entrypoint, 512)
             || !valid_token(&self.execution_mode, 64)
-            || !valid_token(&self.target_profile, 256)
             || self.features.iter().any(|value| !valid_token(value, 128))
             || self
                 .compile_options
@@ -45,6 +46,7 @@ impl ProgramBuildRecipe {
                 "program build recipe is not canonical".into(),
             ));
         }
+        self.target.validate()?;
         for source in &self.source_objects {
             source.validate()?;
         }
@@ -57,7 +59,7 @@ impl ProgramBuildRecipe {
             .program_revision
             .canonical_bytes()
             .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
-        let mut bytes = b"runmat-program-build-recipe-v1\0".to_vec();
+        let mut bytes = b"runmat-program-build-recipe-v2\0".to_vec();
         let mut encoder = Encoder::new(&mut bytes);
         encoder
             .array(9)
@@ -65,7 +67,14 @@ impl ProgramBuildRecipe {
             .and_then(|encoder| encoder.str(&self.entrypoint))
             .and_then(|encoder| encoder.u16(self.outputs.requested_outputs))
             .and_then(|encoder| encoder.str(&self.execution_mode))
-            .and_then(|encoder| encoder.str(&self.target_profile))
+            .and_then(|encoder| {
+                encoder.bytes(
+                    &self
+                        .target
+                        .canonical_bytes()
+                        .map_err(|_| minicbor::encode::Error::message("invalid program target"))?,
+                )
+            })
             .and_then(|encoder| encoder.array(self.features.len() as u64))
             .map_err(encoding)?;
         for feature in &self.features {

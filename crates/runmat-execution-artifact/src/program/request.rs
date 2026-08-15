@@ -30,6 +30,11 @@ impl ProgramExecutionDescriptor {
         }
         Ok(())
     }
+
+    pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
+        self.validate()?;
+        self.artifact.target.validate_for_portable_host()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -129,6 +134,11 @@ impl ProgramExecutionRequest {
         }
         Ok(())
     }
+
+    pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
+        self.validate()?;
+        self.artifact.target.validate_for_portable_host()
+    }
 }
 
 fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -> bool {
@@ -170,14 +180,14 @@ mod tests {
         )
         .unwrap();
         let recipe = ProgramBuildRecipe {
-            schema_version: 1,
+            schema_version: crate::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision,
             entrypoint: "7".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
             },
             execution_mode: "interpreter".into(),
-            target_profile: "portable-test".into(),
+            target: crate::ProgramTarget::portable("portable-test"),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),

@@ -9,7 +9,7 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 use sha2::{Digest as _, Sha256};
 
-use super::worker_server::run_remote_worker_relay_cached;
+use super::worker_server::{run_remote_worker_relay_cached, RemoteWorkerRelayRequest};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 #[derive(serde::Deserialize)]
@@ -92,14 +92,16 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
         return Err(invalid("worker node bundle cache path must be absolute"));
     }
     run_remote_worker_relay_cached(
-        &relay_url,
-        &headers,
-        run_id.clone(),
-        worker,
-        driver_fence,
-        session_id(&run_id, &allocation_id),
-        run_key,
-        FrameLimits::default(),
+        RemoteWorkerRelayRequest {
+            url: &relay_url,
+            headers: &headers,
+            run_identity: run_id.clone(),
+            worker,
+            driver_fence,
+            session_id: session_id(&run_id, &allocation_id),
+            run_key,
+            limits: FrameLimits::default(),
+        },
         Some(bundle_cache),
     )
     .await

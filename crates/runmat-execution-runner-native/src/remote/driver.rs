@@ -134,11 +134,10 @@ pub(super) async fn run_remote_driver(
         ));
     }
     let request = ProgramExecutionRequest::from_parts(descriptor, inputs).map_err(protocol)?;
-    let materialized_project = if bootstrap.desired_worker_count == 0 {
-        Some(crate::materialized_project::MaterializedProject::from_bundle(&bundle)?)
-    } else {
-        None
-    };
+    let materialized_project = (bootstrap.desired_worker_count == 0
+        && bundle.requires_source_project())
+    .then(|| crate::materialized_project::MaterializedProject::from_bundle(&bundle))
+    .transpose()?;
 
     store_checkpoint(
         control.as_ref(),
@@ -185,16 +184,16 @@ pub(super) async fn run_remote_driver(
                 ),
             )
         } else {
-            super::pool_execution::execute(
-                control.as_ref(),
-                &config.authority,
-                &run_key,
+            super::pool_execution::execute(super::pool_execution::RemotePoolExecution {
+                control: control.as_ref(),
+                authority: &config.authority,
+                run_key: &run_key,
                 bundle_archive,
                 request,
-                bootstrap.desired_worker_count,
-                bootstrap.worker_resources,
-                cancellation_receiver,
-            )
+                desired_workers: bootstrap.desired_worker_count,
+                resources: bootstrap.worker_resources,
+                cancellation: cancellation_receiver,
+            })
             .await
         }
     };

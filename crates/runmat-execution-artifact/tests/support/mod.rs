@@ -48,14 +48,14 @@ pub fn revision_for(project: &FrozenProject) -> ProgramRevision {
 
 pub fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
     ProgramBuildRecipe {
-        schema_version: 1,
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision,
         entrypoint: "main".into(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target_profile: "portable-bytecode-v1".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-bytecode-v1"),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),

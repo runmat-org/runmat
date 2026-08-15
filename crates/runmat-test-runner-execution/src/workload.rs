@@ -55,14 +55,14 @@ impl TestAttemptWorkload {
     pub fn program_request(&self) -> Result<ProgramExecutionRequest, String> {
         self.validate()?;
         let recipe = ProgramBuildRecipe {
-            schema_version: 1,
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: self.submission.plan.program_revision.clone(),
             entrypoint: "test_attempt".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
             },
             execution_mode: TEST_ATTEMPT_EXECUTION_MODE.into(),
-            target_profile: TEST_ATTEMPT_TARGET_PROFILE.into(),
+            target: runmat_execution_artifact::ProgramTarget::portable(TEST_ATTEMPT_TARGET_PROFILE),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
@@ -87,7 +87,8 @@ impl TestAttemptWorkload {
         request.validate().map_err(|error| error.to_string())?;
         if request.artifact.form != ExecutableForm::TestAttemptV1
             || request.recipe.execution_mode != TEST_ATTEMPT_EXECUTION_MODE
-            || request.recipe.target_profile != TEST_ATTEMPT_TARGET_PROFILE
+            || request.recipe.target
+                != runmat_execution_artifact::ProgramTarget::portable(TEST_ATTEMPT_TARGET_PROFILE)
         {
             return Err("program request is not a test attempt".into());
         }

@@ -21,14 +21,16 @@ async fn execute_portable_envelope(
 ) -> runmat_execution_artifact::ProgramExecutionResponse {
     let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
     let recipe = runmat_execution_artifact::ProgramBuildRecipe {
-        schema_version: 1,
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
         entrypoint: function.to_string(),
         outputs: runmat_execution::OutputContract {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target_profile: "portable-executable-unit-v3-test".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable(
+            "portable-executable-unit-v3-test",
+        ),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),

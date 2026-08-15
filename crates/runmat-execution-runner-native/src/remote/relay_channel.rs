@@ -2,15 +2,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use runmat_execution::Digest;
-use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
-use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::WebSocketRelayConnection;
 
 use super::route::RelayFrameRoute;
 use super::{
     QuicRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt, RemoteValueReceipt,
-    RemoteWorkerChannel,
+    RemoteWorkerChannel, RemoteWorkerChannelConfig,
 };
 use crate::NativeExecutionResult;
 
@@ -23,30 +21,17 @@ pub struct RelayRemoteWorkerChannel {
 }
 
 impl RelayRemoteWorkerChannel {
-    #[allow(clippy::too_many_arguments)]
     pub async fn connect(
         url: &str,
         headers: &[(String, String)],
-        run_identity: impl Into<String>,
-        node_identity: impl Into<String>,
-        worker: WorkerSpec,
-        driver_fence: u64,
-        session_id: [u8; 16],
-        run_key: RunKeyMaterial,
-        limits: FrameLimits,
+        config: RemoteWorkerChannelConfig,
     ) -> NativeExecutionResult<Arc<Self>> {
-        let connection = WebSocketRelayConnection::connect(url, headers, limits)
+        let connection = WebSocketRelayConnection::connect(url, headers, config.limits)
             .await
             .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))?;
         let protocol = QuicRemoteWorkerChannel::connect_route(
-            run_identity,
-            node_identity,
-            worker,
-            driver_fence,
-            session_id,
-            run_key,
+            config,
             Arc::new(RelayFrameRoute::new(connection)),
-            limits,
         )
         .await?;
         Ok(Arc::new(Self { protocol }))

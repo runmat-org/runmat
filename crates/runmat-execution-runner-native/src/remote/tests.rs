@@ -567,14 +567,14 @@ fn resource_request() -> runmat_execution_transport_native::control::ResourceReq
 
 fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
     ProgramBuildRecipe {
-        schema_version: 1,
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision,
         entrypoint: "0".into(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target_profile: "remote-test".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable("remote-test"),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),

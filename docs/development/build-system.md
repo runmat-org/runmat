@@ -130,6 +130,8 @@ The first phase builds `runmat-aot-runtime` as a static library from the same Ru
 
 Whole-program reachability is computed from canonical MIR, with executable source and binding names supplied by the immutable Core compilation product. AOT consumes that report alongside the builtin catalog's link, placement, provider, and extension contracts; the CLI only renders the resulting plan. `runmat compile --explain-link` prints the retained symbols and reasons, while `--link-plan-json PATH` writes the deterministic program/runtime plan for automated inspection. This keeps source analysis, builtin metadata, artifact identity, and presentation in their owning crates instead of maintaining a second linker-specific registry.
 
+Compiled program recipes and artifacts carry a versioned target contract rather than a free-form target string. Portable bytecode and executable units can run on native or browser hosts, while native objects include an exact architecture, operating system, pointer width, ABI, and object format identity and are rejected by incompatible hosts. Target identity participates in deterministic recipe and artifact IDs. A compiled execution bundle contains only the exact materialized program and frozen package identities it needs; it does not retain or reconstruct project source. Workloads that require dynamic source access continue to use the separate source-project closure.
+
 Set `RUNMAT_BUILD_PROFILE` to select another Cargo profile. The helpers keep intermediate archive products in a private temporary directory and remove them after the CLI build. The embedded payload is never discovered from the installation directory at runtime.
 
 ## WASM And TypeScript Build

@@ -2,12 +2,14 @@ use std::collections::BTreeSet;
 
 use runmat_execution::resource::Capability;
 use runmat_execution::{Digest, ProgramRevision};
-use runmat_package::FrozenProjectHandoff;
 use serde::{Deserialize, Serialize};
 
-use crate::{ArtifactResult, LogicalObject, ObjectDescriptor, ProgramArtifact, ProgramBuildRecipe};
+use crate::{
+    ArtifactError, ArtifactResult, BundleCodeClosure, LogicalObject, ObjectDescriptor,
+    ProgramArtifact, ProgramBuildRecipe,
+};
 
-pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 2;
+pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,7 +40,7 @@ pub struct BundleManifest {
     pub schema_version: u16,
     pub program_revision: ProgramRevision,
     pub project_revision: ProjectRevisionRecord,
-    pub project_handoff: FrozenProjectHandoff,
+    pub code_closure: BundleCodeClosure,
     pub sources: Vec<ObjectDescriptor>,
     pub callables: Vec<BundleCallable>,
     pub recipes: Vec<ProgramBuildRecipe>,
@@ -71,9 +73,14 @@ impl ExecutionBundle {
     pub fn project_handoff_at(
         &self,
         root: &std::path::Path,
-    ) -> ArtifactResult<FrozenProjectHandoff> {
+    ) -> ArtifactResult<runmat_package::FrozenProjectHandoff> {
         self.validate()?;
-        let mut handoff = self.manifest.project_handoff.clone();
+        let BundleCodeClosure::SourceProject { handoff } = &self.manifest.code_closure else {
+            return Err(ArtifactError::Invalid(
+                "compiled execution bundle has no source project to materialize".into(),
+            ));
+        };
+        let mut handoff = handoff.clone();
         handoff.project.workspace_root = root.to_path_buf();
         handoff.project.manifest_path = root.join("runmat.toml");
         for path in handoff.project.access_paths.values_mut() {
@@ -85,5 +92,12 @@ impl ExecutionBundle {
             .validate()
             .map_err(|error| crate::ArtifactError::Invalid(error.to_string()))?;
         Ok(handoff)
+    }
+
+    pub fn requires_source_project(&self) -> bool {
+        matches!(
+            self.manifest.code_closure,
+            BundleCodeClosure::SourceProject { .. }
+        )
     }
 }

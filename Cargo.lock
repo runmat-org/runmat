@@ -6320,6 +6320,7 @@ version = "0.6.1"
 dependencies = [
  "runmat-core",
  "runmat-execution",
+ "runmat-execution-artifact",
  "runmat-mir",
  "runmat-native-codegen",
  "runmat-runtime",

@@ -211,7 +211,6 @@ impl BrowserRemoteSubmission {
         encode_run_key_envelope(&envelope).map_err(js_error)
     }
 
-    #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen(js_name = encryptObject)]
     pub fn encrypt_object(
         &self,

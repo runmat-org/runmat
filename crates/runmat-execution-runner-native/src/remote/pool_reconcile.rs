@@ -75,17 +75,19 @@ pub(super) async fn reconcile_workers(
                     "runmat-worker-relay-v1".into(),
                 ),
             ],
-            authority.run_id.clone(),
-            evidence.node_id.clone(),
-            WorkerSpec {
-                id: worker_id,
-                pool_id,
-                resources: inventory(&worker.resources)?,
+            super::RemoteWorkerChannelConfig {
+                run_identity: authority.run_id.clone(),
+                node_identity: evidence.node_id.clone(),
+                worker: WorkerSpec {
+                    id: worker_id,
+                    pool_id,
+                    resources: inventory(&worker.resources)?,
+                },
+                driver_fence: authority.fencing_token,
+                session_id: session_id(&authority.run_id, &worker.allocation_lease_id),
+                run_key: run_key.clone(),
+                limits: FrameLimits::default(),
             },
-            authority.fencing_token,
-            session_id(&authority.run_id, &worker.allocation_lease_id),
-            run_key.clone(),
-            FrameLimits::default(),
         )
         .await?;
         pool.add_worker(channel).await?;

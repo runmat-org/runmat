@@ -10,7 +10,7 @@ use runmat_runtime::execution::{DeferredCall, ExecutionServiceError};
 pub fn materialize_deferred_call(
     call: &DeferredCall,
     outputs: OutputContract,
-    target_profile: impl Into<String>,
+    target: runmat_execution_artifact::ProgramTarget,
 ) -> Result<(ProgramBuildRecipe, ProgramArtifact, Vec<ValuePayload>), ExecutionServiceError> {
     let program = call.program.as_deref().ok_or_else(|| {
         ExecutionServiceError::Failed("execution is missing its exact program".into())
@@ -20,12 +20,12 @@ pub fn materialize_deferred_call(
         .clone()
         .unwrap_or_else(|| captured_program_revision(program));
     let recipe = ProgramBuildRecipe {
-        schema_version: 1,
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision,
         entrypoint: call.function.to_string(),
         outputs,
         execution_mode: "interpreter".into(),
-        target_profile: target_profile.into(),
+        target,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
@@ -67,7 +67,7 @@ fn captured_program_revision(program: &[u8]) -> ProgramRevision {
 }
 
 pub async fn execute_program_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
-    if request.validate().is_err() {
+    if request.validate_for_portable_host().is_err() {
         return ProgramExecutionResponse::Failure {
             message: "worker rejected a protocol or program identity mismatch".into(),
         };
@@ -287,14 +287,14 @@ mod tests {
         )
         .unwrap();
         let recipe = ProgramBuildRecipe {
-            schema_version: 1,
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision,
             entrypoint: "script".into(),
             outputs: OutputContract {
                 requested_outputs: 1,
             },
             execution_mode: "interpreter".into(),
-            target_profile: "portable-script-test".into(),
+            target: runmat_execution_artifact::ProgramTarget::portable("portable-script-test"),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),

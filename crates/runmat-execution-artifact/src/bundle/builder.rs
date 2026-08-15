@@ -4,8 +4,9 @@ use runmat_execution::{Digest, ProgramRevision};
 use runmat_package::{FrozenProject, FrozenProjectHandoff};
 
 use crate::bundle::{
-    BuildResourceDeclaration, BundleCallable, BundleManifest, ExecutionBundle,
-    ProjectRevisionRecord, EXECUTION_BUNDLE_SCHEMA_VERSION,
+    BuildResourceDeclaration, BundleCallable, BundleCodeClosure, BundleManifest,
+    CompiledPackageClosure, ExecutionBundle, ProjectRevisionRecord,
+    EXECUTION_BUNDLE_SCHEMA_VERSION,
 };
 use crate::{
     ArtifactError, ArtifactResult, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
@@ -16,6 +17,12 @@ struct Materialization {
     recipe: ProgramBuildRecipe,
     form: ExecutableForm,
     executable_bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CodeClosureMode {
+    SourceProject,
+    Compiled,
 }
 
 pub trait SourceReader {
@@ -38,6 +45,7 @@ pub struct ExecutionBundleBuilder<'a, R> {
     recipes: Vec<ProgramBuildRecipe>,
     materializations: Vec<Materialization>,
     resources: BuildResourceDeclaration,
+    code_closure: CodeClosureMode,
 }
 
 impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
@@ -68,6 +76,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                 memory_bytes: 1024 * 1024 * 1024,
                 scratch_bytes: 1024 * 1024 * 1024,
             },
+            code_closure: CodeClosureMode::SourceProject,
         })
     }
 
@@ -95,46 +104,95 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         self
     }
 
+    /// Package an already compiled program without source files or a project
+    /// handoff. The immutable program revision and sorted package identities
+    /// remain in the bundle closure, so workers can validate the exact graph
+    /// without resolving or materializing it.
+    pub fn with_compiled_package_closure(mut self) -> Self {
+        self.code_closure = CodeClosureMode::Compiled;
+        self
+    }
+
     pub fn build(mut self) -> ArtifactResult<ExecutionBundle> {
+        if self.code_closure == CodeClosureMode::Compiled
+            && (self.materializations.is_empty()
+                || self.materializations.iter().any(|materialization| {
+                    !matches!(
+                        materialization.form,
+                        ExecutableForm::ExecutableUnitV3 | ExecutableForm::NativeObjectV1
+                    )
+                }))
+        {
+            return Err(ArtifactError::Invalid(
+                "compiled package closure requires a compiled executable-unit or native-object artifact"
+                    .into(),
+            ));
+        }
         let mut objects = Vec::new();
         let mut callables = Vec::new();
-        let mut project_handoff = FrozenProjectHandoff::new(self.project.clone());
-        project_handoff.project.manifest_path = "runmat.toml".into();
-        project_handoff.project.workspace_root = ".".into();
-        for package in self.project.sources.packages.values() {
-            for source in &package.sources {
-                let path = self.project.access_paths.get(&source.id).ok_or_else(|| {
-                    ArtifactError::Invalid(format!(
-                        "source {} has no frozen access path",
-                        source.id.relative_path
-                    ))
-                })?;
-                let bytes = self.reader.read(path)?;
-                if source.id.content_digest.bytes() != Digest::sha256(&bytes).bytes() {
-                    return Err(ArtifactError::Identity(format!(
-                        "source {} changed after project freeze",
-                        source.id.relative_path
-                    )));
+        let code_closure = match self.code_closure {
+            CodeClosureMode::SourceProject => {
+                let mut project_handoff = FrozenProjectHandoff::new(self.project.clone());
+                project_handoff.project.manifest_path = "runmat.toml".into();
+                project_handoff.project.workspace_root = ".".into();
+                for package in self.project.sources.packages.values() {
+                    for source in &package.sources {
+                        let path = self.project.access_paths.get(&source.id).ok_or_else(|| {
+                            ArtifactError::Invalid(format!(
+                                "source {} has no frozen access path",
+                                source.id.relative_path
+                            ))
+                        })?;
+                        let bytes = self.reader.read(path)?;
+                        if source.id.content_digest.bytes() != Digest::sha256(&bytes).bytes() {
+                            return Err(ArtifactError::Identity(format!(
+                                "source {} changed after project freeze",
+                                source.id.relative_path
+                            )));
+                        }
+                        let logical_name =
+                            format!("{}/{}", package.mount.logical_root, source.id.relative_path);
+                        project_handoff
+                            .project
+                            .access_paths
+                            .insert(source.id.clone(), logical_name.clone().into());
+                        objects.push(LogicalObject::new(
+                            ObjectNamespace::ProgramSource,
+                            logical_name,
+                            "text/x-matlab",
+                            bytes,
+                        )?);
+                        callables.push(BundleCallable {
+                            owner_identity: package.package_instance.to_string(),
+                            qualified_name: source.qualified_name.clone(),
+                            source_digest: Digest::from_bytes(*source.id.content_digest.bytes()),
+                        });
+                    }
                 }
-                let logical_name =
-                    format!("{}/{}", package.mount.logical_root, source.id.relative_path);
-                project_handoff
-                    .project
-                    .access_paths
-                    .insert(source.id.clone(), logical_name.clone().into());
-                objects.push(LogicalObject::new(
-                    ObjectNamespace::ProgramSource,
-                    logical_name,
-                    "text/x-matlab",
-                    bytes,
-                )?);
-                callables.push(BundleCallable {
-                    owner_identity: package.package_instance.to_string(),
-                    qualified_name: source.qualified_name.clone(),
-                    source_digest: Digest::from_bytes(*source.id.content_digest.bytes()),
-                });
+                BundleCodeClosure::SourceProject {
+                    handoff: project_handoff,
+                }
             }
-        }
+            CodeClosureMode::Compiled => {
+                let mut package_instances = self
+                    .project
+                    .graph
+                    .packages
+                    .values()
+                    .map(|package| package.instance.to_string())
+                    .collect::<Vec<_>>();
+                package_instances.sort();
+                package_instances.dedup();
+                BundleCodeClosure::Compiled {
+                    package: CompiledPackageClosure {
+                        schema_version: CompiledPackageClosure::SCHEMA_VERSION,
+                        graph_digest: Digest::from_bytes(*self.project.graph.graph_digest.bytes()),
+                        source_digest: Digest::from_bytes(*self.project.sources.revision.bytes()),
+                        package_instances,
+                    },
+                }
+            }
+        };
         objects.sort_by(|left, right| left.descriptor.cmp(&right.descriptor));
         callables.sort();
         let source_descriptors = objects
@@ -180,7 +238,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                 graph_digest: Digest::from_bytes(*project_revision.graph_digest.bytes()),
                 source_digest: Digest::from_bytes(*project_revision.source_revision.bytes()),
             },
-            project_handoff,
+            code_closure,
             sources: source_descriptors,
             callables,
             recipes,

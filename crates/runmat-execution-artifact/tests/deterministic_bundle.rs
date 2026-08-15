@@ -88,3 +88,70 @@ fn complete_executable_unit_survives_package_archive_round_trip() {
     assert_eq!(envelope.manifest.parallel.distributed_values.len(), 1);
     assert_eq!(envelope.manifest.parallel.collectives.len(), 1);
 }
+
+#[test]
+fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
+    let (_temp, project, revision) = support::frozen_project();
+    let bytes = executable_unit_support::bytes(revision.clone());
+    let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_compiled_package_closure()
+        .with_materialized_program(
+            executable_unit_support::recipe(support::recipe(revision)),
+            ExecutableForm::ExecutableUnitV3,
+            bytes,
+        )
+        .build()
+        .unwrap();
+
+    assert!(bundle.objects.is_empty());
+    assert!(bundle.manifest.sources.is_empty());
+    assert!(bundle.manifest.callables.is_empty());
+    assert!(!bundle.requires_source_project());
+    let runmat_execution_artifact::BundleCodeClosure::Compiled { package } =
+        &bundle.manifest.code_closure
+    else {
+        panic!("compiled bundle retained a source project");
+    };
+    assert_eq!(package.package_instances.len(), 1);
+    assert_eq!(
+        package.graph_digest,
+        bundle.manifest.project_revision.graph_digest
+    );
+    assert_eq!(
+        package.source_digest,
+        bundle.manifest.project_revision.source_digest
+    );
+
+    let mut archive = Vec::new();
+    write_bundle(&bundle, &mut archive, ArchiveLimits::default()).unwrap();
+    let decoded = read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap();
+    assert_eq!(decoded, bundle);
+    assert!(decoded
+        .project_handoff_at(std::path::Path::new("unused"))
+        .is_err());
+}
+
+#[test]
+fn compiled_package_closure_rejects_non_compiled_artifacts_after_decode() {
+    let (_temp, project, revision) = support::frozen_project();
+    let bytes = executable_unit_support::bytes(revision.clone());
+    let mut bundle = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_compiled_package_closure()
+        .with_materialized_program(
+            executable_unit_support::recipe(support::recipe(revision)),
+            ExecutableForm::ExecutableUnitV3,
+            bytes,
+        )
+        .build()
+        .unwrap();
+    let recipe = bundle.manifest.recipes[0].clone();
+    bundle.manifest.artifacts[0] = runmat_execution_artifact::ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::InterpreterBytecodeV1,
+        b"legacy-bytecode".to_vec(),
+    )
+    .unwrap();
+    assert!(bundle.validate().is_err());
+}

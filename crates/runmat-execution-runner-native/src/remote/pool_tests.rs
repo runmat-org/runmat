@@ -10,9 +10,7 @@ use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{InlineValue, ValuePayload};
-use runmat_execution::{
-    Digest, ExecutionScopeId, OutputContract, PoolId, ProgramEnvironment, ProgramRevision, TaskId,
-};
+use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, ProgramRevision, TaskId};
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
     ExecutableForm, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
@@ -37,6 +35,7 @@ struct FakeWorker {
     delay: Duration,
     cancellations: Arc<AtomicUsize>,
     drains: Arc<AtomicUsize>,
+    bundle: Arc<Vec<u8>>,
 }
 
 #[async_trait]
@@ -77,8 +76,7 @@ impl RemoteWorkerChannel for FakeWorker {
         &self,
         bundle_digest: Digest,
     ) -> NativeExecutionResult<RemoteBundleReceipt> {
-        let (_, _, bundle) = executable_bundle();
-        Ok(bundle_receipt(bundle_digest, &bundle))
+        Ok(bundle_receipt(bundle_digest, &self.bundle))
     }
 
     async fn transfer_value(
@@ -111,6 +109,7 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-scope"]);
     let pool_id = PoolId::derive(&[b"remote-pool"]);
     let resources = inventory(3_000);
+    let bundle = Arc::new(executable_bundle().await.2);
     let pool = RemotePoolDriver::new(
         scope_id,
         PoolSpec {
@@ -121,7 +120,7 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
             resource_limit: resources,
         },
         7,
-        executable_bundle().2,
+        bundle.as_ref().clone(),
     )
     .unwrap();
     let installs = Arc::new(AtomicUsize::new(0));
@@ -141,13 +140,14 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
             delay: Duration::from_millis(25),
             cancellations: Arc::new(AtomicUsize::new(0)),
             drains: Arc::new(AtomicUsize::new(0)),
+            bundle: Arc::clone(&bundle),
         }))
         .await
         .unwrap();
     }
     assert_eq!(installs.load(Ordering::SeqCst), 2);
 
-    let (program, artifact_id) = program();
+    let (program, artifact_id) = program().await;
     let mut completions = Vec::new();
     for ordinal in 0_u8..3 {
         let task_id = TaskId::derive(&[b"task", &[ordinal]]);
@@ -195,6 +195,7 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
 async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-cancel-scope"]);
     let pool_id = PoolId::derive(&[b"remote-cancel-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
     let pool = RemotePoolDriver::new(
         scope_id,
         PoolSpec {
@@ -205,7 +206,7 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
             resource_limit: inventory(1_000),
         },
         11,
-        executable_bundle().2,
+        bundle.as_ref().clone(),
     )
     .unwrap();
     let active = Arc::new(AtomicUsize::new(0));
@@ -225,10 +226,11 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         delay: Duration::from_secs(30),
         cancellations: Arc::clone(&cancellations),
         drains: Arc::clone(&drains),
+        bundle: Arc::clone(&bundle),
     }))
     .await
     .unwrap();
-    let (cancel_program, artifact_id) = program();
+    let (cancel_program, artifact_id) = program().await;
     let task_id = TaskId::derive(&[b"cancel-task"]);
     let completion = pool
         .submit(
@@ -259,6 +261,7 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
 
     let scope_id = ExecutionScopeId::derive(&[b"remote-loss-scope"]);
     let pool_id = PoolId::derive(&[b"remote-loss-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
     let pool = RemotePoolDriver::new(
         scope_id,
         PoolSpec {
@@ -269,7 +272,7 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
             resource_limit: inventory(1_000),
         },
         12,
-        executable_bundle().2,
+        bundle.as_ref().clone(),
     )
     .unwrap();
     let active = Arc::new(AtomicUsize::new(0));
@@ -288,10 +291,11 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         delay: Duration::from_secs(30),
         cancellations: Arc::new(AtomicUsize::new(0)),
         drains: Arc::clone(&drains),
+        bundle,
     }))
     .await
     .unwrap();
-    let (lost_program, artifact_id) = program();
+    let (lost_program, artifact_id) = program().await;
     let lost_task_id = TaskId::derive(&[b"lost-task"]);
     let completion = pool
         .submit(
@@ -341,11 +345,11 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         resources: inventory(1_000),
     };
     let task_id = TaskId::derive(&[b"quic-task"]);
-    let (mut program, artifact_id, bundle) = executable_bundle_with_input();
+    let (mut program, artifact_id, bundle) = executable_bundle_with_input().await;
     let value = ValuePayload::Inline(Box::new(InlineValue::String("transferred".into())));
     let encoded_value = serde_json::to_vec(&value).unwrap();
     let value_reference = runmat_execution::value::ValueRef {
-        schema_version: 1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
         id: runmat_execution::identity::ValueId::derive(&[b"quic-value"]),
         logical_digest: value.logical_digest().unwrap(),
         encoded_length: encoded_value.len() as u64,
@@ -397,18 +401,20 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     );
     let client = async {
         let channel = QuicRemoteWorkerChannel::connect(
-            "run-quic-worker",
-            "node-quic",
-            worker,
-            9,
-            [7; 16],
-            run_key,
+            super::RemoteWorkerChannelConfig {
+                run_identity: "run-quic-worker".into(),
+                node_identity: "node-quic".into(),
+                worker,
+                driver_fence: 9,
+                session_id: [7; 16],
+                run_key,
+                limits: FrameLimits::default(),
+            },
             &PinnedQuicEndpoint {
                 authority,
                 server_name: "runmat.execution".into(),
                 certificate_der,
             },
-            FrameLimits::default(),
         )
         .await
         .unwrap();
@@ -500,20 +506,22 @@ fn submission(
     }
 }
 
-fn program() -> (ProgramExecutionRequest, ArtifactId) {
-    let (program, artifact_id, _) = executable_bundle();
+async fn program() -> (ProgramExecutionRequest, ArtifactId) {
+    let (program, artifact_id, _) = executable_bundle().await;
     (program, artifact_id)
 }
 
-fn executable_bundle() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
-    build_executable_bundle(false)
+async fn executable_bundle() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
+    build_executable_bundle(false).await
 }
 
-fn executable_bundle_with_input() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
-    build_executable_bundle(true)
+async fn executable_bundle_with_input() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
+    build_executable_bundle(true).await
 }
 
-fn build_executable_bundle(accepts_input: bool) -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
+async fn build_executable_bundle(
+    accepts_input: bool,
+) -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
     std::fs::write(
@@ -521,11 +529,12 @@ fn build_executable_bundle(accepts_input: bool) -> (ProgramExecutionRequest, Art
         "[package]\nname = \"remote-pool\"\n[sources]\nroots = [\"src\"]\n",
     )
     .unwrap();
-    std::fs::write(
-        project_root.path().join("src/answer.m"),
-        "function y = answer(); y = 42; end\n",
-    )
-    .unwrap();
+    let source_text = if accepts_input {
+        "function y = answer(x); y = x; end\n"
+    } else {
+        "function y = answer(); y = 42; end\n"
+    };
+    std::fs::write(project_root.path().join("src/answer.m"), source_text).unwrap();
     let project = runmat_package::build_frozen_project(
         &project_root.path().join("runmat.toml"),
         BTreeSet::new(),
@@ -535,77 +544,53 @@ fn build_executable_bundle(accepts_input: bool) -> (ProgramExecutionRequest, Art
     let revision = ProgramRevision::new(
         Digest::from_bytes(*project_revision.graph_digest.bytes()),
         Digest::from_bytes(*project_revision.source_revision.bytes()),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"runtime"),
-            Digest::sha256(b"catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap();
+    let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    session
+        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .unwrap();
+    let unit = session
+        .compile_executable_unit(
+            runmat_core::ExecutableSource::new("root", "src/answer.m", source_text),
+            Some(revision.clone()),
+        )
+        .await
+        .unwrap();
+    let envelope = unit.portable_envelope_for(Some("answer")).unwrap();
+    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
     let recipe = ProgramBuildRecipe {
-        schema_version: 1,
-        program_revision: revision,
-        entrypoint: "0".into(),
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision: revision.clone(),
+        entrypoint: function.to_string(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target_profile: "remote-pool-test".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable("remote-pool-test"),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
-    let mut registry = runmat_vm::FunctionRegistry::default();
-    let (instructions, var_count, input_slots, output_slots) = if accepts_input {
-        (
-            vec![
-                runmat_vm::Instr::LoadVar(0),
-                runmat_vm::Instr::StoreVar(1),
-                runmat_vm::Instr::Return,
-            ],
-            2,
-            vec![0],
-            vec![1],
-        )
-    } else {
-        (
-            vec![
-                runmat_vm::Instr::LoadConst(42.0),
-                runmat_vm::Instr::StoreVar(0),
-                runmat_vm::Instr::Return,
-            ],
-            1,
-            Vec::new(),
-            vec![0],
-        )
-    };
-    registry.insert_replacing_name(runmat_vm::FunctionBytecode {
-        display_name: "answer".into(),
-        instructions,
-        var_count,
-        input_slots,
-        output_slots,
-        ..Default::default()
-    });
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        serde_json::to_vec(&registry).unwrap(),
-    )
-    .unwrap();
+    let executable_bytes = envelope.canonical_bytes().unwrap();
+    let artifact =
+        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, executable_bytes)
+            .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
         .unwrap()
+        .with_compiled_package_closure()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::ExecutableUnitV3,
             artifact.executable_bytes.clone(),
         )
         .build()
         .unwrap();
+    assert!(!bundle.requires_source_project());
+    assert!(bundle.objects.is_empty());
+    assert!(bundle.manifest.sources.is_empty());
     let recipe = bundle.manifest.recipes.first().cloned().unwrap();
     let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
     let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
@@ -615,7 +600,7 @@ fn build_executable_bundle(accepts_input: bool) -> (ProgramExecutionRequest, Art
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe,
         artifact,
-        function: 0,
+        function,
         arguments: Vec::new(),
         requested_outputs: 1,
     };

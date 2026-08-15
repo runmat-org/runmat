@@ -6,7 +6,7 @@ use runmat_execution::Digest;
 
 use super::{BundleManifest, ExecutionBundle, EXECUTION_BUNDLE_SCHEMA_VERSION};
 use crate::object::{validate_inventory, ObjectInventoryLimits};
-use crate::{ArtifactError, ArtifactResult, ObjectNamespace};
+use crate::{ArtifactError, ArtifactResult, BundleCodeClosure, ObjectNamespace};
 
 pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
     if bundle.manifest.schema_version != EXECUTION_BUNDLE_SCHEMA_VERSION {
@@ -41,7 +41,7 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
             "bundle revisions or resources are inconsistent".into(),
         ));
     }
-    validate_project_handoff(bundle)?;
+    validate_code_closure(bundle)?;
     validate_inventory(&bundle.objects, ObjectInventoryLimits::default())?;
     let descriptors = bundle
         .objects
@@ -159,8 +159,38 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
     Ok(())
 }
 
-fn validate_project_handoff(bundle: &ExecutionBundle) -> ArtifactResult<()> {
-    let handoff = &bundle.manifest.project_handoff;
+fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
+    match &bundle.manifest.code_closure {
+        BundleCodeClosure::SourceProject { handoff } => validate_project_handoff(bundle, handoff),
+        BundleCodeClosure::Compiled { package } => {
+            package.validate()?;
+            if package.graph_digest != bundle.manifest.project_revision.graph_digest
+                || package.source_digest != bundle.manifest.project_revision.source_digest
+                || !bundle.manifest.sources.is_empty()
+                || !bundle.manifest.callables.is_empty()
+                || !bundle.objects.is_empty()
+                || bundle.manifest.artifacts.is_empty()
+                || bundle.manifest.artifacts.iter().any(|artifact| {
+                    !matches!(
+                        artifact.form,
+                        crate::ExecutableForm::ExecutableUnitV3
+                            | crate::ExecutableForm::NativeObjectV1
+                    )
+                })
+            {
+                return Err(ArtifactError::Identity(
+                    "compiled package closure differs from its bundle revision, contains source payloads, or has a non-compiled artifact".into(),
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_project_handoff(
+    bundle: &ExecutionBundle,
+    handoff: &runmat_package::FrozenProjectHandoff,
+) -> ArtifactResult<()> {
     handoff
         .validate()
         .map_err(|error| ArtifactError::Invalid(format!("invalid project handoff: {error}")))?;
@@ -237,7 +267,7 @@ fn validate_project_handoff(bundle: &ExecutionBundle) -> ArtifactResult<()> {
 }
 
 pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
-    let mut bytes = b"runmat-execution-bundle-v2\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-v3\0".to_vec();
     let revision = manifest
         .program_revision
         .canonical_bytes()
@@ -250,9 +280,9 @@ pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.source_digest.bytes()))
         .and_then(|encoder| {
-            let handoff = serde_json::to_vec(&manifest.project_handoff)
-                .map_err(|_| minicbor::encode::Error::message("invalid project handoff"))?;
-            encoder.bytes(&handoff)
+            let closure = serde_json::to_vec(&manifest.code_closure)
+                .map_err(|_| minicbor::encode::Error::message("invalid code closure"))?;
+            encoder.bytes(&closure)
         })
         .and_then(|encoder| encoder.array(manifest.sources.len() as u64))
         .map_err(encoding)?;

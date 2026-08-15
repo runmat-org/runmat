@@ -12,17 +12,17 @@ use crate::{
 
 const MAX_ITEMS: usize = 100_000;
 const MAX_TEXT: usize = 4096;
-const MAX_PROJECT_HANDOFF_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CODE_CLOSURE_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u8>> {
-    let handoff = serde_json::to_vec(&manifest.project_handoff)
+    let code_closure = serde_json::to_vec(&manifest.code_closure)
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
-    if handoff.len() > MAX_PROJECT_HANDOFF_BYTES {
+    if code_closure.len() > MAX_CODE_CLOSURE_BYTES {
         return Err(ArtifactError::Limit(
-            "project handoff is too large".to_string(),
+            "bundle code closure is too large".to_string(),
         ));
     }
-    let mut bytes = b"runmat-execution-bundle-manifest-v2\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-manifest-v3\0".to_vec();
     let mut encoder = Encoder::new(&mut bytes);
     encoder
         .array(11)
@@ -38,7 +38,7 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
         .and_then(|encoder| encoder.array(2))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.source_digest.bytes()))
-        .and_then(|encoder| encoder.bytes(&handoff))
+        .and_then(|encoder| encoder.bytes(&code_closure))
         .and_then(|encoder| encoder.array(manifest.sources.len() as u64))
         .map_err(encode_error)?;
     for source in &manifest.sources {
@@ -70,7 +70,14 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
             .and_then(|encoder| encoder.u16(artifact.schema_version))
             .and_then(|encoder| encoder.bytes(artifact.id.0.bytes()))
             .and_then(|encoder| encoder.bytes(artifact.recipe_id.0.bytes()))
-            .and_then(|encoder| encoder.str(&artifact.target_profile))
+            .and_then(|encoder| {
+                encoder.bytes(
+                    &artifact
+                        .target
+                        .canonical_bytes()
+                        .map_err(|_| minicbor::encode::Error::message("invalid program target"))?,
+                )
+            })
             .and_then(|encoder| encoder.u8(artifact.form as u8))
             .and_then(|encoder| encoder.bytes(&artifact.executable_bytes))
             .map_err(encode_error)?;
@@ -100,7 +107,7 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
 
 pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
     let payload = bytes
-        .strip_prefix(b"runmat-execution-bundle-manifest-v2\0")
+        .strip_prefix(b"runmat-execution-bundle-manifest-v3\0")
         .ok_or_else(|| ArtifactError::Invalid("invalid bundle manifest domain".into()))?;
     let mut decoder = Decoder::new(payload);
     require_len(decoder.array(), 11, "bundle manifest")?;
@@ -113,13 +120,13 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
         graph_digest: decode_digest(&mut decoder)?,
         source_digest: decode_digest(&mut decoder)?,
     };
-    let project_handoff_bytes = decoder.bytes().map_err(decode_error)?;
-    if project_handoff_bytes.len() > MAX_PROJECT_HANDOFF_BYTES {
+    let code_closure_bytes = decoder.bytes().map_err(decode_error)?;
+    if code_closure_bytes.len() > MAX_CODE_CLOSURE_BYTES {
         return Err(ArtifactError::Limit(
-            "project handoff is too large".to_string(),
+            "bundle code closure is too large".to_string(),
         ));
     }
-    let project_handoff = serde_json::from_slice(project_handoff_bytes)
+    let code_closure = serde_json::from_slice(code_closure_bytes)
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
     let source_count = bounded_len(decoder.array(), "sources")?;
     let mut sources = Vec::with_capacity(source_count);
@@ -149,7 +156,9 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
             schema_version: decoder.u16().map_err(decode_error)?,
             id: ProgramArtifactId(decode_digest(&mut decoder)?),
             recipe_id: ProgramRecipeId(decode_digest(&mut decoder)?),
-            target_profile: decode_text(&mut decoder)?,
+            target: crate::ProgramTarget::from_canonical_bytes(
+                decoder.bytes().map_err(decode_error)?,
+            )?,
             form: decode_form(decoder.u8().map_err(decode_error)?)?,
             executable_bytes: decoder.bytes().map_err(decode_error)?.to_vec(),
         });
@@ -182,7 +191,7 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
         schema_version,
         program_revision,
         project_revision,
-        project_handoff,
+        code_closure,
         sources,
         callables,
         recipes,
@@ -257,7 +266,14 @@ fn encode_recipe(
         .and_then(|encoder| encoder.str(&recipe.entrypoint))
         .and_then(|encoder| encoder.u16(recipe.outputs.requested_outputs))
         .and_then(|encoder| encoder.str(&recipe.execution_mode))
-        .and_then(|encoder| encoder.str(&recipe.target_profile))
+        .and_then(|encoder| {
+            encoder.bytes(
+                &recipe
+                    .target
+                    .canonical_bytes()
+                    .map_err(|_| minicbor::encode::Error::message("invalid program target"))?,
+            )
+        })
         .and_then(|encoder| encoder.array(recipe.features.len() as u64))
         .map_err(encode_error)?;
     for feature in &recipe.features {
@@ -291,7 +307,8 @@ fn decode_recipe(decoder: &mut Decoder<'_>) -> ArtifactResult<ProgramBuildRecipe
     let entrypoint = decode_text(decoder)?;
     let requested_outputs = decoder.u16().map_err(decode_error)?;
     let execution_mode = decode_text(decoder)?;
-    let target_profile = decode_text(decoder)?;
+    let target =
+        crate::ProgramTarget::from_canonical_bytes(decoder.bytes().map_err(decode_error)?)?;
     let feature_count = bounded_len(decoder.array(), "recipe features")?;
     let mut features = BTreeSet::new();
     for _ in 0..feature_count {
@@ -329,7 +346,7 @@ fn decode_recipe(decoder: &mut Decoder<'_>) -> ArtifactResult<ProgramBuildRecipe
         entrypoint,
         outputs: OutputContract { requested_outputs },
         execution_mode,
-        target_profile,
+        target,
         features,
         compile_options,
         source_objects,

@@ -63,18 +63,28 @@ pub async fn run_remote_worker_quic(
         .await
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct RemoteWorkerRelayRequest<'a> {
+    pub url: &'a str,
+    pub headers: &'a [(String, String)],
+    pub run_identity: String,
+    pub worker: WorkerSpec,
+    pub driver_fence: u64,
+    pub session_id: [u8; 16],
+    pub run_key: RunKeyMaterial,
+    pub limits: FrameLimits,
+}
+
 pub async fn run_remote_worker_relay(
-    url: &str,
-    headers: &[(String, String)],
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
+    request: RemoteWorkerRelayRequest<'_>,
 ) -> NativeExecutionResult<()> {
-    run_remote_worker_relay_cached(
+    run_remote_worker_relay_cached(request, None).await
+}
+
+pub(crate) async fn run_remote_worker_relay_cached(
+    request: RemoteWorkerRelayRequest<'_>,
+    bundle_cache: Option<std::path::PathBuf>,
+) -> NativeExecutionResult<()> {
+    let RemoteWorkerRelayRequest {
         url,
         headers,
         run_identity,
@@ -83,23 +93,7 @@ pub async fn run_remote_worker_relay(
         session_id,
         run_key,
         limits,
-        None,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_remote_worker_relay_cached(
-    url: &str,
-    headers: &[(String, String)],
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
-    bundle_cache: Option<std::path::PathBuf>,
-) -> NativeExecutionResult<()> {
+    } = request;
     let connection = WebSocketRelayConnection::connect(url, headers, limits)
         .await
         .map_err(protocol)?;
@@ -107,7 +101,7 @@ pub(crate) async fn run_remote_worker_relay_cached(
         .run_until(run_worker_loop(
             Arc::new(RelayFrameRoute::new(connection)),
             WorkerLoopContext {
-                run_identity: run_identity.into(),
+                run_identity,
                 worker,
                 driver_fence,
                 session_id,
@@ -205,7 +199,7 @@ async fn run_worker_loop(
                             let receipt = installed.receipt.clone();
                             let mut state = state.lock().await;
                             state.bundle = Some(installed.bundle);
-                            state.materialized_project = Some(installed.materialized_project);
+                            state.materialized_project = installed.materialized_project;
                             state.bundle_digest = Some(installed.digest);
                             RemoteWorkerOutcome::BundleStored { receipt }
                         }
@@ -234,7 +228,7 @@ async fn run_worker_loop(
                         let receipt = installed.receipt.clone();
                         let mut state = state.lock().await;
                         state.bundle = Some(installed.bundle);
-                        state.materialized_project = Some(installed.materialized_project);
+                        state.materialized_project = installed.materialized_project;
                         state.bundle_digest = Some(installed.digest);
                         RemoteWorkerOutcome::BundleStored { receipt }
                     }
@@ -309,13 +303,8 @@ async fn run_worker_loop(
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
                 let state_for_task = Arc::clone(&state);
-                let materialized_project = state
-                    .lock()
-                    .await
-                    .materialized_project
-                    .as_ref()
-                    .cloned()
-                    .expect("validated remote attempt has a materialized project");
+                let materialized_project =
+                    state.lock().await.materialized_project.as_ref().cloned();
                 let drain_complete_for_task = Arc::clone(&drain_complete);
                 let task = tokio::task::spawn_local(async move {
                     let mut program = attempt.program;
@@ -332,7 +321,9 @@ async fn run_worker_loop(
                             program.arguments = arguments;
                             crate::execute_host_program_request_with_project(
                                 program,
-                                Some(materialized_project.handoff()),
+                                materialized_project
+                                    .as_deref()
+                                    .map(crate::materialized_project::MaterializedProject::handoff),
                             )
                             .await
                         }
@@ -428,8 +419,8 @@ async fn validate_attempt(
     let Some(bundle) = state.bundle.as_ref() else {
         return Some("exact execution bundle is not installed".into());
     };
-    if state.materialized_project.is_none()
-        || attempt.program.validate().is_err()
+    if bundle.requires_source_project() != state.materialized_project.is_some()
+        || attempt.program.validate_for_portable_host().is_err()
         || !bundle
             .manifest
             .recipes

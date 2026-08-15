@@ -32,52 +32,46 @@ pub struct QuicRemoteWorkerChannel {
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<RemoteWorkerReply>>>>,
 }
 
+pub struct RemoteWorkerChannelConfig {
+    pub run_identity: String,
+    pub node_identity: String,
+    pub worker: WorkerSpec,
+    pub driver_fence: u64,
+    pub session_id: [u8; 16],
+    pub run_key: RunKeyMaterial,
+    pub limits: FrameLimits,
+}
+
 impl QuicRemoteWorkerChannel {
-    #[allow(clippy::too_many_arguments)]
     pub async fn connect(
-        run_identity: impl Into<String>,
-        node_identity: impl Into<String>,
-        worker: WorkerSpec,
-        driver_fence: u64,
-        session_id: [u8; 16],
-        run_key: RunKeyMaterial,
+        config: RemoteWorkerChannelConfig,
         endpoint: &PinnedQuicEndpoint,
-        limits: FrameLimits,
     ) -> NativeExecutionResult<Arc<Self>> {
         let bind = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
         let connection = Arc::new(
-            QuicOverlayConnection::connect(bind, endpoint, limits)
+            QuicOverlayConnection::connect(bind, endpoint, config.limits)
                 .await
                 .map_err(protocol)?,
         );
-        Self::connect_route(
+        Self::connect_route(config, Arc::new(QuicFrameRoute(connection))).await
+    }
+
+    pub(crate) async fn connect_route(
+        config: RemoteWorkerChannelConfig,
+        route: Arc<dyn RemoteFrameRoute>,
+    ) -> NativeExecutionResult<Arc<Self>> {
+        let RemoteWorkerChannelConfig {
             run_identity,
             node_identity,
             worker,
             driver_fence,
             session_id,
             run_key,
-            Arc::new(QuicFrameRoute(connection)),
             limits,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn connect_route(
-        run_identity: impl Into<String>,
-        node_identity: impl Into<String>,
-        worker: WorkerSpec,
-        driver_fence: u64,
-        session_id: [u8; 16],
-        run_key: RunKeyMaterial,
-        route: Arc<dyn RemoteFrameRoute>,
-        limits: FrameLimits,
-    ) -> NativeExecutionResult<Arc<Self>> {
-        let run_identity = run_identity.into();
+        } = config;
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let channel = Arc::new(Self {
-            node_identity: node_identity.into(),
+            node_identity,
             worker,
             driver_fence,
             limits,

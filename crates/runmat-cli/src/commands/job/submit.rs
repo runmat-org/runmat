@@ -48,22 +48,38 @@ pub(crate) struct RemoteSubmissionOptions {
     pub on_run_created: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct JobSubmission {
+    pub file: PathBuf,
+    pub project: Option<Uuid>,
+    pub cluster: String,
+    pub queue: String,
+    pub trust_identity: String,
+    pub function: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub workers: u32,
+    pub detach: bool,
+    pub json: bool,
+    pub args: Vec<String>,
+}
+
 pub async fn submit(
-    file: PathBuf,
-    project: Option<Uuid>,
-    cluster: String,
-    queue: String,
-    trust_identity: String,
-    function: Option<String>,
-    idempotency_key: Option<String>,
-    workers: u32,
-    detach: bool,
-    json: bool,
-    args: Vec<String>,
+    submission: JobSubmission,
     cli: &Cli,
     config: &runmat_config::runtime::RunMatRuntimeConfig,
 ) -> Result<()> {
+    let JobSubmission {
+        file,
+        project,
+        cluster,
+        queue,
+        trust_identity,
+        function,
+        idempotency_key,
+        workers,
+        detach,
+        json,
+        args,
+    } = submission;
     let file = std::fs::canonicalize(&file)
         .with_context(|| format!("resolve remote job source {}", file.display()))?;
     let resolved = crate::commands::package::resolve_for_source(&file, cli)
@@ -100,20 +116,21 @@ pub async fn submit(
     let executable_bytes = executable.canonical_bytes()?;
     let form = ExecutableForm::ExecutableUnitV3;
     let recipe = ProgramBuildRecipe {
-        schema_version: 1,
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
         entrypoint: executable_function.to_string(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target_profile: "portable-executable-unit-v3".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3"),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
     let bundle = ExecutionBundleBuilder::native(frozen, revision.clone())?
+        .with_compiled_package_closure()
         .with_materialized_program(recipe, form, executable_bytes)
         .build()?;
     let recipe = bundle
