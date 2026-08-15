@@ -64,6 +64,18 @@ pub const COLORCUBE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
         notes: "m is read exactly from authoritative host integer storage, validated against RunMat's allocation guard, and used only as the row count. The generated m-by-3 RGB colormap is double; resident scalar controls are rejected without provider dispatch.",
     }];
 
+pub const PARULA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "c = parula(integer_m)",
+        inputs: &COLORCUBE_INTEGER_LENGTH_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "R2026a explicitly lists every built-in integer class for m. The exact nonnegative length is read from authoritative host storage and used only as a guarded row count; the generated m-by-3 RGB colormap is double, and resident controls reject without provider dispatch.",
+    }];
+
 fn colormap_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::Tensor { shape: None }
 }
@@ -128,7 +140,8 @@ define_colormap_builtin!(
     "Return the parula colormap as an RGB array.",
     "parula,colormap,plotting,rgb",
     "c = parula()",
-    "c = parula(m)"
+    "c = parula(m)",
+    crate::builtins::plotting::colormap_arrays::PARULA_INTEGER_CAPABILITIES
 );
 define_colormap_builtin!(
     COLORCUBE_DESCRIPTOR,
@@ -640,6 +653,30 @@ mod tests {
             let length = Tensor::new_integer(storage, vec![1, 1]).expect("length");
             let Value::Tensor(cmap) =
                 colorcube_builtin(vec![Value::Tensor(length)]).expect("colorcube")
+            else {
+                panic!("expected colormap tensor");
+            };
+            assert_eq!((cmap.rows, cmap.cols), (6, 3));
+            assert_eq!(cmap.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        }
+    }
+
+    #[test]
+    fn parula_accepts_all_integer_length_classes_and_returns_double() {
+        let storages = [
+            runmat_builtins::IntegerStorage::I8(vec![6]),
+            runmat_builtins::IntegerStorage::I16(vec![6]),
+            runmat_builtins::IntegerStorage::I32(vec![6]),
+            runmat_builtins::IntegerStorage::I64(vec![6]),
+            runmat_builtins::IntegerStorage::U8(vec![6]),
+            runmat_builtins::IntegerStorage::U16(vec![6]),
+            runmat_builtins::IntegerStorage::U32(vec![6]),
+            runmat_builtins::IntegerStorage::U64(vec![6]),
+        ];
+
+        for storage in storages {
+            let length = Tensor::new_integer(storage, vec![1, 1]).expect("length");
+            let Value::Tensor(cmap) = parula_builtin(vec![Value::Tensor(length)]).expect("parula")
             else {
                 panic!("expected colormap tensor");
             };

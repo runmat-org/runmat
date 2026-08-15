@@ -95393,6 +95393,89 @@
           "when": "Internal surface generation/render preparation fails unexpectedly.",
           "message": "mesh: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "s = mesh(integer_X, Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative on XData/YData/ZData and in RunMat scene persistence; rendering and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap, not an integer coercion rule."
+        },
+        {
+          "form": "s = mesh(X, integer_Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative on XData/YData/ZData and in RunMat scene persistence; rendering and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap, not an integer coercion rule."
+        },
+        {
+          "form": "s = mesh(X, Y, integer_Z, ...)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative on XData/YData/ZData and in RunMat scene persistence; rendering and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap, not an integer coercion rule."
+        }
       ]
     },
     {
@@ -95539,6 +95622,89 @@
           "identifier": "RunMat:meshc:Internal",
           "when": "Internal surface/contour construction or render preparation fails unexpectedly.",
           "message": "meshc: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "s = meshc(integer_X, Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative on the primary Surface object and in RunMat scene persistence; surface rendering, contour generation, and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap."
+        },
+        {
+          "form": "s = meshc(X, integer_Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative on the primary Surface object and in RunMat scene persistence; surface rendering, contour generation, and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap."
+        },
+        {
+          "form": "s = meshc(X, Y, integer_Z, ...)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative on the primary Surface object and in RunMat scene persistence; surface rendering, contour generation, and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap."
         }
       ]
     },
@@ -112482,7 +112648,11 @@
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "figure persistence: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "openfig accepts a textual filename plus textual copy/visibility options and returns opaque figure handles; it has no direct integer data or control role, and resident numeric arguments reject before provider access or file I/O."
+      }
     },
     {
       "name": "opengl",
@@ -112677,6 +112847,82 @@
           "identifier": "RunMat:opentoline:TooManyOutputs",
           "when": "The call requests one or more output arguments.",
           "message": "opentoline: expected no output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "opentoline-integer-line",
+          "mode": "RunMatOnly",
+          "description": "opentoline with a native typed-integer line number is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OpentolineIntegerLineExtension"
+        },
+        {
+          "id": "opentoline-integer-column",
+          "mode": "RunMatOnly",
+          "description": "opentoline with a native typed-integer column number is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OpentolineIntegerColumnExtension"
+        },
+        {
+          "id": "opentoline-resident-position",
+          "mode": "RunMatOnly",
+          "description": "opentoline with an explicit GPU-resident line or column is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OpentolineResidentPositionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "opentoline(filename, integer_line, ...)",
+          "inputs": [
+            {
+              "name": "line",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] Public evidence establishes a positive line-number control but does not enumerate native typed classes; ordinary integer-valued double remains the compatibility form."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact positive position controls only editor navigation. Typed-class and explicit-residency gates run before gather, file resolution, or side effects; automatic residency remains transparent."
+        },
+        {
+          "form": "opentoline(filename, line, integer_column, ...)",
+          "inputs": [
+            {
+              "name": "column",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] Public evidence establishes an optional structural column position but does not enumerate native typed classes; ordinary integer-valued double remains the compatibility form."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact positive position controls only editor navigation. Typed-class and explicit-residency gates run before gather, file resolution, or side effects; automatic residency remains transparent."
         }
       ]
     },
@@ -114345,6 +114591,70 @@
           "when": "Internal pan state or handle-object update fails.",
           "message": "pan: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "pan-integer-graphics-target",
+          "mode": "RunMatOnly",
+          "description": "pan with a typed-integer numeric graphics-target alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PanIntegerGraphicsTargetExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "set(pan_object, 'Enable', integer_zero_or_one)",
+          "inputs": [
+            {
+              "name": "Enable",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] R2026a documents numeric or logical scalar 1/0 for the Enable property but does not enumerate native numeric classes; RunMat accepts every exact integer class without floating conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact scalar is interpreted only as an on/off state and stored as pan-mode metadata."
+        },
+        {
+          "form": "pan(integer_target, option)",
+          "inputs": [
+            {
+              "name": "target",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB requires a Figure or Axes object; typed-integer numeric aliases are a gated RunMat graphics representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility gate precedes handle decoding and any pan-state mutation; resident targets are not gathered."
+        }
       ]
     },
     {
@@ -114453,6 +114763,35 @@
           "identifier": "RunMat:colormapArray:InvalidArgument",
           "when": "The requested colormap length or RGB colormap array is invalid.",
           "message": "colormap array: invalid argument"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "c = parula(integer_m)",
+          "inputs": [
+            {
+              "name": "m",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonnegative scalar length accepts every built-in integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "R2026a explicitly lists every built-in integer class for m. The exact nonnegative length is read from authoritative host storage and used only as a guarded row count; the generated m-by-3 RGB colormap is double, and resident controls reject without provider dispatch."
         }
       ]
     },
@@ -114663,6 +115002,205 @@
           "identifier": "RunMat:patch:Internal",
           "when": "Internal patch triangulation/render setup fails unexpectedly.",
           "message": "patch: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "patch-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "patch with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PatchIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = patch(integer_X, Y, C, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for X coordinates."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather."
+        },
+        {
+          "form": "p = patch(X, integer_Y, C, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for Y coordinates."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather."
+        },
+        {
+          "form": "p = patch(X, Y, integer_Z, C, ...)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for Z coordinates."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather."
+        },
+        {
+          "form": "p = patch(..., integer_CData, ...)",
+          "inputs": [
+            {
+              "name": "CData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer color indices remain authoritative as patch CData before renderer colormap conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather."
+        },
+        {
+          "form": "p = patch('Faces', integer_F, 'Vertices', V, ...)",
+          "inputs": [
+            {
+              "name": "Faces",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for one-based face definitions."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather."
+        },
+        {
+          "form": "p = patch('Faces', F, 'Vertices', integer_V, ...)",
+          "inputs": [
+            {
+              "name": "Vertices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every built-in integer class for vertex coordinates."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather."
+        },
+        {
+          "form": "p = patch(integer_ax, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB targets a graphics object; typed-integer numeric axes aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility gate runs before axes selection, input gathering, triangulation, or rendering."
         }
       ]
     },
@@ -114888,6 +115426,43 @@
           "identifier": "RunMat:pause:GpuGatherFailed",
           "when": "Gathering a GPU argument to host fails during argument classification.",
           "message": "pause: failed to gather gpu input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "pause-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "pause with an explicit GPU-resident argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PauseGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "pause(integer_duration)",
+          "inputs": [
+            {
+              "name": "duration",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly lists every built-in integer class for the nonnegative real duration."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The integer scalar is validated from authoritative storage and crosses one explicit seconds/timer boundary; pause returns no integer data. Explicit resident arguments are independently gated before provider access, while internal automatic residency remains transparent."
         }
       ]
     },

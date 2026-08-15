@@ -3,8 +3,8 @@
 use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use crate::geometry::stroke3d::{tessellate_polyline, StrokeCap3D, StrokeStyle3D};
 use crate::plots::line::LineStyle;
+use crate::plots::NumericPlotData;
 use glam::{Vec2, Vec3, Vec4};
-use runmat_builtins::NumericStorage;
 
 const TRIANGULATION_EPSILON: f32 = 1.0e-6;
 
@@ -21,15 +21,6 @@ pub enum PatchFaceColorMode {
 pub enum PatchEdgeColorMode {
     Color,
     None,
-}
-
-/// Authoritative numeric data retained by a patch independently of the f32
-/// renderer geometry. Graphics properties use this snapshot so integer class,
-/// exact values, and the original array shape survive rendering conversion.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PatchData {
-    pub storage: NumericStorage,
-    pub shape: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,10 +42,12 @@ pub struct PatchPlot {
     bounds: Option<BoundingBox>,
     force_3d: bool,
     dirty: bool,
-    x_data: Option<PatchData>,
-    y_data: Option<PatchData>,
-    z_data: Option<PatchData>,
-    c_data: Option<PatchData>,
+    x_data: Option<NumericPlotData>,
+    y_data: Option<NumericPlotData>,
+    z_data: Option<NumericPlotData>,
+    c_data: Option<NumericPlotData>,
+    faces_data: Option<NumericPlotData>,
+    vertices_data: Option<NumericPlotData>,
 }
 
 impl PatchPlot {
@@ -90,6 +83,8 @@ impl PatchPlot {
             y_data: None,
             z_data: None,
             c_data: None,
+            faces_data: None,
+            vertices_data: None,
         })
     }
 
@@ -100,30 +95,38 @@ impl PatchPlot {
     pub fn source_data(
         &self,
     ) -> (
-        Option<&PatchData>,
-        Option<&PatchData>,
-        Option<&PatchData>,
-        Option<&PatchData>,
+        Option<&NumericPlotData>,
+        Option<&NumericPlotData>,
+        Option<&NumericPlotData>,
+        Option<&NumericPlotData>,
+        Option<&NumericPlotData>,
+        Option<&NumericPlotData>,
     ) {
         (
             self.x_data.as_ref(),
             self.y_data.as_ref(),
             self.z_data.as_ref(),
             self.c_data.as_ref(),
+            self.faces_data.as_ref(),
+            self.vertices_data.as_ref(),
         )
     }
 
     pub fn set_source_data(
         &mut self,
-        x_data: Option<PatchData>,
-        y_data: Option<PatchData>,
-        z_data: Option<PatchData>,
-        c_data: Option<PatchData>,
+        x_data: Option<NumericPlotData>,
+        y_data: Option<NumericPlotData>,
+        z_data: Option<NumericPlotData>,
+        c_data: Option<NumericPlotData>,
+        faces_data: Option<NumericPlotData>,
+        vertices_data: Option<NumericPlotData>,
     ) {
         self.x_data = x_data;
         self.y_data = y_data;
         self.z_data = z_data;
         self.c_data = c_data;
+        self.faces_data = faces_data;
+        self.vertices_data = vertices_data;
     }
 
     pub fn faces(&self) -> &[Vec<usize>] {

@@ -42,6 +42,11 @@ pub const HGLOAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
     canonical_builtin: None,
     notes: "hgload accepts a textual filename and an optional property structure and returns opaque graphics handles plus property metadata; it has no direct integer data or control argument.",
 };
+pub const OPENFIG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "openfig accepts a textual filename plus textual copy/visibility options and returns opaque figure handles; it has no direct integer data or control role, and resident numeric arguments reject before provider access or file I/O.",
+};
 
 const DEFAULT_WIDTH: u32 = 800;
 const DEFAULT_HEIGHT: u32 = 600;
@@ -360,10 +365,10 @@ pub async fn savefig_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     suppress_auto_output = true,
     type_resolver(handle_type),
     descriptor(crate::builtins::plotting::figure_persistence::OPENFIG_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::OPENFIG_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn openfig_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_values(&args, OPENFIG).await?;
     let request = parse_openfig_args(&args, OPENFIG)?;
     let handles = open_figures(&request, OPENFIG).await?;
     Ok(handles_value(&handles))
@@ -1328,12 +1333,16 @@ mod tests {
     }
 
     #[test]
-    fn hgload_and_hgsave_are_explicitly_integer_inapplicable() {
-        for audit in [HGSAVE_INTEGER_AUDIT, HGLOAD_INTEGER_AUDIT] {
+    fn figure_load_and_save_forms_are_explicitly_integer_inapplicable() {
+        for audit in [
+            OPENFIG_INTEGER_AUDIT,
+            HGSAVE_INTEGER_AUDIT,
+            HGLOAD_INTEGER_AUDIT,
+        ] {
             assert_eq!(audit.kind, BuiltinIntegerAuditKind::NotApplicable);
             assert!(audit.canonical_builtin.is_none());
         }
-        for name in [HGSAVE, HGLOAD] {
+        for name in [OPENFIG, HGSAVE, HGLOAD] {
             let builtin = runmat_builtins::builtin_function_by_name(name)
                 .expect("registered graphics persistence builtin");
             assert_eq!(
@@ -1354,6 +1363,18 @@ mod tests {
         });
         assert!(block_on(hgload_builtin(vec![resident.clone()])).is_err());
         assert!(block_on(hgsave_builtin(vec![resident, Value::from("unused.fig")])).is_err());
+    }
+
+    #[test]
+    fn openfig_rejects_resident_filename_without_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = block_on(openfig_builtin(vec![resident])).expect_err("resident filename");
+
+        assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

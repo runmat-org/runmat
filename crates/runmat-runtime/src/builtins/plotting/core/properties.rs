@@ -2,8 +2,7 @@ use runmat_builtins::{
     CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value,
 };
 use runmat_plot::plots::{
-    ColorMap, LegendStyle, NumericPlotData, PatchData, PolarHistogramDisplayStyle, ShadingMode,
-    TextStyle,
+    ColorMap, LegendStyle, NumericPlotData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
 use std::borrow::Cow;
 
@@ -3634,12 +3633,23 @@ fn get_patch_property(
             format!("{builtin}: invalid patch handle"),
         ));
     };
-    let (source_x, source_y, source_z, source_c) = patch.source_data();
+    let (source_x, source_y, source_z, source_c, source_faces, source_vertices) =
+        patch.source_data();
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("patch", patch_handle.figure, patch_handle.axes_index);
-            st.insert("Faces", faces_tensor(patch.faces()));
-            st.insert("Vertices", vertices_tensor(patch.vertices()));
+            st.insert(
+                "Faces",
+                source_faces
+                    .map(numeric_plot_data_value)
+                    .unwrap_or_else(|| faces_tensor(patch.faces())),
+            );
+            st.insert(
+                "Vertices",
+                source_vertices
+                    .map(numeric_plot_data_value)
+                    .unwrap_or_else(|| vertices_tensor(patch.vertices())),
+            );
             st.insert("XData", patch_source_or_vertices(source_x, &patch, 0));
             st.insert("YData", patch_source_or_vertices(source_y, &patch, 1));
             st.insert("ZData", patch_source_or_vertices(source_z, &patch, 2));
@@ -3669,8 +3679,12 @@ fn get_patch_property(
             patch_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("faces") => Ok(faces_tensor(patch.faces())),
-        Some("vertices") => Ok(vertices_tensor(patch.vertices())),
+        Some("faces") => Ok(source_faces
+            .map(numeric_plot_data_value)
+            .unwrap_or_else(|| faces_tensor(patch.faces()))),
+        Some("vertices") => Ok(source_vertices
+            .map(numeric_plot_data_value)
+            .unwrap_or_else(|| vertices_tensor(patch.vertices()))),
         Some("xdata") => Ok(patch_source_or_vertices(source_x, &patch, 0)),
         Some("ydata") => Ok(patch_source_or_vertices(source_y, &patch, 1)),
         Some("zdata") => Ok(patch_source_or_vertices(source_z, &patch, 2)),
@@ -3698,7 +3712,7 @@ fn get_patch_property(
 }
 
 fn patch_source_or_vertices(
-    source: Option<&PatchData>,
+    source: Option<&NumericPlotData>,
     patch: &runmat_plot::plots::PatchPlot,
     component: usize,
 ) -> Value {
@@ -3717,11 +3731,8 @@ fn patch_source_or_vertices(
     })
 }
 
-fn patch_data_value(data: &PatchData) -> Value {
-    Value::Tensor(
-        Tensor::from_numeric_storage(data.storage.clone(), data.shape.clone())
-            .expect("patch source shape matches storage"),
-    )
+fn patch_data_value(data: &NumericPlotData) -> Value {
+    numeric_plot_data_value(data)
 }
 
 fn get_line3_property(
@@ -7281,6 +7292,9 @@ fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
 }
 
 fn surface_x_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    if let (Some(source), _, _) = surface.source_data() {
+        return numeric_plot_data_value(source);
+    }
     surface
         .x_grid
         .as_ref()
@@ -7289,6 +7303,9 @@ fn surface_x_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
 }
 
 fn surface_y_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    if let (_, Some(source), _) = surface.source_data() {
+        return numeric_plot_data_value(source);
+    }
     surface
         .y_grid
         .as_ref()
@@ -7297,6 +7314,9 @@ fn surface_y_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
 }
 
 fn surface_z_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    if let (_, _, Some(source)) = surface.source_data() {
+        return numeric_plot_data_value(source);
+    }
     surface
         .z_data
         .as_ref()

@@ -2,12 +2,16 @@
 
 use glam::{Vec3, Vec4};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntegerStorage, NumericStorage, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
-use runmat_plot::plots::{PatchData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
+use runmat_plot::plots::{NumericPlotData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -24,6 +28,98 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_color_value, value_as_f64, value_as_string, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "patch";
+
+const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "patch-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "patch with a typed-integer numeric axes alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PatchIntegerAxesHandleExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_AXES_EXTENSION];
+
+macro_rules! patch_integer_input {
+    ($name:literal, $availability:expr, $notes:literal) => {
+        [BuiltinIntegerInputCapability {
+            name: $name,
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: $availability,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: $notes,
+        }]
+    };
+}
+
+const INTEGER_X: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
+    "X",
+    BuiltinIntegerInputAvailability::Documented,
+    "R2026a explicitly lists every built-in integer class for X coordinates."
+);
+const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
+    "Y",
+    BuiltinIntegerInputAvailability::Documented,
+    "R2026a explicitly lists every built-in integer class for Y coordinates."
+);
+const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
+    "Z",
+    BuiltinIntegerInputAvailability::Documented,
+    "R2026a explicitly lists every built-in integer class for Z coordinates."
+);
+const INTEGER_C: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
+    "CData",
+    BuiltinIntegerInputAvailability::Documented,
+    "Integer color indices remain authoritative as patch CData before renderer colormap conversion."
+);
+const INTEGER_FACES: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
+    "Faces",
+    BuiltinIntegerInputAvailability::Documented,
+    "R2026a explicitly lists every built-in integer class for one-based face definitions."
+);
+const INTEGER_VERTICES: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
+    "Vertices",
+    BuiltinIntegerInputAvailability::Documented,
+    "R2026a explicitly lists every built-in integer class for vertex coordinates."
+);
+const INTEGER_AX: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
+    "ax",
+    BuiltinIntegerInputAvailability::RunMatOnly,
+    "MATLAB targets a graphics object; typed-integer numeric axes aliases are a gated RunMat representation extension."
+);
+
+const fn patch_data_capability(
+    form: &'static str,
+    inputs: &'static [BuiltinIntegerInputCapability],
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather.",
+    }
+}
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
+    patch_data_capability("p = patch(integer_X, Y, C, ...)", &INTEGER_X),
+    patch_data_capability("p = patch(X, integer_Y, C, ...)", &INTEGER_Y),
+    patch_data_capability("p = patch(X, Y, integer_Z, C, ...)", &INTEGER_Z),
+    patch_data_capability("p = patch(..., integer_CData, ...)", &INTEGER_C),
+    patch_data_capability("p = patch('Faces', integer_F, 'Vertices', V, ...)", &INTEGER_FACES),
+    patch_data_capability("p = patch('Faces', F, 'Vertices', integer_V, ...)", &INTEGER_VERTICES),
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = patch(integer_ax, ...)",
+        inputs: &INTEGER_AX,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility gate runs before axes selection, input gathering, triangulation, or rendering.",
+    },
+];
 
 const PATCH_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -324,9 +420,12 @@ impl Default for PatchOptions {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::patch::PATCH_DESCRIPTOR),
+    extensions(crate::builtins::plotting::patch::EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::patch::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::patch"
 )]
 pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    gate_typed_integer_axes_alias(&args)?;
     let (axes_target, args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_patch_invalid)?;
     let mut plot = Some(parse_patch_plot(args).map_err(map_patch_invalid)?);
@@ -364,6 +463,22 @@ pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     Ok(handle)
 }
 
+fn gate_typed_integer_axes_alias(args: &[Value]) -> BuiltinResult<()> {
+    let Some(first) = args.first() else {
+        return Ok(());
+    };
+    let typed_integer = matches!(first, Value::Int(_))
+        || matches!(first, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(first, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some());
+    if typed_integer && super::properties::resolve_plot_handle(first, BUILTIN_NAME).is_ok() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_AXES_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
     if args.is_empty() {
         return Err(patch_invalid("patch: expected input data"));
@@ -396,6 +511,8 @@ pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
         opts.y_data.as_ref().map(patch_data_from_tensor),
         opts.z_data.as_ref().map(patch_data_from_tensor),
         opts.c_data.as_ref().map(patch_data_from_tensor),
+        opts.faces.as_ref().map(patch_data_from_tensor),
+        opts.vertices.as_ref().map(patch_data_from_tensor),
     );
     plot.set_face_color(opts.face_color);
     plot.set_edge_color(opts.edge_color);
@@ -614,15 +731,12 @@ fn apply_c_data(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn patch_data_from_tensor(tensor: &Tensor) -> PatchData {
+fn patch_data_from_tensor(tensor: &Tensor) -> NumericPlotData {
     let storage = tensor
         .clone()
         .into_numeric_storage()
         .expect("numeric tensor storage");
-    PatchData {
-        storage,
-        shape: tensor.shape.clone(),
-    }
+    NumericPlotData::new(storage, tensor.shape.clone()).expect("validated patch source data")
 }
 
 pub(super) fn split_coordinate_group_columns(
@@ -998,6 +1112,7 @@ pub(super) fn is_property_name(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use runmat_builtins::IntegerStorage;
@@ -1144,6 +1259,59 @@ mod tests {
         assert_eq!(plot.vertices()[0], Vec3::new(0.0, 0.0, 0.0));
         assert_eq!(plot.vertices()[1], Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(plot.vertices()[2], Vec3::new(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn patch_faces_vertices_properties_retain_integer_storage() {
+        let _guard = setup_plot_test();
+        let faces = IntegerStorage::I16(vec![1, 2, 3]);
+        let vertices = IntegerStorage::I16(vec![0, 1, 0, 0, 0, 1]);
+        let handle = crate::call_builtin(
+            "patch",
+            &[
+                Value::String("Faces".into()),
+                int_tensor(1, 3, faces.clone()),
+                Value::String("Vertices".into()),
+                int_tensor(3, 2, vertices.clone()),
+            ],
+        )
+        .expect("integer patch");
+        let Value::Num(handle) = handle else {
+            panic!("expected patch handle");
+        };
+        let retained_faces = get_builtin(vec![Value::Num(handle), Value::String("Faces".into())])
+            .expect("patch Faces");
+        let retained_vertices =
+            get_builtin(vec![Value::Num(handle), Value::String("Vertices".into())])
+                .expect("patch Vertices");
+
+        assert!(
+            matches!(retained_faces, Value::Tensor(tensor) if tensor.shape == vec![1, 3] && tensor.integer_storage() == Some(&faces))
+        );
+        assert!(
+            matches!(retained_vertices, Value::Tensor(tensor) if tensor.shape == vec![3, 2] && tensor.integer_storage() == Some(&vertices))
+        );
+    }
+
+    #[test]
+    fn patch_typed_axes_alias_is_gated_before_plotting() {
+        let _guard = setup_plot_test();
+        let axes = crate::builtins::plotting::gca::gca_builtin(Vec::new()).expect("axes handle");
+        let Value::Num(axes) = axes else {
+            panic!("expected numeric axes handle");
+        };
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = patch_builtin(vec![
+            Value::Int(runmat_builtins::IntValue::U64(axes as u64)),
+            tensor(3, 1, &[0.0, 1.0, 0.0]),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+        ])
+        .expect_err("typed axes alias must be gated");
+
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:PatchIntegerAxesHandleExtension")
+        );
     }
 
     #[test]

@@ -399,6 +399,12 @@ pub enum ScenePlot {
         y: Vec<f64>,
         #[serde(deserialize_with = "deserialize_matrix_f64_lossy")]
         z: Vec<Vec<f64>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        z_source: Option<SceneNumericData>,
         #[serde(default)]
         x_grid: Option<Vec<Vec<f64>>>,
         #[serde(default)]
@@ -434,6 +440,18 @@ pub enum ScenePlot {
         visible: bool,
         #[serde(default)]
         force_3d: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        z_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        c_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        faces_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vertices_source: Option<SceneNumericData>,
     },
     Mesh {
         #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
@@ -2122,10 +2140,14 @@ impl ScenePlot {
                     .export_scene_color_grid()
                     .await
                     .map_err(SceneExportError::readback)?;
+                let (source_x, source_y, source_z) = surface.source_data();
                 Self::Surface {
                     x,
                     y,
                     z,
+                    x_source: source_x.map(Into::into),
+                    y_source: source_y.map(Into::into),
+                    z_source: source_z.map(Into::into),
                     x_grid: surface.x_grid.clone(),
                     y_grid: surface.y_grid.clone(),
                     colormap: surface.colormap.to_serialized_token(),
@@ -2598,6 +2620,9 @@ impl ScenePlot {
                 x: surface.x_data.clone(),
                 y: surface.y_data.clone(),
                 z: surface.z_data.clone().unwrap_or_default(),
+                x_source: surface.source_data().0.map(Into::into),
+                y_source: surface.source_data().1.map(Into::into),
+                z_source: surface.source_data().2.map(Into::into),
                 x_grid: surface.x_grid.clone(),
                 y_grid: surface.y_grid.clone(),
                 colormap: surface.colormap.to_serialized_token(),
@@ -2616,29 +2641,39 @@ impl ScenePlot {
                 label: surface.label.clone(),
                 visible: surface.visible,
             },
-            PlotElement::Patch(patch) => Self::Patch {
-                vertices: patch
-                    .vertices()
-                    .iter()
-                    .map(|point| vec3_to_xyz(*point))
-                    .collect(),
-                faces: patch
-                    .faces()
-                    .iter()
-                    .map(|face| face.iter().map(|idx| *idx as u32).collect())
-                    .collect(),
-                face_color_rgba: vec4_to_rgba(patch.face_color()),
-                edge_color_rgba: vec4_to_rgba(patch.edge_color()),
-                face_color_mode: format!("{:?}", patch.face_color_mode()),
-                edge_color_mode: format!("{:?}", patch.edge_color_mode()),
-                face_alpha: patch.face_alpha(),
-                edge_alpha: patch.edge_alpha(),
-                line_width: patch.line_width(),
-                axes_index,
-                label: patch.label().map(str::to_string),
-                visible: patch.is_visible(),
-                force_3d: patch.force_3d(),
-            },
+            PlotElement::Patch(patch) => {
+                let (source_x, source_y, source_z, source_c, source_faces, source_vertices) =
+                    patch.source_data();
+                Self::Patch {
+                    vertices: patch
+                        .vertices()
+                        .iter()
+                        .map(|point| vec3_to_xyz(*point))
+                        .collect(),
+                    faces: patch
+                        .faces()
+                        .iter()
+                        .map(|face| face.iter().map(|idx| *idx as u32).collect())
+                        .collect(),
+                    face_color_rgba: vec4_to_rgba(patch.face_color()),
+                    edge_color_rgba: vec4_to_rgba(patch.edge_color()),
+                    face_color_mode: format!("{:?}", patch.face_color_mode()),
+                    edge_color_mode: format!("{:?}", patch.edge_color_mode()),
+                    face_alpha: patch.face_alpha(),
+                    edge_alpha: patch.edge_alpha(),
+                    line_width: patch.line_width(),
+                    axes_index,
+                    label: patch.label().map(str::to_string),
+                    visible: patch.is_visible(),
+                    force_3d: patch.force_3d(),
+                    x_source: source_x.map(Into::into),
+                    y_source: source_y.map(Into::into),
+                    z_source: source_z.map(Into::into),
+                    c_source: source_c.map(Into::into),
+                    faces_source: source_faces.map(Into::into),
+                    vertices_source: source_vertices.map(Into::into),
+                }
+            }
             PlotElement::Mesh(mesh) => Self::Mesh {
                 vertices: mesh
                     .vertices()
@@ -3029,6 +3064,9 @@ impl ScenePlot {
                 x,
                 y,
                 z,
+                x_source,
+                y_source,
+                z_source,
                 x_grid,
                 y_grid,
                 colormap,
@@ -3055,6 +3093,17 @@ impl ScenePlot {
                         );
                     }
                 };
+                if x_source.is_some() || y_source.is_some() || z_source.is_some() {
+                    let (fallback_x, fallback_y, fallback_z) = surface.source_data();
+                    let fallback_x = fallback_x.cloned();
+                    let fallback_y = fallback_y.cloned();
+                    let fallback_z = fallback_z.cloned();
+                    surface.set_source_data(
+                        x_source.map(TryInto::try_into).transpose()?.or(fallback_x),
+                        y_source.map(TryInto::try_into).transpose()?.or(fallback_y),
+                        z_source.map(TryInto::try_into).transpose()?.or(fallback_z),
+                    );
+                }
                 surface.colormap = parse_colormap(&colormap);
                 surface.shading_mode = parse_shading_mode(&shading_mode);
                 surface.wireframe = wireframe;
@@ -3085,6 +3134,12 @@ impl ScenePlot {
                 label,
                 visible,
                 force_3d,
+                x_source,
+                y_source,
+                z_source,
+                c_source,
+                faces_source,
+                vertices_source,
             } => {
                 let vertices: Vec<Vec3> = vertices.into_iter().map(xyz_to_vec3).collect();
                 let faces: Vec<Vec<usize>> = faces
@@ -3102,6 +3157,14 @@ impl ScenePlot {
                 patch.set_label(label);
                 patch.set_visible(visible);
                 patch.set_force_3d(force_3d);
+                patch.set_source_data(
+                    x_source.map(TryInto::try_into).transpose()?,
+                    y_source.map(TryInto::try_into).transpose()?,
+                    z_source.map(TryInto::try_into).transpose()?,
+                    c_source.map(TryInto::try_into).transpose()?,
+                    faces_source.map(TryInto::try_into).transpose()?,
+                    vertices_source.map(TryInto::try_into).transpose()?,
+                );
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
             ScenePlot::Mesh {
@@ -3615,8 +3678,9 @@ mod tests {
     use super::*;
     use crate::plots::{
         AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
-        MeshPlot, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot, ReferenceLine,
-        ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+        MeshPlot, NumericPlotData, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot,
+        ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot,
+        SurfacePlot,
     };
     use glam::{Vec3, Vec4};
 
@@ -3796,6 +3860,9 @@ mod tests {
             x: vec![0.0, 1.0, 2.0],
             y: vec![10.0, 20.0],
             z: vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
+            x_source: None,
+            y_source: None,
+            z_source: None,
             x_grid: None,
             y_grid: None,
             colormap: "Parula".to_string(),
@@ -3820,6 +3887,9 @@ mod tests {
             x: vec![0.0, 1.0, 2.0],
             y: vec![10.0, 20.0],
             z: vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+            x_source: None,
+            y_source: None,
+            z_source: None,
             x_grid: None,
             y_grid: None,
             colormap: "Parula".to_string(),
@@ -3851,6 +3921,9 @@ mod tests {
                 x: vec![0.0, 1.0],
                 y: vec![10.0, 20.0, 30.0],
                 z: vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]],
+                x_source: None,
+                y_source: None,
+                z_source: None,
                 x_grid: None,
                 y_grid: None,
                 colormap: "Parula".to_string(),
@@ -4574,6 +4647,140 @@ mod tests {
             surface.color_grid.as_ref().unwrap()[0][0],
             Vec4::new(1.0, 0.0, 0.0, 1.0)
         );
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_native_surface_storage() {
+        let wide = vec![
+            9_007_199_254_740_993,
+            9_007_199_254_740_994,
+            9_007_199_254_740_995,
+            9_007_199_254_740_996,
+        ];
+        let mut surface = SurfacePlot::new(
+            vec![1.0, 2.0],
+            vec![1.0, 2.0],
+            vec![vec![1.0, 2.0], vec![3.0, 4.0]],
+        )
+        .unwrap();
+        surface.set_source_data(
+            None,
+            None,
+            Some(
+                NumericPlotData::new(NumericStorage::U64(wide.clone()), vec![2, 2])
+                    .expect("native surface data"),
+            ),
+        );
+        let mut figure = Figure::new();
+        figure.add_surface_plot(surface);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Surface(surface) = rebuilt.plots().next().unwrap() else {
+            panic!("expected surface")
+        };
+        let (_, _, source_z) = surface.source_data();
+        assert_eq!(
+            source_z.map(NumericPlotData::storage),
+            Some(&NumericStorage::U64(wide))
+        );
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_native_patch_storage() {
+        let faces = vec![1_i16, 2, 3];
+        let vertices = vec![0_u64, 1, 0, 0, 0, 1];
+        let mut patch = PatchPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![vec![0, 1, 2]],
+        )
+        .unwrap();
+        patch.set_source_data(
+            None,
+            None,
+            None,
+            None,
+            Some(
+                NumericPlotData::new(NumericStorage::I16(faces.clone()), vec![1, 3])
+                    .expect("native faces"),
+            ),
+            Some(
+                NumericPlotData::new(NumericStorage::U64(vertices.clone()), vec![3, 2])
+                    .expect("native vertices"),
+            ),
+        );
+        let mut figure = Figure::new();
+        figure.add_patch_plot(patch);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Patch(patch) = rebuilt.plots().next().unwrap() else {
+            panic!("expected patch")
+        };
+        let (_, _, _, _, source_faces, source_vertices) = patch.source_data();
+        assert_eq!(
+            source_faces.map(NumericPlotData::storage),
+            Some(&NumericStorage::I16(faces))
+        );
+        assert_eq!(
+            source_vertices.map(NumericPlotData::storage),
+            Some(&NumericStorage::U64(vertices))
+        );
+    }
+
+    #[test]
+    fn legacy_surface_scene_rebuilds_canonical_f64_sources() {
+        let snapshot = FigureSnapshot::capture(&Figure::new());
+        let scene = FigureScene {
+            schema_version: FigureScene::SCHEMA_VERSION,
+            layout: snapshot.layout,
+            metadata: snapshot.metadata,
+            plots: vec![ScenePlot::Surface {
+                x: vec![0.0, 1.0],
+                y: vec![0.0, 1.0],
+                z: vec![vec![1.0, 2.0], vec![3.0, 4.0]],
+                x_source: None,
+                y_source: None,
+                z_source: None,
+                x_grid: None,
+                y_grid: None,
+                colormap: "Parula".into(),
+                shading_mode: "Smooth".into(),
+                wireframe: false,
+                alpha: 1.0,
+                flatten_z: false,
+                image_mode: false,
+                color_grid_rgba: None,
+                color_limits: None,
+                axes_index: 0,
+                label: None,
+                visible: true,
+            }],
+        };
+
+        let rebuilt = scene.into_figure().expect("legacy surface scene");
+        let PlotElement::Surface(surface) = rebuilt.plots().next().unwrap() else {
+            panic!("expected surface")
+        };
+        let (x, y, z) = surface.source_data();
+        assert!(matches!(
+            x.map(NumericPlotData::storage),
+            Some(NumericStorage::F64(_))
+        ));
+        assert!(matches!(
+            y.map(NumericPlotData::storage),
+            Some(NumericStorage::F64(_))
+        ));
+        assert!(matches!(
+            z.map(NumericPlotData::storage),
+            Some(NumericStorage::F64(_))
+        ));
     }
 
     #[test]
