@@ -11,9 +11,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [],
+    "precisions": ["f32", "f64", "integer", "bool"],
     "broadcasting": "none",
-    "notes": "RunMat gathers gpuArray inputs and materializes the factorial-size permutation matrix on the host."
+    "notes": "RunMat gathers through the exact owning provider, materializes the factorial-size permutation matrix on the host, and restores the same-class result to that owner; explicit gpuArray input fails if residency cannot be preserved."
   },
   "fusion": {
     "elementwise": false,
@@ -24,7 +24,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::array::creation::perms::tests",
-    "integration": "builtins::array::creation::perms::tests::gpu_inputs_gather_to_host_before_permuting"
+    "integration": "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs"
   },
   "description": "`P = perms(v)` returns every permutation of the elements in vector `v`, one permutation per row. RunMat follows MATLAB's reverse lexicographic row order and preserves supported vector container classes.",
   "behaviors": [
@@ -32,7 +32,7 @@
     "The output has `factorial(numel(v))` rows and `numel(v)` columns.",
     "Rows are emitted in MATLAB-compatible reverse lexicographic permutation order relative to the original element positions.",
     "Duplicate input values are permuted by position and are not deduplicated.",
-    "Dense numeric tensors preserve their RunMat dtype metadata; logical, character, string-array, and cell-array vectors return matching container types.",
+    "Dense numeric tensors preserve their native class and exact values, including all eight integer classes and wide 64-bit values; logical, character, string-array, and cell-array vectors return matching container types.",
     "Scalar numeric, logical, and string inputs return the scalar value unchanged.",
     "Complex numeric vectors are permuted positionally and preserve their complex values.",
     "Inputs that are not vectors, unsupported object-like values, sparse tensors, and outputs beyond RunMat's materialization limit raise stable errors."
@@ -70,7 +70,7 @@
     },
     {
       "question": "Can `perms` run on gpuArray inputs?",
-      "answer": "RunMat accepts gpuArray inputs by gathering them to the host before constructing the output. The result is a host array because the output is factorial-size and not fusion-friendly."
+      "answer": "RunMat gathers through the owning provider, constructs the result on the host, and restores the same-class result to that provider. Explicit gpuArray input fails if the provider cannot preserve residency."
     }
   ],
   "links": [

@@ -5,7 +5,11 @@ use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Value,
 };
@@ -199,6 +203,85 @@ pub const PERIODOGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PERIODOGRAM_ERRORS,
 };
 
+const PERIODOGRAM_INTEGER_SIGNAL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "periodogram-integer-signal",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "periodogram accepts a typed-integer input signal as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PeriodogramIntegerSignalExtension"),
+    };
+const PERIODOGRAM_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "periodogram-integer-numeric-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "periodogram accepts typed-integer window, frequency, DFT-length, or sample-rate controls as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PeriodogramIntegerNumericControlExtension"),
+    };
+pub const PERIODOGRAM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
+    PERIODOGRAM_INTEGER_CONTROL_EXTENSION,
+];
+const PERIODOGRAM_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion.",
+    }];
+const PERIODOGRAM_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "window",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented window storage is single or double; typed windows cross a checked floating boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "freqSpec/nfft",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar is decoded as an exact structural DFT length; a vector is a checked floating frequency grid.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Fs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed sample rates enter the floating frequency-scaling boundary only after exactness is proved.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "confidence or numeric option",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Additional supported numeric controls remain independently classified as checked floating inputs.",
+    },
+];
+pub const PERIODOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[pxx,f] = periodogram(integer_x, ...)",
+        inputs: &PERIODOGRAM_INTEGER_SIGNAL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion and supported resident floating paths remain unaffected.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "periodogram(x, integer_window_or_frequency_controls)",
+        inputs: &PERIODOGRAM_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed numerical controls are independently gated; scalar DFT length is structural and remaining controls cross a checked binary64 boundary.",
+    },
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrequencyRange {
     Onesided,
@@ -277,6 +360,10 @@ fn periodogram_error_with_message(
     keywords = "periodogram,psd,power spectrum,spectral density,signal processing",
     type_resolver(periodogram_type),
     descriptor(crate::builtins::math::signal::periodogram::PERIODOGRAM_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::periodogram::PERIODOGRAM_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::signal::periodogram::PERIODOGRAM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::signal::periodogram"
 )]
 async fn periodogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -290,6 +377,28 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
+    ensure_periodogram_integer_boundary(
+        &x,
+        &PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
+        "signal",
+        &PERIODOGRAM_ERROR_INVALID_SIGNAL,
+    )
+    .await?;
+    for (index, value) in rest.iter().enumerate() {
+        let error = match index {
+            0 => &PERIODOGRAM_ERROR_INVALID_WINDOW,
+            1 => &PERIODOGRAM_ERROR_INVALID_NFFT,
+            2 => &PERIODOGRAM_ERROR_INVALID_FS,
+            _ => &PERIODOGRAM_ERROR_INVALID_RANGE,
+        };
+        ensure_periodogram_integer_boundary(
+            value,
+            &PERIODOGRAM_INTEGER_CONTROL_EXTENSION,
+            "numeric control",
+            error,
+        )
+        .await?;
     }
     if let Value::GpuTensor(handle) = &x {
         let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle).map_err(|err| {
@@ -309,6 +418,28 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     let options = parse_options(rest, input.rows, input.is_complex).await?;
     let eval = compute_periodogram(&input.columns, &options)?;
     output_eval(eval)
+}
+
+async fn ensure_periodogram_integer_boundary(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+    role: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_native_integer_class,
+    };
+    if !value_has_native_integer_class(value) {
+        return Ok(());
+    }
+    crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    if !native_integer_value_is_exact_f64_async(value).await? {
+        return Err(periodogram_error_with_detail(
+            error,
+            format!("integer {role} values must be exactly representable as double"),
+        ));
+    }
+    Ok(())
 }
 
 fn output_eval(eval: PeriodogramEvaluation) -> BuiltinResult<Value> {
@@ -1043,6 +1174,7 @@ mod tests {
 
     #[test]
     fn periodogram_reads_typed_integer_vector_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = call(
             Value::Tensor(integer_tensor(vec![0, 1, 0, -1, 0, 1, 0, -1], vec![1, 8])),
             &[
@@ -1109,6 +1241,7 @@ mod tests {
 
     #[test]
     fn periodogram_reads_typed_integer_matrix_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let data = vec![
             1, 1, 1, 1, 0, 0, 0, 0, //
             0, 1, 0, -1, 0, 1, 0, -1,

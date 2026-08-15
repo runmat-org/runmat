@@ -13,10 +13,13 @@ use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericStorage,
-    ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage,
+    LogicalArray, NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -152,6 +155,45 @@ pub const PERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PERMUTE_ERRORS,
 };
 
+const PERMUTE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The generic array contract includes every integer class. Permutation only reorders authoritative elements and preserves class exactly.",
+    }];
+const PERMUTE_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dimorder",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public row-vector contract requires unique positive integer elements. RunMat decodes all native integer classes directly without a floating compatibility mirror.",
+    }];
+pub const PERMUTE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = permute(integer_A, dimorder)",
+        inputs: &PERMUTE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host, paired complex-integer, and provider-resident paths preserve exact class, shape, owner, and explicit residency while changing only layout.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = permute(A, integer_dimorder)",
+        inputs: &PERMUTE_INTEGER_ORDER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Dimension order is parsed exactly as one-based usize values and validated as a complete permutation before data or provider dispatch.",
+    },
+];
+
 #[runtime_builtin(
     name = "permute",
     category = "array/shape",
@@ -160,6 +202,7 @@ pub const PERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "custom",
     type_resolver(permute_type),
     descriptor(crate::builtins::array::shape::permute::PERMUTE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::permute::PERMUTE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::permute"
 )]
 async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
@@ -996,10 +1039,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
+        let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
+            .expect("wgpu provider")
+        else {
+            return;
+        };
 
         let data: Vec<f64> = (0..24).map(|n| n as f64).collect();
         let host = tensor(&data, &[2, 3, 4]);
@@ -1012,7 +1056,8 @@ pub(crate) mod tests {
             data: &host.materialize_f64(),
             shape: &host.shape,
         };
-        let handle = provider.upload(&view).expect("upload to GPU");
+        let handle =
+            runmat_accelerate_api::AccelProvider::upload(provider, &view).expect("upload to GPU");
         let gpu_value =
             permute_builtin(Value::GpuTensor(handle), Value::Tensor(order)).expect("gpu permute");
         let gathered = test_support::gather(gpu_value).expect("gather gpu result");

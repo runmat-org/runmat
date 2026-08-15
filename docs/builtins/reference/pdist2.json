@@ -26,7 +26,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::ml::distance::tests",
-    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+    "integration": "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs"
   },
   "description": "`pdist2(X,Y)` returns a `size(X,1)` by `size(Y,1)` matrix of distances between rows of `X` and rows of `Y`.",
   "behaviors": [
@@ -35,7 +35,8 @@
     "Supported metrics match `pdist`: `\"euclidean\"`, `\"squaredeuclidean\"`, `\"cityblock\"`, `\"chebychev\"`, `\"minkowski\"`, `\"seuclidean\"`, `\"mahalanobis\"`, `\"cosine\"`, `\"correlation\"`, `\"hamming\"`, `\"jaccard\"`, and `\"spearman\"`.",
     "`pdist2(X,Y,\"minkowski\",P)` uses positive finite exponent `P`.",
     "`pdist2(X,Y,\"seuclidean\",S)` accepts a standard-deviation vector and defaults to scale estimated from `X`. `pdist2(X,Y,\"mahalanobis\",C)` accepts a symmetric positive definite covariance matrix and defaults to covariance estimated from `X`.",
-    "`\"Smallest\",K` and `\"Largest\",K` return the K smallest or largest distances per row of `Y`. `[D,I] = pdist2(...)` also returns one-based row indices from `X` for the selected distances."
+    "`\"Smallest\",K` and `\"Largest\",K` return the K smallest or largest distances per row of `Y`; when K exceeds the number of rows in X, all X rows are returned. `[D,I] = pdist2(...)` also returns one-based row indices from `X` for the selected distances.",
+    "Typed-integer observation data, distance parameters, and `CacheSize` values are checked RunMat floating-boundary extensions. Typed `Smallest` and `Largest` counts are separate structural extensions decoded directly from native storage."
   ],
   "examples": [
     {

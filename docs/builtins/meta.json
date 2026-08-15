@@ -115857,92 +115857,195 @@
       ]
     },
     {
-      "name": "pchip",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "pp = pchip(X, Y)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Strictly increasing sample locations."
-            },
-            {
-              "name": "Y",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Sample values."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "pp",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Piecewise-polynomial struct representation."
-            }
-          ]
-        },
-        {
-          "label": "Vq = pchip(X, Y, Xq)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Strictly increasing sample locations."
-            },
-            {
-              "name": "Y",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Sample values."
-            },
-            {
-              "name": "Xq",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Query points."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Vq",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "PCHIP-evaluated values at query points."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.PCHIP.INVALID_ARGUMENT",
           "identifier": "RunMat:pchip:InvalidArgument",
-          "when": "Argument count or interpolation option grammar is invalid.",
-          "message": "pchip: invalid argument"
+          "message": "pchip: invalid argument",
+          "when": "Argument count or interpolation option grammar is invalid."
         },
         {
           "code": "RM.PCHIP.INVALID_INPUT",
           "identifier": "RunMat:pchip:InvalidInput",
-          "when": "Sample/query inputs are invalid for PCHIP construction or evaluation.",
-          "message": "pchip: invalid input"
+          "message": "pchip: invalid input",
+          "when": "Sample/query inputs are invalid for PCHIP construction or evaluation."
         },
         {
           "code": "RM.PCHIP.INTERNAL",
           "identifier": "RunMat:pchip:Internal",
-          "when": "PCHIP coefficient generation or tensor assembly fails internally.",
-          "message": "pchip: internal interpolation failure"
+          "message": "pchip: internal interpolation failure",
+          "when": "PCHIP coefficient generation or tensor assembly fails internally."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "pchip accepts typed-integer sample locations as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PchipIntegerSampleLocationsExtension",
+          "id": "pchip-integer-sample-locations",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "pchip accepts typed-integer sample values as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PchipIntegerSampleValuesExtension",
+          "id": "pchip-integer-sample-values",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "pchip accepts typed-integer query points as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PchipIntegerQueryPointsExtension",
+          "id": "pchip-integer-query-points",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "pp = pchip(integer_X, Y) or Vq = pchip(integer_X, Y, Xq)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "R2026a documents single and double sample locations. RunMat admits typed integers only when each value is exactly representable at the binary64 interpolation boundary.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed sample locations are independently gated before gather and cross once into the floating PCHIP coefficient domain.",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "pp = pchip(X, integer_Y) or Vq = pchip(X, integer_Y, Xq)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Y",
+              "notes": "R2026a documents single and double sample values. RunMat admits typed integers only through the explicit floating interpolation boundary.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed sample values are independently gated before gather and produce floating coefficients or interpolated values.",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "Vq = pchip(X, Y, integer_Xq)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Xq",
+              "notes": "R2026a documents single and double query points. RunMat admits typed integers only when exact binary64 conversion is possible.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed query points are independently gated and converted only after exactness is proved.",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "overload": "Multiple"
+        }
+      ],
+      "name": "pchip",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Strictly increasing sample locations.",
+              "name": "X",
+              "ty": "Any"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sample values.",
+              "name": "Y",
+              "ty": "Any"
+            }
+          ],
+          "label": "pp = pchip(X, Y)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Piecewise-polynomial struct representation.",
+              "name": "pp",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Strictly increasing sample locations.",
+              "name": "X",
+              "ty": "Any"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sample values.",
+              "name": "Y",
+              "ty": "Any"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Query points.",
+              "name": "Xq",
+              "ty": "Any"
+            }
+          ],
+          "label": "Vq = pchip(X, Y, Xq)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "PCHIP-evaluated values at query points.",
+              "name": "Vq",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
@@ -116082,524 +116185,869 @@
       ]
     },
     {
-      "name": "pdf",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "y = pdf(pd, x)",
-          "inputs": [
-            {
-              "name": "pd",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "ProbabilityDistribution object returned by fitdist."
-            },
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Sample data or evaluation points."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Distribution function values."
-            }
-          ]
-        },
-        {
-          "label": "y = pdf(distname, x, params)",
-          "inputs": [
-            {
-              "name": "distname",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Distribution name."
-            },
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Sample data or evaluation points."
-            },
-            {
-              "name": "NameValue",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Name-value options."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Distribution function values."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.FITDIST.INVALID_ARGUMENT",
           "identifier": "RunMat:fitdist:InvalidArgument",
-          "when": "Sample data, distribution name, options, or evaluation inputs are malformed.",
-          "message": "fitdist: invalid argument"
+          "message": "fitdist: invalid argument",
+          "when": "Sample data, distribution name, options, or evaluation inputs are malformed."
         },
         {
           "code": "RM.FITDIST.NUMERICAL",
           "identifier": "RunMat:fitdist:Numerical",
-          "when": "Distribution parameter estimation fails to converge or is ill-conditioned.",
-          "message": "fitdist: numerical failure"
+          "message": "fitdist: numerical failure",
+          "when": "Distribution parameter estimation fails to converge or is ill-conditioned."
         },
         {
           "code": "RM.FITDIST.INTERNAL",
           "identifier": "RunMat:fitdist:Internal",
-          "when": "RunMat cannot construct distribution outputs.",
-          "message": "fitdist: internal error"
+          "message": "fitdist: internal error",
+          "when": "RunMat cannot construct distribution outputs."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "pdf with typed-integer evaluation points is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PdfIntegerXExtension",
+          "id": "pdf-integer-x",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "pdf with typed-integer distribution parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PdfIntegerParametersExtension",
+          "id": "pdf-integer-parameters",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "y = pdf(pd, integer_x) or pdf(name, integer_x, A...)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "x",
+              "notes": "R2026a documents single and double evaluation points. RunMat gates typed integers before provider access and requires exact conversion at the floating density boundary.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed evaluation points are a RunMat-only floating-boundary extension; density or mass values are floating outputs, and resident fallback restores the selected floating output class through the owning provider.",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "y = pdf(name, x, integer_A...D)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "A...D",
+              "notes": "R2026a documents single and double named-distribution parameters. RunMat independently gates typed parameters and rejects lossy wide values.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed distribution parameters are independently gated and converted only after exactness is proved.",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "overload": "Multiple"
+        }
+      ],
+      "name": "pdf",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "ProbabilityDistribution object returned by fitdist.",
+              "name": "pd",
+              "ty": "Any"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points.",
+              "name": "x",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "y = pdf(pd, x)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values.",
+              "name": "y",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name.",
+              "name": "distname",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points.",
+              "name": "x",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value options.",
+              "name": "NameValue",
+              "ty": "Any"
+            }
+          ],
+          "label": "y = pdf(distname, x, params)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values.",
+              "name": "y",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
     {
+      "completion_policy": "Public",
+      "errors": [
+        {
+          "code": "RM.DISTANCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:distance:InvalidArgument",
+          "message": "distance helper: invalid argument",
+          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed."
+        },
+        {
+          "code": "RM.DISTANCE.INTERNAL",
+          "identifier": "RunMat:distance:Internal",
+          "message": "distance helper: internal error",
+          "when": "RunMat cannot allocate or construct a distance output."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "pdist with typed-integer observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PdistIntegerObservationDataExtension",
+          "id": "pdist-integer-observation-data",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "pdist with a typed-integer distance parameter or cache size is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PdistIntegerNumericControlExtension",
+          "id": "pdist-integer-numeric-control",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "D = pdist(integer_X, ...)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "R2026a documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "All distance metrics consume one explicit binary64 view after admission; values beyond exact binary64 range reject rather than alias.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "D = pdist(X, Distance, integer_DistParameter_or_CacheSize)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "DistParameter or CacheSize",
+              "notes": "Documented metric parameters are single or double and CacheSize is double; typed values cross a checked floating control boundary.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Typed numeric controls are independently gated and must be exactly representable before metric parsing.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "StructuralParameter"
+        }
+      ],
       "name": "pdist",
       "output_mode": "Fixed",
-      "completion_policy": "Public",
       "signatures": [
         {
-          "label": "D = pdist(X)",
           "inputs": [
             {
-              "name": "X",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Observation matrix with observations in rows."
+              "description": "Observation matrix with observations in rows.",
+              "name": "X",
+              "ty": "NumericArray"
             }
           ],
+          "label": "D = pdist(X)",
           "outputs": [
             {
-              "name": "D",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Pairwise distances."
+              "description": "Pairwise distances.",
+              "name": "D",
+              "ty": "NumericArray"
             }
           ]
         },
         {
-          "label": "D = pdist(X, Distance, DistParameter)",
           "inputs": [
             {
-              "name": "X",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Observation matrix with observations in rows."
+              "description": "Observation matrix with observations in rows.",
+              "name": "X",
+              "ty": "NumericArray"
             },
             {
-              "name": "options",
-              "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Distance metric and optional metric parameter."
+              "description": "Distance metric and optional metric parameter.",
+              "name": "options",
+              "ty": "Any"
             }
           ],
+          "label": "D = pdist(X, Distance, DistParameter)",
           "outputs": [
             {
-              "name": "D",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Pairwise distances."
+              "description": "Pairwise distances.",
+              "name": "D",
+              "ty": "NumericArray"
             }
           ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.DISTANCE.INVALID_ARGUMENT",
-          "identifier": "RunMat:distance:InvalidArgument",
-          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
-          "message": "distance helper: invalid argument"
-        },
-        {
-          "code": "RM.DISTANCE.INTERNAL",
-          "identifier": "RunMat:distance:Internal",
-          "when": "RunMat cannot allocate or construct a distance output.",
-          "message": "distance helper: internal error"
         }
       ]
     },
     {
+      "completion_policy": "Public",
+      "errors": [
+        {
+          "code": "RM.DISTANCE.INVALID_ARGUMENT",
+          "identifier": "RunMat:distance:InvalidArgument",
+          "message": "distance helper: invalid argument",
+          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed."
+        },
+        {
+          "code": "RM.DISTANCE.INTERNAL",
+          "identifier": "RunMat:distance:Internal",
+          "message": "distance helper: internal error",
+          "when": "RunMat cannot allocate or construct a distance output."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "pdist2 with typed-integer X or Y observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pdist2IntegerObservationDataExtension",
+          "id": "pdist2-integer-observation-data",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "pdist2 with a typed-integer distance parameter or cache size is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pdist2IntegerNumericControlExtension",
+          "id": "pdist2-integer-numeric-control",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "pdist2 with a typed-integer Smallest or Largest count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Pdist2IntegerSelectionCountExtension",
+          "id": "pdist2-integer-selection-count",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "D = pdist2(integer_X, integer_Y, ...)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "R2026a documents single and double X observations; RunMat requires exact binary64 conversion for typed integers.",
+              "scalar_double": "NotApplicable"
+            },
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Y",
+              "notes": "R2026a documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed observations are gated before gather and enter the floating distance domain only after exactness is proved.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "D = pdist2(X, Y, Distance, integer_DistParameter_or_CacheSize)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "DistParameter or CacheSize",
+              "notes": "Typed distance parameters and cache sizes are RunMat-only checked floating controls.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Typed numerical controls are independently gated and cross a checked binary64 boundary.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "StructuralParameter"
+        },
+        {
+          "backend": "HostOnly",
+          "computation_domain": "Structural",
+          "form": "[D,I] = pdist2(X, Y, Smallest/Largest=integer_K)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Smallest or Largest",
+              "notes": "R2026a enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "The typed selection count is decoded directly from authoritative storage; distances and MATLAB-compatible indices remain double.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "StructuralParameter"
+        }
+      ],
       "name": "pdist2",
       "output_mode": "ByRequestedOutputCount",
-      "completion_policy": "Public",
       "signatures": [
         {
-          "label": "D = pdist2(X, Y)",
           "inputs": [
             {
-              "name": "X",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Observation matrix with observations in rows."
+              "description": "Observation matrix with observations in rows.",
+              "name": "X",
+              "ty": "NumericArray"
             },
             {
-              "name": "Y",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Second observation matrix with observations in rows."
+              "description": "Second observation matrix with observations in rows.",
+              "name": "Y",
+              "ty": "NumericArray"
             }
           ],
+          "label": "D = pdist2(X, Y)",
           "outputs": [
             {
-              "name": "D",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Pairwise distances."
+              "description": "Pairwise distances.",
+              "name": "D",
+              "ty": "NumericArray"
             }
           ]
         },
         {
-          "label": "D = pdist2(X, Y, Distance, DistParameter, Name, Value)",
           "inputs": [
             {
+              "arity": "Required",
+              "default": null,
+              "description": "Observation matrix with observations in rows.",
               "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Observation matrix with observations in rows."
+              "ty": "NumericArray"
             },
             {
+              "arity": "Required",
+              "default": null,
+              "description": "Second observation matrix with observations in rows.",
               "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Second observation matrix with observations in rows."
+              "ty": "NumericArray"
             },
             {
-              "name": "options",
-              "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Distance metric, metric parameter, or Smallest/Largest selection options."
+              "description": "Distance metric, metric parameter, or Smallest/Largest selection options.",
+              "name": "options",
+              "ty": "Any"
             }
           ],
+          "label": "D = pdist2(X, Y, Distance, DistParameter, Name, Value)",
           "outputs": [
             {
-              "name": "D",
-              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Selected pairwise distances."
+              "description": "Selected pairwise distances.",
+              "name": "D",
+              "ty": "NumericArray"
             },
             {
-              "name": "I",
-              "ty": "NumericArray",
               "arity": "Optional",
               "default": null,
-              "description": "One-based row indices from X for selected distances."
+              "description": "One-based row indices from X for selected distances.",
+              "name": "I",
+              "ty": "NumericArray"
             }
           ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.DISTANCE.INVALID_ARGUMENT",
-          "identifier": "RunMat:distance:InvalidArgument",
-          "when": "Inputs, dimensions, metrics, metric parameters, or selection options are malformed.",
-          "message": "distance helper: invalid argument"
-        },
-        {
-          "code": "RM.DISTANCE.INTERNAL",
-          "identifier": "RunMat:distance:Internal",
-          "when": "RunMat cannot allocate or construct a distance output.",
-          "message": "distance helper: internal error"
         }
       ]
     },
     {
-      "name": "peaks",
-      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Z = peaks()",
-          "inputs": [],
-          "outputs": [
-            {
-              "name": "Z",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Sampled peaks surface values."
-            }
-          ]
-        },
-        {
-          "label": "Z = peaks(n)",
-          "inputs": [
-            {
-              "name": "n",
-              "ty": "IntegerScalar",
-              "arity": "Required",
-              "default": "49",
-              "description": "Grid size n for n-by-n sampling."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Z",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Sampled peaks surface values."
-            }
-          ]
-        },
-        {
-          "label": "Z = peaks(X, Y)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "X coordinate matrix."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Y coordinate matrix (same size as X)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Z",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Sampled peaks surface values."
-            }
-          ]
-        },
-        {
-          "label": "[X,Y] = peaks(n)",
-          "inputs": [
-            {
-              "name": "n",
-              "ty": "IntegerScalar",
-              "arity": "Required",
-              "default": "49",
-              "description": "Grid size n for n-by-n sampling."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along X-axis."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along Y-axis."
-            }
-          ]
-        },
-        {
-          "label": "[X,Y,Z] = peaks(n)",
-          "inputs": [
-            {
-              "name": "n",
-              "ty": "IntegerScalar",
-              "arity": "Required",
-              "default": "49",
-              "description": "Grid size n for n-by-n sampling."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along X-axis."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along Y-axis."
-            },
-            {
-              "name": "Z",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Sampled peaks surface values."
-            }
-          ]
-        },
-        {
-          "label": "[X,Y] = peaks(X, Y)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "X coordinate matrix."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Y coordinate matrix (same size as X)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along X-axis."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along Y-axis."
-            }
-          ]
-        },
-        {
-          "label": "[X,Y,Z] = peaks(X, Y)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "X coordinate matrix."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Y coordinate matrix (same size as X)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along X-axis."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Grid coordinates along Y-axis."
-            },
-            {
-              "name": "Z",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Sampled peaks surface values."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.PEAKS.OUTPUT_COUNT",
           "identifier": null,
-          "when": "More than three outputs are requested.",
-          "message": "peaks: too many output arguments; maximum is 3"
+          "message": "peaks: too many output arguments; maximum is 3",
+          "when": "More than three outputs are requested."
         },
         {
           "code": "RM.PEAKS.ARG_COUNT",
           "identifier": null,
-          "when": "The builtin is called with more than two input arguments.",
-          "message": "peaks: expected 0, 1, or 2 input arguments"
+          "message": "peaks: expected 0, 1, or 2 input arguments",
+          "when": "The builtin is called with more than two input arguments."
         },
         {
           "code": "RM.PEAKS.N_NON_SCALAR",
           "identifier": null,
-          "when": "The n argument is not a numeric scalar.",
-          "message": "peaks: n must be a numeric scalar"
+          "message": "peaks: n must be a numeric scalar",
+          "when": "The n argument is not a numeric scalar."
         },
         {
           "code": "RM.PEAKS.N_NON_FINITE",
           "identifier": null,
-          "when": "The n argument is non-finite.",
-          "message": "peaks: n must be finite"
+          "message": "peaks: n must be finite",
+          "when": "The n argument is non-finite."
         },
         {
           "code": "RM.PEAKS.N_NON_INTEGER",
           "identifier": null,
-          "when": "The n argument is not an integer.",
-          "message": "peaks: n must be an integer"
+          "message": "peaks: n must be an integer",
+          "when": "The n argument is not an integer."
         },
         {
-          "code": "RM.PEAKS.N_NEGATIVE",
+          "code": "RM.PEAKS.N_OUT_OF_RANGE",
           "identifier": null,
-          "when": "The n argument is negative.",
-          "message": "peaks: n must be non-negative"
+          "message": "peaks: scalar n must be an integer greater than 1",
+          "when": "The scalar n argument is not greater than one."
         },
         {
           "code": "RM.PEAKS.N_TOO_LARGE",
           "identifier": null,
-          "when": "The n argument exceeds platform limits.",
-          "message": "peaks: n is too large for this platform"
+          "message": "peaks: n is too large for this platform",
+          "when": "The n argument exceeds platform limits."
         },
         {
           "code": "RM.PEAKS.XY_NON_NUMERIC",
           "identifier": null,
-          "when": "X/Y inputs are not numeric matrix values.",
-          "message": "peaks: X and Y must be numeric matrices"
+          "message": "peaks: X and Y must be numeric matrices",
+          "when": "X/Y inputs are not numeric matrix values."
         },
         {
           "code": "RM.PEAKS.XY_NOT_2D",
           "identifier": null,
-          "when": "X/Y inputs are not 2-D matrices.",
-          "message": "peaks: X and Y must be 2-D matrices"
+          "message": "peaks: X and Y must be 2-D matrices",
+          "when": "X/Y inputs are not 2-D matrices."
         },
         {
           "code": "RM.PEAKS.XY_SIZE_MISMATCH",
           "identifier": null,
-          "when": "X and Y inputs do not have the same shape.",
-          "message": "peaks: X and Y must have the same size"
+          "message": "peaks: X and Y must have the same size",
+          "when": "X and Y inputs do not have the same shape."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "peaks accepts a typed-integer scalar grid size as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PeaksTypedIntegerGridSizeExtension",
+          "id": "peaks-typed-integer-grid-size",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "peaks accepts explicit gpuArray coordinate or grid-size inputs as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PeaksExplicitGpuInputExtension",
+          "id": "peaks-explicit-gpu-input",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "HostAndGpu",
+          "computation_domain": "Structural",
+          "form": "[X,Y,Z] = peaks(integer_n)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "n",
+              "notes": "The public scalar form requires an integer value greater than one but does not enumerate typed integer storage. RunMat decodes all eight classes exactly as a structural grid size.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Typed n is a gated structural extension; generated coordinates and surface values are floating and provider selection remains automatic.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "ScalarOnly"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "[X,Y,Z] = peaks(integer_Xm, integer_Ym)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Xm",
+              "notes": "R2026a explicitly documents all eight integer coordinate classes. X output preserves Xm exactly when requested, while Z crosses the peaks floating formula boundary.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Ym",
+              "notes": "R2026a explicitly documents all eight integer coordinate classes. Y output preserves Ym exactly when requested, while Z crosses the peaks floating formula boundary.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Documented integer coordinates remain authoritative for returned X and Y; Z intentionally materializes a floating view for transcendental evaluation. Explicit gpuArray inputs are separately RunMat-only because the public page does not advertise GPU arrays.",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "overload": "BroadcastCompatible"
+        }
+      ],
+      "name": "peaks",
+      "output_mode": "ByRequestedOutputCount",
+      "signatures": [
+        {
+          "inputs": [],
+          "label": "Z = peaks()",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sampled peaks surface values.",
+              "name": "Z",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": "49",
+              "description": "Grid size n for n-by-n sampling.",
+              "name": "n",
+              "ty": "IntegerScalar"
+            }
+          ],
+          "label": "Z = peaks(n)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sampled peaks surface values.",
+              "name": "Z",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinate matrix.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinate matrix (same size as X).",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "Z = peaks(X, Y)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sampled peaks surface values.",
+              "name": "Z",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": "49",
+              "description": "Grid size n for n-by-n sampling.",
+              "name": "n",
+              "ty": "IntegerScalar"
+            }
+          ],
+          "label": "[X,Y] = peaks(n)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along X-axis.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along Y-axis.",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": "49",
+              "description": "Grid size n for n-by-n sampling.",
+              "name": "n",
+              "ty": "IntegerScalar"
+            }
+          ],
+          "label": "[X,Y,Z] = peaks(n)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along X-axis.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along Y-axis.",
+              "name": "Y",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sampled peaks surface values.",
+              "name": "Z",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinate matrix.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinate matrix (same size as X).",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "[X,Y] = peaks(X, Y)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along X-axis.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along Y-axis.",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinate matrix.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinate matrix (same size as X).",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "[X,Y,Z] = peaks(X, Y)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along X-axis.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Grid coordinates along Y-axis.",
+              "name": "Y",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Sampled peaks surface values.",
+              "name": "Z",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
@@ -116792,261 +117240,464 @@
       ]
     },
     {
-      "name": "periodogram",
-      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "pxx = periodogram(x, window, nfft, fs, freqrange)",
-          "inputs": [
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Input signal vector or matrix with one signal per column."
-            },
-            {
-              "name": "window",
-              "ty": "NumericArray",
-              "arity": "Optional",
-              "default": "[]",
-              "description": "Window vector. [] uses a rectangular window matching the signal length."
-            },
-            {
-              "name": "nfft",
-              "ty": "NumericArray",
-              "arity": "Optional",
-              "default": "[]",
-              "description": "DFT length or explicit frequency vector."
-            },
-            {
-              "name": "fs",
-              "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Sampling frequency in Hz."
-            },
-            {
-              "name": "freqrange",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Frequency range selector (`onesided`, `twosided`, or `centered`) and spectrum type (`psd` or `power`)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "pxx",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Power spectral density or power spectrum estimate."
-            }
-          ]
-        },
-        {
-          "label": "[pxx, f] = periodogram(x, window, nfft, fs, freqrange)",
-          "inputs": [
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Input signal vector or matrix with one signal per column."
-            },
-            {
-              "name": "window",
-              "ty": "NumericArray",
-              "arity": "Optional",
-              "default": "[]",
-              "description": "Window vector. [] uses a rectangular window matching the signal length."
-            },
-            {
-              "name": "nfft",
-              "ty": "NumericArray",
-              "arity": "Optional",
-              "default": "[]",
-              "description": "DFT length or explicit frequency vector."
-            },
-            {
-              "name": "fs",
-              "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Sampling frequency in Hz."
-            },
-            {
-              "name": "freqrange",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Frequency range selector (`onesided`, `twosided`, or `centered`) and spectrum type (`psd` or `power`)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "pxx",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Power spectral density or power spectrum estimate."
-            },
-            {
-              "name": "f",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Frequency vector in radians/sample or Hz when fs is supplied."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.PERIODOGRAM.ARG_COUNT",
           "identifier": "RunMat:periodogram:ArgCount",
-          "when": "The argument count is outside supported forms.",
-          "message": "periodogram: expected periodogram(x, [window, [nfft_or_f, [fs, [freqrange_or_scale]]]])"
+          "message": "periodogram: expected periodogram(x, [window, [nfft_or_f, [fs, [freqrange_or_scale]]]])",
+          "when": "The argument count is outside supported forms."
         },
         {
           "code": "RM.PERIODOGRAM.INVALID_SIGNAL",
           "identifier": "RunMat:periodogram:InvalidSignal",
-          "when": "Input signal is not a numeric vector or matrix.",
-          "message": "periodogram: x must be a nonempty numeric vector or 2-D matrix"
+          "message": "periodogram: x must be a nonempty numeric vector or 2-D matrix",
+          "when": "Input signal is not a numeric vector or matrix."
         },
         {
           "code": "RM.PERIODOGRAM.INVALID_WINDOW",
           "identifier": "RunMat:periodogram:InvalidWindow",
-          "when": "Window input is invalid.",
-          "message": "periodogram: window must be a finite real vector matching the signal length"
+          "message": "periodogram: window must be a finite real vector matching the signal length",
+          "when": "Window input is invalid."
         },
         {
           "code": "RM.PERIODOGRAM.INVALID_NFFT",
           "identifier": "RunMat:periodogram:InvalidNfft",
-          "when": "DFT length or frequency vector is invalid.",
-          "message": "periodogram: nfft must be a positive integer or finite real frequency vector"
+          "message": "periodogram: nfft must be a positive integer or finite real frequency vector",
+          "when": "DFT length or frequency vector is invalid."
         },
         {
           "code": "RM.PERIODOGRAM.INVALID_FS",
           "identifier": "RunMat:periodogram:InvalidFs",
-          "when": "Sampling frequency is invalid.",
-          "message": "periodogram: fs must be a positive finite scalar"
+          "message": "periodogram: fs must be a positive finite scalar",
+          "when": "Sampling frequency is invalid."
         },
         {
           "code": "RM.PERIODOGRAM.INVALID_RANGE",
           "identifier": "RunMat:periodogram:InvalidRange",
-          "when": "Frequency range selector or spectrum type is invalid.",
-          "message": "periodogram: freqrange must be 'onesided', 'twosided', or 'centered'; spectrum type must be 'psd' or 'power'"
+          "message": "periodogram: freqrange must be 'onesided', 'twosided', or 'centered'; spectrum type must be 'psd' or 'power'",
+          "when": "Frequency range selector or spectrum type is invalid."
         },
         {
           "code": "RM.PERIODOGRAM.INTERNAL",
           "identifier": "RunMat:periodogram:Internal",
-          "when": "Output tensor construction fails internally.",
-          "message": "periodogram: internal error"
+          "message": "periodogram: internal error",
+          "when": "Output tensor construction fails internally."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "periodogram accepts a typed-integer input signal as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PeriodogramIntegerSignalExtension",
+          "id": "periodogram-integer-signal",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "periodogram accepts typed-integer window, frequency, DFT-length, or sample-rate controls as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PeriodogramIntegerNumericControlExtension",
+          "id": "periodogram-integer-numeric-control",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "[pxx,f] = periodogram(integer_x, ...)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "x",
+              "notes": "R2026a documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion and supported resident floating paths remain unaffected.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FunctionSpecific",
+          "form": "periodogram(x, integer_window_or_frequency_controls)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "window",
+              "notes": "Documented window storage is single or double; typed windows cross a checked floating boundary.",
+              "scalar_double": "NotApplicable"
+            },
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "freqSpec/nfft",
+              "notes": "A scalar is decoded as an exact structural DFT length; a vector is a checked floating frequency grid.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Fs",
+              "notes": "Typed sample rates enter the floating frequency-scaling boundary only after exactness is proved.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "confidence or numeric option",
+              "notes": "Additional supported numeric controls remain independently classified as checked floating inputs.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Typed numerical controls are independently gated; scalar DFT length is structural and remaining controls cross a checked binary64 boundary.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "Multiple"
+        }
+      ],
+      "name": "periodogram",
+      "output_mode": "ByRequestedOutputCount",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal vector or matrix with one signal per column.",
+              "name": "x",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Window vector. [] uses a rectangular window matching the signal length.",
+              "name": "window",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Optional",
+              "default": "[]",
+              "description": "DFT length or explicit frequency vector.",
+              "name": "nfft",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Optional",
+              "default": null,
+              "description": "Sampling frequency in Hz.",
+              "name": "fs",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Optional",
+              "default": null,
+              "description": "Frequency range selector (`onesided`, `twosided`, or `centered`) and spectrum type (`psd` or `power`).",
+              "name": "freqrange",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "pxx = periodogram(x, window, nfft, fs, freqrange)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Power spectral density or power spectrum estimate.",
+              "name": "pxx",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input signal vector or matrix with one signal per column.",
+              "name": "x",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Window vector. [] uses a rectangular window matching the signal length.",
+              "name": "window",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Optional",
+              "default": "[]",
+              "description": "DFT length or explicit frequency vector.",
+              "name": "nfft",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Optional",
+              "default": null,
+              "description": "Sampling frequency in Hz.",
+              "name": "fs",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Optional",
+              "default": null,
+              "description": "Frequency range selector (`onesided`, `twosided`, or `centered`) and spectrum type (`psd` or `power`).",
+              "name": "freqrange",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "[pxx, f] = periodogram(x, window, nfft, fs, freqrange)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Power spectral density or power spectrum estimate.",
+              "name": "pxx",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Frequency vector in radians/sample or Hz when fs is supplied.",
+              "name": "f",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "perms",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "P = perms(v)",
-          "inputs": [
-            {
-              "name": "v",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input vector to permute."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "P",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Matrix whose rows contain every permutation of the input vector."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.PERMS.INVALID_INPUT",
           "identifier": "RunMat:perms:InvalidInput",
-          "when": "The input is missing, not a vector, or has an unsupported type.",
-          "message": "perms: input must be a vector"
+          "message": "perms: input must be a vector",
+          "when": "The input is missing, not a vector, or has an unsupported type."
         },
         {
           "code": "RM.PERMS.TOO_LARGE",
           "identifier": "RunMat:perms:TooLarge",
-          "when": "The factorial-size output would exceed RunMat's supported materialisation limit.",
-          "message": "perms: output is too large"
+          "message": "perms: output is too large",
+          "when": "The factorial-size output would exceed RunMat's supported materialisation limit."
         },
         {
           "code": "RM.PERMS.INTERNAL",
           "identifier": "RunMat:perms:Internal",
-          "when": "Output allocation, GPU gather, or container construction failed.",
-          "message": "perms: internal error"
+          "message": "perms: internal error",
+          "when": "Output allocation, GPU gather, or container construction failed."
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "ExactInteger",
+          "form": "P = perms(integer_v)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "v",
+              "notes": "R2026a explicitly documents every integer class and shows an int16 example. Values are rearranged without arithmetic or conversion.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Every output element is copied from authoritative native storage in reverse lexicographic index order. Documented gpuArray inputs gather through their owner and the same-class result is restored to that owner.",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "overload": "ElementwiseShapePreserving"
+        }
+      ],
+      "name": "perms",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input vector to permute.",
+              "name": "v",
+              "ty": "Any"
+            }
+          ],
+          "label": "P = perms(v)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Matrix whose rows contain every permutation of the input vector.",
+              "name": "P",
+              "ty": "Any"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "permute",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "B = permute(A, order)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input array/value."
-            },
-            {
-              "name": "order",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Row/column vector containing a permutation of 1:ndims(A)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input array with dimensions reordered by order."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.PERMUTE.INVALID_ORDER",
           "identifier": "RunMat:permute:InvalidOrder",
-          "when": "order is non-numeric, non-vector, empty, non-integer, out of range, or duplicated.",
-          "message": "permute: invalid order vector"
+          "message": "permute: invalid order vector",
+          "when": "order is non-numeric, non-vector, empty, non-integer, out of range, or duplicated."
         },
         {
           "code": "RM.PERMUTE.RANK_MISMATCH",
           "identifier": "RunMat:permute:RankMismatch",
-          "when": "order length is less than ndims(A).",
-          "message": "permute: order length must be at least ndims(A)"
+          "message": "permute: order length must be at least ndims(A)",
+          "when": "order length is less than ndims(A)."
         },
         {
           "code": "RM.PERMUTE.UNSUPPORTED_INPUT",
           "identifier": "RunMat:permute:UnsupportedInput",
-          "when": "A has unsupported type for permute.",
-          "message": "permute: unsupported input type"
+          "message": "permute: unsupported input type",
+          "when": "A has unsupported type for permute."
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "HostAndGpu",
+          "computation_domain": "ExactInteger",
+          "form": "B = permute(integer_A, dimorder)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "A",
+              "notes": "The generic array contract includes every integer class. Permutation only reorders authoritative elements and preserves class exactly.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Host, paired complex-integer, and provider-resident paths preserve exact class, shape, owner, and explicit residency while changing only layout.",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "overload": "ElementwiseShapePreserving"
+        },
+        {
+          "backend": "HostAndGpu",
+          "computation_domain": "Structural",
+          "form": "B = permute(A, integer_dimorder)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "dimorder",
+              "notes": "The public row-vector contract requires unique positive integer elements. RunMat decodes all native integer classes directly without a floating compatibility mirror.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Dimension order is parsed exactly as one-based usize values and validated as a complete permutation before data or provider dispatch.",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "overload": "StructuralParameter"
+        }
+      ],
+      "name": "permute",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input array/value.",
+              "name": "A",
+              "ty": "Any"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Row/column vector containing a permutation of 1:ndims(A).",
+              "name": "order",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "B = permute(A, order)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input array with dimensions reordered by order.",
+              "name": "B",
+              "ty": "Any"
+            }
+          ]
         }
       ]
     },

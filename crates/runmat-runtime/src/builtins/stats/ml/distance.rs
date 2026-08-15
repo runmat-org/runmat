@@ -228,6 +228,154 @@ pub const KNNSEARCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DISTANCE_ERRORS,
 };
 
+const PDIST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist-integer-observation-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdist with typed-integer observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PdistIntegerObservationDataExtension"),
+};
+const PDIST_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist-integer-numeric-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "pdist with a typed-integer distance parameter or cache size is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PdistIntegerNumericControlExtension"),
+};
+pub const PDIST_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    PDIST_INTEGER_DATA_EXTENSION,
+    PDIST_INTEGER_CONTROL_EXTENSION,
+];
+
+const PDIST2_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist2-integer-observation-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdist2 with typed-integer X or Y observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pdist2IntegerObservationDataExtension"),
+};
+const PDIST2_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist2-integer-numeric-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "pdist2 with a typed-integer distance parameter or cache size is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pdist2IntegerNumericControlExtension"),
+};
+const PDIST2_INTEGER_SELECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pdist2-integer-selection-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pdist2 with a typed-integer Smallest or Largest count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Pdist2IntegerSelectionCountExtension"),
+};
+pub const PDIST2_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    PDIST2_INTEGER_DATA_EXTENSION,
+    PDIST2_INTEGER_CONTROL_EXTENSION,
+    PDIST2_INTEGER_SELECTION_EXTENSION,
+];
+
+const PDIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion.",
+    }];
+const PDIST_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "DistParameter or CacheSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented metric parameters are single or double and CacheSize is double; typed values cross a checked floating control boundary.",
+    }];
+pub const PDIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist(integer_X, ...)",
+        inputs: &PDIST_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All distance metrics consume one explicit binary64 view after admission; values beyond exact binary64 range reject rather than alias.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist(X, Distance, integer_DistParameter_or_CacheSize)",
+        inputs: &PDIST_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed numeric controls are independently gated and must be exactly representable before metric parsing.",
+    },
+];
+
+const PDIST2_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double X observations; RunMat requires exact binary64 conversion for typed integers.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers.",
+    },
+];
+const PDIST2_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "DistParameter or CacheSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "Typed distance parameters and cache sizes are RunMat-only checked floating controls.",
+    }];
+const PDIST2_INTEGER_SELECTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Smallest or Largest",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts.",
+    }];
+pub const PDIST2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist2(integer_X, integer_Y, ...)",
+        inputs: &PDIST2_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed observations are gated before gather and enter the floating distance domain only after exactness is proved.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = pdist2(X, Y, Distance, integer_DistParameter_or_CacheSize)",
+        inputs: &PDIST2_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed numerical controls are independently gated and cross a checked binary64 boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[D,I] = pdist2(X, Y, Smallest/Largest=integer_K)",
+        inputs: &PDIST2_INTEGER_SELECTION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The typed selection count is decoded directly from authoritative storage; distances and MATLAB-compatible indices remain double.",
+    },
+];
+
 const KNN_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "knnsearch-integer-observation-data",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -491,11 +639,15 @@ struct KnnOptions {
     keywords = "pdist,pairwise,distance,statistics,machine learning,clustering",
     type_resolver(vector_type),
     descriptor(crate::builtins::stats::ml::distance::PDIST_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::PDIST_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::PDIST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_pdist_integer_boundaries(PDIST_NAME, &x, None, &rest).await?;
     let x = value_to_matrix(PDIST_NAME, x).await?;
-    let metric = parse_metric(PDIST_NAME, &x, None, rest).await?;
+    let metric_args = strip_cache_size_option(PDIST_NAME, rest).await?;
+    let metric = parse_metric(PDIST_NAME, &x, None, metric_args).await?;
     let distances = condensed_distances(PDIST_NAME, &x, &metric)?;
     Ok(Value::Tensor(distances))
 }
@@ -507,9 +659,12 @@ async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "pdist2,pairwise,distance,nearest neighbor,statistics,machine learning",
     type_resolver(matrix_type),
     descriptor(crate::builtins::stats::ml::distance::PDIST2_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::PDIST2_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::PDIST2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_pdist_integer_boundaries(PDIST2_NAME, &x, Some(&y), &rest).await?;
     let x = value_to_matrix(PDIST2_NAME, x).await?;
     let y = value_to_matrix(PDIST2_NAME, y).await?;
     if x.cols != y.cols {
@@ -519,6 +674,7 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
         ));
     }
     let (metric_args, selection) = split_pdist2_options(rest)?;
+    let metric_args = strip_cache_size_option(PDIST2_NAME, metric_args).await?;
     let metric = parse_metric(PDIST2_NAME, &x, Some(&y), metric_args).await?;
     let distances = distance_matrix(PDIST2_NAME, &x, &y, &metric)?;
     match selection {
@@ -540,6 +696,101 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
             }
         }
     }
+}
+
+async fn strip_cache_size_option(
+    name: &'static str,
+    args: Vec<Value>,
+) -> BuiltinResult<Vec<Value>> {
+    let mut metric_args = Vec::with_capacity(args.len());
+    let mut index = 0usize;
+    while index < args.len() {
+        if keyword_of(&args[index]).is_some_and(|keyword| keyword.eq_ignore_ascii_case("cachesize"))
+        {
+            let Some(value) = args.get(index + 1) else {
+                return Err(distance_error(
+                    name,
+                    format!("{name}: CacheSize requires a value"),
+                ));
+            };
+            if keyword_of(value).is_some_and(|keyword| keyword.eq_ignore_ascii_case("maximal")) {
+                index += 2;
+                continue;
+            }
+            let cache_size = scalar_parameter(name, value, "CacheSize").await?;
+            if !cache_size.is_finite() || cache_size <= 0.0 {
+                return Err(distance_error(
+                    name,
+                    format!("{name}: CacheSize must be positive or 'maximal'"),
+                ));
+            }
+            index += 2;
+            continue;
+        }
+        metric_args.push(args[index].clone());
+        index += 1;
+    }
+    Ok(metric_args)
+}
+
+async fn ensure_pdist_integer_boundaries(
+    name: &'static str,
+    x: &Value,
+    y: Option<&Value>,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    let data_extension = if name == PDIST_NAME {
+        &PDIST_INTEGER_DATA_EXTENSION
+    } else {
+        &PDIST2_INTEGER_DATA_EXTENSION
+    };
+    for (value, role) in std::iter::once((x, "X")).chain(y.map(|value| (value, "Y"))) {
+        if knn_typed_integer(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(data_extension, name)?;
+            ensure_distance_exact_f64(name, value, role).await?;
+        }
+    }
+    for (index, value) in rest.iter().enumerate() {
+        if !knn_typed_integer(value) {
+            continue;
+        }
+        let selector = index
+            .checked_sub(1)
+            .and_then(|previous| keyword_of(&rest[previous]));
+        if name == PDIST2_NAME
+            && selector
+                .as_deref()
+                .is_some_and(|selector| matches!(selector, "smallest" | "largest"))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PDIST2_INTEGER_SELECTION_EXTENSION,
+                name,
+            )?;
+            continue;
+        }
+        let extension = if name == PDIST_NAME {
+            &PDIST_INTEGER_CONTROL_EXTENSION
+        } else {
+            &PDIST2_INTEGER_CONTROL_EXTENSION
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, name)?;
+        ensure_distance_exact_f64(name, value, "numeric control").await?;
+    }
+    Ok(())
+}
+
+async fn ensure_distance_exact_f64(
+    name: &'static str,
+    value: &Value,
+    role: &str,
+) -> BuiltinResult<()> {
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value).await? {
+        return Err(distance_error(
+            name,
+            format!("{name}: typed-integer {role} must be exactly representable as double"),
+        ));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -1666,15 +1917,10 @@ fn selected_distance_outputs(distances: &Tensor, selection: Selection) -> Builti
 }
 
 fn select_distances(distances: &Tensor, selection: Selection) -> BuiltinResult<(Tensor, Tensor)> {
-    let k = match selection {
+    let requested = match selection {
         Selection::Smallest(k) | Selection::Largest(k) => k,
     };
-    if k > distances.rows {
-        return Err(distance_error(
-            PDIST2_NAME,
-            "pdist2: Smallest or Largest count must be <= size(X,1)",
-        ));
-    }
+    let k = requested.min(distances.rows);
     let len = k
         .checked_mul(distances.cols)
         .ok_or_else(|| internal_error(PDIST2_NAME, "pdist2: selected output size overflow"))?;
@@ -2140,6 +2386,7 @@ mod tests {
 
     #[test]
     fn distance_helpers_read_typed_integer_inputs_and_parameters_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2);
         let out = block_on(pdist_builtin(
             x,
@@ -2218,6 +2465,7 @@ mod tests {
 
     #[test]
     fn pdist2_selection_reads_typed_integer_count_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(pdist2_builtin(
             poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 0, 0]), 2, 2),
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 0, 0]), 2, 2),
@@ -2502,6 +2750,7 @@ mod tests {
 
     #[test]
     fn seuclidean_scale_reads_typed_integer_storage_length_without_mirror() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = block_on(pdist_builtin(
             int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2),
             vec![
