@@ -1,7 +1,11 @@
 //! MATLAB-compatible `spline` builtin backed by piecewise-polynomial structs.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Type, Value,
 };
@@ -123,6 +127,42 @@ pub const SPLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SPLINE_ERRORS,
 };
 
+const SPLINE_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "spline-integer-sample-locations",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "spline with typed-integer sample locations is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SplineIntegerSampleLocationsExtension"),
+};
+const SPLINE_INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "spline-integer-sample-values",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "spline with typed-integer sample values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SplineIntegerSampleValuesExtension"),
+};
+const SPLINE_INTEGER_XQ_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "spline-integer-query-points",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "spline with typed-integer query points is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SplineIntegerQueryPointsExtension"),
+};
+pub const SPLINE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    SPLINE_INTEGER_X_EXTENSION,
+    SPLINE_INTEGER_Y_EXTENSION,
+    SPLINE_INTEGER_XQ_EXTENSION,
+];
+
+const SPLINE_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "R2026a documents single and double sample locations. RunMat mode admits typed integers only when every value is exactly representable at the binary64 interpolation boundary." }];
+const SPLINE_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "Y", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "R2026a documents single and double sample values. RunMat mode admits typed integers only through the checked floating interpolation boundary." }];
+const SPLINE_INTEGER_XQ_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "Xq", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "R2026a documents single and double query points. RunMat mode admits typed integers only when exact binary64 conversion is possible." }];
+pub const SPLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "pp = spline(integer_X, Y)", inputs: &SPLINE_INTEGER_X_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Sample locations cross the checked spline coefficient boundary; the returned piecewise-polynomial structure stores floating coefficients." },
+    BuiltinIntegerCapabilityDescriptor { form: "pp = spline(X, integer_Y)", inputs: &SPLINE_INTEGER_Y_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Sample values cross the same checked binary64 coefficient boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "Vq = spline(X, Y, integer_Xq)", inputs: &SPLINE_INTEGER_XQ_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Query values are checked before conversion and the evaluated result is floating." },
+];
+
 fn spline_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -197,9 +237,36 @@ fn spline_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     sink = true,
     type_resolver(spline_type),
     descriptor(crate::builtins::math::interpolation::spline::SPLINE_DESCRIPTOR),
+    extensions(crate::builtins::math::interpolation::spline::SPLINE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::interpolation::spline::SPLINE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::interpolation::spline"
 )]
 async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &SPLINE_INTEGER_X_EXTENSION,
+        NAME,
+        "sample location",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &SPLINE_INTEGER_Y_EXTENSION,
+        NAME,
+        "sample value",
+    )
+    .await?;
+    if let Some(query) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            query,
+            &SPLINE_INTEGER_XQ_EXTENSION,
+            NAME,
+            "query point",
+        )
+        .await?;
+    }
     let series = series_from_values(x, y, NAME).await.map_err(|err| {
         spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INVALID_INPUT)
     })?;

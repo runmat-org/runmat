@@ -7,7 +7,11 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
@@ -106,6 +110,36 @@ pub const SQRT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SQRT_ERRORS,
 };
 
+const SQRT_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sqrt-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sqrt with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SqrtIntegerInputExtension"),
+};
+
+pub const SQRT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SQRT_INTEGER_INPUT_EXTENSION];
+
+const SQRT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double input. RunMat mode admits real typed integers only when every authoritative value is exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported.",
+    }];
+
+pub const SQRT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sqrt(integer_X)",
+        inputs: &SQRT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The result is real double for nonnegative input and complex double when any value is negative. Compatibility admission and exactness validation precede provider access or gather.",
+    }];
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -132,9 +166,18 @@ fn sqrt_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::sqrt::SQRT_DESCRIPTOR),
+    extensions(crate::builtins::math::elementwise::sqrt::SQRT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::elementwise::sqrt::SQRT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
 async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &value,
+        &SQRT_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "input",
+    )
+    .await?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sqrt) {
         return Ok(symbolic);
     }
@@ -564,6 +607,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_integer_argument() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = sqrt_builtin(Value::Int(IntValue::I32(9))).expect("sqrt");
         match result {
             Value::Num(v) => assert!((v - 3.0).abs() < 1e-12),
@@ -574,6 +618,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_reads_typed_integer_tensor_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(IntegerStorage::U32(vec![0, 4, 9]), vec![3, 1])
             .expect("integer tensor");
 
@@ -591,6 +636,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sqrt_negative_typed_integer_tensor_promotes_to_complex_from_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 9]), vec![1, 2])
             .expect("integer tensor");
 
@@ -644,20 +690,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sqrt_integer_gpu_gathers_exact_storage_before_floating_domain() {
+    fn sqrt_integer_gpu_rejects_values_that_round_at_floating_boundary() {
         test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let wide = 9_007_199_254_740_993_u64;
             let tensor =
                 Tensor::new_integer(IntegerStorage::U64(vec![0, wide]), vec![1, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-            let Value::Tensor(output) = sqrt_builtin(Value::GpuTensor(handle)).expect("sqrt")
-            else {
-                panic!("expected host double tensor");
-            };
-            assert_eq!(
-                output.into_numeric_storage().unwrap(),
-                NumericStorage::F64(vec![0.0, (wide as f64).sqrt()])
-            );
+            let error = sqrt_builtin(Value::GpuTensor(handle))
+                .expect_err("wide integer must not round at the sqrt boundary");
+            assert!(error.message().contains("exactly representable as double"));
         });
     }
 

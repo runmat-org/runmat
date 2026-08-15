@@ -47,6 +47,18 @@ The current semantic compatibility target for RunMat is **MATLAB R2026a**.
 
 **Observable behavior**: A program-visible result such as a value, class, shape, side effect, warning, error, or accepted call form. Internal algorithms and data structures are not observable behavior for this policy.
 
+## How to read RunMat compatibility documentation
+
+Start with the documented surface for a builtin: its accepted inputs, result class and shape, errors, and any CPU or GPU restrictions. That surface is the compatibility promise for the current semantic target when RunMat implements the feature. A documented form does not become a RunMat extension merely because RunMat uses a different storage layout, a host fallback, or another algorithm internally.
+
+Builtin reference metadata labels intentional additions as `RunMatOnly`. Those forms are available in `runmat` mode and rejected in MATLAB-compatible mode through a stable extension identifier. A capability marked `Documented` belongs to the target surface, while `Rejected` records an intentional unsupported class or form. Notes marked `[integer-audit-open]` identify a bounded public-evidence question rather than silently claiming compatibility.
+
+RunMat distinguishes automatic residency from explicit device intent. The runtime may automatically keep an intermediate value resident for performance and may gather it transparently when a documented operation needs host execution. An explicit `gpuArray` input represents a user-visible device request, so an undocumented explicit-device fallback is separately classified and gated when required. Compatibility mode therefore does not disable ordinary automatic gathers.
+
+Native integer and single storage remains authoritative until an operation deliberately enters a floating computation domain. Structural operations such as reshaping, grouping, or rearranging values preserve native class and exact payloads. When a RunMat-only typed integer form must enter binary64 arithmetic, RunMat first proves that every value is exactly representable and rejects a value that would silently round; the builtin reference records the resulting output-class rule.
+
+An implementation gap is not an extension and does not change the target. Reference documentation should state missing overloads, provider hooks, output forms, or object behavior directly so readers can distinguish planned coverage from a deliberate semantic difference.
+
 ## Decision order
 
 When implementing or reviewing a supported surface, use this order:
@@ -90,7 +102,7 @@ Release-specific runtime modes should not be introduced without a separate desig
 
 ## RunMat extensions
 
-RunMat extends the MATLAB language with intentional language features that are not part of MathWork's MATLAB. Language extensions are designed to be a superset of MATLAB semantics, and are designed to not conflict with existing MATLAB code. Language extensions can be disabled with the compatability configuration flag described in the [Configuration Reference](/docs/runtime/getting-started/config). An extension must be classified before it becomes part of supported behavior.
+RunMat extends the MATLAB language with intentional language features that are not part of MathWorks' MATLAB. Language extensions are designed to be a superset of MATLAB semantics and not to conflict with existing MATLAB code. Language extensions can be disabled with the compatibility configuration flag described in the [Configuration Reference](/docs/runtime/getting-started/config). An extension must be classified before it becomes part of supported behavior.
 
 | Classification | Meaning | Policy |
 | --- | --- | --- |

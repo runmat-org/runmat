@@ -40,7 +40,8 @@
     "Real inputs default to one-sided output; complex inputs default to two-sided output and reject `'onesided'`.",
     "The optional range selector accepts `'onesided'`, `'twosided'`, or `'centered'`. Range selectors are not combined with explicit frequency vectors.",
     "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` uses coherent-gain normalization.",
-    "`'yaxis'` is accepted as a plotting-orientation no-op for numeric execution. `'reassigned'` is rejected until true energy-center reassignment is implemented."
+    "`'yaxis'` is accepted as a plotting-orientation no-op for numeric execution. `'reassigned'` is rejected until true energy-center reassignment is implemented.",
+    "The documented signal storage class is single or double. Typed integer signals are a RunMat extension; typed windows, overlap counts, frequency specifications, and sample rates are evidence-open role-specific extensions because public integer-value requirements do not establish typed storage for every control. Any value entering binary64 rejects if it would round."
   ],
   "examples": [
     {

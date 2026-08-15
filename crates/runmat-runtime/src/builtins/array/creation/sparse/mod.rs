@@ -3,13 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
-    LogicalArray, NumericDType, ResolveContext, SparseTensor, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
+    ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -91,6 +92,123 @@ pub const SPARSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] =
     BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_m, integer_n, typename?)", inputs: &SPARSE_INTEGER_DIMS_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Dimension controls select host sparse shape while typename selects documented double, single, or logical storage." },
     BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_i, integer_j, v, m?, n?, nzmax?)", inputs: &SPARSE_INTEGER_SUBSCRIPT_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Documented integer subscripts remain exact through duplicate accumulation and CSC ordering; the stored value class follows v." },
     BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_i, integer_j, integer_v, m?, n?, nzmax?)", inputs: &SPARSE_INTEGER_TRIPLET_VALUE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The typed-value form is RunMat-only, sums duplicate entries with class-specific saturation, and stores exact native integer CSC values." },
+];
+
+const SPEYE_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n, [m n], or m and n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every built-in integer class is documented for sparse identity dimensions and is decoded directly into platform extents.",
+    }];
+pub const SPEYE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = speye(integer_dimensions, typename?)",
+        inputs: &SPEYE_INTEGER_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Dimensions affect shape only; typename selects documented double, single, or logical sparse storage.",
+    }];
+
+const SPONES_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "spones-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "spones with typed-integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SponesIntegerInputExtension"),
+};
+pub const SPONES_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPONES_INTEGER_INPUT_EXTENSION];
+const SPONES_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "S",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB sparse storage does not establish typed-integer classes; RunMat admits them only to inspect the exact nonzero pattern.",
+    }];
+pub const SPONES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = spones(integer_A)",
+        inputs: &SPONES_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The nonzero pattern is read exactly and emitted as a host sparse double matrix of ones; documented GPU input may use the gather fallback.",
+    }];
+
+const SPRAND_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sprand-integer-numeric-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "sprand with typed-integer dimensions, density, or condition profile is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SprandIntegerNumericControlExtension"),
+};
+pub const SPRAND_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPRAND_INTEGER_CONTROL_EXTENSION];
+const SPRAND_INTEGER_PATTERN_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "S",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All built-in integer classes are documented for the input whose nonzero pattern is copied.",
+    }];
+const SPRAND_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "m and n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "[integer-audit-open] Public documentation requires nonnegative integer values but does not establish typed storage; RunMat decodes admitted dimensions exactly.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "density or rc",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "[integer-audit-open] Public documentation does not establish typed storage; admitted values must cross the binary64 random-generation boundary exactly.",
+    },
+];
+pub const SPRAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "R = sprand(integer_S, typename?)", inputs: &SPRAND_INTEGER_PATTERN_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Only S's exact nonzero pattern is consumed; random values use double unless typename selects single." },
+    BuiltinIntegerCapabilityDescriptor { form: "R = sprand(integer_m, integer_n, integer_density/rc, typename?)", inputs: &SPRAND_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "[integer-audit-open] Typed controls are evidence-open RunMat extensions: dimensions remain structural while density and condition values require exact binary64 conversion." },
+];
+
+const SPDIAGS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "spdiags-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "spdiags with typed-integer matrix data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SpdiagsIntegerDataExtension"),
+};
+const SPDIAGS_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "spdiags-integer-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "spdiags with typed-integer diagonal or dimension controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SpdiagsIntegerControlExtension"),
+};
+pub const SPDIAGS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SPDIAGS_INTEGER_DATA_EXTENSION,
+    SPDIAGS_INTEGER_CONTROL_EXTENSION,
+];
+const SPDIAGS_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A, B, or Bin",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented matrix storage is single, double, or logical; RunMat requires typed matrix values to be exact at the current binary64 diagonal-processing boundary.",
+    }];
+const SPDIAGS_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "d", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "[integer-audit-open] Diagonal offsets are documented as integer-valued but typed storage is not established; RunMat decodes them exactly." },
+    BuiltinIntegerInputCapability { name: "m and n", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "[integer-audit-open] Output dimensions are documented as nonnegative integers but typed storage is not established; RunMat decodes them exactly." },
+];
+pub const SPDIAGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(integer_A/B/Bin, ...)", inputs: &SPDIAGS_INTEGER_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Typed matrix data is a gated extension and may enter the current binary64 diagonal engine only without rounding." },
+    BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(A/B, integer_d, integer_m?, integer_n?)", inputs: &SPDIAGS_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "[integer-audit-open] Offsets and dimensions are evidence-open typed extensions decoded directly from authoritative storage." },
 ];
 
 const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -405,6 +523,7 @@ async fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "speye,sparse,identity,matrix",
     accel = "custom",
     descriptor(crate::builtins::array::creation::sparse::SPEYE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::sparse::SPEYE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 fn speye_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -452,9 +571,17 @@ async fn nonzeros_builtin(value: Value) -> BuiltinResult<Value> {
     keywords = "spones,sparse,pattern,nonzero",
     accel = "custom",
     descriptor(crate::builtins::array::creation::sparse::SPONES_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::sparse::SPONES_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::sparse::SPONES_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 async fn spones_builtin(value: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SPONES_INTEGER_INPUT_EXTENSION,
+            "spones",
+        )?;
+    }
     let sparse = sparse_pattern_from_value(gpu_helpers::gather_value_async(&value).await?)?;
     let nnz = sparse.nnz();
     Ok(Value::SparseTensor(
@@ -476,9 +603,30 @@ async fn spones_builtin(value: Value) -> BuiltinResult<Value> {
     keywords = "sprand,sparse,random,density",
     accel = "custom",
     descriptor(crate::builtins::array::creation::sparse::SPRAND_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::sparse::SPRAND_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::sparse::SPRAND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 async fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(args.len(), 3 | 4) {
+        for value in &args[..2] {
+            if crate::builtins::common::validation::value_has_native_integer_class(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &SPRAND_INTEGER_CONTROL_EXTENSION,
+                    "sprand",
+                )?;
+            }
+        }
+        for value in &args[2..] {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &SPRAND_INTEGER_CONTROL_EXTENSION,
+                "sprand",
+                "density-or-condition",
+            )
+            .await?;
+        }
+    }
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
         gathered.push(gpu_helpers::gather_value_async(&arg).await?);
@@ -493,9 +641,46 @@ async fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "spdiags,sparse,diagonal,banded",
     accel = "custom",
     descriptor(crate::builtins::array::creation::sparse::SPDIAGS_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::sparse::SPDIAGS_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::sparse::SPDIAGS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if let Some(data) = args.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            data,
+            &SPDIAGS_INTEGER_DATA_EXTENSION,
+            "spdiags",
+            "matrix-data",
+        )
+        .await?;
+    }
+    if let Some(offsets) = args.get(1) {
+        if crate::builtins::common::validation::value_has_native_integer_class(offsets) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SPDIAGS_INTEGER_CONTROL_EXTENSION,
+                "spdiags",
+            )?;
+        }
+    }
+    if args.len() == 3 {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            &args[2],
+            &SPDIAGS_INTEGER_DATA_EXTENSION,
+            "spdiags",
+            "replacement-matrix",
+        )
+        .await?;
+    } else if args.len() == 4 {
+        for dimension in &args[2..] {
+            if crate::builtins::common::validation::value_has_native_integer_class(dimension) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &SPDIAGS_INTEGER_CONTROL_EXTENSION,
+                    "spdiags",
+                )?;
+            }
+        }
+    }
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
         gathered.push(gpu_helpers::gather_value_async(&arg).await?);
@@ -4163,6 +4348,7 @@ pub(crate) mod tests {
 
     #[test]
     fn spdiags_reads_typed_integer_bin_and_offsets_exactly_at_float_boundary() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let bin = exact_integer_tensor(
             IntegerStorage::I16(vec![
                 10, 20, 0, // -1 source column

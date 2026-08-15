@@ -1502,6 +1502,53 @@ fn groupcount_keys_with_empty_bins(
     (keys, rows)
 }
 
+const SPLITAPPLY_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "splitapply-integer-group-vector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "splitapply with a typed-integer G vector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SplitapplyIntegerGroupVectorExtension"),
+};
+pub const SPLITAPPLY_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [SPLITAPPLY_INTEGER_GROUP_EXTENSION];
+const SPLITAPPLY_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X1,...,XN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Numeric data variables may use any built-in integer class and each group slice reaches the callback without numeric conversion.",
+    }];
+const SPLITAPPLY_INTEGER_GROUP_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "G",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public documentation specifies positive integer group numbers but does not establish typed-integer storage; RunMat compares admitted group values exactly.",
+    }];
+pub const SPLITAPPLY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = splitapply(func, integer_X1, ..., G)",
+        inputs: &SPLITAPPLY_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Group row selection preserves each data argument's authoritative class. Output class is determined by func and result concatenation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = splitapply(func, X1, ..., integer_G)",
+        inputs: &SPLITAPPLY_INTEGER_GROUP_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "[integer-audit-open] Typed group identifiers are a gated extension and are decoded without a binary64 mirror; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently.",
+    },
+];
+
 #[runtime_builtin(
     name = "splitapply",
     category = "array/grouping",
@@ -1509,6 +1556,8 @@ fn groupcount_keys_with_empty_bins(
     keywords = "splitapply,groups,apply,function,table",
     accel = "cpu",
     descriptor(crate::builtins::array::grouping::GROUPING_DESCRIPTOR),
+    extensions(crate::builtins::array::grouping::SPLITAPPLY_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::grouping::SPLITAPPLY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::grouping"
 )]
 pub(crate) async fn splitapply_builtin(
@@ -1516,6 +1565,14 @@ pub(crate) async fn splitapply_builtin(
     first_data: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if let Some(group) = rest.last() {
+        if crate::builtins::common::validation::value_has_native_integer_class(group) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SPLITAPPLY_INTEGER_GROUP_EXTENSION,
+                "splitapply",
+            )?;
+        }
+    }
     let func = gather_if_needed_async(&func).await?;
     let first_data = gather_if_needed_async(&first_data).await?;
     let rest = gather_values(rest).await?;

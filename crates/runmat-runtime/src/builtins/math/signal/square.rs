@@ -11,8 +11,12 @@ use std::f64::consts::PI;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, NumericStorage, Tensor, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -147,6 +151,15 @@ pub const SQUARE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SQUARE_ERRORS,
 };
 
+const SQUARE_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "t", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "R2026a documents single and double sample times. RunMat mode admits typed integers only when every value is exactly representable at the binary64 waveform boundary." }];
+const SQUARE_INTEGER_DUTY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "duty", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "R2026a documents single and double duty cycles. RunMat mode admits a typed integer scalar from 0 through 100 behind the nonfloating-input gate." }];
+pub const SQUARE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "Y = square(integer_t)", inputs: &SQUARE_INTEGER_T_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer samples cross one checked binary64 phase boundary and produce a same-shaped double waveform. Automatic residency may gather transparently; explicit gpuArray input has its own extension gate." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = square(t, integer_duty)", inputs: &SQUARE_INTEGER_DUTY_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The scalar duty cycle controls the floating waveform threshold; output class and shape follow the supported t path." },
+];
+
 fn square_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     square_error_with_message(error.message, error)
 }
@@ -211,13 +224,14 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::square::SQUARE_DESCRIPTOR),
     extensions(crate::builtins::math::signal::square::SQUARE_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::square::SQUARE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::square"
 )]
 async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
-    if matches!(&t, Value::GpuTensor(_))
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
-            .any(|value| matches!(value, Value::GpuTensor(_)))
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SQUARE_GPU_INPUT_EXTENSION,
@@ -232,6 +246,22 @@ async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> 
             &SQUARE_NONFLOATING_INPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &t,
+        &SQUARE_NONFLOATING_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "sample-time",
+    )
+    .await?;
+    if let Some(duty) = varargin.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            duty,
+            &SQUARE_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+            "duty-cycle",
+        )
+        .await?;
     }
     let duty = parse_duty(&varargin).await?;
     match t {
@@ -523,9 +553,10 @@ mod tests {
             device_id: 0,
             buffer_id: 9_300_004,
         };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(Value::GpuTensor(handle))
-            .expect_err("MATLAB mode rejects interactive gpuArray input before gather");
+            .expect_err("MATLAB mode rejects explicit interactive gpuArray input before gather");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:SquareGpuInputExtension")

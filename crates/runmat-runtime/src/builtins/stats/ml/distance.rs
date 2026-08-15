@@ -9,7 +9,7 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ResolveContext, Tensor, Type, Value,
+    CellArray, NumericScalar, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -571,6 +571,43 @@ pub const SQUAREFORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DISTANCE_ERRORS,
 };
 
+const SQUAREFORM_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "squareform-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "squareform with typed-integer distance data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareformIntegerInputExtension"),
+};
+const SQUAREFORM_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "squareform-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "squareform with an explicit GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareformExplicitGpuInputExtension"),
+};
+pub const SQUAREFORM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SQUAREFORM_INTEGER_INPUT_EXTENSION,
+    SQUAREFORM_EXPLICIT_GPU_EXTENSION,
+];
+
+const SQUAREFORM_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented MATLAB storage classes are single, double, and logical; RunMat additionally performs the structural conversion on typed integers without changing class or value.",
+    }];
+pub const SQUAREFORM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = squareform(integer_Z)",
+        inputs: &SQUAREFORM_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The condensed-vector and symmetric-matrix layouts are transformed directly in authoritative native storage. Automatic residency may gather transparently; an explicit GPU call remains separately gated.",
+    }];
+
 fn matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![None, None]),
@@ -1023,9 +1060,23 @@ async fn ensure_knn_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
     keywords = "squareform,distance,condensed,symmetric,statistics,machine learning",
     type_resolver(matrix_type),
     descriptor(crate::builtins::stats::ml::distance::SQUAREFORM_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::distance::SQUAREFORM_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::distance::SQUAREFORM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
 async fn squareform_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUAREFORM_INTEGER_INPUT_EXTENSION,
+            SQUAREFORM_NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUAREFORM_EXPLICIT_GPU_EXTENSION,
+            SQUAREFORM_NAME,
+        )?;
+    }
     let tensor = value_to_matrix(SQUAREFORM_NAME, value).await?;
     let force = parse_squareform_force(rest)?;
     let output = squareform_compute(tensor, force)?;
@@ -2178,20 +2229,24 @@ fn vector_to_square(tensor: Tensor) -> BuiltinResult<Tensor> {
     let out_len = size
         .checked_mul(size)
         .ok_or_else(|| internal_error(SQUAREFORM_NAME, "squareform: output size overflow"))?;
-    let mut out = Vec::new();
-    out.try_reserve(out_len)
-        .map_err(|_| internal_error(SQUAREFORM_NAME, "squareform: output allocation failed"))?;
-    out.resize(out_len, 0.0);
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+    let mut out = NumericStorage::zeros(storage.numeric_dtype(), out_len);
     let mut idx = 0usize;
     for col in 0..size {
         for row in (col + 1)..size {
-            let value = tensor::tensor_value_f64(&tensor, idx);
-            out[col * size + row] = value;
-            out[row * size + col] = value;
+            let value = storage.value_at(idx).ok_or_else(|| {
+                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+            })?;
+            out.set_value(col * size + row, value)
+                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+            out.set_value(row * size + col, value)
+                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
             idx += 1;
         }
     }
-    Tensor::new(out, vec![size, size])
+    Tensor::from_numeric_storage(out, vec![size, size])
         .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))
 }
 
@@ -2202,37 +2257,73 @@ fn square_to_vector(tensor: Tensor) -> BuiltinResult<Tensor> {
             "squareform: matrix input must be square",
         ));
     }
-    for idx in 0..tensor.rows {
-        if row_value(&tensor, idx, idx).abs() > EPS {
+    let size = tensor.rows;
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+    for idx in 0..size {
+        let value = storage.value_at(idx * size + idx).ok_or_else(|| {
+            internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+        })?;
+        if !squareform_scalar_is_zero(value) {
             return Err(distance_error(
                 SQUAREFORM_NAME,
                 "squareform: matrix diagonal must be zero",
             ));
         }
     }
-    let len = tensor
-        .rows
-        .checked_mul(tensor.rows.saturating_sub(1))
+    let len = size
+        .checked_mul(size.saturating_sub(1))
         .and_then(|value| value.checked_div(2))
         .ok_or_else(|| internal_error(SQUAREFORM_NAME, "squareform: output size overflow"))?;
-    let mut out = Vec::new();
-    out.try_reserve(len)
-        .map_err(|_| internal_error(SQUAREFORM_NAME, "squareform: output allocation failed"))?;
-    for col in 0..tensor.rows {
-        for row in (col + 1)..tensor.rows {
-            let lower = row_value(&tensor, row, col);
-            let upper = row_value(&tensor, col, row);
-            if (lower - upper).abs() > EPS {
+    let mut out = NumericStorage::zeros(storage.numeric_dtype(), len);
+    let mut out_idx = 0usize;
+    for col in 0..size {
+        for row in (col + 1)..size {
+            let lower = storage.value_at(col * size + row).ok_or_else(|| {
+                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+            })?;
+            let upper = storage.value_at(row * size + col).ok_or_else(|| {
+                internal_error(SQUAREFORM_NAME, "squareform: input storage is inconsistent")
+            })?;
+            if !squareform_scalars_equal(lower, upper) {
                 return Err(distance_error(
                     SQUAREFORM_NAME,
                     "squareform: matrix must be symmetric",
                 ));
             }
-            out.push(upper);
+            out.set_value(out_idx, upper)
+                .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
+            out_idx += 1;
         }
     }
-    Tensor::new(out, vec![1, len])
+    Tensor::from_numeric_storage(out, vec![1, len])
         .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))
+}
+
+fn squareform_scalar_is_zero(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.abs() <= EPS,
+        NumericScalar::F32(value) => f64::from(value).abs() <= EPS,
+        NumericScalar::I8(value) => value == 0,
+        NumericScalar::I16(value) => value == 0,
+        NumericScalar::I32(value) => value == 0,
+        NumericScalar::I64(value) => value == 0,
+        NumericScalar::U8(value) => value == 0,
+        NumericScalar::U16(value) => value == 0,
+        NumericScalar::U32(value) => value == 0,
+        NumericScalar::U64(value) => value == 0,
+    }
+}
+
+fn squareform_scalars_equal(left: NumericScalar, right: NumericScalar) -> bool {
+    match (left, right) {
+        (NumericScalar::F64(left), NumericScalar::F64(right)) => (left - right).abs() <= EPS,
+        (NumericScalar::F32(left), NumericScalar::F32(right)) => {
+            f64::from(left - right).abs() <= EPS
+        }
+        _ => left == right,
+    }
 }
 
 fn condensed_matrix_size(len: usize) -> Option<usize> {
@@ -2255,7 +2346,7 @@ fn condensed_matrix_size(len: usize) -> Option<usize> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericDType};
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
@@ -2734,9 +2825,11 @@ mod tests {
 
     #[test]
     fn squareform_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
         let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
         assert_eq!(matrix.shape, vec![3, 3]);
+        assert_eq!(matrix.numeric_dtype(), NumericDType::U8);
         assert_eq!(
             matrix.materialize_f64(),
             vec![0.0, 5.0, 4.0, 5.0, 0.0, 2.0, 4.0, 2.0, 0.0]
@@ -2745,7 +2838,20 @@ mod tests {
         let matrix = poisoned_int_tensor(IntegerStorage::U8(vec![0, 5, 4, 5, 0, 2, 4, 2, 0]), 3, 3);
         let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
         assert_eq!(vector.shape, vec![1, 3]);
+        assert_eq!(vector.numeric_dtype(), NumericDType::U8);
         assert_eq!(vector.materialize_f64(), vec![5.0, 4.0, 2.0]);
+    }
+
+    #[test]
+    fn squareform_gates_typed_integer_extension_in_strict_mode() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
+        let error = block_on(squareform_builtin(vector, Vec::new()))
+            .expect_err("typed-integer squareform must be gated in strict mode");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SquareformIntegerInputExtension")
+        );
     }
 
     #[test]

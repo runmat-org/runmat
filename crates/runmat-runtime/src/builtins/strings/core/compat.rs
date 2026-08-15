@@ -10,8 +10,8 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance,
-    ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, CharArray, IntValue, LogicalArray, NumericScalar, NumericStorage,
+    ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -550,6 +550,25 @@ descriptor_by_outputs!(
     &IN_TEXT_REST,
     &OUT_ANY
 );
+const SSCANF_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sizeA",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional output-size scalar or two-element vector accepts every built-in integer class and is decoded directly from native storage.",
+    }];
+pub const SSCANF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "A = sscanf(text, format, integer_sizeA)",
+        inputs: &SSCANF_INTEGER_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "sizeA controls output shape only. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, and other numeric scan formats return double.",
+    }];
 descriptor!(
     PATTERN_DESCRIPTOR,
     "pat = pattern(text)",
@@ -1228,6 +1247,7 @@ fn is_typed_integer_value(value: &Value) -> bool {
     accel = "sink",
     type_resolver(tensor_type),
     descriptor(crate::builtins::strings::core::compat::SSCANF_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::core::compat::SSCANF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -2411,9 +2431,38 @@ struct SscanfResult {
 #[derive(Clone, Copy)]
 enum ScanKind {
     Float,
-    Integer,
+    SignedInteger {
+        radix: IntegerRadix,
+        exact_i64: bool,
+    },
+    UnsignedInteger {
+        radix: IntegerRadix,
+        exact_u64: bool,
+    },
     String,
     Char,
+}
+
+#[derive(Clone, Copy)]
+enum IntegerRadix {
+    Decimal,
+    Auto,
+    Octal,
+    Hex,
+}
+
+#[derive(Clone, Copy)]
+enum ScanValue {
+    F64(f64),
+    I64(i64),
+    U64(u64),
+}
+
+#[derive(Clone, Copy)]
+enum ScanOutputClass {
+    F64,
+    I64,
+    U64,
 }
 
 #[derive(Clone)]
@@ -2496,7 +2545,8 @@ fn sscanf_scan(text: &str, format: &str, size: Option<Vec<usize>>) -> BuiltinRes
     if shape.iter().product::<usize>() != values.len() {
         shape = vec![values.len(), 1];
     }
-    let value = Tensor::new(values, shape)
+    let storage = scan_values_into_storage(values, scan_output_class(&tokens))?;
+    let value = Tensor::from_numeric_storage(storage, shape)
         .map(Value::Tensor)
         .map_err(|e| compat_error("sscanf", e))?;
     Ok(SscanfResult {
@@ -2546,6 +2596,12 @@ fn parse_scan_format(format: &str) -> BuiltinResult<Vec<ScanToken>> {
                     .map_err(|_| compat_error("sscanf", "sscanf: invalid field width"))?,
             )
         };
+        let long = if chars.peek() == Some(&'l') {
+            chars.next();
+            true
+        } else {
+            false
+        };
         let Some(specifier) = chars.next() else {
             return Err(compat_error(
                 "sscanf",
@@ -2554,7 +2610,26 @@ fn parse_scan_format(format: &str) -> BuiltinResult<Vec<ScanToken>> {
         };
         let kind = match specifier {
             'f' | 'e' | 'E' | 'g' | 'G' => ScanKind::Float,
-            'd' | 'i' | 'u' => ScanKind::Integer,
+            'd' => ScanKind::SignedInteger {
+                radix: IntegerRadix::Decimal,
+                exact_i64: long,
+            },
+            'i' => ScanKind::SignedInteger {
+                radix: IntegerRadix::Auto,
+                exact_i64: long,
+            },
+            'u' => ScanKind::UnsignedInteger {
+                radix: IntegerRadix::Decimal,
+                exact_u64: long,
+            },
+            'o' => ScanKind::UnsignedInteger {
+                radix: IntegerRadix::Octal,
+                exact_u64: long,
+            },
+            'x' | 'X' => ScanKind::UnsignedInteger {
+                radix: IntegerRadix::Hex,
+                exact_u64: long,
+            },
             's' => ScanKind::String,
             'c' => ScanKind::Char,
             other => {
@@ -2578,7 +2653,7 @@ fn scan_one(
     pos: usize,
     kind: ScanKind,
     width: Option<usize>,
-) -> Option<(Vec<f64>, usize)> {
+) -> Option<(Vec<ScanValue>, usize)> {
     if pos > text.len() {
         return None;
     }
@@ -2586,18 +2661,29 @@ fn scan_one(
         .and_then(|w| byte_index_after_n_chars(&text[pos..], w).map(|idx| pos + idx))
         .unwrap_or(text.len());
     match kind {
-        ScanKind::Float | ScanKind::Integer => {
+        ScanKind::Float => {
             let fragment = &text[pos..end_limit];
-            let len = numeric_prefix_len(fragment, matches!(kind, ScanKind::Integer))?;
+            let len = numeric_prefix_len(fragment, false)?;
             let token = &fragment[..len];
-            let value = if matches!(kind, ScanKind::Integer) {
-                token
-                    .parse::<i64>()
-                    .map(|value| value as f64)
-                    .or_else(|_| token.parse::<f64>())
-                    .ok()?
+            Some((vec![ScanValue::F64(token.parse::<f64>().ok()?)], pos + len))
+        }
+        ScanKind::SignedInteger { radix, exact_i64 } => {
+            let fragment = &text[pos..end_limit];
+            let (value, len) = scan_signed_integer(fragment, radix)?;
+            let value = if exact_i64 {
+                ScanValue::I64(value)
             } else {
-                token.parse::<f64>().ok()?
+                ScanValue::F64(value as f64)
+            };
+            Some((vec![value], pos + len))
+        }
+        ScanKind::UnsignedInteger { radix, exact_u64 } => {
+            let fragment = &text[pos..end_limit];
+            let (value, len) = scan_unsigned_integer(fragment, radix)?;
+            let value = if exact_u64 {
+                ScanValue::U64(value)
+            } else {
+                ScanValue::F64(value as f64)
             };
             Some((vec![value], pos + len))
         }
@@ -2611,7 +2697,10 @@ fn scan_one(
                 None
             } else {
                 Some((
-                    fragment[..len].chars().map(|ch| ch as u32 as f64).collect(),
+                    fragment[..len]
+                        .chars()
+                        .map(|ch| ScanValue::F64(ch as u32 as f64))
+                        .collect(),
                     pos + len,
                 ))
             }
@@ -2622,12 +2711,143 @@ fn scan_one(
             Some((
                 text[pos..pos + len]
                     .chars()
-                    .map(|ch| ch as u32 as f64)
+                    .map(|ch| ScanValue::F64(ch as u32 as f64))
                     .collect(),
                 pos + len,
             ))
         }
     }
+}
+
+fn scan_output_class(tokens: &[ScanToken]) -> ScanOutputClass {
+    let mut class = None;
+    for token in tokens {
+        let ScanToken::Spec {
+            kind,
+            suppress: false,
+            ..
+        } = token
+        else {
+            continue;
+        };
+        let next = match kind {
+            ScanKind::SignedInteger {
+                exact_i64: true, ..
+            } => ScanOutputClass::I64,
+            ScanKind::UnsignedInteger {
+                exact_u64: true, ..
+            } => ScanOutputClass::U64,
+            _ => return ScanOutputClass::F64,
+        };
+        match (class, next) {
+            (None, next) => class = Some(next),
+            (Some(ScanOutputClass::I64), ScanOutputClass::I64)
+            | (Some(ScanOutputClass::U64), ScanOutputClass::U64) => {}
+            _ => return ScanOutputClass::F64,
+        }
+    }
+    class.unwrap_or(ScanOutputClass::F64)
+}
+
+fn scan_values_into_storage(
+    values: Vec<ScanValue>,
+    class: ScanOutputClass,
+) -> BuiltinResult<NumericStorage> {
+    match class {
+        ScanOutputClass::F64 => Ok(NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|value| match value {
+                    ScanValue::F64(value) => value,
+                    ScanValue::I64(value) => value as f64,
+                    ScanValue::U64(value) => value as f64,
+                })
+                .collect(),
+        )),
+        ScanOutputClass::I64 => values
+            .into_iter()
+            .map(|value| match value {
+                ScanValue::I64(value) => Ok(value),
+                _ => Err(compat_error(
+                    "sscanf",
+                    "sscanf: incompatible conversions in int64 scan format",
+                )),
+            })
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(NumericStorage::I64),
+        ScanOutputClass::U64 => values
+            .into_iter()
+            .map(|value| match value {
+                ScanValue::U64(value) => Ok(value),
+                _ => Err(compat_error(
+                    "sscanf",
+                    "sscanf: incompatible conversions in uint64 scan format",
+                )),
+            })
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(NumericStorage::U64),
+    }
+}
+
+fn scan_signed_integer(text: &str, radix: IntegerRadix) -> Option<(i64, usize)> {
+    let (negative, digits, base, len) = integer_token_parts(text, radix, true)?;
+    let magnitude = u64::from_str_radix(digits, base).ok()?;
+    let value = if negative {
+        if magnitude == (1_u64 << 63) {
+            i64::MIN
+        } else {
+            -i64::try_from(magnitude).ok()?
+        }
+    } else {
+        i64::try_from(magnitude).ok()?
+    };
+    Some((value, len))
+}
+
+fn scan_unsigned_integer(text: &str, radix: IntegerRadix) -> Option<(u64, usize)> {
+    let (negative, digits, base, len) = integer_token_parts(text, radix, false)?;
+    if negative {
+        return None;
+    }
+    Some((u64::from_str_radix(digits, base).ok()?, len))
+}
+
+fn integer_token_parts(
+    text: &str,
+    radix: IntegerRadix,
+    allow_negative: bool,
+) -> Option<(bool, &str, u32, usize)> {
+    let bytes = text.as_bytes();
+    let mut start = 0usize;
+    let mut negative = false;
+    if let Some(sign) = bytes.first() {
+        if *sign == b'+' {
+            start = 1;
+        } else if *sign == b'-' && allow_negative {
+            start = 1;
+            negative = true;
+        }
+    }
+    let remaining = &text[start..];
+    let (base, prefix_len) = match radix {
+        IntegerRadix::Decimal => (10, 0),
+        IntegerRadix::Octal => (8, 0),
+        IntegerRadix::Hex => (
+            16,
+            usize::from(remaining.starts_with("0x") || remaining.starts_with("0X")) * 2,
+        ),
+        IntegerRadix::Auto if remaining.starts_with("0x") || remaining.starts_with("0X") => (16, 2),
+        IntegerRadix::Auto if remaining.starts_with('0') => (8, 0),
+        IntegerRadix::Auto => (10, 0),
+    };
+    let digit_start = start + prefix_len;
+    let digit_len = text[digit_start..]
+        .char_indices()
+        .take_while(|(_, ch)| ch.to_digit(base).is_some())
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()?;
+    let end = digit_start + digit_len;
+    Some((negative, &text[digit_start..end], base, end))
 }
 
 fn numeric_prefix_len(text: &str, integer: bool) -> Option<usize> {
@@ -2851,6 +3071,41 @@ mod tests {
         ] {
             assert!(scan_size_from_value(&value).is_err());
         }
+    }
+
+    #[test]
+    fn sscanf_long_integer_formats_preserve_full_width_values() {
+        let signed = sscanf_scan("-9223372036854775808 9223372036854775807", "%ld", None)
+            .expect("signed long scan");
+        let Value::Tensor(signed) = signed.value else {
+            panic!("expected signed tensor");
+        };
+        assert_eq!(signed.numeric_dtype(), NumericDType::I64);
+        assert_eq!(
+            signed.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))
+        );
+
+        let unsigned = sscanf_scan("18446744073709551615 ff 177", "%lu %lx %lo", None)
+            .expect("unsigned long scan");
+        let Value::Tensor(unsigned) = unsigned.value else {
+            panic!("expected unsigned tensor");
+        };
+        assert_eq!(unsigned.numeric_dtype(), NumericDType::U64);
+        assert_eq!(
+            unsigned.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 255, 127]))
+        );
+    }
+
+    #[test]
+    fn sscanf_mixed_long_integer_formats_follow_double_output_rule() {
+        let result = sscanf_scan("42 7.5", "%ld %f", None).expect("mixed scan");
+        let Value::Tensor(result) = result.value else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F64);
+        assert_eq!(result.materialize_f64(), vec![42.0, 7.5]);
     }
 
     #[test]

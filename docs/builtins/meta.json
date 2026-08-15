@@ -143964,7 +143964,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -143999,7 +143999,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         }
@@ -144022,6 +144022,92 @@
           "identifier": "RunMat:sparse:Internal",
           "when": "Sparse matrix materialisation fails internally.",
           "message": "sparse: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "spdiags-integer-data",
+          "mode": "RunMatOnly",
+          "description": "spdiags with typed-integer matrix data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SpdiagsIntegerDataExtension"
+        },
+        {
+          "id": "spdiags-integer-control",
+          "mode": "RunMatOnly",
+          "description": "spdiags with typed-integer diagonal or dimension controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SpdiagsIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B/S = spdiags(integer_A/B/Bin, ...)",
+          "inputs": [
+            {
+              "name": "A, B, or Bin",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented matrix storage is single, double, or logical; RunMat requires typed matrix values to be exact at the current binary64 diagonal-processing boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Typed matrix data is a gated extension and may enter the current binary64 diagonal engine only without rounding."
+        },
+        {
+          "form": "B/S = spdiags(A/B, integer_d, integer_m?, integer_n?)",
+          "inputs": [
+            {
+              "name": "d",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] Diagonal offsets are documented as integer-valued but typed storage is not established; RunMat decodes them exactly."
+            },
+            {
+              "name": "m and n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] Output dimensions are documented as nonnegative integers but typed storage is not established; RunMat decodes them exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] Offsets and dimensions are evidence-open typed extensions decoded directly from authoritative storage."
         }
       ]
     },
@@ -144241,6 +144327,124 @@
           "when": "Output tensor construction fails internally.",
           "message": "spectrogram: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "spectrogram-integer-signal",
+          "mode": "RunMatOnly",
+          "description": "spectrogram with a typed-integer signal is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SpectrogramIntegerSignalExtension"
+        },
+        {
+          "id": "spectrogram-integer-numeric-control",
+          "mode": "RunMatOnly",
+          "description": "spectrogram with typed-integer numeric options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SpectrogramIntegerNumericControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[s,f,t,ps] = spectrogram(integer_x, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented signal classes are single and double; admitted typed values must be exact at the binary64 STFT boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "The signal crosses an exact binary64 boundary before host STFT or provider spectral dispatch; GPU support remains provider-dependent."
+        },
+        {
+          "form": "spectrogram(x, integer_win/nOverlap/freqSpec/Fs, ...)",
+          "inputs": [
+            {
+              "name": "win",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public documentation establishes single and double storage for this role; RunMat gates typed input and prevents rounded conversion."
+            },
+            {
+              "name": "nOverlap",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public documentation establishes single and double storage for this role; RunMat gates typed input and prevents rounded conversion."
+            },
+            {
+              "name": "freqSpec",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public documentation establishes single and double storage for this role; RunMat gates typed input and prevents rounded conversion."
+            },
+            {
+              "name": "Fs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public documentation establishes single and double storage for this role; RunMat gates typed input and prevents rounded conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] Structural scalars are range checked and numerical vectors enter binary64 only after exact representability is proven; public documentation specifies integer-valued controls without establishing typed storage for every role."
+        }
       ]
     },
     {
@@ -144257,7 +144461,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -144278,7 +144482,35 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = speye(n, typename)",
+          "inputs": [
+            {
+              "name": "size",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square size or two-element size vector."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse storage type: double, single, or logical."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -144306,7 +144538,42 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = speye(m, n, typename)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse storage type: double, single, or logical."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -144327,7 +144594,35 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = speye(sz, typename)",
+          "inputs": [
+            {
+              "name": "size",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square size or two-element size vector."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse storage type: double, single, or logical."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse matrix."
             }
           ]
         }
@@ -144350,6 +144645,35 @@
           "identifier": "RunMat:sparse:Internal",
           "when": "Sparse matrix materialisation fails internally.",
           "message": "sparse: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = speye(integer_dimensions, typename?)",
+          "inputs": [
+            {
+              "name": "n, [m n], or m and n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every built-in integer class is documented for sparse identity dimensions and is decoded directly into platform extents."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Dimensions affect shape only; typename selects documented double, single, or logical sparse storage."
         }
       ]
     },
@@ -144552,6 +144876,43 @@
           "when": "Coordinate tensor construction or plotting fails unexpectedly.",
           "message": "sphere: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "sphere-typed-face-count",
+          "mode": "RunMatOnly",
+          "description": "sphere with a typed-integer face count is an evidence-open RunMat extension",
+          "error_identifier": "RunMat:compatibility:SphereTypedFaceCountExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[X,Y,Z] = sphere(integer_n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] R2026a calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "EvidenceOpen",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] n is decoded exactly, checked against allocation bounds, and controls only output shape. Coordinate generation and statement-form plotting use host double values."
+        }
       ]
     },
     {
@@ -144641,6 +145002,109 @@
           "identifier": "RunMat:spline:Internal",
           "when": "Spline coefficient generation or tensor assembly fails internally.",
           "message": "spline: internal interpolation failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "spline-integer-sample-locations",
+          "mode": "RunMatOnly",
+          "description": "spline with typed-integer sample locations is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SplineIntegerSampleLocationsExtension"
+        },
+        {
+          "id": "spline-integer-sample-values",
+          "mode": "RunMatOnly",
+          "description": "spline with typed-integer sample values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SplineIntegerSampleValuesExtension"
+        },
+        {
+          "id": "spline-integer-query-points",
+          "mode": "RunMatOnly",
+          "description": "spline with typed-integer query points is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SplineIntegerQueryPointsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "pp = spline(integer_X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double sample locations. RunMat mode admits typed integers only when every value is exactly representable at the binary64 interpolation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Sample locations cross the checked spline coefficient boundary; the returned piecewise-polynomial structure stores floating coefficients."
+        },
+        {
+          "form": "pp = spline(X, integer_Y)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double sample values. RunMat mode admits typed integers only through the checked floating interpolation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Sample values cross the same checked binary64 coefficient boundary."
+        },
+        {
+          "form": "Vq = spline(X, Y, integer_Xq)",
+          "inputs": [
+            {
+              "name": "Xq",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double query points. RunMat mode admits typed integers only when exact binary64 conversion is possible."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Query values are checked before conversion and the evaluated result is floating."
         }
       ]
     },
@@ -144998,6 +145462,70 @@
           "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
           "message": "grouping builtin: output is too large"
         }
+      ],
+      "extensions": [
+        {
+          "id": "splitapply-integer-group-vector",
+          "mode": "RunMatOnly",
+          "description": "splitapply with a typed-integer G vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SplitapplyIntegerGroupVectorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = splitapply(func, integer_X1, ..., G)",
+          "inputs": [
+            {
+              "name": "X1,...,XN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric data variables may use any built-in integer class and each group slice reaches the callback without numeric conversion."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Group row selection preserves each data argument's authoritative class. Output class is determined by func and result concatenation."
+        },
+        {
+          "form": "Y = splitapply(func, X1, ..., integer_G)",
+          "inputs": [
+            {
+              "name": "G",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public documentation specifies positive integer group numbers but does not establish typed-integer storage; RunMat compares admitted group values exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] Typed group identifiers are a gated extension and are decoded without a binary64 mirror; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently."
+        }
       ]
     },
     {
@@ -145055,7 +145583,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         }
@@ -145078,6 +145606,43 @@
           "identifier": "RunMat:sparse:Internal",
           "when": "Sparse matrix materialisation fails internally.",
           "message": "sparse: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "spones-integer-input",
+          "mode": "RunMatOnly",
+          "description": "spones with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SponesIntegerInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = spones(integer_A)",
+          "inputs": [
+            {
+              "name": "S",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB sparse storage does not establish typed-integer classes; RunMat admits them only to inspect the exact nonzero pattern."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "The nonzero pattern is read exactly and emitted as a host sparse double matrix of ones; documented GPU input may use the gather fallback."
         }
       ]
     },
@@ -145103,7 +145668,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -145122,7 +145687,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "double",
-              "description": "Sparse storage type. RunMat currently supports double sparse storage."
+              "description": "Sparse storage type: double or single."
             }
           ],
           "outputs": [
@@ -145131,7 +145696,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -145166,7 +145731,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -145199,7 +145764,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "double",
-              "description": "Sparse storage type. RunMat currently supports double sparse storage."
+              "description": "Sparse storage type: double or single."
             }
           ],
           "outputs": [
@@ -145208,7 +145773,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -145250,7 +145815,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -145290,7 +145855,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "double",
-              "description": "Sparse storage type. RunMat currently supports double sparse storage."
+              "description": "Sparse storage type: double or single."
             }
           ],
           "outputs": [
@@ -145299,7 +145864,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         }
@@ -145322,6 +145887,86 @@
           "identifier": "RunMat:sparse:Internal",
           "when": "Sparse matrix materialisation fails internally.",
           "message": "sparse: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "sprand-integer-numeric-control",
+          "mode": "RunMatOnly",
+          "description": "sprand with typed-integer dimensions, density, or condition profile is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SprandIntegerNumericControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = sprand(integer_S, typename?)",
+          "inputs": [
+            {
+              "name": "S",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All built-in integer classes are documented for the input whose nonzero pattern is copied."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Only S's exact nonzero pattern is consumed; random values use double unless typename selects single."
+        },
+        {
+          "form": "R = sprand(integer_m, integer_n, integer_density/rc, typename?)",
+          "inputs": [
+            {
+              "name": "m and n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] Public documentation requires nonnegative integer values but does not establish typed storage; RunMat decodes admitted dimensions exactly."
+            },
+            {
+              "name": "density or rc",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "[integer-audit-open] Public documentation does not establish typed storage; admitted values must cross the binary64 random-generation boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] Typed controls are evidence-open RunMat extensions: dimensions remain structural while density and condition values require exact binary64 conversion."
         }
       ]
     },
@@ -145515,6 +146160,35 @@
           "when": "Internal char-array construction failed.",
           "message": "sprintf: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "txt = sprintf(formatSpec, integer_A...)",
+          "inputs": [
+            {
+              "name": "A...",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly lists all eight integer classes. Integer conversions read authoritative values directly, including signed, unsigned, octal, hexadecimal, character-code, width, and precision roles."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Formatting preserves full-width integer text without an f64 intermediary and consumes array elements in column order. Resident numeric arguments gather authoritatively because formatting executes on the client."
+        }
       ]
     },
     {
@@ -145556,6 +146230,43 @@
           "identifier": "RunMat:sqrt:Internal",
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "sqrt: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "sqrt-integer-input",
+          "mode": "RunMatOnly",
+          "description": "sqrt with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SqrtIntegerInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sqrt(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double input. RunMat mode admits real typed integers only when every authoritative value is exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The result is real double for nonnegative input and complex double when any value is negative. Compatibility admission and exactness validation precede provider access or gather."
         }
       ]
     },
@@ -145665,6 +146376,62 @@
           "description": "interactive square gpuArray input is a RunMat extension",
           "error_identifier": "RunMat:compatibility:SquareGpuInputExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = square(integer_t)",
+          "inputs": [
+            {
+              "name": "t",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double sample times. RunMat mode admits typed integers only when every value is exactly representable at the binary64 waveform boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer samples cross one checked binary64 phase boundary and produce a same-shaped double waveform. Automatic residency may gather transparently; explicit gpuArray input has its own extension gate."
+        },
+        {
+          "form": "Y = square(t, integer_duty)",
+          "inputs": [
+            {
+              "name": "duty",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents single and double duty cycles. RunMat mode admits a typed integer scalar from 0 through 100 behind the nonfloating-input gate."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The scalar duty cycle controls the floating waveform threshold; output class and shape follow the supported t path."
+        }
       ]
     },
     {
@@ -145735,6 +146502,49 @@
           "when": "RunMat cannot allocate or construct a distance output.",
           "message": "distance helper: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "squareform-integer-input",
+          "mode": "RunMatOnly",
+          "description": "squareform with typed-integer distance data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SquareformIntegerInputExtension"
+        },
+        {
+          "id": "squareform-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "squareform with an explicit GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SquareformExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = squareform(integer_Z)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented MATLAB storage classes are single, double, and logical; RunMat additionally performs the structural conversion on typed integers without changing class or value."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The condensed-vector and symmetric-matrix layouts are transformed directly in authoritative native storage. Automatic residency may gather transparently; an explicit GPU call remains separately gated."
+        }
       ]
     },
     {
@@ -145770,6 +146580,35 @@
           "identifier": "RunMat:squeeze:InvalidInput",
           "when": "A has an unsupported type for squeeze.",
           "message": "squeeze: unsupported input type"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = squeeze(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "squeeze is class-agnostic structural array manipulation and preserves every integer element without numeric conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Only shape metadata changes. Host values retain authoritative storage and resident values retain the same provider buffer through reshape metadata."
         }
       ]
     },
@@ -146019,6 +146858,130 @@
           "when": "Internal tensor/object construction failed.",
           "message": "ss: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ss-integer-matrix-input",
+          "mode": "RunMatOnly",
+          "description": "ss with typed-integer state-space matrices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SsIntegerMatrixInputExtension"
+        },
+        {
+          "id": "ss-integer-sample-time",
+          "mode": "RunMatOnly",
+          "description": "ss with a typed-integer sample time is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SsIntegerSampleTimeExtension"
+        },
+        {
+          "id": "ss-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "ss with explicit GPU input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SsExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "sys = ss(integer_A, integer_B, integer_C, integer_D, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented public surface does not establish typed-integer storage; RunMat requires every value to be exact at the binary64 model boundary."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented public surface does not establish typed-integer storage; RunMat requires every value to be exact at the binary64 model boundary."
+            },
+            {
+              "name": "C",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented public surface does not establish typed-integer storage; RunMat requires every value to be exact at the binary64 model boundary."
+            },
+            {
+              "name": "D",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented public surface does not establish typed-integer storage; RunMat requires every value to be exact at the binary64 model boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] Each typed matrix is independently gated and checked before conversion; public documentation does not enumerate matrix storage classes, and the state-space object's numeric matrices are binary64."
+        },
+        {
+          "form": "sys = ss(A, B, C, D, integer_Ts)",
+          "inputs": [
+            {
+              "name": "Ts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat admits a typed scalar only when its exact value can enter the binary64 model metadata."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] The sample time is stored as binary64 model metadata after an exact representability check; public documentation requires a numeric scalar without enumerating typed storage classes."
+        }
       ]
     },
     {
@@ -146055,7 +147018,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "A = sscanf(text, format, integer_sizeA)",
+          "inputs": [
+            {
+              "name": "sizeA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional output-size scalar or two-element vector accepts every built-in integer class and is decoded directly from native storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "sizeA controls output shape only. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, and other numeric scan formats return double."
+        }
+      ]
     },
     {
       "name": "stackedplot",

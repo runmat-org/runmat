@@ -34,7 +34,8 @@
     "`[X, Y] = sphere(n)` returns the X and Y coordinate grids.",
     "`[X, Y, Z] = sphere(n)` returns all coordinate grids for use with `surf`, `mesh`, or other 3-D plotting functions.",
     "The default grid uses `n = 20`, producing 21-by-21 coordinate tensors.",
-    "`n` must be a finite non-negative integer scalar. `sphere(0)` returns a single unit-sphere point."
+    "`n` must be a finite non-negative integer scalar. `sphere(0)` returns a single unit-sphere point.",
+    "Typed integer storage for `n` remains an evidence-open RunMat-only extension because public documentation specifies an integer value without enumerating storage classes. RunMat decodes it structurally without conversion through double."
   ],
   "examples": [
     {

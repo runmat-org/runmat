@@ -37,6 +37,8 @@
     "`ss(A, B, C, D, Ts)` stores a finite non-negative sample time.",
     "`ss(A, B, C, D, 'Ts', Ts)` and `ss(A, B, C, D, 'SampleTime', Ts)` store a finite non-negative sample time.",
     "Numeric scalar inputs are treated as 1-by-1 matrices and are accepted only when the resulting dimensions are consistent.",
+    "Typed integer matrices and sample times are evidence-open RunMat-only extensions because public documentation does not enumerate their storage classes. Each value must be exactly representable as double before the state-space object stores binary64 matrix or sample-time metadata.",
+    "Automatically resident inputs may gather transparently for host object construction; an explicit gpuArray input is a separately gated RunMat extension.",
     "Complex, sparse, descriptor-form, uncertain, identified, and generalized models are not supported in this initial implementation."
   ],
   "examples": [
