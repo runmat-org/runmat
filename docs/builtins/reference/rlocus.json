@@ -33,6 +33,7 @@
     "Supports SISO `tf` objects with real or complex coefficients.",
     "Supports SISO `ss` objects by converting state-space metadata to equivalent numerator and denominator polynomials.",
     "Accepts an explicit finite nonnegative gain vector `k`.",
+    "A native typed-integer gain vector is a declared RunMat extension and must be exactly representable at the root-locus double boundary; MATLAB compatibility mode rejects it before gathering model or gain data.",
     "Chooses a deterministic logarithmic gain grid when `k` is omitted and adds samples around real positive breakaway candidates.",
     "Returns `r` as a branches-by-gains matrix, using complex output when any branch has a nonzero imaginary component.",
     "Returns `[r, k]` for two-output calls, where `k` is a row vector.",

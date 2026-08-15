@@ -2,9 +2,12 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, NumericDType, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -162,6 +165,45 @@ pub const RESCALE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RESCALE_ERRORS,
 };
 
+const RESCALE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a accepts numeric arrays; non-single integer data produces double output after a checked binary64 normalization boundary.",
+    }];
+const RESCALE_INTEGER_BOUND_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "l/u/InputMin/InputMax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed interval and input-range bounds are accepted numeric operands and cross the same checked computation boundary.",
+    }];
+pub const RESCALE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = rescale(integer_A, ...)",
+        inputs: &RESCALE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Authoritative integer samples are checked before materialization; range scaling is an intentional binary64 boundary and output is double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = rescale(A, integer_l, integer_u, integer_InputMin, integer_InputMax)",
+        inputs: &RESCALE_INTEGER_BOUND_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Bounds retain exact storage through admission and are materialized only at the named range-scaling boundary; A controls single-versus-double output.",
+    },
+];
+
 fn rescale_type(args: &[Type], ctx: &runmat_builtins::ResolveContext) -> Type {
     numeric_unary_type(args, ctx)
 }
@@ -173,10 +215,22 @@ fn rescale_type(args: &[Type], ctx: &runmat_builtins::ResolveContext) -> Type {
     keywords = "rescale,normalize,range,InputMin,InputMax,gpu",
     type_resolver(rescale_type),
     descriptor(crate::builtins::math::elementwise::rescale::RESCALE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::elementwise::rescale::RESCALE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::elementwise::rescale"
 )]
 async fn rescale_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let raw = parse_rescale_args(&rest)?;
+    ensure_rescale_integer_boundary(&value, "input").await?;
+    ensure_rescale_integer_boundary(&raw.lower, "lower bound").await?;
+    ensure_rescale_integer_boundary(&raw.upper, "upper bound").await?;
+    if let Some(bound) = raw.input_min.as_ref() {
+        ensure_rescale_integer_boundary(bound, "InputMin").await?;
+    }
+    if let Some(bound) = raw.input_max.as_ref() {
+        ensure_rescale_integer_boundary(bound, "InputMax").await?;
+    }
     let input = input_tensor(value).await?;
     let lower = bound_tensor(raw.lower, "lower bound").await?;
     let upper = bound_tensor(raw.upper, "upper bound").await?;
@@ -203,24 +257,24 @@ struct ParsedRescaleArgs {
 struct RescaleInput {
     tensor: Tensor,
     output_dtype: NumericDType,
-    gpu_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    gpu_source: Option<GpuTensorHandle>,
 }
 
 struct BoundOperand {
     tensor: Tensor,
-    gpu_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    gpu_source: Option<GpuTensorHandle>,
 }
 
 impl BoundOperand {
     fn host(tensor: Tensor) -> Self {
         Self {
             tensor,
-            gpu_provider: None,
+            gpu_source: None,
         }
     }
 
     fn was_gpu(&self) -> bool {
-        self.gpu_provider.is_some()
+        self.gpu_source.is_some()
     }
 }
 
@@ -289,7 +343,7 @@ fn parse_name_value_pairs(
 }
 
 async fn input_tensor(value: Value) -> BuiltinResult<RescaleInput> {
-    let (value, gpu_provider) = gather_value(value).await?;
+    let (value, gpu_source) = gather_value(value).await?;
     match value {
         Value::Tensor(tensor) => {
             let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
@@ -300,7 +354,7 @@ async fn input_tensor(value: Value) -> BuiltinResult<RescaleInput> {
             Ok(RescaleInput {
                 tensor,
                 output_dtype,
-                gpu_provider,
+                gpu_source,
             })
         }
         Value::LogicalArray(logical) => {
@@ -313,23 +367,23 @@ async fn input_tensor(value: Value) -> BuiltinResult<RescaleInput> {
             Ok(RescaleInput {
                 tensor,
                 output_dtype: NumericDType::F64,
-                gpu_provider,
+                gpu_source,
             })
         }
         Value::Num(n) => Ok(RescaleInput {
             tensor: scalar_tensor(n),
             output_dtype: NumericDType::F64,
-            gpu_provider,
+            gpu_source,
         }),
         Value::Int(i) => Ok(RescaleInput {
             tensor: scalar_tensor(int_to_f64(&i)),
             output_dtype: NumericDType::F64,
-            gpu_provider,
+            gpu_source,
         }),
         Value::Bool(flag) => Ok(RescaleInput {
             tensor: scalar_tensor(if flag { 1.0 } else { 0.0 }),
             output_dtype: NumericDType::F64,
-            gpu_provider,
+            gpu_source,
         }),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(rescale_invalid_input(
             "complex inputs are not supported by rescale",
@@ -341,7 +395,7 @@ async fn input_tensor(value: Value) -> BuiltinResult<RescaleInput> {
 }
 
 async fn bound_tensor(value: Value, label: &str) -> BuiltinResult<BoundOperand> {
-    let (value, gpu_provider) = gather_value(value).await?;
+    let (value, gpu_source) = gather_value(value).await?;
     let tensor = match value {
         Value::Tensor(tensor) => Ok(tensor),
         Value::LogicalArray(logical) => {
@@ -362,25 +416,17 @@ async fn bound_tensor(value: Value, label: &str) -> BuiltinResult<BoundOperand> 
             "{label} must be numeric or logical, got {other:?}"
         ))),
     }?;
-    Ok(BoundOperand {
-        tensor,
-        gpu_provider,
-    })
+    Ok(BoundOperand { tensor, gpu_source })
 }
 
-async fn gather_value(
-    value: Value,
-) -> BuiltinResult<(
-    Value,
-    Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-)> {
+async fn gather_value(value: Value) -> BuiltinResult<(Value, Option<GpuTensorHandle>)> {
     match value {
         Value::GpuTensor(handle) => {
-            let provider = provider_for_gpu(&handle)?;
+            provider_for_gpu(&handle)?;
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            Ok((Value::Tensor(tensor), Some(provider)))
+            Ok((Value::Tensor(tensor), Some(handle)))
         }
         other => Ok((other, None)),
     }
@@ -393,17 +439,23 @@ fn compute_rescale(
     input_min: BoundOperand,
     input_max: BoundOperand,
 ) -> BuiltinResult<Value> {
-    let should_upload = input.gpu_provider.is_some()
+    let should_upload = input.gpu_source.is_some()
         || lower.was_gpu()
         || upper.was_gpu()
         || input_min.was_gpu()
         || input_max.was_gpu();
-    let output_provider = input
-        .gpu_provider
-        .or(lower.gpu_provider)
-        .or(upper.gpu_provider)
-        .or(input_min.gpu_provider)
-        .or(input_max.gpu_provider);
+    let output_source = gpu_helpers::select_resident_output_source(
+        [
+            input.gpu_source.clone(),
+            lower.gpu_source.clone(),
+            upper.gpu_source.clone(),
+            input_min.gpu_source.clone(),
+            input_max.gpu_source.clone(),
+        ]
+        .into_iter()
+        .flatten(),
+        BUILTIN_NAME,
+    )?;
     let output_shape = broadcast_output_shape(
         &input.tensor.shape,
         &[
@@ -417,7 +469,7 @@ fn compute_rescale(
     if len == 0 {
         let tensor = Tensor::new_with_dtype(Vec::new(), output_shape, input.output_dtype)
             .map_err(rescale_internal)?;
-        return output_value(tensor, should_upload, output_provider);
+        return output_value(tensor, should_upload, output_source.as_ref());
     }
 
     let input_bc = OperandBroadcast::new(&input.tensor.shape, output_shape.len());
@@ -456,7 +508,7 @@ fn compute_rescale(
 
     let tensor =
         Tensor::new_with_dtype(out, output_shape, input.output_dtype).map_err(rescale_internal)?;
-    output_value(tensor, should_upload, output_provider)
+    output_value(tensor, should_upload, output_source.as_ref())
 }
 
 fn broadcast_output_shape(input_shape: &[usize], shapes: &[&[usize]]) -> BuiltinResult<Vec<usize>> {
@@ -572,16 +624,16 @@ fn int_to_f64(value: &IntValue) -> f64 {
 fn output_value(
     tensor: Tensor,
     upload_to_gpu: bool,
-    preferred_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    source: Option<&GpuTensorHandle>,
 ) -> BuiltinResult<Value> {
     if upload_to_gpu {
-        let provider = preferred_provider
-            .or_else(runmat_accelerate_api::provider)
-            .ok_or_else(|| rescale_internal("no active GPU provider for rescale output"))?;
-        let handle = gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|err| rescale_internal(format!("gpu upload failed: {err}")))?;
-        runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        let source =
+            source.ok_or_else(|| rescale_internal("missing GPU source for rescale output"))?;
+        return gpu_helpers::restore_class_preserving_value(
+            source,
+            rescale_tensor_into_value(tensor),
+            BUILTIN_NAME,
+        );
     }
     Ok(rescale_tensor_into_value(tensor))
 }
@@ -589,9 +641,20 @@ fn output_value(
 fn provider_for_gpu(
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<&'static dyn runmat_accelerate_api::AccelProvider> {
-    runmat_accelerate_api::provider_for_handle(handle)
-        .or_else(runmat_accelerate_api::provider)
+    gpu_helpers::exact_provider_for_handle(handle)
         .ok_or_else(|| rescale_internal("no active GPU provider for rescale input"))
+}
+
+async fn ensure_rescale_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(rescale_invalid_input(format!(
+            "integer {role} values must be exactly representable as double"
+        )));
+    }
+    Ok(())
 }
 
 fn rescale_tensor_into_value(tensor: Tensor) -> Value {
@@ -896,7 +959,7 @@ mod tests {
 
     #[tokio::test]
     async fn scalar_uint64_uses_unsigned_value_without_i64_saturation() {
-        let above_i64 = (i64::MAX as u64) + 4096;
+        let above_i64 = (1_u64 << 63) + 4096;
         let result = rescale_builtin(
             Value::Int(IntValue::U64(above_i64)),
             vec![

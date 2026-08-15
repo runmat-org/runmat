@@ -7,9 +7,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::structs::type_resolvers::rmfield_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, StringArray, StructValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, StringArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
@@ -192,6 +195,25 @@ pub const RMFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &RMFIELD_ERRORS,
 };
+const RMFIELD_INTEGER_PAYLOAD_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer fields nested in S",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Struct fields may contain arbitrary values; retained integer fields remain the same authoritative values and classes.",
+    }];
+pub const RMFIELD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S2 = rmfield(S_with_integer_fields, fields)",
+        inputs: &RMFIELD_INTEGER_PAYLOAD_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "rmfield changes only the field map; retained host integers, integer tensors, and resident handles are cloned without provider lookup or numeric conversion.",
+    }];
 
 fn rmfield_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rmfield_error_with_message(error.message, error)
@@ -215,6 +237,7 @@ fn rmfield_error_with_message(
     keywords = "rmfield,struct,remove field,struct array",
     type_resolver(rmfield_type),
     descriptor(crate::builtins::structs::core::rmfield::RMFIELD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::structs::core::rmfield::RMFIELD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
 async fn rmfield_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -442,6 +465,36 @@ pub(crate) mod tests {
         };
         assert!(!updated.fields.contains_key("score"));
         assert!(updated.fields.contains_key("name"));
+    }
+
+    #[test]
+    fn rmfield_preserves_all_integer_classes_in_retained_fields() {
+        let storages = [
+            runmat_builtins::IntegerStorage::I8(vec![i8::MIN]),
+            runmat_builtins::IntegerStorage::I16(vec![i16::MIN]),
+            runmat_builtins::IntegerStorage::I32(vec![i32::MIN]),
+            runmat_builtins::IntegerStorage::I64(vec![i64::MIN]),
+            runmat_builtins::IntegerStorage::U8(vec![u8::MAX]),
+            runmat_builtins::IntegerStorage::U16(vec![u16::MAX]),
+            runmat_builtins::IntegerStorage::U32(vec![u32::MAX]),
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+        ];
+        for storage in storages {
+            let tensor = runmat_builtins::Tensor::new_integer(storage.clone(), vec![1, 1])
+                .expect("integer tensor");
+            let mut structure = StructValue::new();
+            structure
+                .fields
+                .insert("keep".to_string(), Value::Tensor(tensor));
+            structure.fields.insert("drop".to_string(), Value::Num(1.0));
+            let result =
+                run_rmfield(Value::Struct(structure), vec![Value::from("drop")]).expect("rmfield");
+            assert!(matches!(
+                result,
+                Value::Struct(updated)
+                    if matches!(updated.fields.get("keep"), Some(Value::Tensor(tensor)) if tensor.integer_storage() == Some(&storage))
+            ));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -98,10 +98,10 @@ pub const RGB2GRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         inputs: &RGB2GRAY_DOCUMENTED_INTEGER_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "[integer-audit-open] RunMat reads authoritative uint8/uint16 samples, returns the same integer class using nearest rounding and saturation, and restores resident output through the input owner. The public rgb2gray page documents the input classes, coefficients, numeric image output, and gpuArray support but not the exact integer output class or tie rule.",
+        notes: "RunMat reads authoritative uint8/uint16 samples, applies the documented luminance coefficients, and returns the same integer image class using the public integer-conversion rule of nearest rounding with ties away from zero and saturation; resident output is restored through the input owner.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "rgb2gray(unsupported_integer_RGB)",
@@ -482,7 +482,7 @@ mod tests {
         );
         assert_eq!(
             RGB2GRAY_INTEGER_CAPABILITIES[0].overflow,
-            BuiltinIntegerOverflowRule::EvidenceOpen
+            BuiltinIntegerOverflowRule::Saturate
         );
     }
 

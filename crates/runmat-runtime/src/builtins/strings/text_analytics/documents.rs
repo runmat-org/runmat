@@ -7,13 +7,14 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, ClassDef, IntegerStorage, LogicalArray, NumericScalar,
-    ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, ClassDef, IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, PropertyDef,
+    ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -29,6 +30,13 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 pub const TOKENIZED_DOCUMENT_CLASS: &str = "tokenizedDocument";
 pub const BAG_OF_WORDS_CLASS: &str = "bagOfWords";
 const MAX_DENSE_BAG_COUNT_CELLS: usize = 50_000_000;
+
+pub const REMOVE_STOP_WORDS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "removeStopWords accepts a tokenizedDocument and logical IgnoreCase option; native integer and resident numeric arguments are rejected before provider access.",
+    };
 
 thread_local! {
     static TOKENIZED_DOCUMENT_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
@@ -810,11 +818,22 @@ async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_STOP_WORDS_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::strings::text_analytics::documents::REMOVE_STOP_WORDS_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 async fn remove_stop_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let gathered = gather_args(args, "removeStopWords").await?;
-    let (value, options) = parse_remove_stop_words_args(gathered)?;
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(text_analytics_error(
+            "removeStopWords",
+            "removeStopWords: expected tokenizedDocument input and logical options",
+        ));
+    }
+    let (value, options) = parse_remove_stop_words_args(args)?;
     let Value::Object(object) = value else {
         return Err(text_analytics_error(
             "removeStopWords",
@@ -3983,6 +4002,19 @@ mod tests {
             .expect("case-sensitive remove stop words"),
         );
         assert_eq!(documents_property(&filtered), vec![vec!["The", "word"]]);
+    }
+
+    #[test]
+    fn remove_stop_words_rejects_integer_and_resident_inputs_before_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_446_002,
+        });
+        for invalid in [Value::Int(runmat_builtins::IntValue::U8(1)), resident] {
+            let error = run_remove_stop(vec![invalid]).expect_err("numeric input must reject");
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

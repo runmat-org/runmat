@@ -33,7 +33,8 @@
     "Accepts character vectors, string scalars, string arrays, and cell arrays containing those types to identify the fields that should be removed.",
     "Every listed field must already exist. Attempting to remove a missing field raises the standard MATLAB-style error `Reference to non-existent field '<name>'`.",
     "Removing multiple fields applies to every element in a struct array; the operation fails if any element is missing one of the requested fields.",
-    "The input `S` is not mutated in place. `rmfield` returns a new struct (or struct array) while the original remains unchanged."
+    "The input `S` is not mutated in place. `rmfield` returns a new struct (or struct array) while the original remains unchanged.",
+    "Retained fields preserve every nested integer class and exact payload structurally, including wide values, without conversion or provider access."
   ],
   "examples": [
     {

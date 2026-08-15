@@ -242,6 +242,52 @@ pub const ANYMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         notes: "Integer scalars and arrays return logical false because integer classes have no default missing representation; resident inputs gather without floating conversion.",
     }];
 
+const RMMISSING_INTEGER_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rmmissing-integer-dimension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rmmissing accepts a typed-integer dimension control as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RmmissingIntegerDimensionExtension"),
+};
+pub const RMMISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RMMISSING_INTEGER_DIM_EXTENSION];
+const RMMISSING_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The R2022a-and-later surface accepts datatypes without a standard missing definition; all eight integer classes therefore remain unchanged.",
+    }];
+const RMMISSING_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat additionally accepts a typed integer dimension scalar and reads it exactly as a structural control.",
+    }];
+pub const RMMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[R,TF] = rmmissing(integer_A, ...)",
+        inputs: &RMMISSING_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer A is an exact no-op because it has no standard missing value; R preserves class and storage, TF is all-false logical, and documented resident outputs return through the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "R = rmmissing(A, integer_dim)",
+        inputs: &RMMISSING_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The dimension extension is mode-gated before provider access and never crosses a floating boundary.",
+    },
+];
+
 const FILLMISSING_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "fillmissing-integer-data",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -700,20 +746,50 @@ async fn standardize_missing_builtin(value: Value, rest: Vec<Value>) -> BuiltinR
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::RMMISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::RMMISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::RMMISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| invalid_argument(format!("rmmissing: failed to gather input: {err}")))?;
+    if rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RMMISSING_INTEGER_DIM_EXTENSION,
+            "rmmissing",
+        )?;
+    }
+    let source = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
+    let value = if let Some(handle) = source.as_ref() {
+        let owner = gpu_helpers::exact_provider_for_handle(handle)
+            .ok_or_else(|| invalid_argument("rmmissing: no provider owns the resident input"))?;
+        gpu_helpers::download_value_preserving_residency_async(owner, handle)
+            .await
+            .map_err(|err| invalid_argument(format!("rmmissing: failed to gather input: {err}")))?
+    } else {
+        value
+    };
     let options = RemoveOptions::parse(&rest)?;
     let (result, removed) = remove_missing_value(value, options)?;
+    let (result, removed) = if let Some(source) = source.as_ref() {
+        (
+            gpu_helpers::restore_class_preserving_value(source, result, "rmmissing")?,
+            gpu_helpers::restore_class_preserving_value(
+                source,
+                Value::LogicalArray(removed),
+                "rmmissing",
+            )?,
+        )
+    } else {
+        (result, Value::LogicalArray(removed))
+    };
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![result])),
         Some(n) => Ok(crate::output_count::output_list_with_padding(
             n,
-            vec![result, Value::LogicalArray(removed)],
+            vec![result, removed],
         )),
         None => Ok(result),
     }
@@ -3134,6 +3210,52 @@ mod tests {
             }
             other => panic!("expected tensor and mask, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+                vec![1, 2],
+            )
+            .expect("integer tensor");
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
+            runmat_accelerate_api::mark_handle_explicit(&source);
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let result = block_on(rmmissing_builtin(
+                Value::GpuTensor(source.clone()),
+                Vec::new(),
+            ))
+            .expect("resident rmmissing");
+            let Value::OutputList(outputs) = result else {
+                panic!("expected output list");
+            };
+            assert_eq!(outputs.len(), 2);
+            for output in &outputs {
+                assert!(
+                    matches!(output, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+                );
+            }
+            assert!(
+                matches!(&outputs[1], Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+            );
+            let gathered_value = test_support::gather(outputs[0].clone()).expect("gather value");
+            assert_eq!(
+                gathered_value.integer_storage(),
+                Some(&IntegerStorage::U64(vec![1, 9_007_199_254_740_993]))
+            );
+            let gathered_mask = test_support::gather(outputs[1].clone()).expect("gather mask");
+            assert_eq!(gathered_mask.shape, vec![1, 2]);
+            assert_eq!(gathered_mask.materialize_f64(), vec![0.0, 0.0]);
+            assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
+            for output in outputs {
+                if let Value::GpuTensor(handle) = output {
+                    provider.free(&handle).ok();
+                }
+            }
+            provider.free(&source).ok();
+        });
     }
 
     #[test]

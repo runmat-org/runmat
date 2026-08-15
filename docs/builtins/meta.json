@@ -132190,6 +132190,92 @@
           "when": "RunMat cannot allocate or construct regression outputs.",
           "message": "regress: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "regress-integer-data",
+          "mode": "RunMatOnly",
+          "description": "regress accepts typed-integer response and design data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RegressIntegerDataExtension"
+        },
+        {
+          "id": "regress-integer-alpha",
+          "mode": "RunMatOnly",
+          "description": "regress accepts a typed-integer alpha as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RegressIntegerAlphaExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "regress(integer_y, integer_X [, alpha])",
+          "inputs": [
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double response data; typed integers cross a checked binary64 regression boundary."
+            },
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double design data; typed integers cross the same checked boundary independently of y."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact authoritative integer values are checked before transparent gather and then intentionally enter the binary64 least-squares domain; outputs are double."
+        },
+        {
+          "form": "regress(y, X, integer_alpha)",
+          "inputs": [
+            {
+              "name": "alpha",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double alpha; a typed integer is admitted only when exact in binary64 and within the open unit interval."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The typed alpha extension is gated and checked before provider access; the statistical computation and outputs are double."
+        }
       ]
     },
     {
@@ -132535,7 +132621,11 @@
           "when": "Inputs do not match a supported removeStopWords form.",
           "message": "removeStopWords: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "removeStopWords accepts a tokenizedDocument and logical IgnoreCase option; native integer and resident numeric arguments are rejected before provider access."
+      }
     },
     {
       "name": "removeWords",
@@ -132780,6 +132870,62 @@
           "identifier": "RunMat:repelem:Internal",
           "when": "Internal allocation/indexing path fails.",
           "message": "repelem: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = repelem(integer_A, R1,...,RN)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes; authoritative elements are copied without arithmetic or floating conversion."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Replication preserves native class, shape order, and exact wide values; resident inputs use owner-preserving host fallback when no provider hook exists."
+        },
+        {
+          "form": "B = repelem(A, integer_R1,...,integer_RN)",
+          "inputs": [
+            {
+              "name": "R1,...,RN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Typed repetition controls are read exactly as nonnegative structural sizes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Replication counts never pass through binary64; checked size arithmetic rejects unrepresentable output geometry."
         }
       ]
     },
@@ -133091,6 +133237,62 @@
           "identifier": "RunMat:repmat:Internal",
           "when": "Internal allocation/indexing/provider path fails.",
           "message": "repmat: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = repmat(integer_A, r)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes and class-preserving output."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Tiling copies authoritative native storage exactly and restores supported resident results through the owning provider."
+        },
+        {
+          "form": "B = repmat(A, integer_r) or repmat(A, integer_m,integer_n,...)",
+          "inputs": [
+            {
+              "name": "r/m/n/dims",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Typed replication factors are exact nonnegative structural controls."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Factors are never widened to binary64; checked output-size arithmetic rejects overflow."
         }
       ]
     },
@@ -133428,6 +133630,97 @@
           "when": "More outputs are requested than the builtin supports.",
           "message": "sample-rate builtin: too many output arguments"
         }
+      ],
+      "extensions": [
+        {
+          "id": "resample-integer-options",
+          "mode": "RunMatOnly",
+          "description": "resample accepts typed-integer rate, filter-design, filter, and dimension arguments as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ResampleIntegerOptionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "resample(integer_X, P, Q, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double signal input; native integer signals reject before host or provider execution."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Integer signal storage is outside the compatibility surface and rejects from authoritative host or resident dtype metadata before filtering."
+        },
+        {
+          "form": "Y = resample(X, integer_P, integer_Q, integer_N, Dimension=integer_dim)",
+          "inputs": [
+            {
+              "name": "P/Q/N/Dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Rate and dimension controls remain exact through validation; checked arithmetic owns output and filter geometry."
+        },
+        {
+          "form": "Y = resample(X, P, Q, integer_BETA_or_B)",
+          "inputs": [
+            {
+              "name": "BETA/B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed Kaiser beta or FIR coefficients are a RunMat extension and enter filtering only after exact binary64 representability is proved."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Filter-design or coefficient integers cross one named checked binary64 FIR boundary; X retains its documented floating output class and residency behavior."
+        }
       ]
     },
     {
@@ -133601,6 +133894,62 @@
           "when": "Tensor construction, allocation, or GPU gather fails internally.",
           "message": "rescale: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = rescale(integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a accepts numeric arrays; non-single integer data produces double output after a checked binary64 normalization boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Authoritative integer samples are checked before materialization; range scaling is an intentional binary64 boundary and output is double."
+        },
+        {
+          "form": "R = rescale(A, integer_l, integer_u, integer_InputMin, integer_InputMax)",
+          "inputs": [
+            {
+              "name": "l/u/InputMin/InputMax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Typed interval and input-range bounds are accepted numeric operands and cross the same checked computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Bounds retain exact storage through admission and are materialized only at the named range-scaling boundary; A controls single-versus-double output."
+        }
       ]
     },
     {
@@ -133732,6 +134081,62 @@
           "identifier": "RunMat:reshape:UnsupportedInput",
           "when": "Input value type is unsupported for reshape.",
           "message": "reshape: unsupported input type"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = reshape(integer_A, sz)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes and preserves the input datatype."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Reshape changes metadata only; authoritative integer payload and resident handle ownership remain unchanged."
+        },
+        {
+          "form": "B = reshape(A, integer_sz) or reshape(A, integer_m,integer_n,...)",
+          "inputs": [
+            {
+              "name": "sz/m/n/dims",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Typed size controls are parsed exactly as nonnegative dimensions, with one optional inferred dimension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Size controls remain exact and checked multiplication proves element-count equality without binary64 conversion."
         }
       ]
     },
@@ -133878,10 +134283,10 @@
           ],
           "computation_domain": "FloatingPoint",
           "output_class": "FunctionSpecific",
-          "overflow": "EvidenceOpen",
+          "overflow": "Saturate",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "[integer-audit-open] RunMat reads authoritative uint8/uint16 samples, returns the same integer class using nearest rounding and saturation, and restores resident output through the input owner. The public rgb2gray page documents the input classes, coefficients, numeric image output, and gpuArray support but not the exact integer output class or tie rule."
+          "notes": "RunMat reads authoritative uint8/uint16 samples, applies the documented luminance coefficients, and returns the same integer image class using the public integer-conversion rule of nearest rounding with ties away from zero and saturation; resident output is restored through the input owner."
         },
         {
           "form": "rgb2gray(unsupported_integer_RGB)",
@@ -134296,6 +134701,78 @@
           "when": "Internal ribbon surface construction or rendering fails.",
           "message": "ribbon: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = ribbon(integer_Y) or ribbon(integer_X,integer_Y,...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric coordinate surface admits integer vectors; native source storage remains authoritative for XData."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer ribbon heights retain their native storage and class as authoritative ZData."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Rendering deliberately materializes floating geometry, while graphics properties reconstruct XData and ZData from duplicated exact native source storage; the returned graphics handles are double."
+        },
+        {
+          "form": "h = ribbon(X,Y,integer_width)",
+          "inputs": [
+            {
+              "name": "width",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The numeric width scalar is a rendering control and is materialized only at the ribbon-geometry boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Width is validated as a positive finite scalar before floating strip geometry is generated."
+        }
       ]
     },
     {
@@ -134399,6 +134876,125 @@
           "identifier": "RunMat:ridge:Internal",
           "when": "RunMat cannot allocate or construct ridge outputs.",
           "message": "ridge: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ridge-integer-data",
+          "mode": "RunMatOnly",
+          "description": "ridge accepts typed-integer response and predictor data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RidgeIntegerDataExtension"
+        },
+        {
+          "id": "ridge-integer-k",
+          "mode": "RunMatOnly",
+          "description": "ridge accepts typed-integer regularization parameters as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RidgeIntegerKExtension"
+        },
+        {
+          "id": "ridge-integer-scaled",
+          "mode": "RunMatOnly",
+          "description": "ridge accepts a typed-integer scaled flag as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RidgeIntegerScaledExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ridge(integer_y, integer_X, k [, scaled])",
+          "inputs": [
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double response data; typed integers require exact binary64 conversion."
+            },
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double predictors; typed integers require the same checked conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The authoritative integer samples are checked before transparent gather and intentional binary64 standardization/SVD."
+        },
+        {
+          "form": "ridge(y, X, integer_k [, scaled])",
+          "inputs": [
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed regularization parameters are a RunMat extension and enter the floating solver only after exactness and range checks."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Regularization parameters are checked exactly before entering the binary64 solver."
+        },
+        {
+          "form": "ridge(y, X, k, integer_scaled)",
+          "inputs": [
+            {
+              "name": "scaled",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents scaled as numeric 0 or 1 but not a typed integer class; RunMat gates that convenience form independently."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Only exact typed values zero and one are accepted after the compatibility gate."
         }
       ]
     },
@@ -134550,6 +135146,43 @@
           "identifier": "RunMat:rlocus:Internal",
           "when": "Root-locus computation or output construction failed.",
           "message": "rlocus: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rlocus-integer-gain",
+          "mode": "RunMatOnly",
+          "description": "rlocus accepts a typed-integer gain vector as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RlocusIntegerGainExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = rlocus(sys, integer_k)",
+          "inputs": [
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public gain surface does not document typed integer classes; RunMat mode admits them only through a checked binary64 root-locus boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Gain values are gated and checked before any provider lookup, then intentionally enter double polynomial-root computation; returned gains are double."
         }
       ]
     },
@@ -134882,6 +135515,35 @@
           "when": "Rebuilding the updated struct array failed.",
           "message": "rmfield: failed to rebuild struct array"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S2 = rmfield(S_with_integer_fields, fields)",
+          "inputs": [
+            {
+              "name": "integer fields nested in S",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Struct fields may contain arbitrary values; retained integer fields remain the same authoritative values and classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "rmfield changes only the field map; retained host integers, integer tensors, and resident handles are cloned without provider lookup or numeric conversion."
+        }
       ]
     },
     {
@@ -134943,6 +135605,70 @@
           "identifier": "RunMat:missing:InternalError",
           "when": "Internal shape or table materialization fails.",
           "message": "missing-value builtin: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rmmissing-integer-dimension",
+          "mode": "RunMatOnly",
+          "description": "rmmissing accepts a typed-integer dimension control as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RmmissingIntegerDimensionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[R,TF] = rmmissing(integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The R2022a-and-later surface accepts datatypes without a standard missing definition; all eight integer classes therefore remain unchanged."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer A is an exact no-op because it has no standard missing value; R preserves class and storage, TF is all-false logical, and documented resident outputs return through the owning provider."
+        },
+        {
+          "form": "R = rmmissing(A, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat additionally accepts a typed integer dimension scalar and reads it exactly as a structural control."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The dimension extension is mode-gated before provider access and never crosses a floating boundary."
         }
       ]
     },
@@ -135038,7 +135764,11 @@
           "when": "The requested folder path does not exist.",
           "message": "rmpath: folder not found"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "rmpath accepts text path containers only; native integer and resident numeric inputs are rejected before provider lookup."
+      }
     },
     {
       "name": "rms",

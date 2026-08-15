@@ -420,6 +420,70 @@ pub const RESAMPLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RESAMPLE_ERRORS,
 };
 
+const RESAMPLE_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "resample-integer-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "resample accepts typed-integer rate, filter-design, filter, and dimension arguments as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ResampleIntegerOptionsExtension"),
+};
+const RESAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RESAMPLE_INTEGER_OPTION_EXTENSION];
+const RESAMPLE_REJECTED_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double signal input; native integer signals reject before host or provider execution.",
+    }];
+const RESAMPLE_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "P/Q/N/Dimension",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values.",
+    }];
+const RESAMPLE_INTEGER_FLOAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "BETA/B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed Kaiser beta or FIR coefficients are a RunMat extension and enter filtering only after exact binary64 representability is proved.",
+    }];
+pub const RESAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "resample(integer_X, P, Q, ...)",
+        inputs: &RESAMPLE_REJECTED_INTEGER_DATA,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer signal storage is outside the compatibility surface and rejects from authoritative host or resident dtype metadata before filtering.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = resample(X, integer_P, integer_Q, integer_N, Dimension=integer_dim)",
+        inputs: &RESAMPLE_INTEGER_STRUCTURAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Rate and dimension controls remain exact through validation; checked arithmetic owns output and filter geometry.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = resample(X, P, Q, integer_BETA_or_B)",
+        inputs: &RESAMPLE_INTEGER_FLOAT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Filter-design or coefficient integers cross one named checked binary64 FIR boundary; X retains its documented floating output class and residency behavior.",
+    },
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SampleOp {
     Up,
@@ -628,6 +692,8 @@ fn value_rank(value: &Value) -> Option<usize> {
     keywords = "resample,sample rate,polyphase,antialiasing,FIR,signal processing",
     type_resolver(resample_type),
     descriptor(crate::builtins::math::signal::sample_rate::RESAMPLE_DESCRIPTOR),
+    extensions(RESAMPLE_EXTENSIONS),
+    integer_capabilities(RESAMPLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::sample_rate"
 )]
 async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -640,6 +706,22 @@ async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> Bui
         _ => {}
     }
 
+    if is_typed_integer_value(&x) {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_INPUT,
+            "resample input must be single or double",
+        ));
+    }
+    let typed_options = is_typed_integer_value(&p)
+        || is_typed_integer_value(&q)
+        || rest.iter().any(is_typed_integer_value);
+    if typed_options {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESAMPLE_INTEGER_OPTION_EXTENSION,
+            RESAMPLE_NAME,
+        )?;
+    }
     let mut p = parse_factor(&p, RESAMPLE_NAME).await?;
     let mut q = parse_factor(&q, RESAMPLE_NAME).await?;
     let divisor = gcd(p, q);
@@ -1052,6 +1134,16 @@ async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
 }
 
 async fn scalar_f64_option(value: &Value) -> BuiltinResult<f64> {
+    if is_typed_integer_value(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+            "typed integer BETA must be exactly representable as double",
+        ));
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| {
@@ -1075,6 +1167,16 @@ async fn scalar_f64_option(value: &Value) -> BuiltinResult<f64> {
 }
 
 async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
+    if is_typed_integer_value(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(sample_error_with_detail(
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+            "typed integer filter coefficients must be exactly representable as double",
+        ));
+    }
     if let Value::GpuTensor(handle) = value {
         let len = checked_product(&handle.shape)
             .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
@@ -2838,6 +2940,7 @@ mod tests {
 
     #[test]
     fn resample_filter_vector_reads_typed_integer_storage_exactly() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
         let filter = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0]), vec![1, 3]).unwrap();
 
         let parsed = block_on(parse_filter_vector(Value::Tensor(filter))).unwrap();

@@ -2,7 +2,11 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ResolveContext, Tensor, Type, Value,
 };
@@ -245,6 +249,69 @@ pub const REGRESS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const REGRESS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "regress-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "regress accepts typed-integer response and design data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RegressIntegerDataExtension"),
+};
+const REGRESS_INTEGER_ALPHA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "regress-integer-alpha",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "regress accepts a typed-integer alpha as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RegressIntegerAlphaExtension"),
+};
+pub const REGRESS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    REGRESS_INTEGER_DATA_EXTENSION,
+    REGRESS_INTEGER_ALPHA_EXTENSION,
+];
+const REGRESS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double response data; typed integers cross a checked binary64 regression boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double design data; typed integers cross the same checked boundary independently of y.",
+    },
+];
+const REGRESS_INTEGER_ALPHA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "alpha",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double alpha; a typed integer is admitted only when exact in binary64 and within the open unit interval.",
+    }];
+pub const REGRESS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "regress(integer_y, integer_X [, alpha])",
+        inputs: &REGRESS_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact authoritative integer values are checked before transparent gather and then intentionally enter the binary64 least-squares domain; outputs are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "regress(y, X, integer_alpha)",
+        inputs: &REGRESS_INTEGER_ALPHA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The typed alpha extension is gated and checked before provider access; the statistical computation and outputs are double.",
+    },
+];
+
 fn regress_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -294,11 +361,36 @@ struct CoefficientSolve {
     keywords = "regress,linear regression,least squares,statistics,machine learning",
     type_resolver(regress_type),
     descriptor(crate::builtins::stats::ml::regress::REGRESS_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::regress::REGRESS_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::regress::REGRESS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::regress"
 )]
 async fn regress_builtin(y: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(invalid("regress: accepts at most one alpha argument"));
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &REGRESS_INTEGER_DATA_EXTENSION,
+        NAME,
+        "response",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &REGRESS_INTEGER_DATA_EXTENSION,
+        NAME,
+        "design",
+    )
+    .await?;
+    if let Some(value) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &REGRESS_INTEGER_ALPHA_EXTENSION,
+            NAME,
+            "alpha",
+        )
+        .await?;
     }
     let y = gather_tensor(y).await?;
     let x = gather_tensor(x).await?;
@@ -899,6 +991,7 @@ mod tests {
 
     #[test]
     fn regress_accepts_typed_integer_design_and_response() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = crate::output_count::push_output_count(Some(1));
         let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, f64::NAN);
         let x = poisoned_int_tensor(
@@ -916,6 +1009,7 @@ mod tests {
 
     #[test]
     fn regress_rejects_typed_integer_alpha_boundaries() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
         let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, 0.0);
         let x = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2, 0.0);
         let alpha = poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1, 0.5);

@@ -13,10 +13,13 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar,
-    NumericStorage, StringArray, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage,
+    LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -174,6 +177,44 @@ pub const REPMAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &REPMAT_ERRORS,
 };
+const REPMAT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents all eight integer classes and class-preserving output.",
+    }];
+const REPMAT_INTEGER_FACTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "r/m/n/dims",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed replication factors are exact nonnegative structural controls.",
+    }];
+pub const REPMAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = repmat(integer_A, r)",
+        inputs: &REPMAT_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Tiling copies authoritative native storage exactly and restores supported resident results through the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = repmat(A, integer_r) or repmat(A, integer_m,integer_n,...)",
+        inputs: &REPMAT_INTEGER_FACTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Factors are never widened to binary64; checked output-size arithmetic rejects overflow.",
+    },
+];
 
 fn repmat_error(
     error: &'static BuiltinErrorDescriptor,
@@ -302,6 +343,7 @@ fn repmat_type(args: &[Type], ctx: &ResolveContext) -> Type {
     accel = "array_construct",
     type_resolver(repmat_type),
     descriptor(crate::builtins::array::shape::repmat::REPMAT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::repmat::REPMAT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
 async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -637,7 +679,7 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
 }
 
 async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
             if let Ok(tiled) = provider.repmat(&handle, reps) {
                 return Ok(Value::GpuTensor(tiled));
@@ -645,10 +687,11 @@ async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::Bu
         }
         let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
         let tiled = repmat_tensor(&gathered, reps)?;
-        match gpu_helpers::upload_tensor(provider, &tiled) {
-            Ok(new_handle) => Ok(Value::GpuTensor(new_handle)),
-            Err(_) => Ok(tensor::tensor_into_value(tiled)),
-        }
+        gpu_helpers::restore_class_preserving_value(
+            &handle,
+            tensor::tensor_into_value(tiled),
+            BUILTIN_NAME,
+        )
     } else {
         Err(repmat_internal(
             "repmat: no acceleration provider is registered",
