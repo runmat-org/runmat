@@ -12,8 +12,14 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     assembly
         .verify()
         .map_err(|error| format!("standalone Native IR failed verification: {error}"))?;
-    let registry: runmat_vm::FunctionRegistry = serde_json::from_slice(&input.program)
-        .map_err(|error| format!("standalone program registry is invalid: {error}"))?;
+    let program =
+        runmat_native_codegen::aot::AotProgramManifest::from_canonical_bytes(&input.program)
+            .map_err(|error| format!("standalone program manifest is invalid: {error}"))?;
+    if program.executable != assembly.executable_identity
+        || program.native_ir_digest != runmat_execution::Digest::sha256(&input.native_ir)
+    {
+        return Err("standalone program manifest does not match its Native IR".into());
+    }
     let ordered_resume_points: Vec<(ProgramPointId, u64)> =
         serde_json::from_slice(&input.resume_points)
             .map_err(|error| format!("standalone resume-point map is invalid: {error}"))?;
@@ -78,7 +84,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
                 .collect();
             crate::program::invoke_workspace(
                 Rc::clone(&executor),
-                &registry,
+                &program,
                 entrypoint,
                 NativeWorkspaceInput {
                     local_names,
@@ -91,7 +97,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         } else {
             crate::program::invoke(
                 Rc::clone(&executor),
-                &registry,
+                &program,
                 entrypoint,
                 Vec::new(),
                 requested_outputs,

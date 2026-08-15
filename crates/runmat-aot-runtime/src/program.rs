@@ -6,13 +6,13 @@ use runmat_value::Value;
 
 pub async fn invoke(
     executor: Rc<runmat_jit::GenericExecutor>,
-    registry: &runmat_vm::FunctionRegistry,
+    program: &runmat_native_codegen::aot::AotProgramManifest,
     function: ProgramFunctionId,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
-    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), registry, &runtime);
+    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
         .invoke_async(function, arguments, requested_outputs, runtime)
@@ -25,13 +25,13 @@ pub async fn invoke(
 
 pub async fn invoke_workspace(
     executor: Rc<runmat_jit::GenericExecutor>,
-    registry: &runmat_vm::FunctionRegistry,
+    program: &runmat_native_codegen::aot::AotProgramManifest,
     function: ProgramFunctionId,
     workspace: NativeWorkspaceInput,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<GenericExecution, runmat_runtime::RuntimeError> {
-    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), registry, &runtime);
+    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
         .invoke_workspace_async(function, workspace, requested_outputs, runtime)
@@ -52,7 +52,7 @@ struct ProgramInvocationGuards {
 impl ProgramInvocationGuards {
     fn install(
         executor: Rc<runmat_jit::GenericExecutor>,
-        registry: &runmat_vm::FunctionRegistry,
+        program: &runmat_native_codegen::aot::AotProgramManifest,
         runtime: &runmat_runtime::context::RuntimeContext,
     ) -> Self {
         // Installation is synchronous, but it must target this program's
@@ -61,14 +61,10 @@ impl ProgramInvocationGuards {
         let _runtime_scope = runtime.enter();
         let previous_semantic = runmat_runtime::user_functions::current_semantic_function_invoker();
         let native_functions = Arc::new(
-            registry
+            program
                 .functions
-                .values()
-                .filter_map(|function| {
-                    u32::try_from(function.function.0)
-                        .ok()
-                        .map(ProgramFunctionId)
-                })
+                .iter()
+                .map(|function| function.function)
                 .collect::<std::collections::BTreeSet<_>>(),
         );
         let semantic_executor = Rc::clone(&executor);
@@ -153,12 +149,12 @@ impl ProgramInvocationGuards {
 
         let previous_resolver =
             runmat_runtime::user_functions::current_semantic_function_resolver();
-        let resolver_registry = Arc::new(registry.clone());
+        let resolver_program = Arc::new(program.clone());
         let resolver = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
             Arc::new(move |name| {
-                resolver_registry
+                resolver_program
                     .resolve_name(name)
-                    .map(|function| function.0)
+                    .map(|function| function.0 as usize)
                     .or_else(|| {
                         previous_resolver
                             .as_ref()
@@ -166,18 +162,16 @@ impl ProgramInvocationGuards {
                     })
             }),
         ));
-        let mut functions = registry
+        let mut functions = program
             .functions
-            .values()
-            .filter_map(|function| {
-                function.source_id.map(|source_id| {
-                    runmat_runtime::user_functions::SourceFunctionInfo {
-                        source_id,
-                        name: function.display_name.clone(),
-                        function: function.function.0,
-                    }
-                })
-            })
+            .iter()
+            .map(
+                |function| runmat_runtime::user_functions::SourceFunctionInfo {
+                    source_id: runmat_types::SourceId(function.source.0 as usize),
+                    name: function.name.clone(),
+                    function: function.function.0 as usize,
+                },
+            )
             .collect::<Vec<_>>();
         functions.sort_by_key(|function| function.function);
         let catalog = runmat_runtime::user_functions::install_source_function_catalog(Some(

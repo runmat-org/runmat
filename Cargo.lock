@@ -6344,7 +6344,6 @@ dependencies = [
  "runmat-runtime",
  "runmat-types",
  "runmat-value",
- "runmat-vm",
  "serde_json",
 ]
 

@@ -19,7 +19,6 @@ runmat-native-codegen = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-types = { workspace = true }
 runmat-value = { workspace = true }
-runmat-vm = { workspace = true }
 serde_json = { workspace = true }
 
 [lints.rust]

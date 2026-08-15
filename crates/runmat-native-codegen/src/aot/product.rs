@@ -1,14 +1,131 @@
-use runmat_execution::Digest;
-use runmat_types::ProgramFunctionId;
+use runmat_execution::{Digest, ExecutableIdentity};
+use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
 pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 1;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 1;
+const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
 pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
 pub const AOT_RESUME_POINTS_SYMBOL: &str = "runmat_aot_resume_points";
+
+/// Frontend- and VM-independent callable inventory embedded in a native AOT
+/// object. The standalone host needs names and source ownership for exact
+/// runtime dispatch, but never bytecode or interpreter frame metadata.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AotProgramManifest {
+    pub schema_version: u16,
+    pub executable: ExecutableIdentity,
+    pub native_ir_digest: Digest,
+    pub functions: Vec<AotProgramFunction>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AotProgramFunction {
+    pub function: ProgramFunctionId,
+    pub source: ProgramSourceId,
+    pub name: String,
+}
+
+impl AotProgramManifest {
+    pub fn from_assembly(
+        assembly: &crate::NativeAssembly,
+        native_ir_digest: Digest,
+    ) -> Result<Self, crate::NativeCodegenError> {
+        let mut functions = assembly
+            .functions
+            .iter()
+            .map(|function| AotProgramFunction {
+                function: function.id,
+                source: function.source,
+                name: function.name.clone(),
+            })
+            .collect::<Vec<_>>();
+        functions.sort_by_key(|function| function.function);
+        let manifest = Self {
+            schema_version: AOT_PROGRAM_MANIFEST_SCHEMA_VERSION,
+            executable: assembly.executable_identity.clone(),
+            native_ir_digest,
+            functions,
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    pub fn validate(&self) -> Result<(), crate::NativeCodegenError> {
+        self.executable.program.validate().map_err(|error| {
+            crate::NativeCodegenError::new("native.aot.program", error.to_string())
+        })?;
+        if self.schema_version != AOT_PROGRAM_MANIFEST_SCHEMA_VERSION
+            || !valid_identity(&self.executable.root_package, 256)
+            || !valid_identity(&self.executable.entrypoint, 512)
+            || self.functions.is_empty()
+            || self.functions.len() > MAX_AOT_PROGRAM_FUNCTIONS
+            || self
+                .functions
+                .windows(2)
+                .any(|pair| pair[0].function >= pair[1].function)
+            || !self
+                .functions
+                .iter()
+                .any(|function| function.function == self.executable.entrypoint_function)
+            || self.functions.iter().any(|function| {
+                function.name.is_empty()
+                    || function.name.len() > 512
+                    || function.name.chars().any(char::is_control)
+            })
+        {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.program",
+                "AOT program manifest is not canonical",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, crate::NativeCodegenError> {
+        self.validate()?;
+        serde_json::to_vec(self).map_err(|error| {
+            crate::NativeCodegenError::new(
+                "native.aot.program",
+                format!("failed to encode AOT program manifest: {error}"),
+            )
+        })
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, crate::NativeCodegenError> {
+        let manifest: Self = serde_json::from_slice(bytes).map_err(|error| {
+            crate::NativeCodegenError::new(
+                "native.aot.program",
+                format!("failed to decode AOT program manifest: {error}"),
+            )
+        })?;
+        manifest.validate()?;
+        if manifest.canonical_bytes()? != bytes {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.program",
+                "AOT program manifest encoding is not canonical",
+            ));
+        }
+        Ok(manifest)
+    }
+
+    pub fn resolve_name(&self, name: &str) -> Option<ProgramFunctionId> {
+        self.functions
+            .iter()
+            .find(|function| function.name == name)
+            .map(|function| function.function)
+    }
+}
+
+fn valid_identity(value: &str, maximum: usize) -> bool {
+    !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]

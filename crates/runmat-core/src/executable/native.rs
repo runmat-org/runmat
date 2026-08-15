@@ -142,6 +142,11 @@ impl NativeCompilationInput {
                 format!("failed to encode embedded Native IR: {error}"),
             )
         })?;
+        let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
+            assembly,
+            runmat_execution::Digest::sha256(&native_ir),
+        )?
+        .canonical_bytes()?;
         let ordered_resume_points = self
             .interpreter_resume_points
             .iter()
@@ -162,7 +167,7 @@ impl NativeCompilationInput {
             )?,
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_PROGRAM_SYMBOL,
-                self.program_capture.clone(),
+                program,
                 8,
             )?,
             runmat_native_codegen::aot::embedded_blob(
@@ -314,5 +319,33 @@ end
             .regions
             .iter()
             .all(|region| retained.contains(&region.id.function)));
+        let object_data = input
+            .aot_object_data(&assembly)
+            .expect("build retained AOT object data");
+        let program_bytes = &object_data
+            .iter()
+            .find(|data| data.symbol == runmat_native_codegen::aot::AOT_PROGRAM_SYMBOL)
+            .expect("AOT program manifest")
+            .bytes;
+        let program =
+            runmat_native_codegen::aot::AotProgramManifest::from_canonical_bytes(program_bytes)
+                .expect("decode AOT program manifest");
+        assert_eq!(program.functions.len(), 2);
+        assert!(program
+            .functions
+            .iter()
+            .all(|function| function.name != "unused_nested"));
+        assert_eq!(
+            program.native_ir_digest,
+            runmat_execution::Digest::sha256(
+                object_data
+                    .iter()
+                    .find(|data| data.symbol == runmat_native_codegen::aot::AOT_NATIVE_IR_SYMBOL)
+                    .expect("AOT Native IR")
+                    .bytes
+                    .as_slice()
+            )
+        );
+        assert!(!String::from_utf8_lossy(program_bytes).contains("instructions"));
     }
 }
