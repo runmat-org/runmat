@@ -443,6 +443,25 @@ pub const ISPREF_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
     canonical_builtin: None,
     notes: "ispref accepts text group and preference names; integer host or resident controls are invalid and reject before provider access.",
 };
+const SETPREF_INTEGER_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Preference values may use any MATLAB datatype; all eight integer classes retain their exact native class, shape, and payload.",
+    }];
+pub const SETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "setpref(group, preference, integer_value)",
+        inputs: &SETPREF_INTEGER_VALUE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host values are cloned into the RunMat preference session without conversion; automatic residency gathers exact storage before host persistence. Durable cross-session storage remains a general preference-system gap.",
+    }];
 simple_descriptor!(
     SETPREF_SIGNATURES,
     SETPREF_DESCRIPTOR,
@@ -1263,6 +1282,7 @@ fn pref_value_to_text(value: &Value) -> Option<String> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::repl_fs::compat::SETPREF_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::repl_fs::compat::SETPREF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

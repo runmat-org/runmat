@@ -19,7 +19,8 @@
     "Different handle families accept different properties, and unsupported properties raise plotting errors rather than silently succeeding.",
     "Axes-local state such as limits, log modes, legend visibility, and axes font size can be updated through axes handles.",
     "Plot-child properties such as line width, display names, marker styling, and selected object semantics are updated in place through the returned plot handles.",
-    "Legend and text objects participate in the same property path, so figure annotation workflows stay consistent with the rest of the handle model."
+    "Legend and text objects participate in the same property path, so figure annotation workflows stay consistent with the rest of the handle model.",
+    "Whether an integer property value is valid depends on the selected graphics property. Numeric properties such as widths, sizes, limits, positions, and counts validate the integer value at their property-specific scalar or vector boundary; text and enum properties continue to require text."
   ],
   "examples": [
     {

@@ -33,11 +33,12 @@
   },
   "description": "`single(X)` converts scalar or array values to single precision (`float32`). It preserves MATLAB-compatible shape behavior while converting supported numeric, logical, character, and complex inputs.",
   "behaviors": [
-    "Numeric scalars and arrays (double or integer) are rounded to IEEE single precision. Scalars remain scalars; arrays keep their exact shape and column-major layout.",
+    "Numeric scalars and arrays (double or integer) are rounded directly into native IEEE single-precision storage. Scalars remain scalar values; arrays keep their exact shape and column-major layout.",
     "Logical inputs become floating-point `0`/`1`, matching MATLAB’s implicit promotion rules for logical arithmetic.",
     "Complex values convert both the real and imaginary components to single precision using MATLAB’s analytic extension rules.",
     "Character arrays return their Unicode code points (equivalent to `double(char)`), quantised to single precision. Strings, structs, cells, objects, and other unsupported classes raise MATLAB-style errors (`\"single: conversion to single from <type> is not possible\"`).",
-    "Empty arrays stay empty, singleton expansion is unaffected, and metadata such as orientation is preserved exactly."
+    "Empty arrays stay empty, singleton expansion is unaffected, and metadata such as orientation is preserved exactly.",
+    "The two-argument `single(X, 'like', prototype)` form is a RunMat extension. It is available in `runmat` compatibility mode and rejected in MATLAB-compatible modes because the public R2026a `single` contract documents only `single(X)`."
   ],
   "examples": [
     {
@@ -102,7 +103,7 @@
     },
     {
       "question": "How does this affect `class` or `isa`?",
-      "answer": "RunMat currently reports host tensors as `\"double\"` because their backing storage is f64. This mirrors other parts of the runtime (for example, `gather` of a single-precision gpuArray). GPU results still behave correctly when dispatched through Accelerate."
+      "answer": "Host and gathered results use native float32 storage, so `class(single(X))` reports `single` and `isa(single(X), 'single')` is true. The class is not a metadata label over a double buffer."
     },
     {
       "question": "Do NaN or Inf values survive the cast?",

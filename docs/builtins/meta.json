@@ -138161,6 +138161,78 @@
           "description": "interactive sawtooth gpuArray input is a RunMat extension",
           "error_identifier": "RunMat:compatibility:SawtoothGpuInputExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sawtooth(integer_t)",
+          "inputs": [
+            {
+              "name": "t",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer sample times are outside the documented double input domain and are admitted only when every value is exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The RunMat-only form returns double waveform samples and automatic residency may gather through the exact owner."
+        },
+        {
+          "form": "Y = sawtooth(integer_t, integer_xmax)",
+          "inputs": [
+            {
+              "name": "t",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer sample times cross the checked binary64 waveform boundary only in RunMat mode."
+            },
+            {
+              "name": "xmax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The typed peak-position control is checked exactly before conversion and must remain in the documented interval from zero through one."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each independently typed argument is compatibility-gated and proved binary64-exact before evaluation or provider access."
+        }
       ]
     },
     {
@@ -139750,7 +139822,11 @@
           "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
           "message": "datetime: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "second accepts a datetime value and returns its numeric second component. Native integer host or resident values are not datetime objects and reject without conversion or provider access; legacy serial-date parsing belongs to the separately documented date conversion APIs."
+      }
     },
     {
       "name": "semilogx",
@@ -139998,28 +140074,35 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "status = sendmail(to, subject, body)",
+          "label": "status = sendmail(to, subject, message, attachments)",
           "inputs": [
             {
-              "name": "input1",
+              "name": "to",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "First input argument."
+              "description": "Recipient address or collection of addresses."
             },
             {
-              "name": "input2",
-              "ty": "Any",
+              "name": "subject",
+              "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Second input argument."
+              "description": "Message subject text."
             },
             {
-              "name": "input3",
+              "name": "message",
               "ty": "Any",
-              "arity": "Required",
+              "arity": "Optional",
+              "default": "",
+              "description": "Message body text."
+            },
+            {
+              "name": "attachments",
+              "ty": "Any",
+              "arity": "Optional",
               "default": null,
-              "description": "Third input argument."
+              "description": "Optional attachment path or collection of paths."
             }
           ],
           "outputs": [
@@ -140033,7 +140116,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "sendmail accepts textual recipients, subject, message, and attachment paths. Numeric character codes may be embedded in an already constructed character vector, but direct integer scalar, array, nested, or resident numeric arguments are not mail inputs and reject before provider access or transport side effects."
+      }
     },
     {
       "name": "set",
@@ -140081,6 +140168,35 @@
           "identifier": "RunMat:set:Internal",
           "when": "Internal handle/property mutation fails unexpectedly.",
           "message": "set: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "set(h, property, integer_value, ...)",
+          "inputs": [
+            {
+              "name": "property value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer availability and conversion are property-specific; accepted graphics properties read the authoritative scalar or array value before their named renderer or structural boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The generic setter delegates class, range, and storage behavior to each property contract; graphics mutation is client-side and does not reinterpret integer values through a universal floating accessor."
         }
       ]
     },
@@ -140619,6 +140735,62 @@
           "when": "Internal conversion/allocation failed while assigning values.",
           "message": "setfield: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = setfield(S, field_or_path, integer_value)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer assigned as a new or replacement field value remains an ordinary exact MATLAB value with its native class and shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Direct structure and object field replacement preserves authoritative integer payloads; assignment into an existing typed numeric container follows that container's documented conversion rule."
+        },
+        {
+          "form": "S = setfield(S, {integer_idx}, field_or_path, value)",
+          "inputs": [
+            {
+              "name": "idx cells",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric index values inside selector cells are decoded exactly and range checked before structural indexing."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Index selectors never use a floating compatibility mirror; host mutation gathers automatically resident values when required."
+        }
       ]
     },
     {
@@ -140662,7 +140834,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "setpref(group, preference, integer_value)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Preference values may use any MATLAB datatype; all eight integer classes retain their exact native class, shape, and payload."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host values are cloned into the RunMat preference session without conversion; automatic residency gathers exact storage before host persistence. Durable cross-session storage remains a general preference-system gap."
+        }
+      ]
     },
     {
       "name": "setxor",
@@ -141057,6 +141258,62 @@
           "when": "Internal plotting state update fails.",
           "message": "sgtitle: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = sgtitle(integer_txt)",
+          "inputs": [
+            {
+              "name": "txt",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A scalar integer title is formatted directly from its native signed or unsigned value, including full-width uint64, without binary64 conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact decimal spelling becomes the stored text String property; the returned graphics handle remains RunMat's ordinary double handle."
+        },
+        {
+          "form": "h = sgtitle(..., 'FontSize', integer_size)",
+          "inputs": [
+            {
+              "name": "FontSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for FontSize; accepted positive finite values cross the explicit client-renderer scalar boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "FontSize is a client-side graphics property, not an integer-preserving result; valid practical sizes are exactly representable at the renderer boundary."
+        }
       ]
     },
     {
@@ -141134,6 +141391,35 @@
           "identifier": "RunMat:sign:Internal",
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "sign: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sign(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are read and transformed directly in authoritative native storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class; unsupported resident hooks gather exact typed storage."
         }
       ]
     },
@@ -141236,6 +141522,61 @@
           "when": "Internal tensor conversion/allocation/provider flow failed.",
           "message": "sin: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "sin-integer-input",
+          "mode": "RunMatOnly",
+          "description": "sin with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinIntegerInputExtension"
+        },
+        {
+          "id": "sin-logical-input",
+          "mode": "RunMatOnly",
+          "description": "sin with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinLogicalInputExtension"
+        },
+        {
+          "id": "sin-character-input",
+          "mode": "RunMatOnly",
+          "description": "sin with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinCharacterInputExtension"
+        },
+        {
+          "id": "sin-like-output",
+          "mode": "RunMatOnly",
+          "description": "sin with a like output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinLikeOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sin(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode validates authoritative integer storage before conversion; automatic residency may gather and explicit output residency follows the existing provider policy."
+        }
       ]
     },
     {
@@ -141304,6 +141645,35 @@
           "description": "sinc with integer or logical input is a RunMat extension",
           "error_identifier": "RunMat:compatibility:SincNonfloatingInputExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sinc(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer input is outside the documented single/double domain; every nonzero integer maps exactly to zero and integer zero maps exactly to one."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode uses the exact integer identity sinc(0)=1 and sinc(n)=0 for nonzero integers, so full-width values do not require binary64 representability."
+        }
       ]
     },
     {
@@ -141345,6 +141715,49 @@
           "identifier": "RunMat:sind:Internal",
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "sind: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "sind-integer-input",
+          "mode": "RunMatOnly",
+          "description": "sind with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SindIntegerInputExtension"
+        },
+        {
+          "id": "sind-logical-input",
+          "mode": "RunMatOnly",
+          "description": "sind with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SindLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sind(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer degree input is outside the documented single/double domain and crosses the waveform boundary only when binary64-exact."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode preserves exact canonical degree results after the checked conversion boundary; automatic residency gathers transparently."
         }
       ]
     },
@@ -141435,6 +141848,43 @@
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "single: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "single-like-output",
+          "mode": "RunMatOnly",
+          "description": "single with a like output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SingleLikeOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = single(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes convert directly from native integer storage to IEEE binary32 without an intermediate binary64 materialization."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The output is native single storage with MATLAB conversion rounding; complex integer storage preserves complexity while converting each component directly."
+        }
       ]
     },
     {
@@ -141477,6 +141927,55 @@
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "sinh: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "sinh-integer-input",
+          "mode": "RunMatOnly",
+          "description": "sinh with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinhIntegerInputExtension"
+        },
+        {
+          "id": "sinh-logical-input",
+          "mode": "RunMatOnly",
+          "description": "sinh with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinhLogicalInputExtension"
+        },
+        {
+          "id": "sinh-character-input",
+          "mode": "RunMatOnly",
+          "description": "sinh with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinhCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sinh(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes require exact binary64 representability before hyperbolic evaluation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode validates native integer storage before conversion; large finite inputs may naturally overflow to Inf and resident fallback returns through the owner."
+        }
       ]
     },
     {
@@ -141518,6 +142017,55 @@
           "identifier": "RunMat:sinpi:Internal",
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "sinpi: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "sinpi-integer-input",
+          "mode": "RunMatOnly",
+          "description": "sinpi with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinpiIntegerInputExtension"
+        },
+        {
+          "id": "sinpi-logical-input",
+          "mode": "RunMatOnly",
+          "description": "sinpi with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinpiLogicalInputExtension"
+        },
+        {
+          "id": "sinpi-character-input",
+          "mode": "RunMatOnly",
+          "description": "sinpi with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SinpiCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = sinpi(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer input is outside the documented single/double domain, but the exact identity sinpi(n)=0 permits all full-width integer values without floating conversion."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode returns exact double zeros directly from integer class and shape, including int64 and uint64 values above flintmax; resident inputs gather authoritatively."
         }
       ]
     },
@@ -141645,12 +142193,6 @@
           "message": "size: dimension vector must be a vector of positive integers"
         },
         {
-          "code": "RM.SIZE.DIM_VECTOR_EMPTY",
-          "identifier": null,
-          "when": "Dimension vector argument has zero elements.",
-          "message": "size: dimension vector must contain at least one element"
-        },
-        {
           "code": "RM.SIZE.DIM_NON_FINITE",
           "identifier": null,
           "when": "A dimension selector is non-finite.",
@@ -141673,6 +142215,62 @@
           "identifier": null,
           "when": "Output row vector tensor construction fails.",
           "message": "size: failed to build output"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "sz = size(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer array classes are inspected through shape metadata; no element payload or floating conversion is required."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "The result uses MATLAB's conventional double dimension values and preserves the requested output-count rules."
+        },
+        {
+          "form": "sz = size(A, integer_dimensions)",
+          "inputs": [
+            {
+              "name": "dim or dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Scalar and vector selectors are decoded exactly from authoritative integer storage, including documented empty dimension vectors."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Dimension values are range checked before conversion to platform indices; size(A,[]) returns a 1-by-0 double result."
         }
       ]
     },
@@ -142883,7 +143481,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -142911,7 +143509,42 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
+            }
+          ]
+        },
+        {
+          "label": "S = sparse(m, n, typename)",
+          "inputs": [
+            {
+              "name": "m",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of rows."
+            },
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of columns."
+            },
+            {
+              "name": "typename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse storage type: double or single."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -142946,7 +143579,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -142995,7 +143628,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         },
@@ -143051,7 +143684,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sparse double matrix."
+              "description": "Sparse matrix."
             }
           ]
         }
@@ -143082,6 +143715,132 @@
           "mode": "RunMatOnly",
           "description": "sparse integer storage is a RunMat extension",
           "error_identifier": "RunMat:compatibility:SparseIntegerExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = sparse(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer sparse value storage is a RunMat extension; the public sparse value domain is double, single, or logical."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat mode constructs authoritative typed CSC value storage; MATLAB-compatible modes reject before provider access."
+        },
+        {
+          "form": "S = sparse(integer_m, integer_n, typename?)",
+          "inputs": [
+            {
+              "name": "m, n, or nzmax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Structural size and allocation controls are decoded exactly and range checked before conversion to platform dimensions."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Dimension controls select host sparse shape while typename selects documented double, single, or logical storage."
+        },
+        {
+          "form": "S = sparse(integer_i, integer_j, v, m?, n?, nzmax?)",
+          "inputs": [
+            {
+              "name": "i and j",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Integer row and column subscripts are decoded without binary64 conversion and must use one shared integer datatype."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented integer subscripts remain exact through duplicate accumulation and CSC ordering; the stored value class follows v."
+        },
+        {
+          "form": "S = sparse(integer_i, integer_j, integer_v, m?, n?, nzmax?)",
+          "inputs": [
+            {
+              "name": "i and j",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Integer row and column subscripts use one shared datatype and remain exact."
+            },
+            {
+              "name": "v",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer stored values are independently compatibility-gated and retain their native class in RunMat mode."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The typed-value form is RunMat-only, sums duplicate entries with class-specific saturation, and stores exact native integer CSC values."
         }
       ]
     },

@@ -1,6 +1,10 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -40,6 +44,26 @@ const SET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
     inputs: &SET_INPUTS_HANDLE_PAIRS,
     outputs: &SET_OUTPUT_STATUS,
 }];
+
+const SET_INTEGER_PROPERTY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "property value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer availability and conversion are property-specific; accepted graphics properties read the authoritative scalar or array value before their named renderer or structural boundary.",
+    }];
+pub const SET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "set(h, property, integer_value, ...)",
+        inputs: &SET_INTEGER_PROPERTY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The generic setter delegates class, range, and storage behavior to each property contract; graphics mutation is client-side and does not reinterpret integer values through a universal floating accessor.",
+    }];
 
 const SET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SET.INVALID_ARGUMENT",
@@ -91,6 +115,7 @@ fn map_set_error(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(set_type),
     descriptor(crate::builtins::plotting::set::SET_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::set::SET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::set"
 )]
 pub fn set_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {

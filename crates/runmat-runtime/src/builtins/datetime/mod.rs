@@ -4,13 +4,13 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike, Weekday};
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef,
-    StringArray, Tensor, Value,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -596,6 +596,12 @@ const MINUTE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     }];
 pub const MINUTE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "minute(integer_serial, F?)", inputs: &MINUTE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Typed integer legacy serials are RunMat-only, cross one checked serial-date boundary, and return host double values with the input shape." }];
+
+pub const SECOND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "second accepts a datetime value and returns its numeric second component. Native integer host or resident values are not datetime objects and reject without conversion or provider access; legacy serial-date parsing belongs to the separately documented date conversion APIs.",
+};
 
 const MONTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -2905,6 +2911,7 @@ async fn minute_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
 #[runmat_macros::runtime_builtin(
     name = "second",
     descriptor(crate::builtins::datetime::DATETIME_SECOND_DESCRIPTOR),
+    integer_audit(crate::builtins::datetime::SECOND_INTEGER_AUDIT),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract second components from datetime values.",

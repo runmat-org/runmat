@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Tensor, Value,
 };
@@ -19,6 +23,49 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinpi";
+pub const SINPI_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sinpi-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sinpi with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinpiIntegerInputExtension"),
+};
+pub const SINPI_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sinpi-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sinpi with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinpiLogicalInputExtension"),
+};
+pub const SINPI_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "sinpi-character-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "sinpi with character input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:SinpiCharacterInputExtension"),
+    };
+pub const SINPI_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    SINPI_INTEGER_INPUT_EXTENSION,
+    SINPI_LOGICAL_INPUT_EXTENSION,
+    SINPI_CHARACTER_INPUT_EXTENSION,
+];
+const SINPI_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer input is outside the documented single/double domain, but the exact identity sinpi(n)=0 permits all full-width integer values without floating conversion.",
+    }];
+pub const SINPI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sinpi(integer_X)",
+        inputs: &SINPI_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat mode returns exact double zeros directly from integer class and shape, including int64 and uint64 values above flintmax; resident inputs gather authoritatively.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sinpi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -101,9 +148,31 @@ pub const SINPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     sink = true,
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::sinpi::SINPI_DESCRIPTOR),
+    extensions(SINPI_EXTENSIONS),
+    integer_capabilities(SINPI_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::sinpi"
 )]
 async fn sinpi_builtin(value: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINPI_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(&value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINPI_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(&value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINPI_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "sinpi")?;
     match value {
         Value::GpuTensor(handle) => sinpi_gpu(handle).await,
@@ -136,6 +205,10 @@ fn sinpi_real_value(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sinpi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if tensor.integer_storage().is_some() {
+        return Tensor::new(vec![0.0; tensor.len()], tensor.shape.clone())
+            .map_err(|err| sinpi_error_with_detail(&ERROR_INTERNAL, err));
+    }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| sinpi_real(value))
@@ -241,6 +314,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn integer_and_logical_inputs_promote() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(expect_num(call(Value::Int(IntValue::I32(2))).unwrap()), 0.0);
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let Value::Tensor(out) = call(Value::LogicalArray(logical)).unwrap() else {
@@ -289,6 +363,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn sinpi_reads_typed_integer_tensor_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-1, 0, 2]),
             vec![3, 1],

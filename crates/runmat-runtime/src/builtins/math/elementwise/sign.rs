@@ -2,9 +2,13 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -78,6 +82,26 @@ const SIGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     outputs: &SIGN_OUTPUT,
 }];
 
+const SIGN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes are read and transformed directly in authoritative native storage.",
+    }];
+pub const SIGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sign(integer_X)",
+        inputs: &SIGN_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class; unsupported resident hooks gather exact typed storage.",
+    }];
+
 const SIGN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SIGN.INVALID_INPUT",
     identifier: Some("RunMat:sign:InvalidInput"),
@@ -121,6 +145,7 @@ fn sign_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::sign::SIGN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::sign::SIGN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::sign"
 )]
 async fn sign_builtin(value: Value) -> BuiltinResult<Value> {

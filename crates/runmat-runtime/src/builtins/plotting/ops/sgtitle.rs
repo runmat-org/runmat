@@ -1,6 +1,10 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -110,6 +114,27 @@ const SGTITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
+const SGTITLE_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "txt",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A scalar integer title is formatted directly from its native signed or unsigned value, including full-width uint64, without binary64 conversion.",
+    }];
+const SGTITLE_INTEGER_FONT_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "FontSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for FontSize; accepted positive finite values cross the explicit client-renderer scalar boundary.",
+    }];
+pub const SGTITLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = sgtitle(integer_txt)", inputs: &SGTITLE_INTEGER_TEXT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The exact decimal spelling becomes the stored text String property; the returned graphics handle remains RunMat's ordinary double handle." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = sgtitle(..., 'FontSize', integer_size)", inputs: &SGTITLE_INTEGER_FONT_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "FontSize is a client-side graphics property, not an integer-preserving result; valid practical sizes are exactly representable at the renderer boundary." },
+];
+
 const SGTITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SGTITLE.INVALID_ARGUMENT",
     identifier: Some("RunMat:sgtitle:InvalidArgument"),
@@ -142,6 +167,7 @@ pub const SGTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::sgtitle::SGTITLE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::sgtitle::SGTITLE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::sgtitle"
 )]
 pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -195,6 +221,7 @@ fn split_figure_target<'a>(
 /// accepting numeric values wherever text is expected in annotation builtins.
 fn format_num_as_title_text(value: &Value) -> Option<String> {
     let n = match value {
+        Value::Int(value) => return Some(format_integer_title(value)),
         Value::Num(n) => *n,
         _ => return None,
     };
@@ -205,6 +232,19 @@ fn format_num_as_title_text(value: &Value) -> Option<String> {
         Some(format!("{}", n as i64))
     } else {
         Some(format!("{n}"))
+    }
+}
+
+fn format_integer_title(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
     }
 }
 
@@ -347,6 +387,15 @@ mod tests {
         let fig = clone_figure(current).unwrap();
         let expected = format!("{pi}");
         assert_eq!(fig.sg_title.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn sgtitle_preserves_full_width_integer_title_text() {
+        let _guard = setup();
+        let current = current_figure_handle();
+        sgtitle_builtin(vec![Value::Int(IntValue::U64(9_007_199_254_740_993))]).unwrap();
+        let fig = clone_figure(current).unwrap();
+        assert_eq!(fig.sg_title.as_deref(), Some("9007199254740993"));
     }
 
     #[test]

@@ -3,9 +3,12 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, NumericStorage,
-    Tensor, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -29,6 +32,26 @@ const SINC_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExte
 };
 
 pub const SINC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINC_NONFLOATING_INPUT_EXTENSION];
+
+const SINC_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer input is outside the documented single/double domain; every nonzero integer maps exactly to zero and integer zero maps exactly to one.",
+    }];
+pub const SINC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sinc(integer_X)",
+        inputs: &SINC_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat mode uses the exact integer identity sinc(0)=1 and sinc(n)=0 for nonzero integers, so full-width values do not require binary64 representability.",
+    }];
 
 const SINC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -210,6 +233,7 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sinc::SINC_DESCRIPTOR),
     extensions(crate::builtins::math::signal::sinc::SINC_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::sinc::SINC_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {

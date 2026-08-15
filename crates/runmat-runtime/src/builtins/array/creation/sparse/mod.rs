@@ -46,6 +46,53 @@ const NONZEROS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
 pub const NONZEROS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "v = nonzeros(integer_A)", inputs: &NONZEROS_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Stored nonzero values are copied in column order into a full same-class column. Host, sparse, scalar, and supported real gpuArray inputs preserve exact integer class; automatic residency may gather transparently and explicit residency is restored through the exact owner." }];
 
+const SPARSE_INTEGER_A_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer sparse value storage is a RunMat extension; the public sparse value domain is double, single, or logical.",
+    }];
+const SPARSE_INTEGER_DIMS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "m, n, or nzmax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Structural size and allocation controls are decoded exactly and range checked before conversion to platform dimensions.",
+    }];
+const SPARSE_INTEGER_SUBSCRIPT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "i and j",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "Integer row and column subscripts are decoded without binary64 conversion and must use one shared integer datatype.",
+    }];
+const SPARSE_INTEGER_TRIPLET_VALUE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "i and j",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "Integer row and column subscripts use one shared datatype and remain exact.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "v",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer stored values are independently compatibility-gated and retain their native class in RunMat mode.",
+    },
+];
+pub const SPARSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_A)", inputs: &SPARSE_INTEGER_A_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "RunMat mode constructs authoritative typed CSC value storage; MATLAB-compatible modes reject before provider access." },
+    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_m, integer_n, typename?)", inputs: &SPARSE_INTEGER_DIMS_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Dimension controls select host sparse shape while typename selects documented double, single, or logical storage." },
+    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_i, integer_j, v, m?, n?, nzmax?)", inputs: &SPARSE_INTEGER_SUBSCRIPT_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Documented integer subscripts remain exact through duplicate accumulation and CSC ordering; the stored value class follows v." },
+    BuiltinIntegerCapabilityDescriptor { form: "S = sparse(integer_i, integer_j, integer_v, m?, n?, nzmax?)", inputs: &SPARSE_INTEGER_TRIPLET_VALUE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The typed-value form is RunMat-only, sums duplicate entries with class-specific saturation, and stores exact native integer CSC values." },
+];
+
 const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
     ty: BuiltinParamType::NumericArray,
@@ -339,9 +386,11 @@ fn sparse_error(
     type_resolver(sparse_type),
     descriptor(crate::builtins::array::creation::sparse::SPARSE_DESCRIPTOR),
     extensions(crate::compatibility::SPARSE_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::sparse::SPARSE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 async fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    reject_disabled_integer_sparse_constructor(&args)?;
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
         gathered.push(gpu_helpers::gather_value_async(&arg).await?);

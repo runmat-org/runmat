@@ -9,7 +9,7 @@
     "nonzero",
     "gpu"
   ],
-  "summary": "Create sparse double matrices from full arrays, sizes, or row/column/value triplets.",
+  "summary": "Create host-resident sparse matrices from full arrays, sizes, or row/column/value triplets.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -31,15 +31,16 @@
     "unit": "builtins::array::creation::sparse::tests",
     "integration": "crates/runmat-vm/tests/logic.rs::sparse_indexing_reads_stored_unstored_and_column_major_values"
   },
-  "description": "`sparse` creates a sparse double matrix. RunMat stores sparse matrices in compressed sparse column form and supports MATLAB construction forms for conversion from full arrays, empty sparse allocation by size, and triplet assembly from row indices, column indices, and values.",
+  "description": "`sparse` creates a host-resident compressed sparse column matrix. MATLAB-compatible forms construct double, single, or logical sparse values as documented; `runmat` compatibility mode additionally supports exact sparse storage for all eight integer classes.",
   "behaviors": [
-    "`sparse(A)` converts a full numeric or logical array to a sparse double matrix, storing only nonzero values.",
+    "`sparse(A)` stores only nonzero values and preserves documented double, single, or logical input class. Integer `A` is an exact RunMat-only extension.",
     "`sparse(m, n)` returns an `m x n` sparse double matrix with zero stored entries.",
     "`sparse(i, j, v)` creates a sparse matrix whose size is inferred from the largest row and column subscripts.",
     "`sparse(i, j, v, m, n)` creates an `m x n` sparse matrix and errors if any subscript falls outside those dimensions.",
     "`sparse(i, j, v, m, n, nzmax)` accepts the MATLAB allocation hint for compatibility; RunMat's storage is still sized from the produced nonzero entries.",
     "Duplicate `(i, j)` entries are summed. Entries whose final value is zero are not stored.",
-    "Row and column subscripts are one-based positive integers, matching MATLAB.",
+    "Row and column subscripts are one-based positive integers. All eight integer classes are accepted for `i` and `j`; when both are integer arrays they must use the same datatype and are parsed without a double round trip.",
+    "Integer triplet values retain their exact class in `runmat` compatibility mode. Duplicate integer values use class-saturating addition; MATLAB-compatible modes reject the integer-value extension before construction.",
     "Sparse matrices support scalar row/column indexing and linear indexing; scalar selections return sparse `1 x 1` values, unstored entries read as zero, and linear indices are resolved in column-major order.",
     "Sparse slice indexing preserves sparse storage for non-scalar selections.",
     "Sparse indexed assignment currently raises `RunMat:SparseAssignmentUnsupported` instead of silently densifying or partially mutating storage.",
@@ -85,7 +86,7 @@
   "faqs": [
     {
       "question": "Which sparse construction forms are supported?",
-      "answer": "RunMat supports `sparse(A)`, `sparse(m,n)`, `sparse(i,j,v)`, `sparse(i,j,v,m,n)`, and `sparse(i,j,v,m,n,nzmax)` for real double/logical data."
+      "answer": "RunMat supports `sparse(A)`, `sparse(m,n)`, `sparse(i,j,v)`, `sparse(i,j,v,m,n)`, and `sparse(i,j,v,m,n,nzmax)`. MATLAB-compatible value storage is double, single, or logical; exact integer value storage is available only in `runmat` compatibility mode."
     },
     {
       "question": "Does RunMat store sparse matrices densely?",
@@ -158,7 +159,7 @@
     "example": {
       "description": "Supported forms",
       "input": "S = sparse(A)\nS = sparse(m, n)\nS = sparse(i, j, v)\nS = sparse(i, j, v, m, n)\nS = sparse(i, j, v, m, n, nzmax)",
-      "output": "`S` is a sparse double matrix."
+      "output": "`S` is a host-resident sparse matrix whose value class follows the selected compatible form."
     },
     "points": [
       "Sparse values are host-resident compressed sparse column matrices.",

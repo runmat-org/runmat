@@ -6,8 +6,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CharArray, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, CharArray, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
@@ -42,29 +43,6 @@ const INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Second input argument.",
-    },
-];
-const INPUTS_THREE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "input1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input3",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Third input argument.",
     },
 ];
 const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -109,12 +87,52 @@ simple_descriptor!(
     "filename = websave(filename, url)",
     &INPUTS_TWO
 );
-simple_descriptor!(
-    SENDMAIL_SIGNATURES,
-    SENDMAIL_DESCRIPTOR,
-    "status = sendmail(to, subject, body)",
-    &INPUTS_THREE
-);
+const SENDMAIL_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "to",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Recipient address or collection of addresses.",
+    },
+    BuiltinParamDescriptor {
+        name: "subject",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Message subject text.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some(""),
+        description: "Message body text.",
+    },
+    BuiltinParamDescriptor {
+        name: "attachments",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional attachment path or collection of paths.",
+    },
+];
+const SENDMAIL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "status = sendmail(to, subject, message, attachments)",
+    inputs: &SENDMAIL_INPUTS,
+    outputs: &OUTPUT_VALUE,
+}];
+pub const SENDMAIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SENDMAIL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+pub const SENDMAIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "sendmail accepts textual recipients, subject, message, and attachment paths. Numeric character codes may be embedded in an already constructed character vector, but direct integer scalar, array, nested, or resident numeric arguments are not mail inputs and reject before provider access or transport side effects.",
+};
 
 fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -424,31 +442,21 @@ fn path_from_value(value: &Value, name: &str) -> BuiltinResult<PathBuf> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::http::compat::SENDMAIL_DESCRIPTOR),
+    integer_audit(crate::builtins::io::http::compat::SENDMAIL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: mail arguments must be text, not numeric or resident values",
+        ));
+    }
     let args = gather_args("sendmail", &args).await?;
-    if args.len() < 3 || args.len() > 4 {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: recipient, subject, body, and optional attachments are expected",
-        ));
-    }
-    let recipients = recipients_from_value(&args[0])?;
-    let subject = scalar_text(&args[1], "sendmail", "subject")?;
-    let body = scalar_text(&args[2], "sendmail", "body")?;
-    if recipients.is_empty() {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: recipient must not be empty",
-        ));
-    }
-    if args.len() == 4 {
-        return Err(compat_error(
-            "sendmail",
-            "sendmail: attachments are not supported by the current mail transport",
-        ));
-    }
+    let (recipients, subject, body) = parse_sendmail_args(&args)?;
     let message = format_mail_message(&recipients, &subject, &body);
 
     let outbox = std::env::var("RUNMAT_SENDMAIL_OUTBOX").ok();
@@ -488,6 +496,47 @@ async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         "sendmail",
         "sendmail: no mail transport configured; set RUNMAT_SENDMAIL_COMMAND, RUNMAT_SENDMAIL_OUTBOX, or configure a system sendmail binary",
     ))
+}
+
+fn parse_sendmail_args(args: &[Value]) -> BuiltinResult<(Vec<String>, String, String)> {
+    if args.len() < 2 || args.len() > 4 {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: recipient, subject, optional message, and optional attachments are expected",
+        ));
+    }
+    let recipients = recipients_from_value(&args[0])?;
+    let subject = scalar_text(&args[1], "sendmail", "subject")?;
+    let body = args
+        .get(2)
+        .map(|value| scalar_text(value, "sendmail", "message"))
+        .transpose()?
+        .unwrap_or_default();
+    if recipients.is_empty() {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: recipient must not be empty",
+        ));
+    }
+    if args.len() == 4 {
+        return Err(compat_error(
+            "sendmail",
+            "sendmail: attachments are not supported by the current mail transport",
+        ));
+    }
+    Ok((recipients, subject, body))
+}
+
+fn value_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Closure(value) => value.captures.iter().any(value_contains_resident),
+        Value::OutputList(values) => values.iter().any(value_contains_resident),
+        _ => false,
+    }
 }
 
 fn recipients_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
@@ -637,5 +686,42 @@ mod tests {
         assert_eq!(headers, vec![("XRunMat".to_string(), "yes".to_string())]);
         assert_eq!(timeout, Duration::from_secs(7));
         assert_eq!(user_agent, "agent");
+    }
+
+    #[test]
+    fn sendmail_rejects_integer_payloads_before_transport() {
+        let error = run(sendmail_builtin(vec![
+            Value::String("recipient@example.test".to_string()),
+            Value::String("subject".to_string()),
+            Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993)),
+        ]))
+        .expect_err("integer message must reject before transport selection");
+        assert!(error.message().contains("must be text"));
+
+        let nested = runmat_builtins::CellArray::new(
+            vec![Value::Int(runmat_builtins::IntValue::I8(1))],
+            1,
+            1,
+        )
+        .unwrap();
+        let error = run(sendmail_builtin(vec![
+            Value::Cell(nested),
+            Value::String("subject".to_string()),
+            Value::String("message".to_string()),
+        ]))
+        .expect_err("nested integer recipient must reject before transport selection");
+        assert!(error.message().contains("must be text"));
+    }
+
+    #[test]
+    fn sendmail_two_argument_form_uses_an_empty_message() {
+        let (recipients, subject, message) = parse_sendmail_args(&[
+            Value::String("recipient@example.test".to_string()),
+            Value::String("subject".to_string()),
+        ])
+        .expect("two-argument sendmail form");
+        assert_eq!(recipients, ["recipient@example.test"]);
+        assert_eq!(subject, "subject");
+        assert!(message.is_empty());
     }
 }

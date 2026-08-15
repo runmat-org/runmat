@@ -12,8 +12,12 @@ use std::f64::consts::PI;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, Tensor, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -42,6 +46,53 @@ const SAWTOOTH_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensio
 pub const SAWTOOTH_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
     SAWTOOTH_GPU_INPUT_EXTENSION,
+];
+
+const SAWTOOTH_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "t",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer sample times are outside the documented double input domain and are admitted only when every value is exactly representable as binary64.",
+    }];
+const SAWTOOTH_INTEGER_T_XMAX_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "t",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer sample times cross the checked binary64 waveform boundary only in RunMat mode.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "xmax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The typed peak-position control is checked exactly before conversion and must remain in the documented interval from zero through one.",
+    },
+];
+pub const SAWTOOTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sawtooth(integer_t)",
+        inputs: &SAWTOOTH_INTEGER_T_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The RunMat-only form returns double waveform samples and automatic residency may gather through the exact owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sawtooth(integer_t, integer_xmax)",
+        inputs: &SAWTOOTH_INTEGER_T_XMAX_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each independently typed argument is compatibility-gated and proved binary64-exact before evaluation or provider access.",
+    },
 ];
 
 const SAWTOOTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -221,6 +272,7 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sawtooth::SAWTOOTH_DESCRIPTOR),
     extensions(crate::builtins::math::signal::sawtooth::SAWTOOTH_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::sawtooth::SAWTOOTH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::sawtooth"
 )]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
@@ -242,6 +294,22 @@ async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value
             &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &t,
+        &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "t",
+    )
+    .await?;
+    if let [xmax] = varargin.as_slice() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            xmax,
+            &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+            BUILTIN_NAME,
+            "xmax",
+        )
+        .await?;
     }
     let xmax = parse_xmax(&varargin).await?;
     match t {

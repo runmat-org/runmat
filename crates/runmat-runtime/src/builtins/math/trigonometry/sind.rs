@@ -8,7 +8,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Tensor, Value,
 };
@@ -22,6 +26,39 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sind";
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
+pub const SIND_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sind-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sind with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SindIntegerInputExtension"),
+};
+pub const SIND_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sind-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sind with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SindLogicalInputExtension"),
+};
+pub const SIND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [SIND_INTEGER_INPUT_EXTENSION, SIND_LOGICAL_INPUT_EXTENSION];
+const SIND_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer degree input is outside the documented single/double domain and crosses the waveform boundary only when binary64-exact.",
+    }];
+pub const SIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sind(integer_X)",
+        inputs: &SIND_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat mode preserves exact canonical degree results after the checked conversion boundary; automatic residency gathers transparently.",
+    }];
 
 const SIND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -132,9 +169,26 @@ fn sind_complex(re: f64, im: f64) -> (f64, f64) {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::sind::SIND_DESCRIPTOR),
+    extensions(SIND_EXTENSIONS),
+    integer_capabilities(SIND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::sind"
 )]
 async fn sind_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &value,
+        &SIND_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
+    if matches!(&value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SIND_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "sind")?;
     match value {
         Value::GpuTensor(handle) => sind_gpu(handle).await,
@@ -253,6 +307,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sind_int_input_returns_exact() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(
             expect_num(sind_builtin(Value::Int(IntValue::I32(180))).unwrap()),
             0.0,
@@ -293,6 +348,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sind_reads_typed_integer_tensor_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![0, 30, 90]),
             vec![3, 1],
@@ -315,6 +371,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sind_logical_array_promotes() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let result = sind_builtin(Value::LogicalArray(logical)).expect("sind");
         match result {
