@@ -2,9 +2,13 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -171,6 +175,54 @@ pub const ROUND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ROUND_ERRORS,
 };
 
+const ROUND_TYPED_INTEGER_DIGITS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "round-typed-integer-digits",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "round accepts a typed-integer digits argument as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RoundTypedIntegerDigitsExtension"),
+    };
+pub const ROUND_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [ROUND_TYPED_INTEGER_DIGITS_EXTENSION];
+const ROUND_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes are already integral; the one-input form is an exact class- and shape-preserving identity.",
+    }];
+const ROUND_INTEGER_DIGITS_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents N as double; RunMat mode accepts an exact scalar typed integer and range-checks it before selecting the rounding mode.",
+    }];
+pub const ROUND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = round(integer_X)",
+        inputs: &ROUND_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host and resident values retain their original authoritative storage unchanged. Multi-input round with integer X is rejected before dispatch as documented.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = round(floating_X, integer_N [, mode])",
+        inputs: &ROUND_INTEGER_DIGITS_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The RunMat-only control extension never converts N through binary64; it accepts one authoritative integer element within i32 range.",
+    },
+];
+
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -208,9 +260,20 @@ impl RoundStrategy {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::rounding::round::ROUND_DESCRIPTOR),
+    extensions(crate::builtins::math::rounding::round::ROUND_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::rounding::round::ROUND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::rounding::round"
 )]
 async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if rest
+        .first()
+        .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ROUND_TYPED_INTEGER_DIGITS_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let strategy = parse_arguments(&rest)?;
     if !matches!(strategy, RoundStrategy::Integer) && has_exact_integer_storage(&value) {
         return Err(builtin_error_with_detail(
@@ -241,16 +304,16 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn has_exact_integer_storage(value: &Value) -> bool {
-    match value {
-        Value::Int(_) => true,
-        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
-        Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
-        _ => false,
-    }
+    crate::builtins::common::validation::value_has_native_integer_class(value)
 }
 
 async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if matches!(strategy, RoundStrategy::Integer)
+        && runmat_accelerate_api::handle_integer_type(&handle).is_some()
+    {
+        return Ok(Value::GpuTensor(handle));
+    }
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         match strategy.provider_digits() {
             Some((digits, significant)) => {
                 if let Ok(out) = provider.round_digits(&handle, digits, significant).await {
@@ -312,12 +375,28 @@ fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor
 }
 
 fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinResult<Value> {
-    let data = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| (round_scalar(re, strategy), round_scalar(im, strategy)))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(re, im)| (round_scalar(re, strategy), round_scalar(im, strategy)))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(re, im)| {
+                    (
+                        round_scalar(f64::from(re), strategy) as f32,
+                        round_scalar(f64::from(im), strategy) as f32,
+                    )
+                })
+                .collect(),
+        ),
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(storage),
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
@@ -402,32 +481,35 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<RoundStrategy> {
 fn parse_digits(value: &Value) -> BuiltinResult<i32> {
     let err =
         || builtin_error_with_detail(&ROUND_ERROR_INVALID_DIGITS, "N must be an integer scalar");
-    let raw = match value {
-        Value::Int(i) => i.try_to_i64().ok_or_else(|| {
+    let raw = if let Some(i) = tensor::scalar_integer_value(value) {
+        i.try_to_i64().ok_or_else(|| {
             builtin_error_with_detail(&ROUND_ERROR_INVALID_DIGITS, "integer overflow in N")
-        })?,
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(err());
+        })?
+    } else {
+        match value {
+            Value::Num(n) => {
+                if !n.is_finite() {
+                    return Err(err());
+                }
+                let rounded = n.round();
+                if (rounded - n).abs() > f64::EPSILON {
+                    return Err(err());
+                }
+                rounded as i64
             }
-            let rounded = n.round();
-            if (rounded - n).abs() > f64::EPSILON {
-                return Err(err());
+            Value::Bool(b) => {
+                if *b {
+                    1
+                } else {
+                    0
+                }
             }
-            rounded as i64
-        }
-        Value::Bool(b) => {
-            if *b {
-                1
-            } else {
-                0
+            other => {
+                return Err(builtin_error_with_detail(
+                    &ROUND_ERROR_INVALID_DIGITS,
+                    format!("N must be numeric, got {:?}", other),
+                ))
             }
-        }
-        other => {
-            return Err(builtin_error_with_detail(
-                &ROUND_ERROR_INVALID_DIGITS,
-                format!("N must be numeric, got {:?}", other),
-            ))
         }
     };
     if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
@@ -569,6 +651,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn round_integer_inputs_reject_digit_rounding_forms() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let scalar = round_builtin(
             Value::Int(IntValue::U64(u64::MAX)),
             vec![Value::Int(IntValue::I32(-1))],
@@ -626,8 +709,7 @@ pub(crate) mod tests {
     #[test]
     fn round_tensor_decimals() {
         let tensor = Tensor::new(vec![1.2345, 2.499, 3.5001], vec![3, 1]).unwrap();
-        let result = round_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))])
-            .expect("round");
+        let result = round_builtin(Value::Tensor(tensor), vec![Value::Num(2.0)]).expect("round");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
@@ -644,8 +726,7 @@ pub(crate) mod tests {
     #[test]
     fn round_tensor_negative_decimals() {
         let tensor = Tensor::new(vec![123.0, 149.9, 150.0], vec![3, 1]).unwrap();
-        let result = round_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(-2))])
-            .expect("round");
+        let result = round_builtin(Value::Tensor(tensor), vec![Value::Num(-2.0)]).expect("round");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![100.0, 100.0, 200.0]);
@@ -659,7 +740,7 @@ pub(crate) mod tests {
     fn round_scalar_significant() {
         let result = round_builtin(
             Value::Num(0.0012345),
-            vec![Value::Int(IntValue::I32(3)), Value::from("significant")],
+            vec![Value::Num(3.0), Value::from("significant")],
         )
         .expect("round");
         match result {
@@ -686,7 +767,7 @@ pub(crate) mod tests {
     fn round_invalid_mode_errors() {
         let err = round_builtin(
             Value::Num(1.0),
-            vec![Value::Int(IntValue::I32(2)), Value::from("approx")],
+            vec![Value::Num(2.0), Value::from("approx")],
         )
         .unwrap_err();
         assert_error_contains(&err, "unknown rounding mode");
@@ -719,11 +800,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = round_builtin(
-                Value::GpuTensor(handle),
-                vec![Value::Int(IntValue::I32(-2))],
-            )
-            .expect("round");
+            let result =
+                round_builtin(Value::GpuTensor(handle), vec![Value::Num(-2.0)]).expect("round");
             assert!(
                 matches!(result, Value::GpuTensor(_)),
                 "digit-aware round should stay GPU resident"
@@ -745,7 +823,7 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let result = round_builtin(
                 Value::GpuTensor(handle),
-                vec![Value::Int(IntValue::I32(3)), Value::from("significant")],
+                vec![Value::Num(3.0), Value::from("significant")],
             )
             .expect("round");
             assert!(

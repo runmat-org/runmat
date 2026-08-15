@@ -1,14 +1,21 @@
 use super::*;
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    NumericDType,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, NumericDType,
 };
 use runmat_macros::runtime_builtin;
 
 const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
+
+pub const ROWFILTER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "rowfilter is constructed from variable names, Parquet metadata/datastores, tables, or timetables; direct typed-integer arrays have no public data or control role and reject before gather. Integer columns nested in a tabular source remain opaque authoritative payloads while the filter captures row-selection metadata.",
+    };
 
 pub(crate) const ARRAY_DATASTORE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -507,10 +514,19 @@ pub(crate) async fn vartype_builtin(value: Value) -> BuiltinResult<Value> {
     keywords = "rowfilter,table,rows,filter",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::constructors::ROWFILTER_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn rowfilter_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(invalid_argument(
+            "rowfilter: typed numeric arrays are not valid rowfilter constructor inputs",
+        ));
+    }
     let args = gather_values(&args).await?;
     let mut object = ObjectInstance::new(ROWFILTER_CLASS.to_string());
     object.properties.insert(

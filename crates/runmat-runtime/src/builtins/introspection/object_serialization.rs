@@ -2,12 +2,12 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, StructValue, Value,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -98,6 +98,12 @@ pub const SAVEOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &SERIALIZATION_ERRORS,
+};
+
+pub const SAVEOBJ_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "saveobj dispatches only on value or handle objects; direct typed-integer input is invalid. Integer-valued object properties remain opaque nested payloads and are copied through authoritative storage without becoming a direct integer call form.",
 };
 
 pub const LOADOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -445,6 +451,7 @@ pub(crate) async fn restore_value_from_mat_load(value: Value) -> crate::BuiltinR
     summary = "Return the serialized representation for an object.",
     keywords = "saveobj,loadobj,object,serialization,mat",
     descriptor(crate::builtins::introspection::object_serialization::SAVEOBJ_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::object_serialization::SAVEOBJ_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::object_serialization"
 )]
 pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<Value> {

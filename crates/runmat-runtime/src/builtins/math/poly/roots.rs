@@ -8,7 +8,11 @@
 use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Tensor, Value,
 };
@@ -71,6 +75,35 @@ pub const ROOTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ROOTS_ERRORS,
 };
 
+const ROOTS_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "roots-integer-coefficients",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "roots accepts typed-integer polynomial coefficients as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RootsIntegerCoefficientsExtension"),
+    };
+pub const ROOTS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [ROOTS_INTEGER_COEFFICIENTS_EXTENSION];
+const ROOTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "c",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64.",
+    }];
+pub const ROOTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "r = roots(integer_c)",
+        inputs: &ROOTS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The checked extension crosses once into the double companion-matrix/eigenvalue algorithm. Automatic residency gathers through the owning provider; explicit typed-integer input is gated before provider access.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "roots",
@@ -121,6 +154,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(roots_type),
     descriptor(crate::builtins::math::poly::roots::ROOTS_DESCRIPTOR),
+    extensions(crate::builtins::math::poly::roots::ROOTS_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::poly::roots::ROOTS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::poly::roots"
 )]
 async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
@@ -129,6 +164,13 @@ async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
 
 pub(crate) async fn roots_value(coefficients: Value) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &coefficients,
+        &ROOTS_INTEGER_COEFFICIENTS_EXTENSION,
+        BUILTIN_NAME,
+        "coefficient",
+    )
+    .await?;
     let coeffs = coefficients_to_complex(coefficients).await?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {
@@ -394,6 +436,7 @@ pub(crate) mod tests {
 
     #[test]
     fn roots_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, -3, 2]), vec![3, 1]).unwrap();
         let result = roots_builtin(Value::Tensor(coeffs)).expect("roots");
         match result {

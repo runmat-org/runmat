@@ -3814,18 +3814,27 @@ fn get_scatter3_property(
             format!("{builtin}: invalid scatter3 handle"),
         ));
     };
-    let (x, y, z): (Vec<f64>, Vec<f64>, Vec<f64>) = scatter
-        .points
-        .iter()
-        .map(|p| (p.x as f64, p.y as f64, p.z as f64))
-        .unzip_n_vec();
+    let (x, y, z) = if let Some((x, y, z)) = scatter.source_data() {
+        (
+            numeric_plot_data_value(x),
+            numeric_plot_data_value(y),
+            numeric_plot_data_value(z),
+        )
+    } else {
+        let (x, y, z): (Vec<f64>, Vec<f64>, Vec<f64>) = scatter
+            .points
+            .iter()
+            .map(|p| (p.x as f64, p.y as f64, p.z as f64))
+            .unzip_n_vec();
+        (tensor_from_vec(x), tensor_from_vec(y), tensor_from_vec(z))
+    };
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
                 child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
-            st.insert("XData", tensor_from_vec(x));
-            st.insert("YData", tensor_from_vec(y));
-            st.insert("ZData", tensor_from_vec(z));
+            st.insert("XData", x.clone());
+            st.insert("YData", y.clone());
+            st.insert("ZData", z.clone());
             st.insert(
                 "Marker",
                 Value::String(marker_style_name(scatter.marker_style).into()),
@@ -3856,6 +3865,9 @@ fn get_scatter3_property(
             scatter_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(x),
+        Some("ydata") => Ok(y),
+        Some("zdata") => Ok(z),
         Some("marker") => Ok(Value::String(
             marker_style_name(scatter.marker_style).into(),
         )),

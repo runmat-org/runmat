@@ -47,7 +47,8 @@
     "Each result object includes `Name`, `TestFile`, `Passed`, `Failed`, `Incomplete`, `Duration`, and `Details` properties. A single result is returned as a scalar object; zero or multiple results are returned as a cell row of result objects.",
     "A failing test is captured as a failed result rather than as a `runtests` call failure. Discovery, invalid option, and unsupported infrastructure errors still surface as diagnostics.",
     "`Name` and `ProcedureName` filters currently keep cases whose generated test name contains the supplied text. They do not yet implement the full MATLAB selector model. `OutputDetail` and `LoggingLevel` are accepted for compatibility but do not affect execution output yet.",
-    "`UseParallel=false` is accepted. `UseParallel=true`, coverage collection, and tag metadata filtering are explicitly rejected because they require separate parallel or `matlab.unittest` infrastructure."
+    "`UseParallel=false` is accepted. `UseParallel=true`, coverage collection, and tag metadata filtering are explicitly rejected because they require separate parallel or `matlab.unittest` infrastructure.",
+    "Numeric flags such as `IncludeSubfolders`, `IncludeInnerNamespaces`, `IncludeReferencedProjects`, `Strict`, and `UseParallel` accept only exact scalar 0 or 1. All eight integer classes are inspected natively without binary64 conversion; direct gpuArray option values reject before gathering."
   ],
   "examples": [
     {

@@ -522,6 +522,12 @@ pub enum ScenePlot {
     Scatter3 {
         #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
         points: Vec<[f32; 3]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        z_source: Option<SceneNumericData>,
         #[serde(default, deserialize_with = "deserialize_vec_rgba_f32_lossy")]
         colors_rgba: Vec<[f32; 4]>,
         point_size: f32,
@@ -2221,10 +2227,20 @@ impl ScenePlot {
                 }
             }
             PlotElement::Scatter3(scatter3) => {
-                let points = scatter3
-                    .export_scene_points()
+                let (x_data, y_data, z_data) = scatter3
+                    .export_numeric_xyz_data()
                     .await
-                    .map_err(SceneExportError::readback)?;
+                    .map_err(SceneExportError::readback)?
+                    .ok_or_else(|| {
+                        SceneExportError::unexportable("scatter3 plot has no exportable scene data")
+                    })?;
+                let points = x_data
+                    .materialize_f64()
+                    .into_iter()
+                    .zip(y_data.materialize_f64())
+                    .zip(z_data.materialize_f64())
+                    .map(|((x, y), z)| [x as f32, y as f32, z as f32])
+                    .collect::<Vec<_>>();
                 if points.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "scatter3 plot has no exportable scene data",
@@ -2235,7 +2251,10 @@ impl ScenePlot {
                     .await
                     .map_err(SceneExportError::readback)?;
                 Self::Scatter3 {
-                    points: points.into_iter().map(vec3_to_xyz).collect(),
+                    points,
+                    x_source: Some((&x_data).into()),
+                    y_source: Some((&y_data).into()),
+                    z_source: Some((&z_data).into()),
                     colors_rgba: colors.into_iter().map(vec4_to_rgba).collect(),
                     point_size: scatter3.point_size,
                     point_sizes: scatter3.point_sizes.clone(),
@@ -2438,6 +2457,9 @@ impl ScenePlot {
             }
             ScenePlot::Scatter3 {
                 points,
+                x_source,
+                y_source,
+                z_source,
                 colors_rgba,
                 point_sizes,
                 ..
@@ -2446,6 +2468,37 @@ impl ScenePlot {
                     return Err(SceneExportError::unexportable(
                         "scatter3 plot has no exportable point scene data",
                     ));
+                }
+                match (x_source, y_source, z_source) {
+                    (Some(x_source), Some(y_source), Some(z_source)) => {
+                        let x_data: NumericPlotData = x_source
+                            .clone()
+                            .try_into()
+                            .map_err(SceneExportError::unexportable)?;
+                        let y_data: NumericPlotData = y_source
+                            .clone()
+                            .try_into()
+                            .map_err(SceneExportError::unexportable)?;
+                        let z_data: NumericPlotData = z_source
+                            .clone()
+                            .try_into()
+                            .map_err(SceneExportError::unexportable)?;
+                        validate_required_equal_lengths(
+                            "scatter3 typed source scene data",
+                            &[
+                                ("points", points.len()),
+                                ("xSource", x_data.len()),
+                                ("ySource", y_data.len()),
+                                ("zSource", z_data.len()),
+                            ],
+                        )?;
+                    }
+                    (None, None, None) => {}
+                    _ => {
+                        return Err(SceneExportError::unexportable(
+                            "scatter3 scene contains partial typed source data",
+                        ))
+                    }
                 }
                 if !colors_rgba.is_empty() && colors_rgba.len() != points.len() {
                     return Err(SceneExportError::unexportable(format!(
@@ -2756,23 +2809,29 @@ impl ScenePlot {
                     visible: line.visible,
                 }
             }
-            PlotElement::Scatter3(scatter3) => Self::Scatter3 {
-                points: scatter3
-                    .points
-                    .iter()
-                    .map(|point| vec3_to_xyz(*point))
-                    .collect(),
-                colors_rgba: scatter3
-                    .colors
-                    .iter()
-                    .map(|color| vec4_to_rgba(*color))
-                    .collect(),
-                point_size: scatter3.point_size,
-                point_sizes: scatter3.point_sizes.clone(),
-                axes_index,
-                label: scatter3.label.clone(),
-                visible: scatter3.visible,
-            },
+            PlotElement::Scatter3(scatter3) => {
+                let source = scatter3.source_data();
+                Self::Scatter3 {
+                    points: scatter3
+                        .points
+                        .iter()
+                        .map(|point| vec3_to_xyz(*point))
+                        .collect(),
+                    x_source: source.map(|source| source.0.into()),
+                    y_source: source.map(|source| source.1.into()),
+                    z_source: source.map(|source| source.2.into()),
+                    colors_rgba: scatter3
+                        .colors
+                        .iter()
+                        .map(|color| vec4_to_rgba(*color))
+                        .collect(),
+                    point_size: scatter3.point_size,
+                    point_sizes: scatter3.point_sizes.clone(),
+                    axes_index,
+                    label: scatter3.label.clone(),
+                    visible: scatter3.visible,
+                }
+            }
             PlotElement::Contour(contour) => Self::Contour {
                 vertices: contour
                     .cpu_vertices()
@@ -3325,6 +3384,9 @@ impl ScenePlot {
             }
             ScenePlot::Scatter3 {
                 points,
+                x_source,
+                y_source,
+                z_source,
                 colors_rgba,
                 point_size,
                 point_sizes,
@@ -3332,9 +3394,23 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let points: Vec<Vec3> = points.into_iter().map(xyz_to_vec3).collect();
                 let colors: Vec<Vec4> = colors_rgba.into_iter().map(rgba_to_vec4).collect();
-                let mut scatter3 = Scatter3Plot::new(points)?;
+                let mut scatter3 = match (x_source, y_source, z_source) {
+                    (Some(x_source), Some(y_source), Some(z_source)) => {
+                        Scatter3Plot::from_numeric_data(
+                            x_source.try_into()?,
+                            y_source.try_into()?,
+                            z_source.try_into()?,
+                        )?
+                    }
+                    (None, None, None) => {
+                        let points: Vec<Vec3> = points.into_iter().map(xyz_to_vec3).collect();
+                        Scatter3Plot::new(points)?
+                    }
+                    _ => {
+                        return Err("scatter3 scene contains partial typed source data".to_string())
+                    }
+                };
                 if !colors.is_empty() {
                     scatter3 = scatter3.with_colors(colors)?;
                 }
@@ -4368,6 +4444,34 @@ mod tests {
             rebuilt.plots().nth(1),
             Some(PlotElement::Scatter3(_))
         ));
+    }
+
+    #[test]
+    fn scatter3_scene_roundtrip_preserves_wide_integer_source_storage() {
+        let wide = 9_007_199_254_740_993_u64;
+        let shape = vec![1, 2];
+        let scatter3 = Scatter3Plot::from_numeric_data(
+            NumericPlotData::new(NumericStorage::U64(vec![1, wide]), shape.clone()).unwrap(),
+            NumericPlotData::new(NumericStorage::I16(vec![-2, 3]), shape.clone()).unwrap(),
+            NumericPlotData::new(NumericStorage::F32(vec![4.0, 5.0]), shape).unwrap(),
+        )
+        .unwrap();
+        let mut figure = Figure::new();
+        figure.add_scatter3_plot(scatter3);
+
+        let json = serde_json::to_string(&FigureScene::capture(&figure)).unwrap();
+        assert!(json.contains(&wide.to_string()));
+        let rebuilt = serde_json::from_str::<FigureScene>(&json)
+            .unwrap()
+            .into_figure()
+            .unwrap();
+        let Some(PlotElement::Scatter3(scatter3)) = rebuilt.plots().next() else {
+            panic!("expected scatter3")
+        };
+        let (x, y, z) = scatter3.source_data().expect("typed source data");
+        assert_eq!(x.storage(), &NumericStorage::U64(vec![1, wide]));
+        assert_eq!(y.storage(), &NumericStorage::I16(vec![-2, 3]));
+        assert_eq!(z.storage(), &NumericStorage::F32(vec![4.0, 5.0]));
     }
 
     #[test]

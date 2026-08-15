@@ -47,6 +47,16 @@ pub const OPENFIG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerA
     canonical_builtin: None,
     notes: "openfig accepts a textual filename plus textual copy/visibility options and returns opaque figure handles; it has no direct integer data or control role, and resident numeric arguments reject before provider access or file I/O.",
 };
+pub const SAVEAS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "saveas accepts a host graphics object, textual filename, and textual format token; numeric figure handles are opaque double identifiers rather than integer computation inputs, and resident numeric arguments reject before provider access or file I/O.",
+};
+pub const SAVEFIG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "savefig accepts host Figure objects, textual filenames, and textual version tokens; typed-integer arrays are not figure handles and resident numeric arguments reject before provider access or file I/O.",
+};
 
 const DEFAULT_WIDTH: u32 = 800;
 const DEFAULT_HEIGHT: u32 = 600;
@@ -323,9 +333,11 @@ fn handle_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::plotting::figure_persistence::SAVEAS_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::SAVEAS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn saveas_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+    reject_resident_persistence_arguments(&args, SAVEAS)?;
     let args = gather_values(&args, SAVEAS).await?;
     let request = parse_saveas_args(&args)?;
     match request.format {
@@ -348,9 +360,11 @@ pub async fn saveas_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     accel = "metadata",
     type_resolver(bool_type),
     descriptor(crate::builtins::plotting::figure_persistence::SAVEFIG_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::figure_persistence::SAVEFIG_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::figure_persistence"
 )]
 pub async fn savefig_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+    reject_resident_persistence_arguments(&args, SAVEFIG)?;
     let args = gather_values(&args, SAVEFIG).await?;
     let request = parse_savefig_args(&args, SAVEFIG)?;
     save_figures(&request.output_path, &request.figures, SAVEFIG).await?;
@@ -429,6 +443,25 @@ async fn gather_values(values: &[Value], builtin: &'static str) -> BuiltinResult
         })?);
     }
     Ok(out)
+}
+
+fn reject_resident_persistence_arguments(
+    values: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if values.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(persistence_error(
+            &ERROR_INVALID_ARGUMENT,
+            builtin,
+            format!(
+                "{builtin}: typed integer and gpuArray values are not valid figure, filename, or format arguments"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1451,36 +1484,27 @@ mod tests {
     }
 
     #[test]
-    fn savefig_reads_typed_integer_handle_arrays_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    fn savefig_rejects_typed_integer_handle_arrays_before_io() {
         let _guard = setup();
         let first = figure_builtin(vec![]).expect("figure one");
-        block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot one");
-        let second = figure_builtin(vec![Value::String("next".into())]).expect("figure two");
-        block_on(plot_builtin(vec![Value::Tensor(tensor(&[3.0, 2.0, 1.0]))])).expect("plot two");
         let handles = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![first as i64, second as i64]),
-            vec![1, 2],
+            runmat_builtins::IntegerStorage::I64(vec![first as i64]),
+            vec![1, 1],
         )
         .expect("handle tensor");
 
         let path = temp_path("integer_handles");
         let _ = std::fs::remove_file(&path);
-        block_on(savefig_builtin(vec![
+        let error = block_on(savefig_builtin(vec![
             Value::Tensor(handles),
             Value::String(path.to_string_lossy().into_owned()),
         ]))
-        .expect("savefig integer handles");
-        clear_figure(None).expect("clear");
-        let value = block_on(openfig_builtin(vec![Value::String(
-            path.to_string_lossy().into_owned(),
-        )]))
-        .expect("openfig");
-        let Value::Tensor(tensor) = value else {
-            panic!("expected handle tensor");
-        };
-        assert_eq!(tensor.materialize_f64().len(), 2);
-        let _ = std::fs::remove_file(&path);
+        .expect_err("typed integer graphics handles must reject");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:figurePersistence:InvalidArgument")
+        );
+        assert!(!path.exists());
     }
 
     #[test]

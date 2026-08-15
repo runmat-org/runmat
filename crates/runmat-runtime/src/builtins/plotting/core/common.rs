@@ -9,6 +9,7 @@ use crate::BuiltinResult;
 
 use super::plotting_error;
 
+#[cfg(test)]
 type NumericTriplet = (Vec<f64>, Vec<f64>, Vec<f64>);
 
 /// Default error message when no plotting backend is available.
@@ -77,6 +78,7 @@ pub fn numeric_plot_data_triplet(
     ))
 }
 
+#[cfg(test)]
 pub fn numeric_triplet(
     x: Tensor,
     y: Tensor,

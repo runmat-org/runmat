@@ -9,7 +9,9 @@ use crate::gpu::scatter2::ScatterColorBuffer;
 use crate::gpu::scatter3::Scatter3GpuInputs;
 use crate::gpu::util::{copy_readback_bytes, readback_scalar_buffer_f64};
 use crate::plots::scatter::MarkerStyle;
+use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
+use runmat_builtins::NumericStorage;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Scatter3GpuStyle {
@@ -47,6 +49,9 @@ pub struct Scatter3Plot {
     pub label: Option<String>,
     /// Visibility flag.
     pub visible: bool,
+    source_x: Option<NumericPlotData>,
+    source_y: Option<NumericPlotData>,
+    source_z: Option<NumericPlotData>,
     vertices: Option<Vec<Vertex>>,
     bounds: Option<BoundingBox>,
     gpu_vertices: Option<GpuVertexBuffer>,
@@ -57,8 +62,31 @@ pub struct Scatter3Plot {
 
 impl Scatter3Plot {
     pub async fn export_scene_points(&self) -> Result<Vec<Vec3>, String> {
+        if let Some((x, y, z)) = self.export_numeric_xyz_data().await? {
+            return Ok(x
+                .materialize_f64()
+                .into_iter()
+                .zip(y.materialize_f64())
+                .zip(z.materialize_f64())
+                .map(|((x, y), z)| Vec3::new(x as f32, y as f32, z as f32))
+                .collect());
+        }
         if !self.points.is_empty() {
             return Ok(self.points.clone());
+        }
+
+        Ok(Vec::new())
+    }
+
+    pub async fn export_numeric_xyz_data(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData, NumericPlotData)>, String> {
+        match (&self.source_x, &self.source_y, &self.source_z) {
+            (Some(x), Some(y), Some(z)) if x.len() == y.len() && x.len() == z.len() => {
+                return Ok(Some((x.clone(), y.clone(), z.clone())));
+            }
+            (None, None, None) => {}
+            _ => return Err("scatter3 plot has incomplete CPU source data".to_string()),
         }
 
         if let Some(inputs) = &self.gpu_inputs {
@@ -91,13 +119,17 @@ impl Scatter3Plot {
                 inputs.scalar,
             )
             .await?;
-            let points = x
-                .into_iter()
-                .zip(y)
-                .zip(z)
-                .map(|((x, y), z)| Vec3::new(x as f32, y as f32, z as f32))
-                .collect();
-            return Ok(points);
+            let shape = vec![1, len];
+            let wrap = |values: Vec<f64>| match inputs.scalar {
+                crate::gpu::ScalarType::F64 => {
+                    NumericPlotData::new(NumericStorage::F64(values), shape.clone())
+                }
+                crate::gpu::ScalarType::F32 => NumericPlotData::new(
+                    NumericStorage::F32(values.into_iter().map(|value| value as f32).collect()),
+                    shape.clone(),
+                ),
+            };
+            return Ok(Some((wrap(x)?, wrap(y)?, wrap(z)?)));
         }
 
         if self.gpu_vertices.is_some() {
@@ -106,7 +138,7 @@ impl Scatter3Plot {
             );
         }
 
-        Ok(Vec::new())
+        Ok(None)
     }
 
     pub async fn export_scene_colors(&self, point_count: usize) -> Result<Vec<Vec4>, String> {
@@ -191,6 +223,38 @@ impl Scatter3Plot {
 
     /// Create a new scatter3 plot. Colors default to a blue colormap.
     pub fn new(points: Vec<Vec3>) -> Result<Self, String> {
+        let shape = vec![1, points.len()];
+        let x = NumericPlotData::new(
+            NumericStorage::F32(points.iter().map(|point| point.x).collect()),
+            shape.clone(),
+        )?;
+        let y = NumericPlotData::new(
+            NumericStorage::F32(points.iter().map(|point| point.y).collect()),
+            shape.clone(),
+        )?;
+        let z = NumericPlotData::new(
+            NumericStorage::F32(points.iter().map(|point| point.z).collect()),
+            shape,
+        )?;
+        Self::from_numeric_data(x, y, z)
+    }
+
+    /// Create a scatter3 plot while retaining native source class and values.
+    pub fn from_numeric_data(
+        x: NumericPlotData,
+        y: NumericPlotData,
+        z: NumericPlotData,
+    ) -> Result<Self, String> {
+        if x.len() != y.len() || x.len() != z.len() {
+            return Err("scatter3 source lengths must match".to_string());
+        }
+        let points = x
+            .materialize_f64()
+            .into_iter()
+            .zip(y.materialize_f64())
+            .zip(z.materialize_f64())
+            .map(|((x, y), z)| Vec3::new(x as f32, y as f32, z as f32))
+            .collect::<Vec<_>>();
         let default_color = Vec4::new(0.1, 0.7, 0.3, 1.0);
         let colors = vec![default_color; points.len()];
         Ok(Self {
@@ -205,6 +269,9 @@ impl Scatter3Plot {
             edge_color_from_vertex_colors: false,
             label: None,
             visible: true,
+            source_x: Some(x),
+            source_y: Some(y),
+            source_z: Some(z),
             vertices: None,
             bounds: None,
             gpu_vertices: None,
@@ -234,6 +301,9 @@ impl Scatter3Plot {
             edge_color_from_vertex_colors: style.edge_from_vertex_colors,
             label: None,
             visible: true,
+            source_x: None,
+            source_y: None,
+            source_z: None,
             vertices: None,
             bounds: Some(bounds),
             gpu_vertices: Some(buffer),
@@ -246,6 +316,13 @@ impl Scatter3Plot {
     pub fn with_gpu_source_inputs(mut self, inputs: Scatter3GpuInputs) -> Self {
         self.gpu_inputs = Some(inputs);
         self
+    }
+
+    pub fn source_data(&self) -> Option<(&NumericPlotData, &NumericPlotData, &NumericPlotData)> {
+        match (&self.source_x, &self.source_y, &self.source_z) {
+            (Some(x), Some(y), Some(z)) => Some((x, y, z)),
+            _ => None,
+        }
     }
 
     fn invalidate_gpu_vertices(&mut self) {
@@ -383,6 +460,18 @@ impl Scatter3Plot {
                 .map(|sizes| sizes.len() * std::mem::size_of::<f32>())
                 .unwrap_or(0)
             + gpu_bytes
+            + self
+                .source_x
+                .as_ref()
+                .map_or(0, NumericPlotData::estimated_byte_len)
+            + self
+                .source_y
+                .as_ref()
+                .map_or(0, NumericPlotData::estimated_byte_len)
+            + self
+                .source_z
+                .as_ref()
+                .map_or(0, NumericPlotData::estimated_byte_len)
     }
 
     /// Generate render data for the renderer.

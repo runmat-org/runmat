@@ -7,9 +7,12 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, ObjectInstance, Value,
 };
 use runmat_hir::RUNTESTS_BUILTIN_NAME;
 use runmat_macros::runtime_builtin;
@@ -120,6 +123,26 @@ pub const RUNTESTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RUNTESTS_ERRORS,
 };
 
+const RUNTESTS_INTEGER_FLAG_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "IncludeSubfolders, IncludeInnerNamespaces, IncludeReferencedProjects, Strict, or UseParallel",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Documented numeric-or-logical flags accept only exact scalar zero or one; native integer storage is inspected without binary64 conversion.",
+    }];
+pub const RUNTESTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "results = runtests(..., flag_name, integer_0_or_1, ...)",
+        inputs: &RUNTESTS_INTEGER_FLAG_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Integer flags control host test discovery and execution. Other direct integer arguments are invalid targets or option payloads, and resident numeric values reject before provider access.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::runtests")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "runtests",
@@ -183,6 +206,7 @@ struct RunTestsOptions {
     summary = "Discover and run MATLAB-style test files.",
     keywords = "test,unit testing,runtests,diagnostics,developer tools",
     descriptor(self::RUNTESTS_DESCRIPTOR),
+    integer_capabilities(self::RUNTESTS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::diagnostics::runtests"
 )]
 pub async fn runtests_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
@@ -194,6 +218,15 @@ pub fn requires_vm_workspace_context() -> BuiltinResult<Value> {
 }
 
 pub async fn resolve_runtests_plan(args: Vec<Value>) -> BuiltinResult<RunTestsPlan> {
+    if args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        return Err(runtests_error_detail(
+            &RUNTESTS_ERROR_INVALID_INPUT,
+            "gpuArray values are not valid runtests targets or option values",
+        ));
+    }
     let gathered = gather_values(args).await?;
     let options = parse_options(gathered)?;
     let mut paths = BTreeSet::new();
@@ -437,10 +470,19 @@ fn value_to_strings(value: &Value) -> BuiltinResult<Vec<String>> {
 }
 
 fn value_to_bool(value: &Value) -> BuiltinResult<bool> {
+    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(runtests_error_detail(
+                &RUNTESTS_ERROR_INVALID_INPUT,
+                "expected an exact numeric or logical scalar value of 0 or 1",
+            )),
+        };
+    }
     match value {
         Value::Bool(v) => Ok(*v),
         Value::Num(v) if *v == 0.0 || *v == 1.0 => Ok(*v != 0.0),
-        Value::Int(v) => Ok(v.to_f64() != 0.0),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,

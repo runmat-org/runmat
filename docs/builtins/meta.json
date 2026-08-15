@@ -136417,6 +136417,43 @@
           "when": "Runtime fails while building companion matrix outputs or solving eigenvalues.",
           "message": "roots: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "roots-integer-coefficients",
+          "mode": "RunMatOnly",
+          "description": "roots accepts typed-integer polynomial coefficients as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RootsIntegerCoefficientsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = roots(integer_c)",
+          "inputs": [
+            {
+              "name": "c",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The checked extension crosses once into the double companion-matrix/eigenvalue algorithm. Automatic residency gathers through the owning provider; explicit typed-integer input is gated before provider access."
+        }
       ]
     },
     {
@@ -136498,6 +136535,59 @@
           "identifier": "RunMat:rot90:Internal",
           "when": "Internal rotation or provider fallback path fails.",
           "message": "rot90: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rot90-direction-token",
+          "mode": "RunMatOnly",
+          "description": "rot90 accepts textual direction tokens as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Rot90DirectionTokenExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = rot90(integer_A [, integer_K])",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents all eight integer array classes; rotation is a pure permutation of authoritative native storage."
+            },
+            {
+              "name": "K",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The integer rotation count is reduced modulo four directly in its native signed or unsigned domain."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "No numeric conversion occurs. Host storage is reordered exactly; resident integer fallback gathers and re-uploads through the exact owning provider when direct permutation hooks are unavailable."
         }
       ]
     },
@@ -136622,6 +136712,70 @@
           "when": "Internal tensor conversion/allocation failed.",
           "message": "round: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "round-typed-integer-digits",
+          "mode": "RunMatOnly",
+          "description": "round accepts a typed-integer digits argument as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RoundTypedIntegerDigitsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = round(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are already integral; the one-input form is an exact class- and shape-preserving identity."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host and resident values retain their original authoritative storage unchanged. Multi-input round with integer X is rejected before dispatch as documented."
+        },
+        {
+          "form": "Y = round(floating_X, integer_N [, mode])",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents N as double; RunMat mode accepts an exact scalar typed integer and range-checks it before selecting the rounding mode."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-only control extension never converts N through binary64; it accepts one authoritative integer element within i32 range."
+        }
       ]
     },
     {
@@ -136682,7 +136836,11 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "rowfilter is constructed from variable names, Parquet metadata/datastores, tables, or timetables; direct typed-integer arrays have no public data or control role and reject before gather. Integer columns nested in a tabular source remain opaque authoritative payloads while the filter captures row-selection metadata."
+      }
     },
     {
       "name": "rref",
@@ -136826,6 +136984,76 @@
           "identifier": "RunMat:rref:Internal",
           "when": "Runtime fails while computing row reduction or executing gather/upload paths.",
           "message": "rref: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rref-integer-matrix",
+          "mode": "RunMatOnly",
+          "description": "rref accepts typed-integer matrix data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RrefIntegerMatrixExtension"
+        },
+        {
+          "id": "rref-integer-tolerance",
+          "mode": "RunMatOnly",
+          "description": "rref accepts a typed-integer tolerance as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RrefIntegerToleranceExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[R,pivots] = rref(integer_A [, tol])",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double matrices; RunMat admits typed integers only when every matrix entry is exactly representable in binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The guarded extension crosses once into the double row-reduction algorithm; R and one-based pivot indices are double, and resident fallback restores R through the exact input owner."
+        },
+        {
+          "form": "[R,pivots] = rref(A, integer_tol)",
+          "inputs": [
+            {
+              "name": "tol",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents a single or double tolerance; the RunMat-only typed scalar form is exactness- and range-checked before conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The tolerance is a scalar floating-control boundary and never routes an inexact wide integer through binary64."
         }
       ]
     },
@@ -136976,6 +137204,35 @@
           "identifier": "RunMat:runtests:WorkspaceStateFailed",
           "when": "The VM cannot isolate or restore the caller workspace around a test case.",
           "message": "runtests: workspace isolation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "results = runtests(..., flag_name, integer_0_or_1, ...)",
+          "inputs": [
+            {
+              "name": "IncludeSubfolders, IncludeInnerNamespaces, IncludeReferencedProjects, Strict, or UseParallel",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented numeric-or-logical flags accept only exact scalar zero or one; native integer storage is inspected without binary64 conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Integer flags control host test discovery and execution. Other direct integer arguments are invalid targets or option payloads, and resident numeric values reject before provider access."
         }
       ]
     },
@@ -137247,7 +137504,11 @@
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "figure persistence: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "saveas accepts a host graphics object, textual filename, and textual format token; numeric figure handles are opaque double identifiers rather than integer computation inputs, and resident numeric arguments reject before provider access or file I/O."
+      }
     },
     {
       "name": "savefig",
@@ -137355,7 +137616,11 @@
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "figure persistence: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "savefig accepts host Figure objects, textual filenames, and textual version tokens; typed-integer arrays are not figure handles and resident numeric arguments reject before provider access or file I/O."
+      }
     },
     {
       "name": "saveobj",
@@ -137403,7 +137668,11 @@
           "when": "Object serialization nesting exceeds the supported recursion limit.",
           "message": "object serialization: recursion limit exceeded"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "saveobj dispatches only on value or handle objects; direct typed-integer input is invalid. Integer-valued object properties remain opaque nested payloads and are copied through authoritative storage without becoming a direct integer call form."
+      }
     },
     {
       "name": "savepath",
@@ -138573,6 +138842,110 @@
           "when": "Internal 3-D scatter construction or rendering fails unexpectedly.",
           "message": "scatter3: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = scatter3(integer_X, integer_Y, integer_Z, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents all eight integer coordinate classes; native class, shape, and exact values remain authoritative as XData."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer YData remains authoritative independently of renderer geometry."
+            },
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer ZData remains authoritative independently of renderer geometry."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Graphics source properties retain authoritative native storage while a derived f32 vertex cache is used only for rendering. Documented gpuArray input executes client-side; unsupported integer buffers gather exactly through their owner."
+        },
+        {
+          "form": "h = scatter3(X,Y,Z,integer_S [, integer_C])",
+          "inputs": [
+            {
+              "name": "S",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a explicitly documents all eight integer classes for marker areas; validated values enter the floating renderer-size boundary."
+            },
+            {
+              "name": "C",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric colormap indices or RGB components are renderer controls; integer identity is used before the documented color-mapping boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Marker areas and colors are validated in their native numeric class, then deliberately materialized into finite renderer metadata; the returned graphics handle is double."
+        }
       ]
     },
     {
@@ -138675,6 +139048,131 @@
           "identifier": "RunMat:scatterhist:Internal",
           "when": "RunMat cannot allocate or render the scatterhist chart.",
           "message": "scatterhist: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "scatterhist-integer-data",
+          "mode": "RunMatOnly",
+          "description": "scatterhist accepts typed-integer observation data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ScatterhistIntegerDataExtension"
+        },
+        {
+          "id": "scatterhist-integer-group",
+          "mode": "RunMatOnly",
+          "description": "scatterhist accepts typed-integer Group labels as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ScatterhistIntegerGroupExtension"
+        },
+        {
+          "id": "scatterhist-integer-option",
+          "mode": "RunMatOnly",
+          "description": "scatterhist accepts typed-integer numeric option values as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ScatterhistIntegerOptionExtension"
+        },
+        {
+          "id": "scatterhist-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "scatterhist accepts interactive gpuArray arguments as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ScatterhistGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = scatterhist(integer_x, integer_y, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double observations; typed integers require exact binary64 representation before histogram and rendering computation."
+            },
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The same checked boundary applies independently to Y observations."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The RunMat-only observation extension crosses once into double histogram/statistical geometry after exactness checks; the public result is a vector of double graphics handles."
+        },
+        {
+          "form": "h = scatterhist(x,y,\"Group\",integer_group)",
+          "inputs": [
+            {
+              "name": "Group",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer group identity is retained exactly, including wide int64 and uint64 values, and converted only to textual legend labels."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Grouping compares exact native values and therefore does not collapse distinct wide integers through double."
+        },
+        {
+          "form": "h = scatterhist(x,y,option_name,integer_value,...)",
+          "inputs": [
+            {
+              "name": "NBins or numeric style/control value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents these numeric controls as single or double. Exact structural flags/bin counts remain integer until validation; renderer-domain sizes, widths, bandwidths, and RGB values require checked binary64 conversion."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Each RunMat-only typed option is gated before gather; exact structural controls and checked renderer-domain conversions are distinguished by option role."
         }
       ]
     },
@@ -138810,7 +139308,7 @@
           ]
         },
         {
-          "label": "h = scatterplot(x, n, offset, marker, ax)",
+          "label": "h = scatterplot(x, n, offset, marker, scatfig)",
           "inputs": [
             {
               "name": "x",
@@ -138841,11 +139339,11 @@
               "description": "Marker LineSpec forwarded to scatter."
             },
             {
-              "name": "ax",
-              "ty": "AxesHandle",
+              "name": "scatfig",
+              "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Target axes handle."
+              "description": "Existing figure handle used for the scatter plot."
             }
           ],
           "outputs": [
@@ -138863,7 +139361,7 @@
         {
           "code": "RM.SCATTERPLOT.INVALID_ARGUMENT",
           "identifier": "RunMat:scatterplot:InvalidArgument",
-          "when": "The input samples, decimation factor, offset, marker, or axes handle is invalid.",
+          "when": "The input samples, decimation factor, offset, marker, or existing Figure handle is invalid.",
           "message": "scatterplot: invalid argument"
         },
         {
@@ -138871,6 +139369,92 @@
           "identifier": "RunMat:scatterplot:PlotFailed",
           "when": "The underlying scatter plot cannot be rendered.",
           "message": "scatterplot: plot operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "scatterplot-integer-data",
+          "mode": "RunMatOnly",
+          "description": "scatterplot accepts typed-integer sample data as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ScatterplotIntegerDataExtension"
+        },
+        {
+          "id": "scatterplot-integer-control",
+          "mode": "RunMatOnly",
+          "description": "scatterplot accepts typed-integer n and offset controls as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ScatterplotIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = scatterplot(integer_x, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double samples; typed integer values require exact binary64 representation before constellation geometry is computed."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The RunMat-only sample extension crosses into floating plotting coordinates only after exactness checks; the output is a double graphics handle."
+        },
+        {
+          "form": "h = scatterplot(x, integer_n [, integer_offset], ...)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a specifies a double positive-integer decimation factor; RunMat mode validates typed integer storage exactly."
+            },
+            {
+              "name": "offset",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a specifies a double nonnegative-integer offset; RunMat mode validates it exactly and requires offset < n."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Decimation controls remain exact usize-bounded integers and are never routed through binary64."
         }
       ]
     },

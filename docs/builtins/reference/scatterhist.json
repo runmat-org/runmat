@@ -18,7 +18,9 @@
     "`Group` accepts numeric labels, character matrices, string arrays, cell labels, or categorical labels and renders one scatter/marginal series per group. Legends default on for grouped charts unless `Legend` is set to `off`, and grouped histograms default to stair outlines unless `Style` is set explicitly.",
     "`Color`, `Marker`, `MarkerSize`, `LineStyle`, `LineWidth`, and `Bandwidth` accept scalar/single-value forms or cyclic per-group forms such as color-character sequences, string/cell style arrays, numeric vectors, and RGB or bandwidth matrices.",
     "`Kernel` set to `on` renders Gaussian kernel-density marginal lines using Scott bandwidth estimates or `Bandwidth`. `Kernel` set to `overlay` renders both binned counts and kernel lines.",
-    "`Style` supports `bar` and `stairs`. Use `Kernel` to select kernel-density marginal lines or count/kernel overlays. `PlotGroup` set to `off` pools grouped observations for plotting."
+    "`Style` supports `bar` and `stairs`. Use `Kernel` to select kernel-density marginal lines or count/kernel overlays. `PlotGroup` set to `off` pools grouped observations for plotting.",
+    "MATLAB documents single/double x, y, and numeric controls. RunMat mode additionally admits all eight integer classes for x/y, exact integer Group labels, and exact integer-valued controls; strict MATLAB mode rejects those extensions and values entering histogram or density arithmetic must be exactly representable in binary64.",
+    "`scatterhist` is a host chart compositor. Strict MATLAB mode rejects RunMat's gpuArray extension before gathering; RunMat mode admits it explicitly and performs the required owner-specific gather before chart construction."
   ],
   "examples": [
     {

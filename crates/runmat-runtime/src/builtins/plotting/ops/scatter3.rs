@@ -6,8 +6,12 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 #[cfg(test)]
 use runmat_builtins::Tensor;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
@@ -18,7 +22,7 @@ use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::scatter3::Scatter3GpuStyle;
 use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
-use runmat_plot::plots::Scatter3Plot;
+use runmat_plot::plots::{NumericPlotData, Scatter3Plot};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -27,7 +31,7 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use std::convert::TryFrom;
 
-use super::common::{gather_tensor_from_gpu, numeric_triplet};
+use super::common::{gather_tensor_from_gpu, numeric_plot_data_triplet};
 use super::gpu_helpers::axis_bounds;
 use super::op_common::line_inputs::NumericInput as ScatterInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -475,6 +479,68 @@ pub const SCATTER3_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SCATTER3_ERRORS,
 };
 
+const SCATTER3_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents all eight integer coordinate classes; native class, shape, and exact values remain authoritative as XData.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer YData remains authoritative independently of renderer geometry.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer ZData remains authoritative independently of renderer geometry.",
+    },
+];
+const SCATTER3_INTEGER_STYLE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "S",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a explicitly documents all eight integer classes for marker areas; validated values enter the floating renderer-size boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "C",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric colormap indices or RGB components are renderer controls; integer identity is used before the documented color-mapping boundary.",
+    },
+];
+pub const SCATTER3_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatter3(integer_X, integer_Y, integer_Z, ...)",
+        inputs: &SCATTER3_INTEGER_COORDINATE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Graphics source properties retain authoritative native storage while a derived f32 vertex cache is used only for rendering. Documented gpuArray input executes client-side; unsupported integer buffers gather exactly through their owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = scatter3(X,Y,Z,integer_S [, integer_C])",
+        inputs: &SCATTER3_INTEGER_STYLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Marker areas and colors are validated in their native numeric class, then deliberately materialized into finite renderer metadata; the returned graphics handle is double.",
+    },
+];
+
 fn scatter3_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -538,6 +604,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::scatter3::SCATTER3_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::scatter3::SCATTER3_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
 pub async fn scatter3_builtin(
@@ -616,9 +683,10 @@ pub async fn scatter3_builtin(
                 .into_tensor("scatter3")
                 .map_err(map_scatter3_invalid_argument)?,
         );
-        let (x_vals, y_vals, z_vals) = numeric_triplet(x_tensor, y_tensor, z_tensor, "scatter3")
-            .map_err(map_scatter3_invalid_argument)?;
-        let scatter = build_scatter3_plot(x_vals, y_vals, z_vals, &mut resolved_style)
+        let (x_data, y_data, z_data) =
+            numeric_plot_data_triplet(x_tensor, y_tensor, z_tensor, BUILTIN_NAME)
+                .map_err(map_scatter3_invalid_argument)?;
+        let scatter = build_scatter3_plot_numeric(x_data, y_data, z_data, &mut resolved_style)
             .map_err(map_scatter3_invalid_argument)?;
         let plot_index = figure.add_scatter3_plot_on_axes(scatter, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
@@ -829,10 +897,26 @@ fn resolve_marker_color(marker_color: &MarkerColor, fallback: Vec4, default_base
     }
 }
 
+#[cfg(test)]
 fn build_scatter3_plot(
     x: Vec<f64>,
     y: Vec<f64>,
     z: Vec<f64>,
+    style: &mut Scatter3ResolvedStyle,
+) -> BuiltinResult<Scatter3Plot> {
+    let shape = vec![x.len(), 1];
+    build_scatter3_plot_numeric(
+        NumericPlotData::from_f64(x, shape.clone()).map_err(scatter3_err)?,
+        NumericPlotData::from_f64(y, shape.clone()).map_err(scatter3_err)?,
+        NumericPlotData::from_f64(z, shape).map_err(scatter3_err)?,
+        style,
+    )
+}
+
+fn build_scatter3_plot_numeric(
+    x: NumericPlotData,
+    y: NumericPlotData,
+    z: NumericPlotData,
     style: &mut Scatter3ResolvedStyle,
 ) -> BuiltinResult<Scatter3Plot> {
     if x.len() != y.len() || x.len() != z.len() {
@@ -843,14 +927,7 @@ fn build_scatter3_plot(
 
     ensure_scatter3_host_metadata(style, x.len())?;
 
-    let points: Vec<Vec3> = x
-        .iter()
-        .zip(y.iter())
-        .zip(z.iter())
-        .map(|((x, y), z)| Vec3::new(*x as f32, *y as f32, *z as f32))
-        .collect();
-
-    let mut scatter = Scatter3Plot::new(points)
+    let mut scatter = Scatter3Plot::from_numeric_data(x, y, z)
         .map_err(|err| scatter3_err(format!("scatter3: {err}")))?
         .with_point_size(style.point_size)
         .with_color(style.uniform_color)

@@ -16,7 +16,11 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
     Value,
@@ -177,6 +181,41 @@ pub const ROT90_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ROT90_ERRORS,
 };
 
+const ROT90_DIRECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rot90-direction-token",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rot90 accepts textual direction tokens as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Rot90DirectionTokenExtension"),
+};
+pub const ROT90_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ROT90_DIRECTION_EXTENSION];
+const ROT90_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents all eight integer array classes; rotation is a pure permutation of authoritative native storage.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "K",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The integer rotation count is reduced modulo four directly in its native signed or unsigned domain.",
+    },
+];
+pub const ROT90_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = rot90(integer_A [, integer_K])",
+        inputs: &ROT90_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "No numeric conversion occurs. Host storage is reordered exactly; resident integer fallback gathers and re-uploads through the exact owning provider when direct permutation hooks are unavailable.",
+    }];
+
 fn rot90_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rot90_error_with_message(error.message, error)
 }
@@ -200,11 +239,19 @@ fn rot90_error_with_message(
     accel = "custom",
     type_resolver(preserve_matrix_type),
     descriptor(crate::builtins::array::shape::rot90::ROT90_DESCRIPTOR),
+    extensions(crate::builtins::array::shape::rot90::ROT90_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::shape::rot90::ROT90_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
 async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(rot90_error(&ROT90_ERROR_TOO_MANY_INPUTS));
+    }
+    if rest.first().is_some_and(is_text_rotation_argument) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ROT90_DIRECTION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let steps = parse_rotation_steps(rest.first())?;
     match value {
@@ -247,6 +294,13 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         | Value::Symbolic(_)
         | Value::OutputList(_) => Err(rot90_error(&ROT90_ERROR_UNSUPPORTED_INPUT)),
     }
+}
+
+fn is_text_rotation_argument(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
 }
 
 fn parse_rotation_steps(arg: Option<&Value>) -> crate::BuiltinResult<usize> {
@@ -495,7 +549,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
             if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
                 return Ok(Value::GpuTensor(out));
@@ -504,7 +558,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     }
     let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let rotated = rot90_tensor(host_tensor, steps)?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         gpu_helpers::upload_tensor(provider, &rotated)
             .map(Value::GpuTensor)
             .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
@@ -829,6 +883,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rot90_clockwise_direction() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let result = rot90_builtin(Value::Tensor(tensor), vec![Value::from("clockwise")])
             .expect("rot90 clockwise");
@@ -844,6 +899,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rot90_counterclockwise_direction_keyword() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let result = rot90_builtin(
             Value::Tensor(tensor.clone()),
