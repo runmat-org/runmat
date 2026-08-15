@@ -2,7 +2,7 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle, IntegerElementType};
 use runmat_builtins::{IntValue, IntegerStorage, NumericDType, Tensor, Value};
 
-const PACKET: [(&str, usize, &[usize]); 8] = [
+const PACKET: [(&str, usize, &[usize]); 9] = [
     ("pulstran", 3, &[8, 8, 8]),
     ("rectpuls", 2, &[8, 8]),
     ("rand", 3, &[8, 8, 8]),
@@ -11,6 +11,7 @@ const PACKET: [(&str, usize, &[usize]); 8] = [
     ("random", 2, &[8, 8]),
     ("randperm", 1, &[8]),
     ("randsample", 3, &[8, 8, 8]),
+    ("rng", 3, &[8, 8, 8]),
 ];
 
 fn integer_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
@@ -89,6 +90,7 @@ fn random_and_waveform_extensions_are_independent_declarative_records() {
         ("random", 2),
         ("randperm", 2),
         ("randsample", 5),
+        ("rng", 2),
     ];
     let mut ids = std::collections::HashSet::new();
     for (name, count) in expected {
@@ -113,7 +115,28 @@ fn random_and_waveform_extensions_are_independent_declarative_records() {
             );
         }
     }
-    assert_eq!(ids.len(), 23);
+    assert_eq!(ids.len(), 25);
+}
+
+#[test]
+fn rng_public_and_wide_integer_seed_domains_are_independently_gated() {
+    {
+        let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+        call("rng", vec![Value::Int(IntValue::U32(u32::MAX))])
+            .expect("largest documented integer seed");
+        let error = call("rng", vec![Value::Int(IntValue::U64(u32::MAX as u64 + 1))])
+            .expect_err("wide seed is a RunMat extension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:RngWideSeedExtension")
+        );
+    }
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    call(
+        "rng",
+        vec![Value::Int(IntValue::U64(9_007_199_254_740_993))],
+    )
+    .expect("RunMat preserves a wide integer seed without binary64 rounding");
 }
 
 #[test]

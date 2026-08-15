@@ -1,7 +1,7 @@
 use lsp_types::Position;
 use runmat_lsp::core::analysis::{analyze_document_with_compat, signature_help_at, CompatMode};
 
-const PACKET: [(&str, usize, &str); 8] = [
+const PACKET: [(&str, usize, &str); 9] = [
     ("pulstran", 3, "y=pulstran([0 1],0,'rectpuls');"),
     ("rectpuls", 2, "y=rectpuls([0 1]);"),
     ("rand", 3, "y=rand(uint8(2));"),
@@ -10,6 +10,7 @@ const PACKET: [(&str, usize, &str); 8] = [
     ("random", 2, "y=random('Normal',0,1);"),
     ("randperm", 1, "y=randperm(uint8(2));"),
     ("randsample", 3, "y=randsample(3,2);"),
+    ("rng", 3, "rng(uint32(1));"),
 ];
 
 #[test]
@@ -49,6 +50,7 @@ fn new_runmat_only_forms_publish_stable_compatibility_identifiers() {
         ("randn", 2),
         ("random", 2),
         ("randsample", 5),
+        ("rng", 2),
     ];
     let mut ids = std::collections::HashSet::new();
     for (name, count) in expected {
@@ -73,5 +75,5 @@ fn new_runmat_only_forms_publish_stable_compatibility_identifiers() {
             );
         }
     }
-    assert_eq!(ids.len(), 17);
+    assert_eq!(ids.len(), 19);
 }

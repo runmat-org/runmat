@@ -15,8 +15,12 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use runmat_accelerate_api::{GpuTensorHandle, PagefunOp, PagefunRequest};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -41,6 +45,27 @@ pub const PAGEFUN_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     PAGEFUN_HOST_INPUT_EXTENSION,
     PAGEFUN_TEXT_CALLABLE_EXTENSION,
 ];
+
+const PAGEFUN_INTEGER_MTIMES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A or B page operand",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "pagefun delegates each page to the selected function, and the documented mtimes contract admits an integer operand only when the other operand is scalar.",
+    }];
+
+pub const PAGEFUN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pagefun(@mtimes, integer_A, B)",
+        inputs: &PAGEFUN_INTEGER_MTIMES_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "[integer-audit-open] R2026a requires each page to satisfy mtimes, including its integer-scalar restriction. RunMat currently rejects typed integer pages before floating materialization because neither the WGPU page kernel nor the host result assembler preserves typed integer storage; exact scalar-page execution remains to be implemented.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::pagefun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -255,6 +280,9 @@ fn pagefun_internal_error(message: impl Into<String>) -> RuntimeError {
     type_resolver(pagefun_type),
     descriptor(crate::builtins::acceleration::gpu::pagefun::PAGEFUN_DESCRIPTOR),
     extensions(crate::builtins::acceleration::gpu::pagefun::PAGEFUN_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::acceleration::gpu::pagefun::PAGEFUN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
 async fn pagefun_builtin(
@@ -1288,6 +1316,18 @@ pub(crate) mod tests {
         );
         let error = block_on(result).expect_err("typed integer page inputs must not use f64");
         assert!(error.to_string().contains("typed integer kernel"));
+    }
+
+    #[test]
+    fn pagefun_integer_capability_keeps_typed_scalar_mtimes_open() {
+        assert_eq!(PAGEFUN_INTEGER_CAPABILITIES.len(), 1);
+        let capability = &PAGEFUN_INTEGER_CAPABILITIES[0];
+        assert_eq!(
+            capability.inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(capability.overload, BuiltinIntegerOverloadKind::ScalarOnly);
+        assert!(capability.notes.contains("[integer-audit-open]"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

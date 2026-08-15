@@ -5,7 +5,8 @@ use runmat_builtins::{
 };
 use runmat_lsp::core::analysis::{analyze_document_with_compat, signature_help_at, CompatMode};
 
-const CAPABILITY_NAMES: [&str; 8] = [
+const CAPABILITY_NAMES: [&str; 9] = [
+    "pagefun",
     "pagemtimes",
     "pagetranspose",
     "pinv",
@@ -51,6 +52,11 @@ fn floating_decomposition_extensions_declare_checked_runmat_boundaries() {
 
 #[test]
 fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
+    let pagefun = runmat_builtins::builtin_function_by_name("pagefun").expect("pagefun");
+    assert!(pagefun.integer_capabilities[0]
+        .notes
+        .contains("[integer-audit-open]"));
+
     let transpose =
         runmat_builtins::builtin_function_by_name("pagetranspose").expect("pagetranspose");
     assert_eq!(
@@ -81,6 +87,7 @@ fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
 #[test]
 fn page_and_decomposition_signatures_are_visible_to_lsp() {
     for (name, source) in [
+        ("pagefun", "z=pagefun(@mtimes,uint16(1),uint16(1));"),
         ("pagemtimes", "z=pagemtimes(uint16(1),uint16(1));"),
         ("pagetranspose", "z=pagetranspose(uint16([1 2]));"),
         ("pinv", "z=pinv(uint16([1 2;3 4]));"),

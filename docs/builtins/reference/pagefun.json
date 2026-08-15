@@ -36,7 +36,8 @@
     "The first two dimensions of each input form the matrix operated on by the builtin. Dimensions three and up identify individual pages. Inputs with fewer pages are broadcast so long as the page extent is `1`.",
     "Any combination of empty matrices and empty page extents produces empty results with MATLAB-compatible shapes.",
     "MATLAB-compatible calls require at least one distributed or `gpuArray` input. In `runmat` compatibility mode, all-host operands are accepted as a RunMat extension and return host results.",
-    "When any operand is a `gpuArray`, provider fallback gathers inputs to the host and uploads uniform real or complex numeric results back to the GPU so documented mixed host/GPU calls preserve output residency."
+    "When any operand is a `gpuArray`, provider fallback gathers inputs to the host and uploads uniform real or complex numeric results back to the GPU so documented mixed host/GPU calls preserve output residency.",
+    "Integer operands inherit the selected function's contract. For the currently implemented `@mtimes`, the documented scalar-integer cases remain open: RunMat rejects typed integer pages before floating materialization until the provider kernel and host page assembler can preserve exact typed results."
   ],
   "examples": [
     {
@@ -73,7 +74,7 @@
     },
     {
       "question": "Are results always uploaded back to the GPU?",
-      "answer": "Numeric results are uploaded when every operand started as a `gpuArray` and an acceleration provider is registered. Complex results remain on the host today, matching MATLAB's behaviour when complex GPU buffers are not available."
+      "answer": "When any operand is a `gpuArray` and an acceleration provider is registered, supported uniform real or complex numeric results are uploaded back to the device. An all-host RunMat-extension call returns a host result."
     },
     {
       "question": "Does `pagefun` participate in fusion?",

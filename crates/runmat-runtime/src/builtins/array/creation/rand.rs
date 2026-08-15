@@ -274,7 +274,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::FunctionSpecific,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] This legacy control form updates the shared RunMat random stream and synchronizes the active provider when supported, but exact MATLAB stream/state equivalence is not yet established.",
+        notes: "The legacy control reads all eight native integer scalar classes exactly, rejects negatives and values outside its restorable token domain, updates the shared stream, and synchronizes the active provider when supported. Generator sequence/state parity is a general RNG-engine conformance gap rather than an implicit integer conversion boundary.",
     },
 ];
 

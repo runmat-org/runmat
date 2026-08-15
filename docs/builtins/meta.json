@@ -87629,6 +87629,70 @@
           "when": "Too many arguments were supplied.",
           "message": "limit: too many input arguments"
         }
+      ],
+      "extensions": [
+        {
+          "id": "limit-numeric-expression",
+          "mode": "RunMatOnly",
+          "description": "limit with a nonsymbolic numeric expression is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:LimitNumericExpressionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "L = limit(integer_expr, ...)",
+          "inputs": [
+            {
+              "name": "expr",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public input is symbolic; RunMat mode also admits a scalar native integer when it is exactly representable by the current binary64 symbolic core."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "This independently gated RunMat extension rejects integers that would round before constructing a symbolic constant; the result follows the symbolic result contract."
+        },
+        {
+          "form": "L = limit(expr, var, integer_point, direction)",
+          "inputs": [
+            {
+              "name": "point",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar integer limit point enters the current binary64 symbolic core only after an exact-representability check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "[integer-audit-open] The point is read from authoritative integer storage and must convert exactly before substitution into RunMat's binary64 symbolic representation; exact symbolic support beyond binary64's integer range remains to be implemented."
+        }
       ]
     },
     {
@@ -92062,6 +92126,62 @@
           "mode": "RunMatOnly",
           "description": "raw non-double macd matrix input is a RunMat extension",
           "error_identifier": "RunMat:compatibility:MacdNondoubleMatrixExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[MACDLine, SignalLine] = macd(integer_Data_matrix)",
+          "inputs": [
+            {
+              "name": "Data matrix",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents raw matrix Data as double; RunMat mode admits native integer M-by-4 matrices only when every price is exactly representable at the binary64 EMA boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The raw-matrix extension is gated before provider access, reads authoritative integer storage, rejects lossy binary64 conversion, and computes host-double column outputs."
+        },
+        {
+          "form": "[MACDLine, SignalLine] = macd(table_with_integer_prices)",
+          "inputs": [
+            {
+              "name": "High/Low/Open/Close table variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented table and timetable containers impose names and vector shapes without restricting the numeric storage class of their price variables."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer price variables remain exact until a checked binary64 EMA boundary; outputs preserve the table or timetable container and use double Close data."
         }
       ]
     },
@@ -114616,6 +114736,35 @@
           "description": "pagefun text callables are a RunMat extension",
           "error_identifier": "RunMat:compatibility:PagefunTextCallableExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = pagefun(@mtimes, integer_A, B)",
+          "inputs": [
+            {
+              "name": "A or B page operand",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "pagefun delegates each page to the selected function, and the documented mtimes contract admits an integer operand only when the other operand is scalar."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "GpuRestricted",
+          "overload": "ScalarOnly",
+          "notes": "[integer-audit-open] R2026a requires each page to satisfy mtimes, including its integer-scalar restriction. RunMat currently rejects typed integer pages before floating materialization because neither the WGPU page kernel nor the host result assembler preserves typed integer storage; exact scalar-page execution remains to be implemented."
+        }
       ]
     },
     {
@@ -127323,7 +127472,7 @@
           "overflow": "Error",
           "backend": "FunctionSpecific",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] This legacy control form updates the shared RunMat random stream and synchronizes the active provider when supported, but exact MATLAB stream/state equivalence is not yet established."
+          "notes": "The legacy control reads all eight native integer scalar classes exactly, rejects negatives and values outside its restorable token domain, updates the shared stream, and synchronizes the active provider when supported. Generator sequence/state parity is a general RNG-engine conformance gap rather than an implicit integer conversion boundary."
         }
       ]
     },
@@ -136374,6 +136523,103 @@
           "identifier": "RunMat:rng:Internal",
           "when": "Internal snapshot conversion/allocation/apply fails.",
           "message": "rng: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rng-wide-seed",
+          "mode": "RunMatOnly",
+          "description": "rng seeds at or above 2^32 are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RngWideSeedExtension"
+        },
+        {
+          "id": "rng-typed-state-fields",
+          "mode": "RunMatOnly",
+          "description": "rng state structures with native integer fields are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RngTypedStateFieldsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "s = rng(integer_seed[, generator]) where seed < 2^32",
+          "inputs": [
+            {
+              "name": "seed",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented seed is a nonnegative integer below 2^32; native integer scalars are read exactly before the range check."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact seed configures the shared host stream and provider state hook; generator sequence/state parity is a general RNG-engine conformance gap, not an implicit integer conversion boundary."
+        },
+        {
+          "form": "s = rng(wide_integer_seed[, generator])",
+          "inputs": [
+            {
+              "name": "seed",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode extends the seed domain through u64; native typed values remain exact even above flintmax."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "This RunMat-only form is gated before stream mutation and retains an exact typed Seed field when a binary64 field would round."
+        },
+        {
+          "form": "s = rng(state_with_integer_fields)",
+          "inputs": [
+            {
+              "name": "Seed/State fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB-compatible restoration consumes a structure returned by rng; accepting independently constructed native-integer state fields is a separately gated RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The independently gated extension validates native Seed and State words directly from authoritative storage without an f64 mirror."
         }
       ]
     },

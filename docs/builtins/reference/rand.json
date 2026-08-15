@@ -39,7 +39,7 @@
     "All eight integer classes are documented for scalar, separate-dimension, and row-size-vector controls and are decoded structurally from authoritative storage; resident size controls are separately gated RunMat extensions.",
     "`rand(___, 'like', A)` matches the type, complexity, and residency of `A`, while ordinary size arguments determine shape and omission of size arguments returns a scalar. The old implicit `rand(A)` prototype form is not supported.",
     "`rand(___, 'double')` leaves the output as double precision (default). `'single'` returns single-precision results that mirror MATLAB's behaviour.",
-    "`rand('seed', seed)` and `rand(\"seed\", seed)` accept non-negative integer scalar seeds and reset RunMat's shared pseudorandom stream. `rand('seed')` queries a restorable legacy state token for the current stream position; passing that token back to `rand('seed', token)` restores subsequent draws. This legacy control form also synchronizes the active acceleration provider's RNG state when provider hooks are available."
+    "`rand('seed', seed)` and `rand(\"seed\", seed)` read non-negative integer scalar seeds exactly and reset RunMat's shared pseudorandom stream. `rand('seed')` queries a same-session restorable RunMat token for the current stream position; passing that token back restores subsequent RunMat draws. This legacy control form also synchronizes the active acceleration provider's RNG state when provider hooks are available; exact MATLAB generator/state parity remains a separate RNG-engine conformance gap."
   ],
   "examples": [
     {
