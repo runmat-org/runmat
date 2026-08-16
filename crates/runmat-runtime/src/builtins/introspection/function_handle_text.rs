@@ -33,6 +33,13 @@ pub const STR2FUNC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STR2FUNC_ERRORS,
 };
 
+pub const STR2FUNC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "str2func accepts scalar function-name text only. Integer, numeric, and provider-resident values reject before provider access, and the builtin has no integer output surface.",
+    };
+
 const STR2FUNC_ERROR_NAME_SHAPE_INVALID: runmat_builtins::BuiltinErrorDescriptor =
     runmat_builtins::BuiltinErrorDescriptor {
         code: "RM.STR2FUNC.NAME_SHAPE_INVALID",
@@ -113,6 +120,7 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "str2func",
     descriptor(self::STR2FUNC_DESCRIPTOR),
+    integer_audit(self::STR2FUNC_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::function_handle_text"
 )]
 pub fn str2func_builtin_registered(value: Value) -> crate::BuiltinResult<Value> {
@@ -202,6 +210,30 @@ mod tests {
             device_id: u32::MAX,
             buffer_id: u64::MAX,
         })
+    }
+
+    #[test]
+    fn str2func_integer_audit_is_inapplicable() {
+        assert_eq!(
+            STR2FUNC_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(STR2FUNC_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn str2func_rejects_integer_and_resident_values_before_provider_access() {
+        for value in [
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                    .expect("integer tensor"),
+            ),
+            unowned_resident_value(),
+        ] {
+            let error = dispatch_str2func(value).expect_err("non-text must reject");
+            assert_eq!(error.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
+        }
     }
 
     #[test]

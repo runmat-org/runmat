@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Executes on the CPU. GPU-resident inputs are gathered automatically so prefix comparisons match MATLAB exactly."
+    "notes": "Prefix comparison executes on the CPU. Documented integer `N` is read exactly; unsupported numeric text operands return false before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -30,13 +30,14 @@
   "description": "`strncmp(A, B, N)` compares corresponding text elements and returns logical `true` when the first `N` characters match exactly. It follows MATLAB-compatible case-sensitive comparison and implicit expansion behavior.",
   "behaviors": [
     "**Accepted text types**: String scalars/arrays, character vectors or character arrays, and cell arrays of character vectors.",
-    "**Scalar `N` requirement**: The third argument must evaluate to a finite, nonnegative integer scalar. Numeric, logical, and scalar tensor/logical-array values are accepted when they convert cleanly.",
+    "**Scalar `N` requirement**: The third argument accepts double, single, or any of the eight integer classes as an integer scalar. It is read from native storage without an f64 mirror.",
     "**Implicit expansion**: Scalars expand to match the size of the other operand before comparison.",
     "**Character arrays**: Rows are treated as independent character vectors. Each row is compared against the other operand and the result is returned as a column vector.",
     "**Unicode-aware comparisons**: Prefixes are counted in MATLAB characters (Unicode scalar values), so multi-byte UTF-8 sequences are handled transparently.",
-    "**Prefix length semantics**: If `N` is `0`, every comparison evaluates to `true`. If either text element is shorter than `N`, it must match exactly up to the end of the shorter value and the longer value must also end within `N` characters to be considered equal.",
+    "**Prefix length semantics**: If `N` is zero or negative, every comparison evaluates to `true`. If either text element is shorter than `N`, it must match exactly up to the end of the shorter value and the longer value must also end within `N` characters to be considered equal.",
     "**Missing strings**: Any comparison involving a missing string returns `false` unless `N == 0`.",
-    "**Result type**: Scalar comparisons return logical scalars. Array comparisons return logical arrays that follow MATLAB's column-major ordering."
+    "**Result type**: Scalar comparisons return logical scalars. Array comparisons return logical arrays that follow MATLAB's column-major ordering.",
+    "**Unsupported datatypes**: Integer and other numeric values in `A` or `B` are unsupported text operands and return scalar logical `false` without gather or implicit text conversion."
   ],
   "examples": [
     {
@@ -68,7 +69,7 @@
   "faqs": [
     {
       "question": "What argument types does `strncmp` accept?",
-      "answer": "String arrays, character vectors/arrays, and cell arrays of character vectors. Mixed combinations are converted automatically. The third argument `N` must be a nonnegative integer scalar."
+      "answer": "`A` and `B` accept string arrays, character vectors/arrays, and cell arrays of character vectors. `N` accepts double, single, or any integer class; negative `N` is treated as zero."
     },
     {
       "question": "Is the comparison case-sensitive?",
@@ -149,8 +150,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/core/strncmp.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strncmp.rs"
   },
-  "gpu_residency": "No. If you pass GPU-resident data, RunMat automatically gathers it to host memory before running `strncmp`. The builtin is an acceleration sink and always returns host logical outputs. Explicit `gpuArray` / `gather` calls are only required for compatibility with legacy MATLAB workflows.",
+  "gpu_residency": "No. `strncmp` returns host logical output. Provider-resident numeric text operands are unsupported and return false without gather; an admitted automatically resident count may gather transparently.",
   "gpu_behavior": [
-    "`strncmp` is registered as an acceleration **sink**. When any operand resides on the GPU, RunMat gathers all inputs back to host memory before performing the comparison so that the behaviour matches MATLAB exactly. The logical result is always returned on the host. Providers do not need to supply specialised kernels."
+    "`strncmp` is a host comparison sink. RunMat may gather an admitted automatically resident numeric count through its owner, but unsupported resident numeric text operands return false before provider access."
   ]
 }

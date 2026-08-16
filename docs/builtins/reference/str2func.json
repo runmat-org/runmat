@@ -1,0 +1,69 @@
+{
+  "title": "str2func",
+  "category": "introspection",
+  "keywords": [
+    "str2func",
+    "function handle",
+    "introspection",
+    "text"
+  ],
+  "summary": "Construct a function handle from scalar function-name text.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Function-handle construction consumes host text. Numeric and provider-resident values reject before provider access."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "not applicable",
+    "notes": "Handle construction is an introspection operation and is not eligible for numeric fusion."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::function_handle_text::tests",
+    "integration": "integer_text_only_admission_semantics"
+  },
+  "description": "`str2func(name)` creates a function handle from a character row vector or scalar string. The text can name a builtin, user function, or qualified function; RunMat resolves known semantic functions and retains a late-bound name when resolution must happen later.",
+  "behaviors": [
+    "The input must be scalar row text. Nonscalar string arrays and multirow character arrays reject with a shape error.",
+    "A leading `@` is accepted and removed before the name is stored, and surrounding whitespace is ignored.",
+    "Empty names reject instead of creating an unusable handle.",
+    "Integer and other numeric inputs are not converted to text. Provider-resident numeric values reject before RunMat attempts a gather.",
+    "RunMat currently constructs named handles. Parsing the full text representation of an anonymous function remains an implementation gap."
+  ],
+  "examples": [
+    {
+      "description": "Create and call a named function handle",
+      "input": "f = str2func('sin');\ny = f(pi/2)",
+      "output": "y = 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `str2func` convert a numeric value into a function name?",
+      "answer": "No. It accepts scalar function-name text only. Convert data to text explicitly only when that is genuinely the intended program behavior."
+    },
+    {
+      "question": "When is the named function resolved?",
+      "answer": "RunMat binds a known semantic function immediately when possible. Otherwise it keeps the validated name in the handle so ordinary runtime function resolution can select the target when the handle is called."
+    }
+  ],
+  "links": [
+    {
+      "label": "func2str",
+      "url": "./func2str"
+    },
+    {
+      "label": "functions",
+      "url": "./functions"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/function_handle_text.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/function_handle_text.rs"
+  }
+}

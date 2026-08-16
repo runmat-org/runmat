@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+    char_row_to_string_slice, contains_resident_text_input, is_missing_string,
 };
 use crate::builtins::strings::core::compat::pattern_regex;
 use crate::builtins::strings::type_resolvers::text_preserve_type;
@@ -208,7 +208,7 @@ fn replace_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
     if [&text, &old, &new]
         .into_iter()
-        .any(contains_numeric_or_resident_text_input)
+        .any(contains_resident_text_input)
     {
         return Err(replace_error(&REPLACE_ERROR_INVALID_INPUT));
     }

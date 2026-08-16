@@ -1,8 +1,12 @@
 //! MATLAB-compatible `strncmp` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,6 +17,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
 use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -99,6 +104,27 @@ pub const STRNCMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRNCMP_ERRORS,
 };
 
+const STRNCMP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "N accepts double, single, and every built-in integer class. Negative values are treated as zero, while values beyond the host count domain reject without rounding.",
+    }];
+
+pub const STRNCMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = strncmp(A, B, N)",
+        inputs: &STRNCMP_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "N limits a host text comparison and is parsed directly from authoritative integer storage. Unsupported numeric A or B inputs return scalar logical false before provider access.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strncmp",
@@ -153,9 +179,13 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(logical_text_match_type),
     descriptor(crate::builtins::strings::core::strncmp::STRNCMP_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::core::strncmp::STRNCMP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
+        return Ok(Value::Bool(false));
+    }
     let a = gather_if_needed_async(&a)
         .await
         .map_err(remap_strncmp_flow)?;
@@ -240,9 +270,7 @@ fn prefix_equal(lhs: &str, rhs: &str, limit: usize) -> bool {
 
 fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => i
-            .try_to_usize()
-            .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH)),
+        Value::Int(i) => parse_prefix_length_from_integer(&i),
         Value::Num(n) => parse_prefix_length_from_float(n),
         Value::Bool(b) => Ok(if b { 1 } else { 0 }),
         Value::Tensor(tensor) => {
@@ -253,9 +281,7 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
                 .integer_storage()
                 .and_then(|storage| storage.value_at(0))
             {
-                return value
-                    .try_to_usize()
-                    .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
+                return parse_prefix_length_from_integer(&value);
             }
             parse_prefix_length_from_float(tensor::tensor_value_f64(&tensor, 0))
         }
@@ -269,12 +295,21 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
     }
 }
 
+fn parse_prefix_length_from_integer(value: &IntValue) -> BuiltinResult<usize> {
+    if value.try_to_i64().is_some_and(|value| value < 0) {
+        return Ok(0);
+    }
+    value
+        .try_to_usize()
+        .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH))
+}
+
 fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     if value < 0.0 {
-        return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
+        return Ok(0);
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
@@ -548,31 +583,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strncmp_negative_length_errors() {
-        let err = error_message(
-            strncmp_builtin(
-                Value::String("abc".into()),
-                Value::String("abc".into()),
-                Value::Num(-1.0),
-            )
-            .expect_err("negative length"),
-        );
-        assert!(err.to_ascii_lowercase().contains("nonnegative"));
+    fn strncmp_negative_length_is_treated_as_zero() {
+        let result = strncmp_builtin(
+            Value::String("abc".into()),
+            Value::String("xyz".into()),
+            Value::Num(-1.0),
+        )
+        .expect("negative length becomes zero");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[test]
-    fn strncmp_prefix_length_rejects_negative_typed_integer_tensor() {
+    fn strncmp_prefix_length_treats_negative_typed_integer_tensor_as_zero() {
         let limit =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("integer tensor");
-        let err = error_message(
-            strncmp_builtin(
-                Value::String("abc".into()),
-                Value::String("abc".into()),
-                Value::Tensor(limit),
-            )
-            .expect_err("negative length"),
-        );
-        assert!(err.to_ascii_lowercase().contains("nonnegative"));
+        let result = strncmp_builtin(
+            Value::String("abc".into()),
+            Value::String("xyz".into()),
+            Value::Tensor(limit),
+        )
+        .expect("negative length becomes zero");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[test]

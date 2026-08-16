@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Executes on the CPU; GPU-resident inputs are gathered automatically so results match MATLAB behaviour."
+    "notes": "Text comparison executes on the CPU. Unsupported numeric or provider-resident inputs return scalar logical false without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -35,7 +35,8 @@
     "**Cell arrays**: Each cell is treated as a text scalar. Scalar cell arrays expand across the other operand before comparison.",
     "**Missing strings**: String elements equal to `missing` compare unequal to everything, including other `missing` values.",
     "**Result form**: A single logical scalar is returned for scalar comparisons; otherwise you receive a logical array using column-major MATLAB layout.",
-    "**Case sensitivity**: Matching is case-sensitive. Use `strcmpi` for case-insensitive comparisons."
+    "**Case sensitivity**: Matching is case-sensitive. Use `strcmpi` for case-insensitive comparisons.",
+    "**Unsupported datatypes**: Following the documented text-comparison rule, integer and other unsupported numeric inputs return scalar logical `false`; RunMat does not gather or stringify them."
   ],
   "examples": [
     {
@@ -149,8 +150,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/core/strcmp.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strcmp.rs"
   },
-  "gpu_residency": "You normally do **not** need to call `gpuArray`. If you do, RunMat gathers the operands before computing `strcmp` so the output matches MATLAB. The result always lives on the host because this builtin inspects text data.",
+  "gpu_residency": "`strcmp` compares host text and returns host logical output. Unsupported numeric resident operands return false without provider access.",
   "gpu_behavior": [
-    "`strcmp` is registered as an acceleration sink. When either input resides on the GPU, RunMat gathers both operands back to host memory before comparing them so the results match MATLAB exactly. Providers do not need to implement custom kernels, and the logical result is always returned on the CPU."
+    "`strcmp` is a host text comparison sink. Numeric resident operands are unsupported datatypes and return scalar logical false without gather or backend-specific kernels."
   ]
 }

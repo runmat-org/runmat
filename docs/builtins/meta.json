@@ -150192,7 +150192,11 @@
           "when": "Internal tensor assembly failed while building parsed output.",
           "message": "str2double: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "str2double parses string, character, or cellstr input and returns double. Integer, numeric, and provider-resident numeric inputs reject before provider access rather than being implicitly converted to text."
+      }
     },
     {
       "name": "str2func",
@@ -150240,7 +150244,11 @@
           "when": "Parsed function name is empty.",
           "message": "str2func: function name must not be empty"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "str2func accepts scalar function-name text only. Integer, numeric, and provider-resident values reject before provider access, and the builtin has no integer output surface."
+      }
     },
     {
       "name": "str2num",
@@ -150269,7 +150277,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "str2num evaluates scalar string or character text and therefore has no integer input role. Integer, numeric, and provider-resident input rejects before provider access; parsed numeric output is a separate result-class concern."
+      }
     },
     {
       "name": "strcat",
@@ -150336,7 +150348,11 @@
           "when": "Internal output container construction failed.",
           "message": "strcat: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strcat concatenates character arrays, string arrays, and cell arrays of character vectors. Numeric, integer, and provider-resident values reject before provider access without implicit text conversion."
+      }
     },
     {
       "name": "strcmp",
@@ -150391,7 +150407,11 @@
           "when": "Internal logical result assembly failed.",
           "message": "strcmp: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strcmp compares text containers. An unsupported integer or other numeric input returns scalar logical false as documented, without reading numeric payloads or accessing a provider."
+      }
     },
     {
       "name": "strcmpi",
@@ -150446,7 +150466,11 @@
           "when": "Internal logical result assembly failed.",
           "message": "strcmpi: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strcmpi compares text containers. An unsupported integer or other numeric input returns scalar logical false as documented, without reading numeric payloads or accessing a provider."
+      }
     },
     {
       "name": "strfind",
@@ -150725,6 +150749,82 @@
           "when": "Input conversion/formatting/encoding constraints are violated.",
           "message": "string: invalid input"
         }
+      ],
+      "extensions": [
+        {
+          "id": "string-format-spec",
+          "mode": "RunMatOnly",
+          "description": "string(formatSpec, A...) printf-style formatting is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StringFormatSpecExtension"
+        },
+        {
+          "id": "string-encoding",
+          "mode": "RunMatOnly",
+          "description": "string(X, encoding) character-encoding selection is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StringEncodingExtension"
+        },
+        {
+          "id": "string-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "string with explicit gpuArray numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StringExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "str = string(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every built-in integer class converts element by element to decimal text from authoritative storage, preserving input shape and exact wide values."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host and automatically resident integer arrays convert to a host string array without an f64 mirror. Explicit gpuArray input is independently mode-gated because R2026a does not document interactive GPU-array input for string."
+        },
+        {
+          "form": "str = string(formatSpec, A...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat printf-style format arguments accept every integer class and retain exact typed scalars until the selected formatter consumes them."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "This printf-style formatting form is a mode-gated RunMat extension and does not redefine the documented string(A) conversion surface."
+        }
       ]
     },
     {
@@ -150888,6 +150988,76 @@
           "identifier": "RunMat:strings:InternalError",
           "when": "Internal string array construction failed.",
           "message": "strings: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "strings-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "strings(..., 'like', prototype) is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StringsLikePrototypeExtension"
+        },
+        {
+          "id": "strings-fill-mode",
+          "mode": "RunMatOnly",
+          "description": "strings(..., 'empty'|'missing') fill selection is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StringsFillModeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "str = strings(n | sz | sz1,...,szN)",
+          "inputs": [
+            {
+              "name": "size",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Scalar, separate, and vector size forms accept every built-in integer class. Negative values become zero, and dimensions are checked exactly against the host allocation domain."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "R2026a documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array."
+        },
+        {
+          "form": "str = strings(..., 'like', prototype)",
+          "inputs": [
+            {
+              "name": "prototype",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The RunMat-only like form inspects only prototype shape; integer class and payload are not converted or read."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The like form is a mode-gated RunMat extension and is not presented as part of the R2026a strings contract."
         }
       ]
     },
@@ -151092,7 +151262,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strjoin joins text using a text delimiter. Integer, numeric, and provider-resident values have no input role and reject before provider access without implicit text conversion."
+      }
     },
     {
       "name": "strjust",
@@ -151128,7 +151302,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strjust operates on character or string text and an optional textual alignment. Integer, numeric, and provider-resident inputs reject before provider access and are not treated as character codes."
+      }
     },
     {
       "name": "strlength",
@@ -151176,7 +151354,11 @@
           "when": "Internal tensor construction failed while building length results.",
           "message": "strlength: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strlength measures string, character, and cellstr input and returns double character counts. Integer and resident numeric inputs reject before provider access and are never interpreted as character codes."
+      }
     },
     {
       "name": "strncmp",
@@ -151244,6 +151426,35 @@
           "when": "Internal logical result assembly failed.",
           "message": "strncmp: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = strncmp(A, B, N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "N accepts double, single, and every built-in integer class. Negative values are treated as zero, while values beyond the host count domain reject without rounding."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "N limits a host text comparison and is parsed directly from authoritative integer storage. Unsupported numeric A or B inputs return scalar logical false before provider access."
+        }
       ]
     },
     {
@@ -151287,7 +151498,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "tf = strncmpi(A, B, N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "N accepts double, single, and every built-in integer class. Negative values are treated as zero, while values beyond the host count domain reject without rounding."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "N limits a host text comparison and is parsed directly from authoritative integer storage. Unsupported numeric A or B inputs return scalar logical false before provider access."
+        }
+      ]
     },
     {
       "name": "strrep",
@@ -151361,7 +151601,11 @@
           "when": "Internal output container construction failed.",
           "message": "strrep: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strrep accepts text in the subject, old-pattern, and replacement roles. Numeric, integer, and provider-resident values reject before provider access and are never interpreted as character codes."
+      }
     },
     {
       "name": "strsplit",
@@ -151578,7 +151822,11 @@
           "when": "Internal output container construction failed.",
           "message": "strsplit: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strsplit accepts scalar text, text delimiters, and textual or logical options. Integer and provider-resident numeric values have no documented role and reject before provider access without implicit character conversion."
+      }
     },
     {
       "name": "strtok",
@@ -151614,7 +151862,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strtok accepts host text and an optional text delimiter. Integer, numeric, and provider-resident values in either role reject before provider access and are not interpreted as character codes."
+      }
     },
     {
       "name": "strtrim",
@@ -151662,7 +151914,11 @@
           "when": "Internal output container construction failed.",
           "message": "strtrim: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "strtrim removes whitespace from text containers. Numeric, integer, and provider-resident values reject before provider access and are not interpreted as character codes."
+      }
     },
     {
       "name": "struct",

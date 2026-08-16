@@ -1,7 +1,11 @@
 //! MATLAB-compatible `string` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
     Tensor, Value,
@@ -103,6 +107,74 @@ pub const STRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRING_ERRORS,
 };
 
+const STRING_FORMAT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "string-format-spec",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "string(formatSpec, A...) printf-style formatting is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringFormatSpecExtension"),
+};
+
+const STRING_ENCODING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "string-encoding",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "string(X, encoding) character-encoding selection is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringEncodingExtension"),
+};
+
+const STRING_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "string-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "string with explicit gpuArray numeric input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringExplicitGpuInputExtension"),
+};
+
+pub const STRING_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    STRING_FORMAT_EXTENSION,
+    STRING_ENCODING_EXTENSION,
+    STRING_EXPLICIT_GPU_EXTENSION,
+];
+
+const STRING_VALUE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every built-in integer class converts element by element to decimal text from authoritative storage, preserving input shape and exact wide values.",
+    }];
+
+const STRING_FORMAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat printf-style format arguments accept every integer class and retain exact typed scalars until the selected formatter consumes them.",
+    }];
+
+pub const STRING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = string(A)",
+        inputs: &STRING_VALUE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host and automatically resident integer arrays convert to a host string array without an f64 mirror. Explicit gpuArray input is independently mode-gated because R2026a does not document interactive GPU-array input for string.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = string(formatSpec, A...)",
+        inputs: &STRING_FORMAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "This printf-style formatting form is a mode-gated RunMat extension and does not redefine the documented string(A) conversion surface.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "string",
@@ -139,9 +211,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(string_array_type),
     descriptor(crate::builtins::strings::core::string::STRING_DESCRIPTOR),
+    extensions(crate::builtins::strings::core::string::STRING_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::string::STRING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::string"
 )]
 async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRING_EXPLICIT_GPU_EXTENSION,
+            "string",
+        )?;
+    }
+    if !rest.is_empty() {
+        let extension = if rest.len() == 1 && is_encoding_call_shape(&value, &rest[0]) {
+            &STRING_ENCODING_EXTENSION
+        } else {
+            &STRING_FORMAT_EXTENSION
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, "string")?;
+    }
     if rest.is_empty() {
         let gathered = gather_if_needed_async(&value)
             .await
@@ -178,6 +270,22 @@ async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     }
     let formatted = format_from_spec(format_value, gathered_args).await?;
     Ok(Value::StringArray(formatted))
+}
+
+fn is_encoding_call_shape(first: &Value, candidate: &Value) -> bool {
+    if !matches!(
+        first,
+        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_)
+    ) || has_format_placeholders(first)
+    {
+        return false;
+    }
+    if let Value::Cell(cell) = first {
+        if !cell_contains_only_text_scalars(cell) {
+            return false;
+        }
+    }
+    value_to_scalar_text(candidate).is_some()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -978,6 +1086,7 @@ pub(crate) mod tests {
     };
 
     fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         futures::executor::block_on(super::string_builtin(value, rest))
     }
 
@@ -1465,6 +1574,27 @@ pub(crate) mod tests {
                 other => panic!("expected string array, got {other:?}"),
             }
         });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_strict_mode_gates_explicit_gpu_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 452,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = futures::executor::block_on(super::string_builtin(
+            Value::GpuTensor(handle),
+            Vec::new(),
+        ))
+        .expect_err("strict mode rejects explicit GPU input before gather");
+        assert_eq!(
+            error.identifier(),
+            STRING_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

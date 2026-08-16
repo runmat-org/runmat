@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+    char_row_to_string_slice, contains_resident_text_input, is_missing_string,
 };
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -317,9 +317,7 @@ impl PatternSpec {
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
 async fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    if contains_numeric_or_resident_text_input(&value)
-        || rest.iter().any(contains_numeric_or_resident_text_input)
-    {
+    if contains_resident_text_input(&value) || rest.iter().any(contains_resident_text_input) {
         return Err(strip_error(&STRIP_ERROR_INVALID_INPUT));
     }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;

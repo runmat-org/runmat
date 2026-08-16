@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Executes on the CPU; GPU-resident inputs are gathered before concatenation so trimming semantics match MATLAB."
+    "notes": "Text concatenation executes on the CPU. Numeric and provider-resident values are unsupported text inputs and reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,8 @@
     "When no string arrays are present but any input is a cell array of character vectors, the result is a cell array whose elements are character vectors.",
     "Otherwise, the result is a character array. For character inputs, `strcat` removes trailing space characters from each operand **before** concatenating.",
     "Cell array elements must be character vectors (or string scalars). Mixing cell arrays with unsupported content raises a MATLAB-compatible error.",
-    "Empty inputs broadcast naturally: an operand with a zero-length dimension yields an empty output after broadcasting."
+    "Empty inputs broadcast naturally: an operand with a zero-length dimension yields an empty output after broadcasting.",
+    "Integer and other numeric arrays are not implicitly formatted as text; use `string` first when numeric-to-text conversion is intentional."
   ],
   "examples": [
     {
@@ -160,8 +161,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/transform/strcat.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/strcat.rs"
   },
-  "gpu_residency": "No. String manipulation runs on the CPU. If intermediate values are on the GPU, RunMat gathers them automatically so you can call `strcat` without extra residency management.",
+  "gpu_residency": "No. `strcat` accepts host text and returns host text. Provider-resident numeric values are unsupported text operands and reject before access.",
   "gpu_behavior": [
-    "RunMat currently performs text concatenation on the CPU. When any operand resides on the GPU, the runtime gathers it to host memory before applying MATLAB-compatible trimming and concatenation rules. Providers do not need to implement device kernels for this builtin today."
+    "RunMat performs text concatenation on the CPU. Unsupported resident numeric operands reject before provider lookup rather than being gathered and implicitly formatted."
   ]
 }

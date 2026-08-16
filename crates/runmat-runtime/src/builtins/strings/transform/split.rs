@@ -5,12 +5,12 @@ use std::collections::HashSet;
 use regex::RegexBuilder;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -541,6 +541,12 @@ pub const STRSPLIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRSPLIT_ERRORS,
 };
 
+pub const STRSPLIT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strsplit accepts scalar text, text delimiters, and textual or logical options. Integer and provider-resident numeric values have no documented role and reject before provider access without implicit character conversion.",
+};
+
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -703,9 +709,27 @@ fn positive_usize(value: f64) -> Option<usize> {
     accel = "sink",
     type_resolver(unknown_type),
     descriptor(crate::builtins::strings::transform::split::STRSPLIT_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::split::STRSPLIT_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::split"
 )]
 async fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&text)
+        || rest.iter().any(|value| {
+            matches!(
+                value,
+                Value::Num(_)
+                    | Value::Int(_)
+                    | Value::Tensor(_)
+                    | Value::SparseTensor(_)
+                    | Value::Complex(_, _)
+                    | Value::ComplexTensor(_)
+                    | Value::Symbolic(_)
+                    | Value::GpuTensor(_)
+            )
+        })
+    {
+        return Err(split_error(&SPLIT_ERROR_INVALID_INPUT));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(|err| map_control_flow_with_builtin(err, STRSPLIT_BUILTIN_NAME))?;

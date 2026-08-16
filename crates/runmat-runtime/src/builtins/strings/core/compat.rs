@@ -18,7 +18,9 @@ use runmat_macros::runtime_builtin;
 use crate::builtins::common::broadcast as matlab_broadcast;
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 const PATTERN_CLASS: &str = "pattern";
@@ -287,6 +289,26 @@ descriptor!(
     &IN_A_B_N,
     &OUT_BOOL
 );
+const STRNCMPI_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "N accepts double, single, and every built-in integer class. Negative values are treated as zero, while values beyond the host count domain reject without rounding.",
+    }];
+
+pub const STRNCMPI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = strncmpi(A, B, N)",
+        inputs: &STRNCMPI_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "N limits a host text comparison and is parsed directly from authoritative integer storage. Unsupported numeric A or B inputs return scalar logical false before provider access.",
+    }];
 descriptor!(
     ISSTRPROP_DESCRIPTOR,
     "tf = isstrprop(text, category, 'ForceCellOutput', tf?)",
@@ -348,12 +370,22 @@ descriptor_by_outputs!(
     &IN_TEXT_REST,
     &OUT_ANY
 );
+pub const STRTOK_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strtok accepts host text and an optional text delimiter. Integer, numeric, and provider-resident values in either role reject before provider access and are not interpreted as character codes.",
+};
 descriptor_by_outputs!(
     STR2NUM_DESCRIPTOR,
     "[x, tf] = str2num(text)",
     &IN_TEXT,
     &OUT_ANY
 );
+pub const STR2NUM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "str2num evaluates scalar string or character text and therefore has no integer input role. Integer, numeric, and provider-resident input rejects before provider access; parsed numeric output is a separate result-class concern.",
+};
 const MAT2STR_INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
     ty: BuiltinParamType::Any,
@@ -891,9 +923,13 @@ fn convert_variadic(
     accel = "sink",
     type_resolver(bool_type),
     descriptor(crate::builtins::strings::core::compat::STRNCMPI_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::core::compat::STRNCMPI_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn strncmpi_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
+        return Ok(Value::Bool(false));
+    }
     let a = gather_if_needed_async(&a)
         .await
         .map_err(map_flow("strncmpi"))?;
@@ -903,7 +939,7 @@ async fn strncmpi_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> 
     let n = gather_if_needed_async(&n)
         .await
         .map_err(map_flow("strncmpi"))?;
-    let n = parse_nonnegative_usize(&n, "strncmpi")?;
+    let n = parse_strncmp_count(&n)?;
     let left = TextList::from_value(a, "strncmpi")?;
     let right = TextList::from_value(b, "strncmpi")?;
     let shape = broadcast_shape(&left.shape, &right.shape, "strncmpi")?;
@@ -919,6 +955,46 @@ async fn strncmpi_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> 
         out.push(u8::from(matched));
     }
     logical_value(out, shape, "strncmpi")
+}
+
+fn parse_strncmp_count(value: &Value) -> BuiltinResult<usize> {
+    let invalid = || compat_error("strncmpi", "strncmpi: expected an integer scalar count");
+    match value {
+        Value::Int(value) => {
+            if value.try_to_i64().is_some_and(|value| value < 0) {
+                Ok(0)
+            } else {
+                value.try_to_usize().ok_or_else(invalid)
+            }
+        }
+        Value::Num(value) => {
+            if !value.is_finite() || value.fract() != 0.0 {
+                return Err(invalid());
+            }
+            if *value < 0.0 {
+                return Ok(0);
+            }
+            if *value > usize::MAX as f64 || (usize::BITS == 64 && *value == usize::MAX as f64) {
+                return Err(invalid());
+            }
+            Ok(*value as usize)
+        }
+        Value::Bool(value) => Ok(usize::from(*value)),
+        Value::Tensor(tensor) if tensor.len() == 1 => match tensor
+            .numeric_value_at(0)
+            .expect("scalar tensor has one numeric value")
+        {
+            NumericScalar::F64(value) => parse_strncmp_count(&Value::Num(value)),
+            NumericScalar::F32(value) => parse_strncmp_count(&Value::Num(f64::from(value))),
+            value => parse_strncmp_count(&Value::Int(
+                value
+                    .into_int_value()
+                    .expect("non-floating numeric scalar is integer"),
+            )),
+        },
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(usize::from(array.data[0] != 0)),
+        _ => Err(invalid()),
+    }
 }
 
 #[runtime_builtin(
@@ -1046,9 +1122,20 @@ async fn isspace_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::STRTOK_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::compat::STRTOK_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&text)
+        || rest
+            .first()
+            .is_some_and(contains_numeric_or_resident_text_input)
+    {
+        return Err(compat_error(
+            "strtok",
+            "strtok: expected host text and a text delimiter",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("strtok"))?;
@@ -1081,9 +1168,16 @@ async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(tensor_type),
     descriptor(crate::builtins::strings::core::compat::STR2NUM_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::compat::STR2NUM_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn str2num_builtin(text: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&text) {
+        return Err(compat_error(
+            "str2num",
+            "str2num: expected a string scalar or character array",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("str2num"))?;

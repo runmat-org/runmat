@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Executes on the CPU; GPU-resident text or delimiters are gathered to host memory before splitting."
+    "notes": "Splitting executes on host text. Numeric and provider-resident text or delimiter values reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,8 @@
     "When you omit the delimiter, `strsplit` splits on MATLAB's default whitespace set (`' '`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`) and collapses consecutive delimiters.",
     "Explicit delimiters default to `'CollapseDelimiters', true`, so adjacent delimiters are grouped unless you opt out.",
     "Set `'DelimiterType', 'RegularExpression'` to interpret delimiters as regex patterns. In `'Simple'` mode, delimiters are matched literally and special regex characters are escaped.",
-    "String input returns a row string array. Character-vector input returns a row cell array of text elements."
+    "String input returns a row string array. Character-vector input returns a row cell array of text elements.",
+    "Integer values have no text or option role and are not interpreted as delimiters or character codes."
   ],
   "examples": [
     {

@@ -150,6 +150,11 @@ descriptor!(
     &IN_TEXT_REST,
     &OUT_ANY
 );
+pub const STRJUST_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strjust operates on character or string text and an optional textual alignment. Integer, numeric, and provider-resident inputs reject before provider access and are not treated as character codes.",
+};
 descriptor!(
     SPLITLINES_DESCRIPTOR,
     "s = splitlines(text)",
@@ -890,9 +895,20 @@ async fn deblank_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::STRJUST_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::compat::STRJUST_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn strjust_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&text)
+        || rest
+            .first()
+            .is_some_and(contains_numeric_or_resident_text_input)
+    {
+        return Err(transform_error(
+            "strjust",
+            "strjust: expected host text and a textual alignment",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("strjust"))?;
