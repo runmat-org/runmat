@@ -17,7 +17,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`surfc` combines the shared surface path with the modern contour path instead of relying on a separate legacy composite implementation."
+    "notes": "`surfc` retains exact owner-aware source data for the primary surface while combining the shared floating rendering path with the modern contour path."
   },
   "fusion": {
     "elementwise": false,
@@ -32,6 +32,7 @@
   "description": "`surfc` combines a shaded `surf`-style surface with projected contour lines on the base plane. It supports MATLAB-compatible surface-family inputs and returns the primary surface handle.",
   "behaviors": [
     "`surfc` shares the same surface semantics as `surf` for the primary surface object.",
+    "The primary surface's `XData`, `YData`, and `ZData` retain native single, double, or integer class, exact values, and shape; surface rendering and projected-contour construction are explicit floating boundaries.",
     "The returned handle is the surface handle for the composite result, while contour overlays are attached as the secondary composite plot content.",
     "The contour overlay uses the same modern contour-generation path as `contour`, rather than a one-off composite implementation.",
     "Colormap, colorbar, view, and subplot-local state all operate on the composite through the same shared axes metadata model.",

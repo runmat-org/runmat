@@ -19,13 +19,85 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 const BUILTIN_NAME: &str = "svd";
+
+pub const SVD_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow exactly representable typed-integer matrices in svd",
+    error_identifier: Some("RunMat:compatibility:SvdIntegerInputExtension"),
+};
+pub const SVD_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer zero economy selector in svd",
+    error_identifier: Some("RunMat:compatibility:SvdIntegerOptionExtension"),
+};
+pub const SVD_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow logical matrices in svd",
+    error_identifier: Some("RunMat:compatibility:SvdLogicalInputExtension"),
+};
+pub const SVD_LOGICAL_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "svd-logical-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a logical economy selector in svd",
+    error_identifier: Some("RunMat:compatibility:SvdLogicalOptionExtension"),
+};
+pub const SVD_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    SVD_INTEGER_INPUT_EXTENSION,
+    SVD_INTEGER_OPTION_EXTENSION,
+    SVD_LOGICAL_INPUT_EXTENSION,
+    SVD_LOGICAL_OPTION_EXTENSION,
+];
+const SVD_INTEGER_MATRIX: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public dense matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check.",
+    }];
+const SVD_INTEGER_OPTION: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "economy selector",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "RunMat mode accepts a typed integer scalar only when its exact value is zero.",
+}];
+pub const SVD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[U, S, V] = svd(integer_A, options...)",
+        inputs: &SVD_INTEGER_MATRIX,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated matrix crosses one checked binary64 SVD boundary. Values not exactly representable as double reject before factorization or provider dispatch; outputs are double and follow the requested full/economy/vector form.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = svd(A, integer_zero)",
+        inputs: &SVD_INTEGER_OPTION,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact gated zero selects economy size without floating conversion; nonzero or nonscalar integer options reject.",
+    },
+];
 
 const SVD_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -283,6 +355,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(svd_type),
     descriptor(crate::builtins::math::linalg::factor::svd::SVD_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::factor::svd::SVD_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::factor::svd::SVD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::factor::svd"
 )]
 async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -358,8 +432,42 @@ enum SigmaFormat {
 }
 
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SVD_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_logical_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SVD_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    for option in args {
+        if crate::builtins::common::validation::value_has_native_integer_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SVD_INTEGER_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if crate::builtins::common::validation::value_has_logical_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SVD_LOGICAL_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
     let options = parse_options(args)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(svd_invalid_input(
+            "svd: integer input must be exactly representable as double",
+        ));
+    }
     evaluate_value(value, options).await
 }
 
@@ -1132,6 +1240,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn svd_logical_input_matches_numeric() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).expect("logical");
         let logical_eval =
             evaluate(Value::LogicalArray(logical.clone()), &[]).expect("logical svd");
@@ -1148,6 +1257,59 @@ pub(crate) mod tests {
         {
             assert!((a - b).abs() < 1e-12, "{a} vs {b}");
         }
+    }
+
+    #[test]
+    fn svd_typed_integer_input_is_gated_and_exactly_checked() {
+        let matrix = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 2]), vec![2, 2])
+                    .expect("integer matrix"),
+            )
+        };
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = evaluate(matrix(), &[]).expect_err("strict mode rejects integer input");
+        assert_eq!(
+            error.identifier(),
+            SVD_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let eval = evaluate(matrix(), &[]).expect("exact integer input");
+        assert_eq!(
+            tensor_from_value(eval.singular_values()).materialize_f64(),
+            vec![2.0, 1.0]
+        );
+        let inexact = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("wide integer matrix"),
+        );
+        let error = evaluate(inexact, &[]).expect_err("inexact binary64 boundary rejects");
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn svd_typed_integer_zero_option_is_explicitly_gated() {
+        let matrix = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).expect("matrix");
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = evaluate(
+            Value::Tensor(matrix.clone()),
+            &[Value::Int(runmat_builtins::IntValue::U8(0))],
+        )
+        .expect_err("strict mode rejects typed integer option");
+        assert_eq!(
+            error.identifier(),
+            SVD_INTEGER_OPTION_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        evaluate(
+            Value::Tensor(matrix),
+            &[Value::Int(runmat_builtins::IntValue::U8(0))],
+        )
+        .expect("extension mode accepts exact integer zero");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

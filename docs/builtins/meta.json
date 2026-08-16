@@ -152530,6 +152530,51 @@
           "when": "Internal tensor conversion/output construction fails.",
           "message": "sub2ind: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ind = sub2ind(integer_sz, integer_I1, integer_In...)",
+          "inputs": [
+            {
+              "name": "sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The size vector accepts every native integer class and is parsed directly as positive platform dimensions."
+            },
+            {
+              "name": "I1...In",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every subscript role accepts all eight integer classes, including scalar expansion and full-width exact bounds checks."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Dimensions and subscripts are read from authoritative integer storage, combined with checked column-major index arithmetic, and returned as documented double indices. Resident integer inputs use exact gather fallback and return resident double output when the owner supports upload."
+        }
       ]
     },
     {
@@ -152591,6 +152636,43 @@
           "identifier": "RunMat:subplot:Internal",
           "when": "Internal subplot state operation fails.",
           "message": "subplot: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "subplot-integer-grid-control",
+          "mode": "RunMatOnly",
+          "description": "Allow typed-integer subplot grid controls",
+          "error_identifier": "RunMat:compatibility:SubplotIntegerGridControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ax = subplot(integer_rows, integer_cols, integer_position)",
+          "inputs": [
+            {
+              "name": "rows, cols, or position",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public R2026a data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The gated scalars are converted directly to platform dimensions before any figure state changes; the graphics handle remains a host double scalar."
         }
       ]
     },
@@ -152655,6 +152737,51 @@
           "when": "Target class does not implement subsasgn.",
           "message": "subsasgn: class does not define subsasgn for indexed assignment"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "obj = subsasgn(obj, kind, integer_payload, integer_rhs)",
+          "inputs": [
+            {
+              "name": "payload subscripts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer selectors may be carried in the indexing payload passed to an overloaded object method."
+            },
+            {
+              "name": "rhs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Assigned integer values are forwarded to the object's subsasgn implementation with their exact class, shape, and residency."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat forwards selectors and the authoritative integer right-hand side without conversion. The class method owns assignment conversion, overflow, and returned-receiver semantics."
+        }
       ]
     },
     {
@@ -152710,6 +152837,35 @@
           "identifier": "RunMat:MissingSubsref",
           "when": "Target class does not implement subsref.",
           "message": "subsref: class does not define subsref for indexing operation"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = subsref(obj, kind, integer_payload)",
+          "inputs": [
+            {
+              "name": "payload subscripts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer selectors may be carried in the indexing payload passed to an overloaded object method."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat forwards authoritative selector values to the object's subsref implementation without numeric conversion. The method determines output class and overflow behavior; integer primitive receivers are not object dispatch targets."
         }
       ]
     },
@@ -152843,6 +152999,70 @@
           "identifier": "RunMat:subtitle:Internal",
           "when": "Internal plotting state update fails.",
           "message": "subtitle: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "subtitle-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow typed-integer aliases for encoded axes handles",
+          "error_identifier": "RunMat:compatibility:SubtitleIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = subtitle(..., 'FontSize', integer_size)",
+          "inputs": [
+            {
+              "name": "FontSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents every native integer class for the FontSize property."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented property crosses the graphics font-size boundary after exact scalar classification; the returned text handle is a host double scalar."
+        },
+        {
+          "form": "h = subtitle(integer_ax, txt, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat graphics handles are internally encoded numeric scalars; typed-integer aliases are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "RunMat mode parses the gated scalar exactly before resolving the encoded axes handle; strict mode rejects before graphics state access."
         }
       ]
     },
@@ -153556,6 +153776,89 @@
           "when": "Internal surface construction or render preparation fails unexpectedly.",
           "message": "surf: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = surf(integer_X, Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative in scene XData/YData/ZData; rendering and contour/color preparation are explicit floating boundaries."
+        },
+        {
+          "form": "h = surf(X, integer_Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative in scene XData/YData/ZData; rendering and contour/color preparation are explicit floating boundaries."
+        },
+        {
+          "form": "h = surf(X, Y, integer_Z, ...)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative in scene XData/YData/ZData; rendering and contour/color preparation are explicit floating boundaries."
+        }
       ]
     },
     {
@@ -153702,6 +154005,89 @@
           "identifier": "RunMat:surfc:Internal",
           "when": "Internal surface/contour construction or render preparation fails unexpectedly.",
           "message": "surfc: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = surfc(integer_X, Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative in scene XData/YData/ZData; surface rendering and projected-contour construction are explicit floating boundaries."
+        },
+        {
+          "form": "h = surfc(X, integer_Y, Z, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative in scene XData/YData/ZData; surface rendering and projected-contour construction are explicit floating boundaries."
+        },
+        {
+          "form": "h = surfc(X, Y, integer_Z, ...)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native class, exact values, and shape remain authoritative in scene XData/YData/ZData; surface rendering and projected-contour construction are explicit floating boundaries."
         }
       ]
     },
@@ -154045,6 +154431,88 @@
           "when": "Runtime cannot materialize SVD outputs.",
           "message": "svd: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "svd-integer-input",
+          "mode": "RunMatOnly",
+          "description": "Allow exactly representable typed-integer matrices in svd",
+          "error_identifier": "RunMat:compatibility:SvdIntegerInputExtension"
+        },
+        {
+          "id": "svd-integer-option",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer zero economy selector in svd",
+          "error_identifier": "RunMat:compatibility:SvdIntegerOptionExtension"
+        },
+        {
+          "id": "svd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "Allow logical matrices in svd",
+          "error_identifier": "RunMat:compatibility:SvdLogicalInputExtension"
+        },
+        {
+          "id": "svd-logical-option",
+          "mode": "RunMatOnly",
+          "description": "Allow a logical economy selector in svd",
+          "error_identifier": "RunMat:compatibility:SvdLogicalOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[U, S, V] = svd(integer_A, options...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public dense matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The gated matrix crosses one checked binary64 SVD boundary. Values not exactly representable as double reject before factorization or provider dispatch; outputs are double and follow the requested full/economy/vector form."
+        },
+        {
+          "form": "S = svd(A, integer_zero)",
+          "inputs": [
+            {
+              "name": "economy selector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts a typed integer scalar only when its exact value is zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "The exact gated zero selects economy size without floating conversion; nonzero or nonscalar integer options reject."
+        }
       ]
     },
     {
@@ -154080,24 +154548,43 @@
           "identifier": "RunMat:bitwise:InvalidInput",
           "when": "Inputs are not finite integer-valued numeric, logical, or gatherable gpuArray values.",
           "message": "bitwise operation: invalid input"
-        },
+        }
+      ],
+      "extensions": [
         {
-          "code": "RM.BITWISE.SIZE_MISMATCH",
-          "identifier": "RunMat:bitwise:SizeMismatch",
-          "when": "Input shapes are not compatible for implicit expansion.",
-          "message": "bitwise operation: array sizes are not compatible"
-        },
+          "id": "swapbytes-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "Allow host fallback for explicit gpuArray input to swapbytes",
+          "error_identifier": "RunMat:compatibility:SwapbytesExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
-          "identifier": "RunMat:idivide:DivideByZero",
-          "when": "The divisor contains zero.",
-          "message": "idivide: division by zero"
-        },
-        {
-          "code": "RM.IDIVIDE.OVERFLOW",
-          "identifier": "RunMat:idivide:Overflow",
-          "when": "A rounded quotient cannot be represented in the dividend integer class.",
-          "message": "idivide: quotient overflows output class"
+          "form": "Y = swapbytes(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class is documented; byte reversal preserves class and shape exactly."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Each element's native byte sequence is reversed directly in authoritative storage; 8-bit classes are unchanged. Automatic residency gathers transparently, while explicit gpuArray fallback is independently gated."
         }
       ]
     },

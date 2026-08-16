@@ -81,6 +81,26 @@ pub const SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SUBSREF_ERRORS,
 };
 
+const SUBSREF_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "payload subscripts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer selectors may be carried in the indexing payload passed to an overloaded object method.",
+    }];
+pub const SUBSREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "out = subsref(obj, kind, integer_payload)",
+        inputs: &SUBSREF_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat forwards authoritative selector values to the object's subsref implementation without numeric conversion. The method determines output class and overflow behavior; integer primitive receivers are not object dispatch targets.",
+    }];
+
 const SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
     ty: BuiltinParamType::Any,
@@ -151,6 +171,34 @@ pub const SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &SUBSASGN_ERRORS,
 };
+
+const SUBSASGN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "payload subscripts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer selectors may be carried in the indexing payload passed to an overloaded object method.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "rhs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Assigned integer values are forwarded to the object's subsasgn implementation with their exact class, shape, and residency.",
+    },
+];
+pub const SUBSASGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "obj = subsasgn(obj, kind, integer_payload, integer_rhs)",
+        inputs: &SUBSASGN_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat forwards selectors and the authoritative integer right-hand side without conversion. The class method owns assignment conversion, overflow, and returned-receiver semantics.",
+    }];
 
 const NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
@@ -787,6 +835,9 @@ pub(crate) async fn dispatch_subsasgn(
     summary = "Dispatch overloaded object indexing reads.",
     keywords = "subsref,indexing,classdef,object",
     descriptor(crate::builtins::introspection::object_indexing::SUBSREF_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::SUBSREF_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
 pub async fn subsref_builtin(
@@ -803,6 +854,9 @@ pub async fn subsref_builtin(
     summary = "Dispatch overloaded object indexing writes.",
     keywords = "subsasgn,indexing,classdef,object",
     descriptor(crate::builtins::introspection::object_indexing::SUBSASGN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::SUBSASGN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
 pub async fn subsasgn_builtin(

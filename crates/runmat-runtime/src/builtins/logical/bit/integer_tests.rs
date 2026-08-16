@@ -1845,3 +1845,22 @@ fn swapbytes_reinterprets_floating_point_bytes() {
         Value::Num(f64::from_bits(value.to_bits().swap_bytes()))
     );
 }
+
+#[test]
+fn swapbytes_declares_exact_integer_contract_and_gates_explicit_gpu_fallback() {
+    assert_eq!(SWAPBYTES_INTEGER_CAPABILITIES.len(), 1);
+    assert_eq!(SWAPBYTES_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+    let handle = runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX - 454,
+    };
+    runmat_accelerate_api::mark_handle_explicit(&handle);
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(swapbytes_builtin(Value::GpuTensor(handle)))
+        .expect_err("strict mode rejects explicit GPU fallback before provider access");
+    assert_eq!(
+        error.identifier(),
+        SWAPBYTES_EXPLICIT_GPU_EXTENSION.error_identifier
+    );
+}

@@ -29,6 +29,35 @@ const BITSHIFT_NAME: &str = "bitshift";
 const IDIVIDE_NAME: &str = "idivide";
 const SWAPBYTES_NAME: &str = "swapbytes";
 
+pub const SWAPBYTES_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "swapbytes-explicit-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Allow host fallback for explicit gpuArray input to swapbytes",
+        error_identifier: Some("RunMat:compatibility:SwapbytesExplicitGpuInputExtension"),
+    };
+pub const SWAPBYTES_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [SWAPBYTES_EXPLICIT_GPU_EXTENSION];
+const SWAPBYTES_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every native integer class is documented; byte reversal preserves class and shape exactly.",
+    }];
+pub const SWAPBYTES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = swapbytes(integer_X)",
+        inputs: &SWAPBYTES_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Each element's native byte sequence is reversed directly in authoritative storage; 8-bit classes are unchanged. Automatic residency gathers transparently, while explicit gpuArray fallback is independently gated.",
+    }];
+
 const BITAND_SINGLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "bitand-single-input",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -1530,9 +1559,17 @@ async fn idivide_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "swapbytes,byte order,endian,numeric",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::SWAPBYTES_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::integer::SWAPBYTES_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::integer::SWAPBYTES_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn swapbytes_builtin(value: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SWAPBYTES_EXPLICIT_GPU_EXTENSION,
+            SWAPBYTES_NAME,
+        )?;
+    }
     let gathered = gpu_helpers::gather_value_async(&value)
         .await
         .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err.message()))?;
