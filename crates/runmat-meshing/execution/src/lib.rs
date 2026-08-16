@@ -8,6 +8,7 @@ mod error;
 mod host;
 mod objects;
 mod publication;
+mod response;
 mod serial;
 mod task;
 
@@ -39,6 +40,7 @@ pub use publication::{
     import_result_publication, prepare_result_publication, MeshingArtifactAccess,
     PreparedMeshingResultPublication,
 };
+pub use response::{MeshingHostResponseV2, MESHING_HOST_RESPONSE_SCHEMA_VERSION};
 pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,

@@ -4,7 +4,8 @@ use std::task::{Context, Poll, Waker};
 
 use crate::{
     build_task_submission, prepare_result_publication, prepare_stage_objects,
-    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostWorkloadV2, MeshingTaskEffectPolicy,
+    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponseV2, MeshingHostWorkloadV2,
+    MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
@@ -152,6 +153,11 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
         .workload_result()
         .validate_against(&fixture.host.workload)
         .unwrap();
+    let response = MeshingHostResponseV2::completed(&fixture.host, &completed).unwrap();
+    let encoded = response.canonical_encode().unwrap();
+    let decoded = MeshingHostResponseV2::canonical_decode(&encoded).unwrap();
+    decoded.validate_against(&fixture.host).unwrap();
+    assert_eq!(decoded.attempt_success(), Some(completed.attempt_success()));
     assert_eq!(
         completed
             .publication()
@@ -301,6 +307,10 @@ fn serial_stage_reports_typed_cancellation_and_search_budget_failures() {
         .unwrap()
         .validate_against(&cancelled.host.workload)
         .unwrap();
+    let response = MeshingHostResponseV2::failed(&cancelled.host, &error)
+        .unwrap()
+        .unwrap();
+    response.validate_against(&cancelled.host).unwrap();
     assert_eq!(
         stage_failure(&error).category,
         MeshingFailureCategory::Cancelled
@@ -321,6 +331,48 @@ fn serial_stage_reports_typed_cancellation_and_search_budget_failures() {
         stage_failure(&error).category,
         MeshingFailureCategory::SearchWorkBudgetExceeded
     );
+}
+
+#[test]
+fn host_response_rejects_missing_roots_and_wrong_authority() {
+    let mut fixture = Fixture::new();
+    let completed = execute_serial_stage(
+        &fixture.program,
+        &mut fixture.store,
+        &SurfaceKernel,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1024),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let response = MeshingHostResponseV2::completed(&fixture.host, &completed).unwrap();
+    let MeshingHostResponseV2::Validated {
+        schema_version,
+        stage_manifest_digest,
+        mut root,
+        mut result_objects,
+    } = response
+    else {
+        panic!("successful stage returned a failure response")
+    };
+    result_objects.retain(|object| object != &root);
+    let missing = MeshingHostResponseV2::Validated {
+        schema_version,
+        stage_manifest_digest,
+        root: root.clone(),
+        result_objects,
+    };
+    assert!(missing.validate_against(&fixture.host).is_err());
+
+    root.authorization_scope = "another-run".into();
+    let wrong_authority = MeshingHostResponseV2::Validated {
+        schema_version,
+        stage_manifest_digest,
+        root,
+        result_objects: completed.publication().result_objects().to_vec(),
+    };
+    assert!(wrong_authority.validate_against(&fixture.host).is_err());
 }
 
 #[test]
