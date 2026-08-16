@@ -23,7 +23,26 @@ pub enum MeshingStageV2 {
     Publication,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+impl MeshingStageV2 {
+    pub const ALL: [Self; 14] = [
+        Self::GeometryAdmission,
+        Self::Healing,
+        Self::Sizing,
+        Self::CurveMesh,
+        Self::SurfaceMesh,
+        Self::ProtectedBoundaryComplex,
+        Self::Tetrahedralization,
+        Self::ConstraintRecovery,
+        Self::Refinement,
+        Self::Optimization,
+        Self::OrderElevation,
+        Self::Validation,
+        Self::Serialization,
+        Self::Publication,
+    ];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeshingOperationV2 {
     AdmitGeometry,
