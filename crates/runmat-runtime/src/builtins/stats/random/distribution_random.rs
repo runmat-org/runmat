@@ -728,7 +728,7 @@ pub mod binornd {
             classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
             availability: BuiltinIntegerInputAvailability::RunMatOnly,
             scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-            notes: "Typed-integer size arguments are gated by binornd-integer-size and parsed exactly into structural dimensions without a floating compatibility mirror.",
+            notes: "Typed-integer size arguments are gated by binornd-integer-size and parsed exactly into structural dimensions.",
         }];
 
     pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [

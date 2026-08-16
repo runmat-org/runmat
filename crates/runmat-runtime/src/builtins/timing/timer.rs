@@ -289,7 +289,7 @@ pub const TIMER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::FunctionSpecific,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The timer object stores the original value; no floating compatibility mirror is created.",
+        notes: "The timer object preserves the original integer class and value.",
     },
 ];
 

@@ -124,7 +124,7 @@ pub const TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host and automatically resident variables become host table variables without an f64 mirror; unsupported explicit GPU intent is independently gated before gather.",
+        notes: "Host and automatically resident variables become host table variables with exact classes and values preserved; unsupported explicit GPU intent is independently gated before gather.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "T = table(Size=integer_sz, VariableTypes=integer_type_names, Name=Value...)",
@@ -412,7 +412,7 @@ pub const ORDINAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Strictly increasing edges are compared without a binary64 mirror; bins are left-closed and right-open except that the last bin includes the final edge, and duplicate textual labels merge bins.",
+        notes: "Strictly increasing integer edges are compared exactly; bins are left-closed and right-open except that the last bin includes the final edge, and duplicate textual labels merge bins.",
     },
 ];
 
@@ -457,7 +457,7 @@ pub const DICTIONARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Construction, duplicate resolution, lookup, assignment, and removal compare authoritative configured-class integer values without a binary64 mirror; the result is a host dictionary object.",
+        notes: "Construction, duplicate resolution, lookup, assignment, and removal compare configured-class integer values exactly; the result is a host dictionary object.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "d = dictionary(gpuArray(integer_keys_or_values), ...)",

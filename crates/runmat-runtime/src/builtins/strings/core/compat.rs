@@ -339,7 +339,7 @@ pub const ISSTRPROP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "All eight integer classes produce a same-shaped logical classification without an integer-to-floating mirror. Interactive resident numeric input is separately mode-gated before exact gather.",
+        notes: "All eight integer classes produce a same-shaped logical classification from their exact values. Interactive resident numeric input is separately mode-gated before exact gather.",
     }];
 descriptor!(
     ISLETTER_DESCRIPTOR,

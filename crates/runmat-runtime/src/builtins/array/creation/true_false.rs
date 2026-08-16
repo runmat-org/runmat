@@ -84,7 +84,7 @@ pub const FALSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The documented row size vector is read from authoritative integer storage without a floating mirror.",
+        notes: "The documented row size vector is decoded exactly from every supported integer class.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "F = false(..., like=integer_p)",

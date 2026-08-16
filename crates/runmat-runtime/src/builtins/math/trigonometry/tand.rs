@@ -66,7 +66,7 @@ pub const TAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Exact integer modular reduction makes wide int64 and uint64 inputs unambiguous, preserves canonical zero/unit/pole results, and avoids a lossy binary64 angle mirror; resident input gathers through authoritative typed storage.",
+        notes: "Exact integer modular reduction makes wide int64 and uint64 inputs unambiguous and preserves canonical zero, unit, and pole results; resident input gathers exactly through its owning provider.",
     }];
 
 const TAND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

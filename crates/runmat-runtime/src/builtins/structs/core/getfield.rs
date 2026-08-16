@@ -311,7 +311,7 @@ pub const GETFIELD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection gathers native numeric storage rather than a floating mirror.",
+        notes: "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection preserves the source numeric class and exact values.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "value = getfield(S, {integer_idx}, field, ..., {integer_idxN})",

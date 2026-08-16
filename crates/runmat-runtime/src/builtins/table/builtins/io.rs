@@ -139,7 +139,7 @@ pub const READTABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Each imported integer table variable owns authoritative native storage; table containment does not introduce a floating mirror.",
+        notes: "Each imported integer table variable retains its documented class and exact values inside the table.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "T = readtable(filename, 'VariableNamesLine', integer_line)",

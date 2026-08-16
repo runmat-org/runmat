@@ -169,7 +169,7 @@ const PERMUTE_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public row-vector contract requires unique positive integer elements. RunMat decodes all native integer classes directly without a floating compatibility mirror.",
+        notes: "The public row-vector contract requires unique positive integer elements. RunMat decodes every supported integer class exactly.",
     }];
 pub const PERMUTE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

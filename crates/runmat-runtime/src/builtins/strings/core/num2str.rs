@@ -60,7 +60,7 @@ pub const NUM2STR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Default and custom formatting preserve exact signed and unsigned decimal values without a binary64 mirror. Automatic residency gathers through its owner; explicit gpuArray fallback is separately gated.",
+        notes: "Default and custom formatting preserve exact signed and unsigned decimal values, including values above flintmax. Automatic residency gathers through its owner; explicit gpuArray fallback is separately gated.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "txt = num2str(A, integer_p[, \"local\"])",

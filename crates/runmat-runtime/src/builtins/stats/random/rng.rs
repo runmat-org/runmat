@@ -102,7 +102,7 @@ pub const RNG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The independently gated extension validates native Seed and State words directly from authoritative storage without an f64 mirror.",
+        notes: "The independently gated extension validates Seed and State words exactly in their native integer classes.",
     },
 ];
 

@@ -198,7 +198,7 @@ pub const READ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "An explicit integer datatype returns that exact native integer class in a host row vector; byte-order decoding never materializes a floating compatibility mirror.",
+        notes: "An explicit integer datatype returns that exact integer class in a host row vector, with byte order decoded directly into the requested class.",
     },
 ];
 

@@ -189,7 +189,7 @@ pub const STACKEDPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Selectors are validated as positive in-range one-based indices without using their floating mirror; selected integer variables retain exact source storage.",
+        notes: "Selectors are validated exactly as positive in-range one-based indices; selected integer variables retain their source classes and values.",
     },
 ];
 

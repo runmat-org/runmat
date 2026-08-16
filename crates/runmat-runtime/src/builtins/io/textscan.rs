@@ -156,7 +156,7 @@ pub const TEXTSCAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer fields are parsed directly into authoritative native storage. CollectOutput combines only adjacent numeric columns of the same class, so no mixed-class floating mirror is introduced.",
+        notes: "Integer fields retain their documented classes and exact values. CollectOutput combines only adjacent numeric columns of the same class.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "C = textscan(typed_integer_file_id, formatSpec, typed_integer_controls...)",

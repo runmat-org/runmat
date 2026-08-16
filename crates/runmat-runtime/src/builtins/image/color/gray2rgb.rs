@@ -93,7 +93,7 @@ const GRAY2RGB_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are replicated directly from authoritative storage without entering a floating compatibility mirror.",
+        notes: "All eight integer classes are replicated with their exact source class and values preserved.",
     }];
 
 pub const GRAY2RGB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

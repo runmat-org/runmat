@@ -544,7 +544,7 @@ pub const TRAIN_WORD_EMBEDDING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDe
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Counts, sizes, ranges, and boolean controls decode from native storage without a compatibility mirror. Floating training-rate options require exact binary64 representation. Automatic residency gathers transparently; explicit gpuArray option intent is unsupported.",
+        notes: "Counts, sizes, ranges, and boolean controls decode exactly in every supported integer class. Floating training-rate options require exact binary64 representation. Automatic residency gathers transparently; explicit gpuArray option intent is unsupported.",
     }];
 
 #[runtime_builtin(

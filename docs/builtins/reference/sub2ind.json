@@ -142,6 +142,6 @@
   },
   "gpu_residency": "```matlab:runnable\nrows = gpuArray((1:100)');\ncols = gpuArray(ones(100, 1) * 4);\nidx = sub2ind([100 4], rows, cols);\n```\n\nExpected behavior:\n\n```matlab\n% idx remains a gpuArray containing the column-major indices.\ndisp(gather(idx(1:5)));\n% Output:\n%    301\n%    302\n%    303\n%    304\n%    305\n```",
   "gpu_behavior": [
-    "When a WGPU-backed provider is active, supported floating-point subscript forms execute through the provider hook with bounds and integrality checks. Native integer resident inputs deliberately use the exact host path so `int64` and `uint64` values are never rounded through a floating mirror; after computation, the documented double indices are uploaded back to the input owner when possible."
+    "When a WGPU-backed provider is active, supported floating-point subscript forms execute through the provider hook with bounds and integrality checks. Native integer resident inputs deliberately use the exact host path so `int64` and `uint64` subscripts retain their full precision; after computation, the documented double indices are uploaded back to the input owner when possible."
   ]
 }

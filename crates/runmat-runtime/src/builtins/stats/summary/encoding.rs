@@ -158,7 +158,7 @@ pub const ONEHOTENCODE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Every signed and unsigned integer typename constructs native same-class zero/one storage without a floating compatibility mirror.",
+        notes: "Every signed and unsigned integer typename constructs same-class zero and one values.",
     },
 ];
 

@@ -90,7 +90,7 @@ const EIGS_INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinInteger
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Positive structural count parsed exactly without a binary64 mirror.",
+    notes: "Positive structural count parsed exactly in every supported integer class.",
 }];
 const EIGS_INTEGER_SIGMA_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

@@ -126,7 +126,7 @@
     },
     {
       "question": "Can I request single-precision output?",
-      "answer": "Yes. Pass `'OutputType','single'`. RunMat stores the result physically as native `single`; it does not keep a double compatibility mirror."
+      "answer": "Yes. Pass `'OutputType','single'`. RunMat returns a native single-precision array."
     },
     {
       "question": "How are delimiters detected automatically?",

@@ -233,7 +233,7 @@ pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching native integer storage; no floating mirror or numeric cast is used.",
+        notes: "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching integer classes without a numeric cast.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "m = memmapfile(..., 'Format', {type, integer_shape, field})",

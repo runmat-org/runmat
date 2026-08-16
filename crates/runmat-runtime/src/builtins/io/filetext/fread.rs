@@ -131,7 +131,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The registry identifier is validated without a floating mirror.",
+        notes: "The registry identifier is validated exactly as an integer.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "A = fread(fileID, integer_sizeA, ...)",

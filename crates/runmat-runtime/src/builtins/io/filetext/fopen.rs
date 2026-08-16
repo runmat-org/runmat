@@ -104,7 +104,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "A successful query returns host character metadata; integer identifiers never cross a floating mirror.",
+        notes: "A successful query returns host character metadata; integer identifiers are validated exactly.",
     }];
 
 const FOPEN_OUTPUT_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

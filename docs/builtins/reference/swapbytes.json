@@ -27,7 +27,7 @@
     "Supports dense `double`, `single`, and all eight native integer classes, including full-width `int64` and `uint64` values.",
     "`uint8` values are unchanged because they contain one byte.",
     "Floating-point values are reinterpreted by their IEEE bytes, byte-swapped, and returned in the same class.",
-    "Integer outputs preserve input class, shape, and exact byte-reversed values without passing through a floating mirror.",
+    "Integer outputs preserve input class, shape, and exact byte-reversed values for all eight integer classes.",
     "Logical, complex, string, cell, struct, and object inputs raise errors.",
     "Automatically resident inputs gather transparently. Explicit gpuArray input uses the same host fallback only when RunMat extensions are enabled."
   ],

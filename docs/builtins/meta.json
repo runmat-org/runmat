@@ -244,7 +244,7 @@
           "overflow": "FunctionSpecific",
           "backend": "HostOnly",
           "overload": "ScalarOnly",
-          "notes": "A scalar is cast once to the declared dtype and repeated without floating mirroring; nonscalar fills reject."
+          "notes": "A scalar is cast once to the declared dtype and that exact typed value is repeated; nonscalar fills reject."
         }
       ]
     },
@@ -1117,7 +1117,7 @@
           "overflow": "FunctionSpecific",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "The transaction retains the native scalar and exact optional slice until commit; commit casts once to the declared dtype and repeats the result without floating mirroring."
+          "notes": "The transaction retains the exact scalar and optional slice until commit; commit casts once to the declared dtype and repeats that typed value."
         }
       ]
     },
@@ -10585,7 +10585,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Typed-integer evaluation points are gated by binocdf-integer-x and enter the floating binomial-CDF boundary without an integer compatibility mirror."
+              "notes": "Typed-integer evaluation points are gated by binocdf-integer-x and must be exactly representable at the floating binomial-CDF boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -10867,7 +10867,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Typed-integer size arguments are gated by binornd-integer-size and parsed exactly into structural dimensions without a floating compatibility mirror."
+              "notes": "Typed-integer size arguments are gated by binornd-integer-size and parsed exactly into structural dimensions."
             }
           ],
           "computation_domain": "Structural",
@@ -12353,7 +12353,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "RunMat can structurally assemble same-class sparse integer blocks without a floating mirror; the public sparse numeric storage domain is single, double, or logical."
+              "notes": "RunMat can structurally assemble same-class sparse integer blocks while preserving their exact values; the public sparse numeric storage domain is single, double, or logical."
             }
           ],
           "computation_domain": "Structural",
@@ -13222,7 +13222,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "RunMat-only grouping form; integer group identity, order, and labels remain exact without a binary64 mirror."
+          "notes": "RunMat-only grouping form; integer group identity, order, and labels remain exact for every supported class."
         },
         {
           "form": "boxplot(___,Name,Value) with integer numeric option values",
@@ -15471,7 +15471,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Typed-integer evaluation points are gated before provider access and enter the floating CDF boundary without an integer compatibility mirror."
+              "notes": "Typed-integer evaluation points are gated before provider access and must be exactly representable at the floating CDF boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -19351,7 +19351,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Host inputs are repeated from authoritative native storage without an f64 mirror. A resident input is a gated RunMat extension because the required table result is host-resident."
+          "notes": "Host inputs retain their exact class and values when repeated. A resident input is a gated RunMat extension because the required table result is host-resident."
         }
       ]
     },
@@ -19820,7 +19820,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "This RunMat extension checks exact binary64 representability before host execution; the result is double on host, while a resident scalar uses the owning provider's selected precision, and no integer compatibility mirror is materialized."
+          "notes": "This RunMat extension requires exact binary64 representability before host execution; the result is double on host, while a resident scalar uses the owning provider's selected precision."
         },
         {
           "form": "c = cond(A, integer_p)",
@@ -20371,7 +20371,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "Every integer class is a documented ValueType and is stored without a floating mirror."
+              "notes": "Every integer class is a documented ValueType and retains its exact class and payload."
             }
           ],
           "computation_domain": "Structural",
@@ -26667,7 +26667,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "The documented four-element numeric range accepts all eight integer classes without materializing a lossy double mirror."
+              "notes": "The documented four-element numeric range accepts all eight integer classes and decodes every offset exactly."
             }
           ],
           "computation_domain": "Structural",
@@ -26855,7 +26855,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Integer matrix elements serialize exactly without crossing an f64 mirror. Resident input is independently gated and gathered through the handle owner."
+          "notes": "Integer matrix elements serialize with their exact values. Resident input is independently gated and gathered through the handle owner."
         }
       ]
     },
@@ -37093,7 +37093,7 @@
           "overflow": "FunctionSpecific",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "Construction, duplicate resolution, lookup, assignment, and removal compare authoritative configured-class integer values without a binary64 mirror; the result is a host dictionary object."
+          "notes": "Construction, duplicate resolution, lookup, assignment, and removal compare configured-class integer values exactly; the result is a host dictionary object."
         },
         {
           "form": "d = dictionary(gpuArray(integer_keys_or_values), ...)",
@@ -37933,7 +37933,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "All eight integer edge classes are documented; increasing edges are validated without an f64 mirror."
+              "notes": "All eight integer edge classes are documented; increasing edges are validated exactly in their source class."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -38037,7 +38037,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "FunctionSpecific",
-          "notes": "disp is a no-output host rendering sink. Resident integer values gather through exact typed provider download before decimal formatting; no floating compatibility mirror or provider output is created."
+          "notes": "disp is a no-output host rendering sink. Resident integer values gather exactly through their provider before decimal formatting; no provider output is created."
         }
       ]
     },
@@ -39259,7 +39259,7 @@
           "overflow": "Error",
           "backend": "HostAndGpu",
           "overload": "StructuralParameter",
-          "notes": "All eight scalar integer classes select the reduction dimension without passing through an f64 mirror."
+          "notes": "All eight scalar integer classes select the reduction dimension through exact structural decoding."
         }
       ]
     },
@@ -41250,7 +41250,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "Positive structural count parsed exactly without a binary64 mirror."
+              "notes": "Positive structural count parsed exactly in every supported integer class."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -42056,7 +42056,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "The typed control is extension-gated before x or a provider is accessed and is parsed without an f64 mirror; RunMat preserves the floating signal precision consistently across host and resident execution."
+          "notes": "The typed control is extension-gated before x or a provider is accessed and is parsed exactly; RunMat preserves the floating signal precision consistently across host and resident execution."
         }
       ]
     },
@@ -45636,7 +45636,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "The documented row size vector is read from authoritative integer storage without a floating mirror."
+          "notes": "The documented row size vector is decoded exactly from every supported integer class."
         },
         {
           "form": "F = false(..., like=integer_p)",
@@ -49744,7 +49744,7 @@
           "overflow": "Error",
           "backend": "HostAndGpu",
           "overload": "StructuralParameter",
-          "notes": "Documented controls are exact and do not pass through the tensor f64 compatibility mirror."
+          "notes": "Documented controls are decoded exactly in every supported integer class."
         },
         {
           "form": "Y = fft(int64_or_uint64_X, ...)",
@@ -50377,7 +50377,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Real and typed-complex integer storage is reordered without an f64 compatibility mirror; resident fallback re-uploads to the owning provider."
+          "notes": "Real and typed-complex integer values are reordered exactly with class preserved; resident fallback re-uploads to the owning provider."
         },
         {
           "form": "Y = fftshift(X, integer_DIM)",
@@ -53606,7 +53606,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "FunctionSpecific",
-          "notes": "Linear indices are exact binary64 indices; resident integer inputs gather without an f64 value mirror."
+          "notes": "Linear indices are exact binary64 indices; resident integer values gather exactly through their owning provider."
         },
         {
           "form": "[row,col,v] = find(integer_X,___)",
@@ -54370,7 +54370,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "The order is decoded without an f64 mirror; resident order input gathers through its owner after compatibility admission, and coefficient output remains a host double row vector."
+          "notes": "The order is decoded exactly in every supported integer class; resident order input gathers through its owner after compatibility admission, and coefficient output remains a host double row vector."
         },
         {
           "form": "b = fir1(n,integer_Wn,...)",
@@ -55433,7 +55433,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "One-based integer selectors are decoded from exact storage without a floating mirror."
+          "notes": "One-based integer selectors are decoded exactly in every supported integer class."
         },
         {
           "form": "mdl = fitlm(...,Intercept=integer_scalar)",
@@ -57887,7 +57887,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "ScalarOnly",
-          "notes": "A successful query returns host character metadata; integer identifiers never cross a floating mirror."
+          "notes": "A successful query returns host character metadata; integer identifiers are validated exactly."
         }
       ]
     },
@@ -58656,7 +58656,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "ScalarOnly",
-          "notes": "The registry identifier is validated without a floating mirror."
+          "notes": "The registry identifier is validated exactly as an integer."
         },
         {
           "form": "A = fread(fileID, integer_sizeA, ...)",
@@ -59221,7 +59221,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "Point count is decoded exactly, must be at least two, and selects response shape without an f64 mirror."
+          "notes": "Point count is decoded exactly in every supported integer class, must be at least two, and selects the response shape."
         },
         {
           "form": "[h,f] = freqz(b,a,n,integer_fs)",
@@ -63972,7 +63972,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "Multiple",
-          "notes": "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection gathers native numeric storage rather than a floating mirror."
+          "notes": "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection preserves the source numeric class and exact values."
         },
         {
           "form": "value = getfield(S, {integer_idx}, field, ..., {integer_idxN})",
@@ -65069,7 +65069,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "All eight integer classes are replicated directly from authoritative storage without entering a floating compatibility mirror."
+              "notes": "All eight integer classes are replicated with their exact source class and values preserved."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -72894,7 +72894,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Real and typed-complex integer storage is reordered without an f64 mirror; resident fallback restores to the owner."
+          "notes": "Real and typed-complex integer values are reordered exactly with class preserved; resident fallback restores to the owner."
         },
         {
           "form": "Y = ifftshift(X, integer_DIM)",
@@ -83454,7 +83454,7 @@
           "overflow": "Saturate",
           "backend": "HostOnly",
           "overload": "ElementwiseShapePreserving",
-          "notes": "All eight integer classes produce a same-shaped logical classification without an integer-to-floating mirror. Interactive resident numeric input is separately mode-gated before exact gather."
+          "notes": "All eight integer classes produce a same-shaped logical classification from their exact values. Interactive resident numeric input is separately mode-gated before exact gather."
         }
       ]
     },
@@ -89701,7 +89701,7 @@
           "overflow": "Error",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "Level-5 MAT integer class tags reconstruct native signed or unsigned storage of the same width and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads; no binary64 compatibility mirror is created."
+          "notes": "Level-5 MAT integer class tags reconstruct signed or unsigned values of the same class, width, and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads."
         }
       ]
     },
@@ -95264,7 +95264,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching native integer storage; no floating mirror or numeric cast is used."
+          "notes": "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching integer classes without a numeric cast."
         },
         {
           "form": "m = memmapfile(..., 'Format', {type, integer_shape, field})",
@@ -110689,7 +110689,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Default and custom formatting preserve exact signed and unsigned decimal values without a binary64 mirror. Automatic residency gathers through its owner; explicit gpuArray fallback is separately gated."
+          "notes": "Default and custom formatting preserve exact signed and unsigned decimal values, including values above flintmax. Automatic residency gathers through its owner; explicit gpuArray fallback is separately gated."
         },
         {
           "form": "txt = num2str(A, integer_p[, \"local\"])",
@@ -112538,7 +112538,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "Every signed and unsigned integer typename constructs native same-class zero/one storage without a floating compatibility mirror."
+          "notes": "Every signed and unsigned integer typename constructs same-class zero and one values."
         }
       ]
     },
@@ -114249,7 +114249,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Strictly increasing edges are compared without a binary64 mirror; bins are left-closed and right-open except that the last bin includes the final edge, and duplicate textual labels merge bins."
+          "notes": "Strictly increasing integer edges are compared exactly; bins are left-closed and right-open except that the last bin includes the final edge, and duplicate textual labels merge bins."
         }
       ]
     },
@@ -117963,7 +117963,7 @@
                 "Uint64"
               ],
               "name": "dimorder",
-              "notes": "The public row-vector contract requires unique positive integer elements. RunMat decodes all native integer classes directly without a floating compatibility mirror.",
+              "notes": "The public row-vector contract requires unique positive integer elements. RunMat decodes every supported integer class exactly.",
               "scalar_double": "Allowed"
             }
           ],
@@ -129786,7 +129786,7 @@
           "overflow": "Error",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "An explicit integer datatype returns that exact native integer class in a host row vector; byte-order decoding never materializes a floating compatibility mirror."
+          "notes": "An explicit integer datatype returns that exact integer class in a host row vector, with byte order decoded directly into the requested class."
         }
       ]
     },
@@ -130322,7 +130322,7 @@
           "overflow": "Saturate",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "File I/O and parsing are host operations. Every integer OutputType produces private authoritative native storage with no eager floating compatibility mirror."
+          "notes": "File I/O and parsing are host operations. Every integer OutputType produces the requested integer class and preserves exactly representable parsed values."
         },
         {
           "form": "M = readmatrix(filename, typed_integer_controls...)",
@@ -130501,7 +130501,7 @@
           "overflow": "Saturate",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "Each imported integer table variable owns authoritative native storage; table containment does not introduce a floating mirror."
+          "notes": "Each imported integer table variable retains its documented class and exact values inside the table."
         },
         {
           "form": "T = readtable(filename, 'VariableNamesLine', integer_line)",
@@ -136625,7 +136625,7 @@
           "overflow": "Error",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
-          "notes": "The independently gated extension validates native Seed and State words directly from authoritative storage without an f64 mirror."
+          "notes": "The independently gated extension validates Seed and State words exactly in their native integer classes."
         }
       ]
     },
@@ -140795,7 +140795,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Index selectors never use a floating compatibility mirror; host mutation gathers automatically resident values when required."
+          "notes": "Index selectors are decoded exactly in every supported integer class; host mutation gathers automatically resident values when required."
         }
       ]
     },
@@ -145530,7 +145530,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] Typed group identifiers are a gated extension and are decoded without a binary64 mirror; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently."
+          "notes": "[integer-audit-open] Typed group identifiers are a gated extension and are decoded exactly; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently."
         }
       ]
     },
@@ -147290,7 +147290,7 @@
           "overflow": "Error",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
-          "notes": "Selectors are validated as positive in-range one-based indices without using their floating mirror; selected integer variables retain exact source storage."
+          "notes": "Selectors are validated exactly as positive in-range one-based indices; selected integer variables retain their source classes and values."
         }
       ]
     },
@@ -148126,7 +148126,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "The integer default is an opaque value carrier rather than a numeric computation. Automatic residency may gather transparently through the owning provider; host values retain exact storage without a floating mirror."
+          "notes": "The integer default is an opaque value carrier rather than a numeric computation. Automatic residency may gather transparently through the owning provider; host values retain their exact class and payload."
         }
       ]
     },
@@ -150802,7 +150802,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host and automatically resident integer arrays convert to a host string array without an f64 mirror. Explicit gpuArray input is independently mode-gated because R2026a does not document interactive GPU-array input for string."
+          "notes": "Host and automatically resident integer arrays convert exactly to host strings, including wide integer values. Explicit gpuArray input is independently mode-gated because R2026a does not document interactive GPU-array input for string."
         },
         {
           "form": "str = string(formatSpec, A...)",
@@ -155007,7 +155007,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Host and automatically resident variables become host table variables without an f64 mirror; unsupported explicit GPU intent is independently gated before gather."
+          "notes": "Host and automatically resident variables become host table variables with exact classes and values preserved; unsupported explicit GPU intent is independently gated before gather."
         },
         {
           "form": "T = table(Size=integer_sz, VariableTypes=integer_type_names, Name=Value...)",
@@ -155392,7 +155392,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "Timetable construction changes container metadata only; unrelated integer variables are cloned without a binary64 mirror."
+          "notes": "Timetable construction changes container metadata only; unrelated integer variables retain their exact classes and values."
         },
         {
           "form": "TT = table2timetable(T, RowTimes=integer_time_variable_index)",
@@ -155805,7 +155805,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Exact integer modular reduction makes wide int64 and uint64 inputs unambiguous, preserves canonical zero/unit/pole results, and avoids a lossy binary64 angle mirror; resident input gathers through authoritative typed storage."
+          "notes": "Exact integer modular reduction makes wide int64 and uint64 inputs unambiguous and preserves canonical zero, unit, and pole results; resident input gathers exactly through its owning provider."
         }
       ]
     },
@@ -157305,7 +157305,7 @@
           "overflow": "Saturate",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "Integer fields are parsed directly into authoritative native storage. CollectOutput combines only adjacent numeric columns of the same class, so no mixed-class floating mirror is introduced."
+          "notes": "Integer fields retain their documented classes and exact values. CollectOutput combines only adjacent numeric columns of the same class."
         },
         {
           "form": "C = textscan(typed_integer_file_id, formatSpec, typed_integer_controls...)",
@@ -158579,7 +158579,7 @@
           "overflow": "Error",
           "backend": "FunctionSpecific",
           "overload": "StructuralParameter",
-          "notes": "The timer object stores the original value; no floating compatibility mirror is created."
+          "notes": "The timer object preserves the original integer class and value."
         }
       ]
     },
@@ -159163,7 +159163,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "Each data variable remains independent of row-time metadata and is stored without an f64 compatibility mirror."
+          "notes": "Each data variable remains independent of row-time metadata and retains its exact class and values."
         },
         {
           "form": "TT = timetable(Size=integer_sz, VariableTypes=types, timingName=timingValue)",
@@ -159323,7 +159323,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
-          "notes": "Conversion never creates an f64 compatibility mirror for contained integer variables. By default, row times become the first table variable."
+          "notes": "Contained integer variables retain their exact classes and values during conversion. By default, row times become the first table variable."
         },
         {
           "form": "T = timetable2table(TT, ConvertRowTimes=typed_integer_flag)",
@@ -160508,7 +160508,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "Counts, sizes, ranges, and boolean controls decode from native storage without a compatibility mirror. Floating training-rate options require exact binary64 representation. Automatic residency gathers transparently; explicit gpuArray option intent is unsupported."
+          "notes": "Counts, sizes, ranges, and boolean controls decode exactly in every supported integer class. Floating training-rate options require exact binary64 representation. Automatic residency gathers transparently; explicit gpuArray option intent is unsupported."
         }
       ]
     },

@@ -349,7 +349,7 @@ pub const STATGET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The integer default is an opaque value carrier rather than a numeric computation. Automatic residency may gather transparently through the owning provider; host values retain exact storage without a floating mirror.",
+        notes: "The integer default is an opaque value carrier rather than a numeric computation. Automatic residency may gather transparently through the owning provider; host values retain their exact class and payload.",
     }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::options")]

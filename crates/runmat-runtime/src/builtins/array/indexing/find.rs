@@ -114,7 +114,7 @@ pub const FIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Linear indices are exact binary64 indices; resident integer inputs gather without an f64 value mirror.",
+        notes: "Linear indices are exact binary64 indices; resident integer values gather exactly through their owning provider.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "[row,col,v] = find(integer_X,___)",

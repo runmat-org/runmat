@@ -40,7 +40,7 @@
     "Empty reductions yield zeros of the appropriate shape; length mismatches raise `A and B must be the same size`.",
     "Public MATLAB data inputs are single or double. RunMat additionally accepts logical and all eight typed-integer classes only in RunMat extension mode.",
     "When both extension operands are typed integers, each product is formed from authoritative integer storage before crossing to the floating reduction/output domain, avoiding pre-product loss above flintmax.",
-    "Typed-integer `dim` is documented control input, is available in compatibility modes, and is parsed exactly without consulting an f64 mirror."
+    "Typed-integer `dim` is a documented control input, is available in compatibility modes, and is decoded exactly in every supported integer class."
   ],
   "examples": [
     {

@@ -33,7 +33,7 @@
     "Option names are case-insensitive for the builtins that consume them.",
     "`TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, `Algorithm`, and `SpecifyObjectiveGradient` are canonicalized when constructed with `optimset`.",
     "`GradObj` is accepted as a MATLAB-compatible alias for `SpecifyObjectiveGradient`.",
-    "Documented numeric option values use single or double. Native integer payloads are a gated RunMat extension and remain exact in the returned struct without a compatibility mirror.",
+    "Documented numeric option values use single or double. Native integer payloads are a gated RunMat extension and retain their exact classes and values in the returned struct.",
     "Automatically resident payloads gather into host metadata. Explicitly resident payloads are rejected in compatibility mode and preserved only when RunMat extensions are enabled.",
     "Unknown option names are preserved so future solvers can read them."
   ],

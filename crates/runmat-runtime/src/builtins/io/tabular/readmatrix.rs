@@ -293,7 +293,7 @@ pub const READMATRIX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "File I/O and parsing are host operations. Every integer OutputType produces private authoritative native storage with no eager floating compatibility mirror.",
+        notes: "File I/O and parsing are host operations. Every integer OutputType produces the requested integer class and preserves exactly representable parsed values.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "M = readmatrix(filename, typed_integer_controls...)",

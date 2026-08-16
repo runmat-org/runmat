@@ -1155,7 +1155,7 @@ pub const DATAARRAY_FILL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescript
         overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "A scalar is cast once to the declared dtype and repeated without floating mirroring; nonscalar fills reject.",
+        notes: "A scalar is cast once to the declared dtype and that exact typed value is repeated; nonscalar fills reject.",
     }];
 
 const DATATX_LIFECYCLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
@@ -1278,7 +1278,7 @@ pub const DATATX_FILL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
         overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The transaction retains the native scalar and exact optional slice until commit; commit casts once to the declared dtype and repeats the result without floating mirroring.",
+        notes: "The transaction retains the exact scalar and optional slice until commit; commit casts once to the declared dtype and repeats that typed value.",
     }];
 
 const DATATX_CREATE_ARRAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [

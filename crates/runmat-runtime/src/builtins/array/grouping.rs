@@ -235,7 +235,7 @@ const DISCRETIZE_INTEGER_X_EDGES_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer edge classes are documented; increasing edges are validated without an f64 mirror.",
+        notes: "All eight integer edge classes are documented; increasing edges are validated exactly in their source class.",
     },
 ];
 const DISCRETIZE_INTEGER_VALUES_INPUTS: [BuiltinIntegerInputCapability; 1] = [
@@ -544,7 +544,7 @@ pub const COMBINATIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host inputs are repeated from authoritative native storage without an f64 mirror. A resident input is a gated RunMat extension because the required table result is host-resident.",
+        notes: "Host inputs retain their exact class and values when repeated. A resident input is a gated RunMat extension because the required table result is host-resident.",
     },
 ];
 
@@ -1545,7 +1545,7 @@ pub const SPLITAPPLY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] Typed group identifiers are a gated extension and are decoded without a binary64 mirror; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently.",
+        notes: "[integer-audit-open] Typed group identifiers are a gated extension and are decoded exactly; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently.",
     },
 ];
 
@@ -4008,7 +4008,7 @@ mod tests {
     }
 
     #[test]
-    fn discretize_explicit_integer_edges_do_not_use_f64_mirror() {
+    fn discretize_explicit_integer_edges_validate_wide_values_exactly() {
         let base = 9_007_199_254_740_992_u64;
         let out = block_on(discretize_builtin(
             Value::Tensor(

@@ -1780,7 +1780,7 @@ pub mod binocdf {
             classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
             availability: BuiltinIntegerInputAvailability::RunMatOnly,
             scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-            notes: "Typed-integer evaluation points are gated by binocdf-integer-x and enter the floating binomial-CDF boundary without an integer compatibility mirror.",
+            notes: "Typed-integer evaluation points are gated by binocdf-integer-x and must be exactly representable at the floating binomial-CDF boundary.",
         }];
 
     const INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] =

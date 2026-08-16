@@ -157,7 +157,7 @@ const BLKDIAG_SPARSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat can structurally assemble same-class sparse integer blocks without a floating mirror; the public sparse numeric storage domain is single, double, or logical.",
+        notes: "RunMat can structurally assemble same-class sparse integer blocks while preserving their exact values; the public sparse numeric storage domain is single, double, or logical.",
     }];
 
 const BLKDIAG_COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =

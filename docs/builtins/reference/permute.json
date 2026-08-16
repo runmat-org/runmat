@@ -38,7 +38,7 @@
     "Duplicate or zero dimension indices throw an error.",
     "Works on empty arrays and arrays with zero-sized dimensions. The result preserves MATLAB's column-major ordering.",
     "Logical, complex, string, and all eight native integer array classes retain their classes and exact values. Character arrays support 2-D permutations (transpose or identity).",
-    "Dimension order accepts every integer class and is decoded exactly as a one-based structural permutation without passing through a floating mirror.",
+    "Dimension order accepts every integer class and is decoded exactly as a one-based structural permutation.",
     "gpuArray inputs stay on the GPU. If the provider lacks a native permute kernel, RunMat gathers once, permutes on the host, and uploads the result back to the device."
   ],
   "examples": [

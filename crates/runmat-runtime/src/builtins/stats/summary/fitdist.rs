@@ -256,7 +256,7 @@ const CDF_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer evaluation points are gated before provider access and enter the floating CDF boundary without an integer compatibility mirror.",
+        notes: "Typed-integer evaluation points are gated before provider access and must be exactly representable at the floating CDF boundary.",
     }];
 
 const CDF_INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =

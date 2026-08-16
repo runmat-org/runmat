@@ -132,7 +132,7 @@ pub const TIMETABLE2TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescrip
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Conversion never creates an f64 compatibility mirror for contained integer variables. By default, row times become the first table variable.",
+        notes: "Contained integer variables retain their exact classes and values during conversion. By default, row times become the first table variable.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "T = timetable2table(TT, ConvertRowTimes=typed_integer_flag)",
@@ -212,7 +212,7 @@ pub const TIMETABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each data variable remains independent of row-time metadata and is stored without an f64 compatibility mirror.",
+        notes: "Each data variable remains independent of row-time metadata and retains its exact class and values.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "TT = timetable(Size=integer_sz, VariableTypes=types, timingName=timingValue)",
@@ -347,7 +347,7 @@ pub const TABLE2TIMETABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescrip
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Timetable construction changes container metadata only; unrelated integer variables are cloned without a binary64 mirror.",
+        notes: "Timetable construction changes container metadata only; unrelated integer variables retain their exact classes and values.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "TT = table2timetable(T, RowTimes=integer_time_variable_index)",

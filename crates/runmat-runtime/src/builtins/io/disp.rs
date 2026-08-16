@@ -128,7 +128,7 @@ pub const DISP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "disp is a no-output host rendering sink. Resident integer values gather through exact typed provider download before decimal formatting; no floating compatibility mirror or provider output is created.",
+        notes: "disp is a no-output host rendering sink. Resident integer values gather exactly through their provider before decimal formatting; no provider output is created.",
     }];
 
 fn disp_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {

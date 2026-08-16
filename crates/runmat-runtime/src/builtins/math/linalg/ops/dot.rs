@@ -170,7 +170,7 @@ pub const DOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "All eight scalar integer classes select the reduction dimension without passing through an f64 mirror.",
+        notes: "All eight scalar integer classes select the reduction dimension through exact structural decoding.",
     },
 ];
 

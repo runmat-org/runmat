@@ -194,7 +194,7 @@ pub const LOAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Level-5 MAT integer class tags reconstruct native signed or unsigned storage of the same width and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads; no binary64 compatibility mirror is created.",
+        notes: "Level-5 MAT integer class tags reconstruct signed or unsigned values of the same class, width, and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads.",
     }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]

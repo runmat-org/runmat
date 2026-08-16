@@ -33,7 +33,7 @@
     {"question": "What counts as nonzero?", "answer": "A real value is nonzero when it is not exact zero. A complex value is nonzero when either component is nonzero. NaN and infinities are nonzero."},
     {"question": "Are index outputs integers?", "answer": "No. MATLAB-compatible k, row, and col outputs are double. RunMat rejects an index that cannot be represented exactly as binary64 instead of silently rounding it."},
     {"question": "What happens on an f32 GPU provider?", "answer": "RunMat gathers and computes the result on the host so double indices remain exact, then re-uploads the outputs through the input handle's owning provider to preserve gpuArray residency and device ownership. An f64 provider can execute the operation natively."},
-    {"question": "Does the third output preserve integer values?", "answer": "Yes. v preserves all eight integer classes and reads authoritative storage, so values above flintmax are not passed through an f64 mirror."},
+    {"question": "Does the third output preserve integer values?", "answer": "Yes. v preserves all eight integer classes exactly, including int64 and uint64 values above flintmax."},
     {"question": "Why can strict compatibility reject find(X,'last')?", "answer": "MATLAB documents direction only after K. Enable RunMat extensions to use the direction-only convenience form, or write `find(X,1,'last')`."}
   ],
   "links": [
@@ -44,5 +44,5 @@
   ],
   "source": {"label": "`crates/runmat-runtime/src/builtins/array/indexing/find.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/find.rs"},
   "gpu_residency": "F64 real inputs use the owning provider's hook when available. F32, logical, and integer resident inputs take a correctness-first host fallback because index outputs must be exact doubles and v must preserve its input class; fallback outputs are re-uploaded through that same owner so they remain resident on the input device.",
-  "gpu_behavior": ["Provider execution is limited to cases where the owning provider can produce exact double indices. Other resident inputs gather through their owning provider without using an integer f64 mirror, compute on the host, and restore outputs through that same provider even when another provider is active."]
+  "gpu_behavior": ["Provider execution is limited to cases where the owning provider can produce exact double indices. Other resident integer inputs gather exactly through their owning provider, compute on the host, and restore outputs through that same provider even when another provider is active."]
 }
