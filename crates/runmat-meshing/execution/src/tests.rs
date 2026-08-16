@@ -13,12 +13,12 @@ use runmat_meshing_core::{
 use crate::{import_stage_objects, prepare_stage_objects, MeshingStageObjectRoot};
 
 #[derive(Default)]
-struct MemoryCache {
+pub(crate) struct MemoryCache {
     objects: HashMap<Digest, Vec<u8>>,
 }
 
 impl MemoryCache {
-    fn insert_all(&mut self, objects: &[LogicalObject]) {
+    pub(crate) fn insert_all(&mut self, objects: &[LogicalObject]) {
         for object in objects {
             self.objects
                 .insert(object.descriptor.digest, object.bytes.clone());
@@ -167,7 +167,10 @@ fn import_enforces_total_bytes_before_accepting_closure() {
     assert!(error.to_string().contains("inventory is too large"));
 }
 
-fn fixture(records: Vec<Vec<u8>>, maximum_chunk_bytes: u64) -> crate::PreparedMeshingStageObjects {
+pub(crate) fn fixture(
+    records: Vec<Vec<u8>>,
+    maximum_chunk_bytes: u64,
+) -> crate::PreparedMeshingStageObjects {
     let (identity, manifest, chunks) = fixture_contracts(records, maximum_chunk_bytes);
     prepare_stage_objects(identity, manifest, chunks, ObjectInventoryLimits::default()).unwrap()
 }

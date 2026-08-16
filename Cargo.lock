@@ -6803,6 +6803,7 @@ version = "0.6.1"
 dependencies = [
  "runmat-execution",
  "runmat-execution-artifact",
+ "runmat-execution-runner",
  "runmat-meshing-core",
  "thiserror 1.0.69",
 ]

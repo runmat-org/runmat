@@ -35,6 +35,34 @@ impl PreparedMeshingStageObjects {
             encoded_length: self.root.encoded_length,
         }
     }
+
+    pub fn revalidate(&self, limits: ObjectInventoryLimits) -> MeshingExecutionResult<()> {
+        let mut chunks = Vec::with_capacity(self.manifest.chunks.len());
+        for descriptor in &self.manifest.chunks {
+            let digest = execution_digest(descriptor.digest);
+            let object = self
+                .objects
+                .iter()
+                .find(|object| object.descriptor.digest == digest)
+                .ok_or(MeshingExecutionError::MissingObject(digest))?;
+            chunks.push(EncodedMeshingChunkV2 {
+                descriptor: descriptor.clone(),
+                bytes: object.bytes.clone(),
+            });
+        }
+        let rebuilt = prepare_stage_objects(
+            self.result_identity.clone(),
+            self.manifest.clone(),
+            chunks,
+            limits,
+        )?;
+        if rebuilt != *self {
+            return Err(MeshingExecutionError::Identity(
+                "prepared meshing object set is not its canonical closure",
+            ));
+        }
+        Ok(())
+    }
 }
 
 pub fn prepare_stage_objects(

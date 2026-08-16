@@ -5,7 +5,10 @@
 
 mod error;
 mod objects;
+mod publication;
 
+#[cfg(test)]
+mod publication_tests;
 #[cfg(test)]
 mod tests;
 
@@ -14,4 +17,8 @@ pub use objects::{
     import_stage_objects, prepare_stage_objects, MeshingStageObjectRoot,
     PreparedMeshingStageObjects, MESHING_RESULT_IDENTITY_MEDIA_TYPE,
     MESHING_STAGE_MANIFEST_MEDIA_TYPE,
+};
+pub use publication::{
+    import_result_publication, prepare_result_publication, MeshingArtifactAccess,
+    PreparedMeshingResultPublication,
 };
