@@ -6770,10 +6770,12 @@ dependencies = [
 name = "runmat-meshing-core"
 version = "0.6.1"
 dependencies = [
+ "minicbor",
  "runmat-geometry-core",
  "runmat-meshing-size",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

@@ -14,7 +14,7 @@ fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
     }
 }
 
-fn request() -> MeshingRequestV2 {
+pub(super) fn request() -> MeshingRequestV2 {
     MeshingRequestV2 {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: MeshElementOrderV2::Tet4,
@@ -72,7 +72,7 @@ fn request() -> MeshingRequestV2 {
     }
 }
 
-fn artifact() -> AnalysisMeshArtifactV2 {
+pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
     let solid = entity(PersistentEntityKind::Solid, "solid:1");
     let region = entity(PersistentEntityKind::Region, "region:1");
     let nodes = [
@@ -121,7 +121,7 @@ fn artifact() -> AnalysisMeshArtifactV2 {
         },
     )
     .collect();
-    AnalysisMeshArtifactV2 {
+    let mut artifact = AnalysisMeshArtifactV2 {
         schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: digest(1),
         root_stage_manifest_digest: digest(2),
@@ -180,14 +180,16 @@ fn artifact() -> AnalysisMeshArtifactV2 {
                 },
             ],
         },
-    }
+    };
+    artifact.seal_canonical_digest().unwrap();
+    artifact
 }
 
-fn evidence(artifact: &AnalysisMeshArtifactV2) -> MeshingEvidenceV2 {
+pub(super) fn evidence(artifact: &AnalysisMeshArtifactV2) -> MeshingEvidenceV2 {
     MeshingEvidenceV2 {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
         geometry: artifact.geometry.clone(),
-        resolved_request_digest: digest(4),
+        resolved_request_digest: artifact.resolved_request.canonical_digest().unwrap(),
         artifact_digest: artifact.canonical_digest,
         algorithms: artifact.resolved_request.algorithms.clone(),
         deterministic_seed: artifact.resolved_request.deterministic_seed,

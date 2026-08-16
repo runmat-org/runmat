@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    validate_finite, validate_token, AlgorithmVersionSet, GeometryRevisionRef,
-    MeshingContractError, MeshingResourceBudgetV2, MeshingStageV2, PersistentEntityId,
-    StableDigest,
+    validate_finite, validate_token, AlgorithmVersionSet, CanonicalMeshingContract,
+    GeometryRevisionRef, MeshingContractError, MeshingResourceBudgetV2, MeshingStageV2,
+    PersistentEntityId, StableDigest,
 };
 
 pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 2;
@@ -264,21 +264,10 @@ impl MeshingEvidenceV2 {
         &self,
         artifact: &super::AnalysisMeshArtifactV2,
     ) -> Result<(), MeshingContractError> {
-        if self.schema_version != MESHING_EVIDENCE_SCHEMA_VERSION {
-            return Err(MeshingContractError::invalid(
-                "meshing evidence schema version",
-                format!("expected {MESHING_EVIDENCE_SCHEMA_VERSION}"),
-            ));
-        }
+        self.validate_standalone()?;
         artifact.validate()?;
-        self.geometry.validate()?;
-        self.resolved_request_digest
-            .validate_nonzero("evidence resolved request digest")?;
-        self.artifact_digest
-            .validate_nonzero("evidence artifact digest")?;
-        self.algorithms.validate()?;
-        self.platform.validate()?;
         if self.geometry != artifact.geometry
+            || self.resolved_request_digest != artifact.resolved_request.canonical_digest()?
             || self.artifact_digest != artifact.canonical_digest
             || self.algorithms != artifact.resolved_request.algorithms
             || self.deterministic_seed != artifact.resolved_request.deterministic_seed
@@ -288,6 +277,32 @@ impl MeshingEvidenceV2 {
                 "geometry, artifact, algorithm, or seed identity does not match the artifact",
             ));
         }
+        if self.resources.generated_nodes != artifact.topology.nodes.len() as u64
+            || self.resources.generated_elements != artifact.topology.volume_elements.len() as u64
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing resource usage",
+                "generated entity counts must match the validated artifact",
+            ));
+        }
+        self.resources
+            .validate_against(&artifact.resolved_request.resources)
+    }
+
+    pub(super) fn validate_standalone(&self) -> Result<(), MeshingContractError> {
+        if self.schema_version != MESHING_EVIDENCE_SCHEMA_VERSION {
+            return Err(MeshingContractError::invalid(
+                "meshing evidence schema version",
+                format!("expected {MESHING_EVIDENCE_SCHEMA_VERSION}"),
+            ));
+        }
+        self.geometry.validate()?;
+        self.resolved_request_digest
+            .validate_nonzero("evidence resolved request digest")?;
+        self.artifact_digest
+            .validate_nonzero("evidence artifact digest")?;
+        self.algorithms.validate()?;
+        self.platform.validate()?;
         if self.stages.len() != MeshingStageV2::ALL.len()
             || self
                 .stages
@@ -316,16 +331,7 @@ impl MeshingEvidenceV2 {
         for sizing in &self.sizing {
             sizing.validate()?;
         }
-        if self.resources.generated_nodes != artifact.topology.nodes.len() as u64
-            || self.resources.generated_elements != artifact.topology.volume_elements.len() as u64
-        {
-            return Err(MeshingContractError::invalid(
-                "meshing resource usage",
-                "generated entity counts must match the validated artifact",
-            ));
-        }
-        self.resources
-            .validate_against(&artifact.resolved_request.resources)
+        Ok(())
     }
 }
 

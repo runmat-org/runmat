@@ -9,8 +9,10 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+minicbor = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-meshing-size = { workspace = true }
 

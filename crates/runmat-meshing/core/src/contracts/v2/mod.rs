@@ -2,6 +2,7 @@ mod artifact;
 mod artifact_classification;
 mod artifact_types;
 mod cancellation;
+mod canonical;
 mod error;
 mod evidence;
 mod failure;
@@ -19,6 +20,7 @@ pub use artifact_types::{
     MeshNeighborV2, MeshRegionV2, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 pub use cancellation::{CancellationPolicyV2, MeshingCancellationSignal, NeverCancelled};
+pub use canonical::{CanonicalMeshingContract, MeshingCanonicalLimits};
 pub use error::MeshingContractError;
 pub use evidence::{
     CacheAdmissionDecisionV2, ErrorDistributionV2, InvariantEvidenceV2, MeshingEvidenceV2,

@@ -110,17 +110,24 @@ pub enum MeshingWorkloadResultV2 {
 }
 
 impl MeshingWorkloadResultV2 {
+    pub(super) fn validate_standalone(&self) -> Result<(), MeshingContractError> {
+        match self {
+            Self::Validated {
+                stage_manifest_digest,
+            } => stage_manifest_digest.validate_nonzero("workload result manifest digest"),
+            Self::Failed { failure } => failure.validate(),
+        }
+    }
+
     pub fn validate_against(
         &self,
         request: &MeshingWorkloadRequestV2,
     ) -> Result<(), MeshingContractError> {
         request.validate()?;
+        self.validate_standalone()?;
         match self {
-            Self::Validated {
-                stage_manifest_digest,
-            } => stage_manifest_digest.validate_nonzero("workload result manifest digest"),
+            Self::Validated { .. } => Ok(()),
             Self::Failed { failure } => {
-                failure.validate()?;
                 if failure.stage != request.stage {
                     return Err(MeshingContractError::invalid(
                         "workload failure stage",

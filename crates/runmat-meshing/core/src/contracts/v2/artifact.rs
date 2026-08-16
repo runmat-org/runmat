@@ -2,22 +2,25 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     validate_finite, validate_token, AnalysisMeshArtifactV2, AnalysisMeshTopologyV2,
-    FieldTopologyLocationV2, MeshElementOrderV2, MeshingContractError, MeshingRequestV2,
-    PersistentEntityId, PersistentEntityKind, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    CanonicalMeshingContract, FieldTopologyLocationV2, MeshElementOrderV2, MeshingContractError,
+    MeshingRequestV2, PersistentEntityId, PersistentEntityKind,
+    ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 const MAX_ENTITY_PROVENANCE: usize = 32;
 
 impl AnalysisMeshArtifactV2 {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
+        self.validate_canonical()
+    }
+
+    pub(super) fn validate_payload(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
                 "analysis mesh artifact schema version",
                 format!("expected {ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION}"),
             ));
         }
-        self.canonical_digest
-            .validate_nonzero("artifact.canonical_digest")?;
         self.root_stage_manifest_digest
             .validate_nonzero("artifact.root_stage_manifest_digest")?;
         self.geometry.validate()?;
@@ -27,7 +30,7 @@ impl AnalysisMeshArtifactV2 {
 }
 
 impl AnalysisMeshTopologyV2 {
-    fn validate(&self, request: &MeshingRequestV2) -> Result<(), MeshingContractError> {
+    pub(super) fn validate(&self, request: &MeshingRequestV2) -> Result<(), MeshingContractError> {
         require_nonempty("mesh nodes", &self.nodes)?;
         require_nonempty("volume elements", &self.volume_elements)?;
         if self.nodes.len() as u64 > request.resources.maximum_nodes

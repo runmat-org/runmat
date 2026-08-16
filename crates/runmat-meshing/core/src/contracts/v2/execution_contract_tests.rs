@@ -14,7 +14,7 @@ fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
     }
 }
 
-fn batch_partition() -> MeshingPartitionDescriptorV2 {
+pub(super) fn batch_partition() -> MeshingPartitionDescriptorV2 {
     MeshingPartitionDescriptorV2 {
         kind: MeshingPartitionKindV2::CanonicalEntityBatch,
         partition_index: 0,
@@ -27,7 +27,7 @@ fn batch_partition() -> MeshingPartitionDescriptorV2 {
     }
 }
 
-fn stage_identity() -> MeshingStageIdentityV2 {
+pub(super) fn stage_identity() -> MeshingStageIdentityV2 {
     MeshingStageIdentityV2 {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageV2::SurfaceMesh,
@@ -46,7 +46,7 @@ fn stage_identity() -> MeshingStageIdentityV2 {
     }
 }
 
-fn workload() -> MeshingWorkloadRequestV2 {
+pub(super) fn workload() -> MeshingWorkloadRequestV2 {
     MeshingWorkloadRequestV2 {
         schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
         stage: MeshingStageV2::SurfaceMesh,
@@ -64,7 +64,7 @@ fn workload() -> MeshingWorkloadRequestV2 {
     }
 }
 
-fn progress(sequence: u64, completed_work: u64) -> MeshingProgressV2 {
+pub(super) fn progress(sequence: u64, completed_work: u64) -> MeshingProgressV2 {
     MeshingProgressV2 {
         schema_version: MESHING_PROGRESS_SCHEMA_VERSION,
         stage: MeshingStageV2::SurfaceMesh,
