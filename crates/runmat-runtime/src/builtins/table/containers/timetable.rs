@@ -18,6 +18,14 @@ pub(in crate::builtins::table) struct Table2TimetableOptions {
     pub(in crate::builtins::table) start_time: Option<Value>,
 }
 
+#[derive(Default)]
+pub(in crate::builtins::table) struct TimetableConstructorOptions {
+    pub(in crate::builtins::table) table: TableConstructorOptions,
+    pub(in crate::builtins::table) sample_rate: Option<Value>,
+    pub(in crate::builtins::table) time_step: Option<Value>,
+    pub(in crate::builtins::table) start_time: Option<Value>,
+}
+
 pub(in crate::builtins::table) fn parse_table2timetable_options(
     args: &[Value],
 ) -> BuiltinResult<Table2TimetableOptions> {
@@ -83,13 +91,13 @@ pub(in crate::builtins::table) fn table2timetable_generated_row_times(
 
 pub(in crate::builtins::table) fn split_timetable_constructor_args(
     args: Vec<Value>,
-) -> BuiltinResult<(Option<Value>, Vec<Value>, TableConstructorOptions)> {
+) -> BuiltinResult<(Option<Value>, Vec<Value>, TimetableConstructorOptions)> {
     if args.is_empty() {
-        return Ok((None, Vec::new(), TableConstructorOptions::default()));
+        return Ok((None, Vec::new(), TimetableConstructorOptions::default()));
     }
     let mut variables = Vec::new();
     let mut row_times = None;
-    let mut options = TableConstructorOptions::default();
+    let mut options = TimetableConstructorOptions::default();
     let mut idx = 0usize;
     let has_explicit_row_times = args.iter().any(|value| {
         scalar_text(value, "timetable option")
@@ -109,12 +117,37 @@ pub(in crate::builtins::table) fn split_timetable_constructor_args(
                     continue;
                 }
                 if name.eq_ignore_ascii_case("VariableNames") {
-                    options.variable_names = Some(variable_name_list(&args[idx + 1])?);
+                    options.table.variable_names = Some(variable_name_list(&args[idx + 1])?);
                     idx += 2;
                     continue;
                 }
                 if name.eq_ignore_ascii_case("RowNames") {
-                    options.row_names = Some(string_list(&args[idx + 1])?);
+                    options.table.row_names = Some(string_list(&args[idx + 1])?);
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("Size") {
+                    options.table.size = Some(args[idx + 1].clone());
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("VariableTypes") {
+                    options.table.variable_types = Some(string_list(&args[idx + 1])?);
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("SampleRate") {
+                    options.sample_rate = Some(args[idx + 1].clone());
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("TimeStep") {
+                    options.time_step = Some(args[idx + 1].clone());
+                    idx += 2;
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("StartTime") {
+                    options.start_time = Some(args[idx + 1].clone());
                     idx += 2;
                     continue;
                 }
@@ -132,6 +165,11 @@ pub(in crate::builtins::table) fn is_timetable_option_token(value: &Value) -> bo
             name.eq_ignore_ascii_case("RowTimes")
                 || name.eq_ignore_ascii_case("VariableNames")
                 || name.eq_ignore_ascii_case("RowNames")
+                || name.eq_ignore_ascii_case("Size")
+                || name.eq_ignore_ascii_case("VariableTypes")
+                || name.eq_ignore_ascii_case("SampleRate")
+                || name.eq_ignore_ascii_case("TimeStep")
+                || name.eq_ignore_ascii_case("StartTime")
         })
         .unwrap_or(false)
 }
@@ -295,13 +333,18 @@ fn numeric_sample_rate(value: &Value) -> BuiltinResult<f64> {
 }
 
 fn positive_integer_sample_rate(value: &runmat_builtins::IntValue) -> BuiltinResult<f64> {
-    if value.try_to_u64().is_some_and(|value| value > 0) {
-        Ok(value.to_f64())
-    } else {
-        Err(invalid_argument(
-            "array2timetable: SampleRate must be a positive finite numeric scalar",
-        ))
+    let exact = value
+        .try_to_u64()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            invalid_argument("array2timetable: SampleRate must be a positive finite numeric scalar")
+        })?;
+    if exact > (1_u64 << 53) {
+        return Err(invalid_argument(
+            "array2timetable: integer SampleRate must be exactly representable as double",
+        ));
     }
+    Ok(exact as f64)
 }
 
 fn fixed_step_row_times(

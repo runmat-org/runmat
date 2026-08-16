@@ -1,14 +1,95 @@
 use super::*;
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, NumericDType,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericDType,
 };
 use runmat_macros::runtime_builtin;
 
 const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
+
+pub(in crate::builtins::table) const TIMERANGE_NUMERIC_BOUNDS_EXTENSION:
+    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timerange-numeric-bounds",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timerange with numeric row-time bounds is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimerangeNumericBoundsExtension"),
+};
+const TIMERANGE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timerange-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timerange with explicitly GPU-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimerangeExplicitGpuInputExtension"),
+};
+pub const TIMERANGE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TIMERANGE_NUMERIC_BOUNDS_EXTENSION,
+    TIMERANGE_EXPLICIT_GPU_EXTENSION,
+];
+const TIMERANGE_INTEGER_BOUND_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "start or end numeric row-time bound",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public timerange bounds are datetime, duration, or supported event filters. Numeric row-time bounds remain available only in RunMat mode.",
+    }];
+pub const TIMERANGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = timerange(integer_start, integer_end [, interval_type])",
+        inputs: &TIMERANGE_INTEGER_BOUND_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Numeric extension bounds retain their native scalar identity and compare with numeric timetable row times through exact mixed-class ordering rather than f64 conversion.",
+    }];
+
+const TIMERANGE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Timetable row-time subscript selector.",
+}];
+const TIMERANGE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "startTime",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Beginning of the selected row-time interval.",
+    },
+    BuiltinParamDescriptor {
+        name: "endTime",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "End of the selected row-time interval.",
+    },
+    BuiltinParamDescriptor {
+        name: "intervalType",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("openright"),
+        description: "One of openright, openleft, open, or closed.",
+    },
+];
+const TIMERANGE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "S = timerange(startTime, endTime, intervalType)",
+    inputs: &TIMERANGE_INPUTS,
+    outputs: &TIMERANGE_OUTPUT,
+}];
+pub const TIMERANGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIMERANGE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
 
 pub(crate) const TABLE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -432,23 +513,31 @@ fn preallocated_table(
     variables: Vec<Value>,
     options: TableConstructorOptions,
 ) -> BuiltinResult<Value> {
+    let (names, columns, row_names, _) = preallocated_table_columns(variables, options, "table")?;
+    table_from_columns_with_properties(names, columns, row_names)
+}
+
+pub(in crate::builtins::table) fn preallocated_table_columns(
+    variables: Vec<Value>,
+    options: TableConstructorOptions,
+    context: &str,
+) -> BuiltinResult<(Vec<String>, Vec<Value>, Option<Vec<String>>, usize)> {
     if !variables.is_empty() {
-        return Err(invalid_argument(
-            "table: Size/VariableTypes preallocation cannot be combined with data variables",
-        ));
+        return Err(invalid_argument(format!(
+            "{context}: Size/VariableTypes preallocation cannot be combined with data variables"
+        )));
     }
     let size = options
         .size
         .as_ref()
-        .ok_or_else(|| invalid_argument("table: preallocation requires Size"))?;
-    let variable_types = options
-        .variable_types
-        .as_ref()
-        .ok_or_else(|| invalid_argument("table: preallocation requires VariableTypes"))?;
+        .ok_or_else(|| invalid_argument(format!("{context}: preallocation requires Size")))?;
+    let variable_types = options.variable_types.as_ref().ok_or_else(|| {
+        invalid_argument(format!("{context}: preallocation requires VariableTypes"))
+    })?;
     let [rows, width] = table_preallocation_size(size)?;
     if variable_types.len() != width {
         return Err(invalid_argument(format!(
-            "table: VariableTypes has {} entries but Size requests {width} variables",
+            "{context}: VariableTypes has {} entries but Size requests {width} variables",
             variable_types.len()
         )));
     }
@@ -456,7 +545,7 @@ fn preallocated_table(
     for type_name in variable_types {
         let dtype = table_preallocation_numeric_dtype(type_name).ok_or_else(|| {
             invalid_argument(format!(
-                "table: preallocation type '{type_name}' is not yet supported; use double, single, or a built-in integer type"
+                "{context}: preallocation type '{type_name}' is not yet supported; use double, single, or a built-in integer type"
             ))
         })?;
         columns.push(Value::Tensor(
@@ -467,7 +556,7 @@ fn preallocated_table(
     let names = options
         .variable_names
         .unwrap_or_else(|| generated_variable_names(width));
-    table_from_columns_with_properties(names, columns, options.row_names)
+    Ok((names, columns, options.row_names, rows))
 }
 
 fn table_preallocation_size(value: &Value) -> BuiltinResult<[usize; 2]> {
@@ -612,40 +701,68 @@ pub(crate) async fn dictionary_builtin(args: Vec<Value>) -> BuiltinResult<Value>
     summary = "Create a timetable row-time range selector.",
     keywords = "timerange,timetable,row times",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    descriptor(crate::builtins::table::builtins::constructors::TIMERANGE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::TIMERANGE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::TIMERANGE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn timerange_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
-    if args.len() > 3 {
+    if !(2..=3).contains(&args.len()) {
         return Err(invalid_argument(
             "timerange: expected start, end, and optional inclusivity",
         ));
     }
+    if args[..2].iter().any(timerange_argument_is_numeric) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMERANGE_NUMERIC_BOUNDS_EXTENSION,
+            "timerange",
+        )?;
+    }
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMERANGE_EXPLICIT_GPU_EXTENSION,
+            "timerange",
+        )?;
+    }
     let gathered = gather_values(&args).await?;
+    let inclusivity = gathered
+        .get(2)
+        .map(|value| scalar_text(value, "timerange inclusivity"))
+        .transpose()?
+        .unwrap_or_else(|| "openright".to_string());
+    if !["openright", "openleft", "open", "closed"]
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(inclusivity.trim()))
+    {
+        return Err(invalid_argument(format!(
+            "timerange: unsupported inclusivity '{inclusivity}'"
+        )));
+    }
     let mut object = ObjectInstance::new(TIMERANGE_CLASS.to_string());
-    object.properties.insert(
-        "Start".to_string(),
-        gathered
-            .first()
-            .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
-    );
-    object.properties.insert(
-        "End".to_string(),
-        gathered
-            .get(1)
-            .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
-    );
+    object
+        .properties
+        .insert("Start".to_string(), gathered[0].clone());
+    object
+        .properties
+        .insert("End".to_string(), gathered[1].clone());
     object.properties.insert(
         "Inclusivity".to_string(),
-        gathered
-            .get(2)
-            .cloned()
-            .unwrap_or_else(|| Value::from("closed")),
+        Value::String(inclusivity.to_ascii_lowercase()),
     );
     Ok(Value::Object(object))
+}
+
+fn timerange_argument_is_numeric(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    )
 }
 
 #[runtime_builtin(

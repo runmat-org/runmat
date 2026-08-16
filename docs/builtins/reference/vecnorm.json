@@ -66,7 +66,7 @@
       "output": "N is size 2x2x1"
     },
     {
-      "description": "Keeping GPU workflows compatible",
+      "description": "Computing Vector Norms On GPU Data",
       "input": "G = gpuArray([3 5; 4 12]);\nN = vecnorm(G)",
       "output": "N = [5 13]"
     }

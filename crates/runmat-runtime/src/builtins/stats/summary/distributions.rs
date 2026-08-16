@@ -606,15 +606,15 @@ impl NormalOutputPlan {
             }
         }
         .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
-        let value = match self.precision {
-            NormalOutputPrecision::Double => tensor::tensor_into_value(tensor),
-            NormalOutputPrecision::Single => Value::Tensor(tensor),
-        };
         let Some(source) = self.gpu_source else {
-            return Ok(value);
+            return Ok(match self.precision {
+                NormalOutputPrecision::Double => tensor::tensor_into_value(tensor),
+                NormalOutputPrecision::Single => Value::Tensor(tensor),
+            });
         };
-        let restored = gpu_helpers::restore_class_preserving_value(&source, value, name)
-            .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+        let restored =
+            gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), name)
+                .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
         if runmat_accelerate_api::handle_is_explicit(&source)
             && !matches!(restored, Value::GpuTensor(_))
         {
@@ -623,7 +623,12 @@ impl NormalOutputPlan {
                 format!("{name}: provider cannot preserve explicit gpuArray output residency"),
             ));
         }
-        Ok(restored)
+        Ok(match (self.precision, restored) {
+            (NormalOutputPrecision::Double, Value::Tensor(tensor)) => {
+                tensor::tensor_into_value(tensor)
+            }
+            (_, value) => value,
+        })
     }
 }
 
@@ -1551,6 +1556,69 @@ pub mod tinv {
     use super::*;
     normal_descriptor!("tinv", T_INV_SIGNATURES);
 
+    const INTEGER_P_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "tinv-integer-probability",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "tinv with typed-integer probabilities is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TinvIntegerProbabilityExtension"),
+    };
+    const INTEGER_NU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "tinv-integer-degrees-of-freedom",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "tinv with typed-integer degrees of freedom is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TinvIntegerDegreesOfFreedomExtension"),
+    };
+    const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "tinv-logical-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "tinv with logical numeric input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TinvLogicalInputExtension"),
+    };
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+        INTEGER_P_EXTENSION,
+        INTEGER_NU_EXTENSION,
+        LOGICAL_INPUT_EXTENSION,
+    ];
+
+    const INTEGER_P_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "p",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Public tinv probabilities are single or double. Typed-integer probabilities are independently gated and must cross the binary64 inverse-CDF boundary exactly.",
+        }];
+    const INTEGER_NU_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "nu",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Public tinv degrees of freedom are single or double. Typed-integer values are independently gated and must cross the binary64 inverse-CDF boundary exactly.",
+        }];
+    pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+        BuiltinIntegerCapabilityDescriptor {
+            form: "x = tinv(integer_p, nu)",
+            inputs: &INTEGER_P_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+            notes: "RunMat-only integer p is checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider when possible.",
+        },
+        BuiltinIntegerCapabilityDescriptor {
+            form: "x = tinv(p, integer_nu)",
+            inputs: &INTEGER_NU_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+            notes: "RunMat-only integer nu is checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider when possible.",
+        },
+    ];
+
     #[runtime_builtin(
         name = "tinv",
         category = "stats/summary",
@@ -1558,17 +1626,42 @@ pub mod tinv {
         keywords = "tinv,student t,inverse,cdf,statistics,distribution",
         type_resolver(super::normal_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::tinv"
     )]
     pub(crate) async fn tinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::t_args("tinv", value, rest).await?;
-        let data = args
-            .x
+        if rest.len() != 1 {
+            return Err(super::normal_error("tinv", "tinv: expected p and nu"));
+        }
+        let nu_value = rest.into_iter().next().expect("one nu argument");
+        ensure_extensions(&value, &nu_value)?;
+        let output = NormalOutputPlan::inspect("tinv", &value, std::slice::from_ref(&nu_value))?;
+        let p = super::normal_value_to_tensor("tinv", "p", value).await?;
+        let nu = super::normal_value_to_tensor("tinv", "nu", nu_value).await?;
+        let (p, nu, shape) = super::broadcast_pair("tinv", &p, &nu)?;
+        let data = p
             .iter()
-            .zip(args.nu.iter())
+            .zip(nu.iter())
             .map(|(p, nu)| distribution_math::student_t_inv(*p, *nu))
             .collect();
-        super::finish(args.shape, data)
+        output.finish("tinv", shape, data)
+    }
+
+    fn ensure_extensions(p: &Value, nu: &Value) -> BuiltinResult<()> {
+        if super::is_typed_integer_value(p) {
+            crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_P_EXTENSION, "tinv")?;
+        }
+        if super::is_typed_integer_value(nu) {
+            crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_NU_EXTENSION, "tinv")?;
+        }
+        if super::is_logical_value(p) || super::is_logical_value(nu) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_INPUT_EXTENSION,
+                "tinv",
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -3303,6 +3396,107 @@ mod tests {
         ))
         .unwrap_err();
         assert!(inexact.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn tinv_integer_roles_gate_independently_and_use_the_exact_double_boundary() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let integer_p = block_on(tinv::tinv_builtin(
+                mirrorless_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                vec![Value::Num(5.0)],
+            ))
+            .expect_err("integer p must gate");
+            assert_eq!(
+                integer_p.identifier(),
+                Some("RunMat:compatibility:TinvIntegerProbabilityExtension")
+            );
+            let integer_nu = block_on(tinv::tinv_builtin(
+                Value::Num(0.5),
+                vec![mirrorless_int_tensor(
+                    IntegerStorage::U16(vec![5]),
+                    vec![1, 1],
+                )],
+            ))
+            .expect_err("integer nu must gate");
+            assert_eq!(
+                integer_nu.identifier(),
+                Some("RunMat:compatibility:TinvIntegerDegreesOfFreedomExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let exact = block_on(tinv::tinv_builtin(
+            mirrorless_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+            vec![mirrorless_int_tensor(
+                IntegerStorage::U16(vec![5]),
+                vec![1, 1],
+            )],
+        ))
+        .expect("exact integer tinv inputs");
+        assert!(
+            matches!(exact, Value::Num(value) if value.is_infinite() && value.is_sign_positive())
+        );
+
+        let inexact = block_on(tinv::tinv_builtin(
+            Value::Num(0.5),
+            vec![mirrorless_int_tensor(
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+                vec![1, 1],
+            )],
+        ))
+        .expect_err("wide integer nu must reject");
+        assert!(inexact.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn tinv_preserves_native_single_output_precision() {
+        let output = block_on(tinv::tinv_builtin(
+            Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap()),
+            vec![Value::Num(5.0)],
+        ))
+        .expect("single tinv");
+        let Value::Tensor(output) = output else {
+            panic!("expected single tensor output")
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.materialize_f64(), vec![0.0]);
+    }
+
+    #[test]
+    fn tinv_declares_independent_integer_role_metadata() {
+        let builtin = runmat_builtins::builtin_function_by_name("tinv").unwrap();
+        assert_eq!(builtin.integer_capabilities.len(), 2);
+        assert_eq!(builtin.extensions.len(), 3);
+        assert!(builtin
+            .integer_capabilities
+            .iter()
+            .all(|capability| capability.inputs[0].classes.len() == 8));
+    }
+
+    #[test]
+    fn tinv_resident_floating_input_returns_to_the_exact_owner() {
+        test_support::with_test_provider(|provider| {
+            let source =
+                gpu_helpers::upload_tensor(provider, &Tensor::new(vec![0.5], vec![1, 1]).unwrap())
+                    .expect("resident probability");
+            runmat_accelerate::fusion_residency::mark(&source);
+            let output = block_on(tinv::tinv_builtin(
+                Value::GpuTensor(source.clone()),
+                vec![Value::Num(5.0)],
+            ))
+            .expect("resident tinv");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident output")
+            };
+            assert_eq!(output_handle.device_id, source.device_id);
+            assert!(gpu_helpers::exact_provider_for_handle(output_handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(runmat_accelerate::fusion_residency::is_resident(&source));
+            let gathered = test_support::gather(output).expect("gather tinv output");
+            assert_eq!(gathered.materialize_f64(), vec![0.0]);
+            let _ = provider.free(&source);
+        });
     }
 
     #[test]

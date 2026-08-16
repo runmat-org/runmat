@@ -9,7 +9,7 @@
     "wait",
     "timerfind"
   ],
-  "summary": "Create a MATLAB-compatible timer handle object.",
+  "summary": "Create a timer handle object for scheduled callbacks.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -30,16 +30,18 @@
       "timer_constructs_finds_starts_and_deletes_through_vm"
     ]
   },
-  "description": "`timer` creates a handle object with MATLAB timer properties and method dispatch for `start`, `startat`, `stop`, `wait`, and `delete`. RunMat stores timers in a per-thread registry so `timerfind` and `timerfindall` can retrieve them while valid.",
+  "description": "`timer` creates a handle object with callback, timing, execution, visibility, and user-data properties. Use `start`, `startat`, `stop`, `wait`, and `delete` to control its lifecycle, and use `timerfind` or `timerfindall` to retrieve valid timers.",
   "behaviors": [
     "`t = timer` creates a valid timer handle with defaults: `ExecutionMode='singleShot'`, `Period=1`, `StartDelay=0`, `TasksToExecute=1`, `BusyMode='drop'`, `ObjectVisibility='on'`, `Running='off'`, `TasksExecuted=0`, `Type='timer'`, and a generated `Name`.",
     "`t = timer(Name, Value, ...)` accepts common callback, timing, labeling, and user-data properties: `TimerFcn`, `StartFcn`, `StopFcn`, `ErrorFcn`, `Period`, `StartDelay`, `TasksToExecute`, `BusyMode`, `ExecutionMode`, `Name`, `Tag`, `ObjectVisibility`, and `UserData`.",
-    "Callback properties accept strings, character rows, function handles, closures, or callback cell arrays for property compatibility. This slice executes function-handle, closure, and callback-cell callbacks; non-empty text callbacks are rejected at execution time because they require dynamic-eval callback infrastructure.",
+    "Callback properties accept strings, character rows, function handles, closures, or callback cell arrays. Function-handle, closure, and callback-cell callbacks execute directly; non-empty text callbacks are not yet executable.",
     "`start(t)` validates `TimerFcn`, marks `Running='on'`, executes `StartFcn`, executes `TimerFcn` once for `singleShot` or `TasksToExecute` times for fixed execution modes, updates `TasksExecuted`, `InstantPeriod`, and `AveragePeriod`, then executes `StopFcn` and marks `Running='off'`.",
     "`startat(t, delaySeconds)` is supported for numeric positive relative delays. MATLAB date/time and date-string start times are not yet implemented.",
     "`stop(t)` marks the timer stopped and runs `StopFcn` if the timer was running. `wait(t)` returns after the timer is stopped. `delete(t)` invalidates the handle, removes it from timer discovery, and releases its GC root.",
-    "RunMat executes timer callbacks synchronously on the current VM path rather than on a background event queue. Long delays therefore block the caller on native hosts. This preserves deterministic behavior across native and wasm hosts, but it is not full MATLAB asynchronous scheduling.",
-    "Multiple timers are represented as a cell row because RunMat does not yet have first-class MATLAB object arrays."
+    "Timer callbacks currently run synchronously on the current VM path. Long delays therefore block the caller on native hosts; background event-queue scheduling is not yet available.",
+    "`TasksToExecute` retains a native integer scalar exactly. `Period` and `StartDelay` are stored as seconds and reject integer values that cannot cross the binary64 seconds boundary exactly.",
+    "`UserData` preserves native integer class, shape, and payload without numeric conversion.",
+    "Multiple timers are currently returned as a cell row."
   ],
   "examples": [
     {
@@ -54,7 +56,7 @@
   "faqs": [
     {
       "question": "Does RunMat run timers in the background?",
-      "answer": "No. Timer callbacks run synchronously when `start` drives the timer. Background scheduling and a MATLAB-compatible timer event queue require additional runtime infrastructure."
+      "answer": "No. Timer callbacks run synchronously when `start` drives the timer. Background scheduling requires an event queue that is not yet available."
     },
     {
       "question": "Can timer callbacks use GPU arrays?",

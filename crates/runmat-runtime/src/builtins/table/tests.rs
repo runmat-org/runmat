@@ -3,7 +3,7 @@ use crate::RuntimeError;
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 use futures::executor::block_on;
-use runmat_builtins::IntegerStorage;
+use runmat_builtins::{IntValue, IntegerStorage};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags, SandboxFsProvider,
@@ -2377,7 +2377,11 @@ fn array2timetable_preserves_every_integer_storage_class_exactly() {
         .unwrap();
         assert_array2timetable_duration_row_times(&timetable, &[0.0, 1.0]);
         let Value::Tensor(round_trip) = block_on(table2array_builtin(
-            block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+            block_on(timetable2table_builtin(
+                timetable,
+                vec![Value::from("ConvertRowTimes"), Value::Bool(false)],
+            ))
+            .unwrap(),
         ))
         .unwrap() else {
             panic!("expected typed integer array");
@@ -2564,7 +2568,11 @@ fn array2timetable_resident_integer_input_is_mode_gated_and_gathers_exactly() {
                 ))
                 .unwrap();
                 let Value::Tensor(round_trip) = block_on(table2array_builtin(
-                    block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+                    block_on(timetable2table_builtin(
+                        timetable,
+                        vec![Value::from("ConvertRowTimes"), Value::Bool(false)],
+                    ))
+                    .unwrap(),
                 ))
                 .unwrap() else {
                     panic!("expected typed integer array");
@@ -2606,7 +2614,11 @@ fn array2timetable_wgpu_gathers_every_resident_integer_class_exactly() {
         ))
         .unwrap();
         let Value::Tensor(round_trip) = block_on(table2array_builtin(
-            block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+            block_on(timetable2table_builtin(
+                timetable,
+                vec![Value::from("ConvertRowTimes"), Value::Bool(false)],
+            ))
+            .unwrap(),
         ))
         .unwrap() else {
             panic!("expected typed integer array");
@@ -3004,6 +3016,7 @@ fn height_reads_resident_shape_without_provider_or_data_access() {
 
 #[test]
 fn categorical_dictionary_and_selector_objects_materialize() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let categorical = block_on(categorical_builtin(vec![Value::StringArray(
         StringArray::new(vec!["red".into(), "blue".into(), "red".into()], vec![3, 1]).unwrap(),
     )]))
@@ -4198,6 +4211,7 @@ fn timetable_rowtimes_option_keeps_all_variables_and_table2timetable_does_not_dr
 
 #[test]
 fn table_selector_objects_filter_rows_and_variables() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let t = table_from_columns(
         vec!["A".into(), "Name".into()],
         vec![
@@ -4253,7 +4267,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         .unwrap(),
     );
     assert_eq!(ranged.class_name, TIMETABLE_CLASS);
-    assert_eq!(table_height(&ranged).unwrap(), 2);
+    assert_eq!(table_height(&ranged).unwrap(), 1);
 
     let open_left = block_on(timerange_builtin(vec![
         Value::Num(2.0),
@@ -4321,6 +4335,131 @@ fn table_selector_objects_filter_rows_and_variables() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected datetime row-time selection, got {other:?}"),
     }
+}
+
+#[test]
+fn timerange_defaults_to_half_open_and_orders_wide_integer_row_times_exactly() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let base = 1_u64 << 53;
+    let tt = block_on(timetable_builtin(vec![
+        Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![base, base + 1, base + 2]),
+                vec![3, 1],
+            )
+            .unwrap(),
+        ),
+        Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap()),
+        Value::from("VariableNames"),
+        Value::Cell(CellArray::new(vec![Value::from("X")], 1, 1).unwrap()),
+    ]))
+    .unwrap();
+    let selector = block_on(timerange_builtin(vec![
+        Value::Int(IntValue::U64(base + 1)),
+        Value::Int(IntValue::U64(base + 2)),
+    ]))
+    .unwrap();
+    let selected = object(
+        table_paren_get(
+            &object(tt),
+            &Value::Cell(CellArray::new(vec![selector, Value::from(":")], 1, 2).unwrap()),
+        )
+        .unwrap(),
+    );
+    match table_member_get(&selected, &Value::from("X")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
+        other => panic!("expected exact half-open range result, got {other:?}"),
+    }
+}
+
+#[test]
+fn timetable_preallocation_and_default_conversion_preserve_integer_variables() {
+    let tt = block_on(timetable_builtin(vec![
+        Value::from("Size"),
+        Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![2, 1]), vec![1, 2]).unwrap()),
+        Value::from("VariableTypes"),
+        Value::StringArray(StringArray::new(vec!["uint64".into()], vec![1, 1]).unwrap()),
+        Value::from("SampleRate"),
+        Value::Int(IntValue::U16(2)),
+        Value::from("VariableNames"),
+        Value::Cell(CellArray::new(vec![Value::from("Count")], 1, 1).unwrap()),
+    ]))
+    .expect("preallocated timetable");
+    let tt_object = object(tt.clone());
+    let variables = table_variables(&tt_object).unwrap();
+    let Value::Tensor(counts) = variables.fields.get("Count").unwrap() else {
+        panic!("expected integer Count variable")
+    };
+    assert_eq!(counts.numeric_dtype(), runmat_builtins::NumericDType::U64);
+
+    let table = object(block_on(timetable2table_builtin(tt, Vec::new())).unwrap());
+    assert_eq!(
+        table_variable_names_from_object(&table).unwrap(),
+        vec!["Time".to_string(), "Count".to_string()]
+    );
+    let variables = table_variables(&table).unwrap();
+    let Value::Tensor(counts) = variables.fields.get("Count").unwrap() else {
+        panic!("expected converted integer Count variable")
+    };
+    assert_eq!(counts.numeric_dtype(), runmat_builtins::NumericDType::U64);
+}
+
+#[test]
+fn timetable_extensions_gate_numeric_times_and_integer_conversion_flags() {
+    {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let numeric_times = block_on(timetable_builtin(vec![
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap()),
+        ]))
+        .expect_err("numeric row times must gate");
+        assert_eq!(
+            numeric_times.identifier(),
+            TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION.error_identifier
+        );
+        let numeric_range = block_on(timerange_builtin(vec![
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U8(2)),
+        ]))
+        .expect_err("numeric timerange must gate");
+        assert_eq!(
+            numeric_range.identifier(),
+            TIMERANGE_NUMERIC_BOUNDS_EXTENSION.error_identifier
+        );
+    }
+
+    let row_times = array2timetable_duration_row_times(vec![0.0]);
+    let tt = block_on(timetable_builtin(vec![
+        row_times,
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+        ),
+    ]))
+    .unwrap();
+    {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(timetable2table_builtin(
+            tt.clone(),
+            vec![Value::from("ConvertRowTimes"), Value::Int(IntValue::U8(0))],
+        ))
+        .expect_err("typed integer option must gate");
+        assert_eq!(
+            error.identifier(),
+            TIMETABLE2TABLE_INTEGER_OPTION_EXTENSION.error_identifier
+        );
+    }
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let table = object(
+        block_on(timetable2table_builtin(
+            tt,
+            vec![Value::from("ConvertRowTimes"), Value::Int(IntValue::U8(0))],
+        ))
+        .unwrap(),
+    );
+    assert_eq!(
+        table_variable_names_from_object(&table).unwrap(),
+        vec!["Var1".to_string()]
+    );
 }
 
 #[test]

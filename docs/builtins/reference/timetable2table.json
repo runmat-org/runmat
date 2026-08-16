@@ -7,9 +7,9 @@
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`timetable2table(TT)` converts a RunMat timetable object to a table object.",
-  "behaviors": ["`\"ConvertRowTimes\", true` prepends timetable row times as a `Time` variable.", "Variable order and row names are preserved."],
-  "examples": [{"description": "Convert row times to a table variable", "input": "T = timetable2table(TT, 'ConvertRowTimes', true)", "output": "T = table object"}],
+  "description": "`timetable2table(TT)` converts a timetable to a table and places the row-time vector in the first table variable.",
+  "behaviors": ["Row times are converted by default and prepended as a `Time` variable. Set `\"ConvertRowTimes\"` to `false` to discard them.", "Variable order, native integer classes, exact payloads, and row names are preserved."],
+  "examples": [{"description": "Convert Row Times To A Table Variable", "input": "T = timetable2table(TT)", "output": "T = table object"}],
   "links": [{"label": "table2timetable", "url": "./table2timetable"}, {"label": "timetable", "url": "./timetable"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
 }

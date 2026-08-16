@@ -31,8 +31,8 @@
   "description": "`timerfindall` returns valid timer handles regardless of `ObjectVisibility`, optionally filtered by exact property values.",
   "behaviors": [
     "`timerfindall` returns visible and invisible valid timers in the current runtime thread.",
-    "`timerfindall(Name, Value, ...)` applies exact property matches.",
-    "A single match returns a scalar timer handle. Zero or multiple matches return a 1-by-N cell row because RunMat does not yet have first-class MATLAB object arrays.",
+    "`timerfindall(Name, Value, ...)` applies exact property matches, including exact native integer comparisons.",
+    "A single match returns a scalar timer handle. Zero or multiple matches return a 1-by-N cell row.",
     "Deleted timers are removed from discovery."
   ],
   "examples": [
@@ -41,7 +41,12 @@
       "input": "t = timer('ObjectVisibility', 'off', 'TimerFcn', @tick);\nallTimers = timerfindall"
     }
   ],
-  "faqs": [],
+  "faqs": [
+    {
+      "question": "Which search forms are available?",
+      "answer": "No-argument and name-value searches are available. Searching within a supplied timer array and filtering from a property structure are not yet implemented."
+    }
+  ],
   "links": [
     {
       "label": "timer",

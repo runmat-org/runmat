@@ -11,6 +11,241 @@ use runmat_macros::runtime_builtin;
 
 const ARRAY2TIMETABLE_BUILTIN_NAME: &str = "array2timetable";
 
+const TIMETABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "TT",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Output timetable.",
+}];
+const TIMETABLE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "rowTimes or timing options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Datetime/duration row times, SampleRate, TimeStep, or preallocation options.",
+    },
+    BuiltinParamDescriptor {
+        name: "variables and Name,Value options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Same-height data variables plus VariableNames, Size, VariableTypes, and timing options.",
+    },
+];
+const TIMETABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "TT = timetable()",
+        inputs: &[],
+        outputs: &TIMETABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TT = timetable(rowTimes, variables..., Name=Value...)",
+        inputs: &TIMETABLE_INPUTS,
+        outputs: &TIMETABLE_OUTPUT,
+    },
+];
+pub const TIMETABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIMETABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+
+const TIMETABLE2TABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "T",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Output table.",
+}];
+const TIMETABLE2TABLE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "TT",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input timetable.",
+    },
+    BuiltinParamDescriptor {
+        name: "ConvertRowTimes",
+        ty: BuiltinParamType::PropertyValue,
+        arity: BuiltinParamArity::Optional,
+        default: Some("true"),
+        description:
+            "Logical flag that controls whether row times become the first table variable.",
+    },
+];
+const TIMETABLE2TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "T = timetable2table(TT, ConvertRowTimes=value)",
+    inputs: &TIMETABLE2TABLE_INPUTS,
+    outputs: &TIMETABLE2TABLE_OUTPUT,
+}];
+pub const TIMETABLE2TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIMETABLE2TABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+
+pub(in crate::builtins::table) const TIMETABLE2TABLE_INTEGER_OPTION_EXTENSION:
+    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timetable2table-typed-integer-convert-row-times",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timetable2table with a typed-integer ConvertRowTimes value is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Timetable2TableIntegerConvertRowTimesExtension"),
+};
+const TIMETABLE2TABLE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "timetable2table-explicit-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "timetable2table with explicitly GPU-resident input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Timetable2TableExplicitGpuInputExtension"),
+    };
+pub const TIMETABLE2TABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TIMETABLE2TABLE_INTEGER_OPTION_EXTENSION,
+    TIMETABLE2TABLE_EXPLICIT_GPU_EXTENSION,
+];
+const TIMETABLE2TABLE_INTEGER_VARIABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer timetable variables",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every data variable retains its native integer class, shape, and payload when timetable metadata is converted to table metadata.",
+    }];
+const TIMETABLE2TABLE_INTEGER_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ConvertRowTimes",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public option is logical. RunMat mode additionally accepts exact integer zero or one.",
+    }];
+pub const TIMETABLE2TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = timetable2table(TT_with_integer_variables, Name=Value...)",
+        inputs: &TIMETABLE2TABLE_INTEGER_VARIABLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Conversion never creates an f64 compatibility mirror for contained integer variables. By default, row times become the first table variable.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = timetable2table(TT, ConvertRowTimes=typed_integer_flag)",
+        inputs: &TIMETABLE2TABLE_INTEGER_OPTION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The mode gate runs before residency access; admitted values are decoded exactly and never pass through f64.",
+    },
+];
+
+pub(in crate::builtins::table) const TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION:
+    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timetable-numeric-row-times",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timetable with numeric row times is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimetableNumericRowTimesExtension"),
+};
+const TIMETABLE_GENERATED_ROW_TIMES_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "timetable-generated-row-times",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "timetable with data variables but no timing source uses generated row times as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TimetableGeneratedRowTimesExtension"),
+    };
+const TIMETABLE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timetable-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timetable with explicitly GPU-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimetableExplicitGpuInputExtension"),
+};
+pub const TIMETABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION,
+    TIMETABLE_GENERATED_ROW_TIMES_EXTENSION,
+    TIMETABLE_EXPLICIT_GPU_EXTENSION,
+];
+const TIMETABLE_INTEGER_VARIABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "data variables or VariableTypes",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Timetable data variables may use all eight integer classes and retain authoritative native storage.",
+    }];
+const TIMETABLE_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Size",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The two-element preallocation size is decoded exactly as nonnegative platform dimensions.",
+    }];
+const TIMETABLE_INTEGER_SAMPLE_RATE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "SampleRate",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A positive numeric sample rate crosses the explicit floating seconds-to-days timing boundary after exact integer validation.",
+    }];
+const TIMETABLE_INTEGER_ROW_TIMES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numeric RowTimes",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Compatibility mode requires datetime or duration row times. RunMat mode retains exact numeric row-time storage for numeric timetable workflows.",
+    }];
+pub const TIMETABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "TT = timetable(rowTimes, integer_var1, ..., integer_varN, Name=Value...)",
+        inputs: &TIMETABLE_INTEGER_VARIABLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each data variable remains independent of row-time metadata and is stored without an f64 compatibility mirror.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "TT = timetable(Size=integer_sz, VariableTypes=types, timingName=timingValue)",
+        inputs: &TIMETABLE_INTEGER_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer VariableTypes allocate zero-filled native columns directly; a timing source is required for nonempty preallocation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "TT = timetable(..., SampleRate=integer_Fs, ...)",
+        inputs: &TIMETABLE_INTEGER_SAMPLE_RATE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The sample-rate control determines duration or datetime row times and does not change any data-variable class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "TT = timetable(integer_row_times, variables...)",
+        inputs: &TIMETABLE_INTEGER_ROW_TIMES_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "This mode-gated numeric extension preserves class, shape, and values and supports exact timerange selection.",
+    },
+];
+
 const TABLE2TIMETABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "TT",
     ty: BuiltinParamType::Any,
@@ -292,18 +527,95 @@ pub const ARRAY2TIMETABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescrip
     summary = "Create a timetable from row times and variables.",
     keywords = "timetable,table,RowTimes,TimeStep,VariableNames",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    descriptor(crate::builtins::table::builtins::timetable::TIMETABLE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::timetable::TIMETABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::timetable::TIMETABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMETABLE_EXPLICIT_GPU_EXTENSION,
+            "timetable",
+        )?;
+    }
     let args = gather_values(&args).await?;
-    let (row_times, variables, options) = split_timetable_constructor_args(args)?;
-    let names = options
-        .variable_names
-        .unwrap_or_else(|| generated_variable_names(variables.len()));
-    let mut value =
-        table_from_columns_with_class(TIMETABLE_CLASS, names, variables, options.row_names)?;
+    let (explicit_row_times, variables, options) = split_timetable_constructor_args(args)?;
+    let timing_forms = usize::from(explicit_row_times.is_some())
+        + usize::from(options.sample_rate.is_some())
+        + usize::from(options.time_step.is_some());
+    if timing_forms > 1 {
+        return Err(invalid_argument(
+            "timetable: specify exactly one of RowTimes, SampleRate, or TimeStep",
+        ));
+    }
+    if options.start_time.is_some() && options.sample_rate.is_none() && options.time_step.is_none()
+    {
+        return Err(invalid_argument(
+            "timetable: StartTime requires SampleRate or TimeStep",
+        ));
+    }
+
+    let preallocated = options.table.size.is_some() || options.table.variable_types.is_some();
+    let (names, variables, row_names, height) = if preallocated {
+        preallocated_table_columns(variables, options.table, "timetable")?
+    } else {
+        let names = options
+            .table
+            .variable_names
+            .unwrap_or_else(|| generated_variable_names(variables.len()));
+        let height = variables
+            .first()
+            .map(value_row_count)
+            .transpose()?
+            .unwrap_or(0);
+        (names, variables, options.table.row_names, height)
+    };
+
+    let row_times = if let Some(row_times) = explicit_row_times {
+        Some(row_times)
+    } else if options.sample_rate.is_some() || options.time_step.is_some() {
+        Some(array2timetable_row_times(
+            &Array2TimetableOptions {
+                row_times: None,
+                sample_rate: options.sample_rate,
+                time_step: options.time_step,
+                start_time: options.start_time,
+                variable_names: None,
+                dimension_names: None,
+            },
+            height,
+        )?)
+    } else {
+        None
+    };
+
+    if let Some(row_times) = row_times.as_ref() {
+        if !is_time_like_value(row_times) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION,
+                "timetable",
+            )?;
+            if !matches!(row_times, Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
+                return Err(invalid_argument(
+                    "timetable: RowTimes must contain datetime or duration values",
+                ));
+            }
+        }
+    } else if height > 0 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMETABLE_GENERATED_ROW_TIMES_EXTENSION,
+            "timetable",
+        )?;
+    }
+
+    let mut value = table_from_columns_with_class(TIMETABLE_CLASS, names, variables, row_names)?;
     if let Value::Object(object) = &mut value {
         set_timetable_row_times(object, row_times)?;
     }
@@ -493,18 +805,45 @@ fn table2timetable_time_variable_name(selector: &Value, names: &[String]) -> Bui
     summary = "Convert a timetable into a table.",
     keywords = "timetable2table,timetable,table,ConvertRowTimes",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    descriptor(crate::builtins::table::builtins::timetable::TIMETABLE2TABLE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::timetable::TIMETABLE2TABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::timetable::TIMETABLE2TABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn timetable2table_builtin(
     value: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if rest.chunks_exact(2).any(|pair| {
+        scalar_text(&pair[0], "timetable2table option").is_ok_and(|name| {
+            name.eq_ignore_ascii_case("ConvertRowTimes")
+                && crate::builtins::common::validation::value_contains_native_integer_class(
+                    &pair[1],
+                )
+        })
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMETABLE2TABLE_INTEGER_OPTION_EXTENSION,
+            "timetable2table",
+        )?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMETABLE2TABLE_EXPLICIT_GPU_EXTENSION,
+            "timetable2table",
+        )?;
+    }
     let host = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;
     let rest = gather_values(&rest).await?;
-    let convert_row_times = parse_bool_option(&rest, "ConvertRowTimes", false, "timetable2table")?;
+    let convert_row_times = parse_timetable2table_convert_row_times(&rest)?;
     let object = into_timetable_object(host, "timetable2table")?;
     let mut names = table_variable_names_from_object(&object)?;
     let variables = table_variables(&object)?;
@@ -522,6 +861,24 @@ pub(crate) async fn timetable2table_builtin(
     }
     let row_names = selected_row_names(&object, &(0..table_height(&object)?).collect::<Vec<_>>())?;
     table_from_columns_with_properties(names, columns, row_names)
+}
+
+fn parse_timetable2table_convert_row_times(args: &[Value]) -> BuiltinResult<bool> {
+    if args.is_empty() {
+        return Ok(true);
+    }
+    if args.len() != 2 {
+        return Err(invalid_argument(
+            "timetable2table: ConvertRowTimes must be supplied as one name-value pair",
+        ));
+    }
+    let name = scalar_text(&args[0], "timetable2table option")?;
+    if !name.eq_ignore_ascii_case("ConvertRowTimes") {
+        return Err(invalid_argument(format!(
+            "timetable2table: unsupported option '{name}'"
+        )));
+    }
+    zero_one_bool_scalar(&args[1], "ConvertRowTimes")
 }
 
 #[runtime_builtin(
