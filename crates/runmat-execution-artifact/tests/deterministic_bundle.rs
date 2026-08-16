@@ -90,6 +90,33 @@ fn complete_executable_unit_survives_package_archive_round_trip() {
 }
 
 #[test]
+fn meshing_host_workload_form_survives_package_archive_round_trip() {
+    let (_temp, project, revision) = support::frozen_project();
+    let mut recipe = support::recipe(revision.clone());
+    recipe.entrypoint = "meshing_workload".into();
+    recipe.execution_mode = "meshing".into();
+    recipe.target = runmat_execution_artifact::ProgramTarget::portable("portable-meshing-host-v2");
+    let bundle = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_compiled_package_closure()
+        .with_materialized_program(
+            recipe,
+            ExecutableForm::MeshingWorkloadV2,
+            b"canonical-meshing-host-contract".to_vec(),
+        )
+        .build()
+        .unwrap();
+    let mut archive = Vec::new();
+    write_bundle(&bundle, &mut archive, ArchiveLimits::default()).unwrap();
+    let decoded = read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap();
+    assert_eq!(decoded, bundle);
+    assert_eq!(
+        decoded.manifest.artifacts[0].form,
+        ExecutableForm::MeshingWorkloadV2
+    );
+}
+
+#[test]
 fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
     let (_temp, project, revision) = support::frozen_project();
     let bytes = executable_unit_support::bytes(revision.clone());

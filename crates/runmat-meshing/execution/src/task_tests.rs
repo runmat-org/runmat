@@ -265,16 +265,16 @@ fn unchanged_scheduler_admits_only_a_capable_worker() {
         .any(|action| matches!(action, DriverAction::Launch(_))));
 }
 
-struct Fixture {
-    request: MeshingRequestV2,
-    identity: MeshingStageIdentityV2,
-    workload: MeshingWorkloadRequestV2,
-    input: ValueRef,
-    context: MeshingExecutionContext,
+pub(crate) struct Fixture {
+    pub(crate) request: MeshingRequestV2,
+    pub(crate) identity: MeshingStageIdentityV2,
+    pub(crate) workload: MeshingWorkloadRequestV2,
+    pub(crate) input: ValueRef,
+    pub(crate) context: MeshingExecutionContext,
 }
 
 impl Fixture {
-    fn new(stage: MeshingStageV2) -> Self {
+    pub(crate) fn new(stage: MeshingStageV2) -> Self {
         let request = request();
         let input_digest = stable(20);
         let cohort = "native-cohort-v1".to_string();

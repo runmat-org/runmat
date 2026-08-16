@@ -146,6 +146,7 @@ fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -
         ExecutableForm::InterpreterBytecodeV1 => function.to_string() == entrypoint,
         ExecutableForm::InterpreterScriptV1 => function == 0 && entrypoint == "script",
         ExecutableForm::TestAttemptV1 => function == 0 && entrypoint == "test_attempt",
+        ExecutableForm::MeshingWorkloadV2 => function == 0 && entrypoint == "meshing_workload",
         ExecutableForm::ExecutableUnitV3 => function.to_string() == entrypoint,
         ExecutableForm::NativeObjectV1 => function.to_string() == entrypoint,
     }

@@ -119,7 +119,9 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                 || self.materializations.iter().any(|materialization| {
                     !matches!(
                         materialization.form,
-                        ExecutableForm::ExecutableUnitV3 | ExecutableForm::NativeObjectV1
+                        ExecutableForm::ExecutableUnitV3
+                            | ExecutableForm::NativeObjectV1
+                            | ExecutableForm::MeshingWorkloadV2
                     )
                 }))
         {

@@ -4,10 +4,13 @@
 //! immutable closure onto execution artifact objects and, in later modules, execution workloads.
 
 mod error;
+mod host;
 mod objects;
 mod publication;
 mod task;
 
+#[cfg(test)]
+mod host_tests;
 #[cfg(test)]
 mod publication_tests;
 #[cfg(test)]
@@ -16,6 +19,10 @@ mod task_tests;
 mod tests;
 
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
+pub use host::{
+    MeshingHostWorkloadV2, MESHING_HOST_EXECUTION_MODE, MESHING_HOST_TARGET_PROFILE,
+    MESHING_HOST_WORKLOAD_SCHEMA_VERSION,
+};
 pub use objects::{
     import_stage_objects, prepare_stage_objects, MeshingStageObjectRoot,
     PreparedMeshingStageObjects, MESHING_RESULT_IDENTITY_MEDIA_TYPE,

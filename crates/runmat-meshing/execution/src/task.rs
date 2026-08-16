@@ -144,7 +144,7 @@ fn validate_identity_binding(
     Ok(())
 }
 
-fn validate_inputs(
+pub(crate) fn validate_inputs(
     workload: &MeshingWorkloadRequestV2,
     roots: &[ValueRef],
     access: &MeshingArtifactAccess,

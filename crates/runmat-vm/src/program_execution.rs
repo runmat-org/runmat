@@ -80,6 +80,11 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
             message: "test-attempt programs require a test-capable execution host".into(),
         };
     }
+    if request.artifact.form == ExecutableForm::MeshingWorkloadV2 {
+        return ProgramExecutionResponse::Failure {
+            message: "meshing workloads require a meshing-capable execution host".into(),
+        };
+    }
     if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
         return execute_unit_request(request).await;
     }
@@ -316,5 +321,57 @@ mod tests {
                 requested_outputs: 1,
             }));
         assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+    }
+
+    #[test]
+    fn generic_vm_rejects_meshing_workload_for_specialized_host() {
+        let revision = ProgramRevision::new(
+            Digest::sha256(b"mesh-graph"),
+            Digest::sha256(b"mesh-source"),
+            ProgramEnvironment::new(
+                1,
+                1,
+                Digest::sha256(b"runtime"),
+                Digest::sha256(b"catalog"),
+                "matlab",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let recipe = ProgramBuildRecipe {
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: revision,
+            entrypoint: "meshing_workload".into(),
+            outputs: OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "meshing".into(),
+            target: runmat_execution_artifact::ProgramTarget::portable("portable-meshing-host-v2"),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let artifact = ProgramArtifact::materialize(
+            &recipe,
+            ExecutableForm::MeshingWorkloadV2,
+            b"inert-host-contract".to_vec(),
+        )
+        .unwrap();
+        let response =
+            futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                recipe,
+                artifact,
+                function: 0,
+                arguments: Vec::new(),
+                requested_outputs: 1,
+            }));
+        assert_eq!(
+            response,
+            ProgramExecutionResponse::Failure {
+                message: "meshing workloads require a meshing-capable execution host".into(),
+            }
+        );
     }
 }

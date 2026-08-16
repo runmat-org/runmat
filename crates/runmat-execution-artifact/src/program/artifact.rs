@@ -16,6 +16,7 @@ pub enum ExecutableForm {
     TestAttemptV1 = 2,
     ExecutableUnitV3 = 3,
     NativeObjectV1 = 4,
+    MeshingWorkloadV2 = 5,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
