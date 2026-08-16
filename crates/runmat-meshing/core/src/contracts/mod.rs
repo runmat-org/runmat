@@ -16,6 +16,7 @@ pub mod stage;
 pub mod surface;
 pub mod tetrahedron;
 pub mod topology;
+pub mod v2;
 
 pub use artifact::{
     analysis_mesh_field_topology, AnalysisBoundaryEdge, AnalysisBoundaryFace,
@@ -85,3 +86,4 @@ pub use tetrahedron::{
     TETRAHEDRON_UNTANGLING_REJECTION_PREFIX, TETRAHEDRON_UNTANGLING_RELOCATED_SEED_COUNT,
 };
 pub use topology::{BoundaryElementKind, VolumeElementKind};
+pub use v2::*;

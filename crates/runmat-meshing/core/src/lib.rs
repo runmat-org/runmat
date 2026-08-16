@@ -23,6 +23,16 @@ pub use contracts::options::{
 };
 pub use contracts::provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use contracts::topology::{BoundaryElementKind, VolumeElementKind};
+pub use contracts::v2::{
+    AlgorithmVersionSet, CancellationPolicyV2, GeometricWitness, GeometryRevisionRef,
+    GeometryTolerancePolicy, MeshElementOrderV2, MeshingCancellationSignal, MeshingContractError,
+    MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure, MeshingFailureCategory,
+    MeshingOperationV2, MeshingQualityTargetsV2, MeshingRequestV2, MeshingResourceBudgetV2,
+    MeshingStageV2, MetricCombinationRule, MetricContribution, MetricContributionScope,
+    MetricFieldRequestV2, MetricSourceKind, MetricTensor3, NeverCancelled, PersistentEntityId,
+    PersistentEntityKind, StableDigest, SurfaceQualityTargetsV2, VolumeQualityTargetsV2,
+    MESHING_FAILURE_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+};
 pub use contracts::{
     validate_meshing_stage_order, CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract,
     CadModel, CadShellContract, CadVertexContract, CadVolumeContract, CurveMesh, CurveMeshElement,
