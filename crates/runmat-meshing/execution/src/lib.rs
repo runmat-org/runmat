@@ -3,10 +3,12 @@
 //! Meshing owns logical records, stage identity, and manifest closure. This crate only maps that
 //! immutable closure onto execution artifact objects and, in later modules, execution workloads.
 
+mod budget;
 mod error;
 mod host;
 mod objects;
 mod publication;
+mod serial;
 mod task;
 
 #[cfg(test)]
@@ -14,10 +16,15 @@ mod host_tests;
 #[cfg(test)]
 mod publication_tests;
 #[cfg(test)]
+mod serial_tests;
+#[cfg(test)]
 mod task_tests;
 #[cfg(test)]
 mod tests;
 
+pub use budget::{
+    MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl, NoopMeshingProgress,
+};
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
 pub use host::{
     MeshingHostWorkloadV2, MESHING_HOST_EXECUTION_MODE, MESHING_HOST_TARGET_PROFILE,
@@ -31,6 +38,10 @@ pub use objects::{
 pub use publication::{
     import_result_publication, prepare_result_publication, MeshingArtifactAccess,
     PreparedMeshingResultPublication,
+};
+pub use serial::{
+    execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
+    MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,
 };
 pub use task::{
     build_task_submission, MeshingExecutionContext, MeshingTaskEffectPolicy,
