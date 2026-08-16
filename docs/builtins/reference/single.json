@@ -38,7 +38,7 @@
     "Complex values convert both the real and imaginary components to single precision using MATLAB’s analytic extension rules.",
     "Character arrays return their Unicode code points (equivalent to `double(char)`), quantised to single precision. Strings, structs, cells, objects, and other unsupported classes raise MATLAB-style errors (`\"single: conversion to single from <type> is not possible\"`).",
     "Empty arrays stay empty, singleton expansion is unaffected, and metadata such as orientation is preserved exactly.",
-    "The two-argument `single(X, 'like', prototype)` form is a RunMat extension. It is available in `runmat` compatibility mode and rejected in MATLAB-compatible modes because the public R2026a `single` contract documents only `single(X)`."
+    "The two-argument `single(X, 'like', prototype)` form is a RunMat extension. It is available in `runmat` compatibility mode and rejected in MATLAB-compatible modes because the compatibility target's public `single` contract documents only `single(X)`."
   ],
   "examples": [
     {

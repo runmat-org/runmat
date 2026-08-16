@@ -345,7 +345,7 @@ const PAD_LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly documents single, double, and every built-in integer class for the nonnegative scalar output length.",
+        notes: "The compatibility target explicitly documents single, double, and every built-in integer class for the nonnegative scalar output length.",
     }];
 
 pub const PAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

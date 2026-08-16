@@ -128,7 +128,7 @@
     "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/decomposition.rs"
   },
   "gpu_behavior": [
-    "R2026a does not document GPU Array support for `decomposition`. RunMat retains gpuArray arguments behind its explicit extension mode and gathers them to host storage because the object owns normalized matrix metadata.",
+    "The compatibility target does not document GPU Array support for `decomposition`. RunMat retains gpuArray arguments behind its explicit extension mode and gathers them to host storage because the object owns normalized matrix metadata.",
     "Solves through `dA \\ b` and `b / dA` call the existing `mldivide` and `mrdivide` implementations with the effective coefficient matrix. If a provider accepts that solve, residency follows the same provider behavior as direct matrix division; otherwise RunMat uses the host fallback."
   ]
 }

@@ -81,7 +81,7 @@ const GRAY2RGB_CALL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDesc
     id: "gray2rgb-callable",
     mode: BuiltinExtensionMode::RunMatOnly,
     description:
-        "gray2rgb is a RunMat-provided image helper rather than an R2026a MATLAB product API",
+        "gray2rgb is a RunMat-provided image helper rather than an API in the compatibility target",
     error_identifier: Some("RunMat:compatibility:Gray2rgbCallExtension"),
 };
 

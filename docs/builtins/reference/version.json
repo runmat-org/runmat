@@ -24,17 +24,11 @@
   "description": "`version` returns the RunMat crate version. `version('-release')` returns RunMat's advertised MATLAB compatibility release string.",
   "behaviors": [
     "No arguments returns the RunMat package version.",
-    "`'-release'` returns `R2023b` for compatibility branching.",
+    "`'-release'` returns the centrally configured compatibility release for branching.",
     "`'-description'` returns a human-readable RunMat description.",
     "`'-java'` returns an empty string because RunMat does not embed MATLAB's Java runtime."
   ],
-  "examples": [
-    {
-      "description": "Querying the compatibility release",
-      "input": "version('-release')",
-      "output": "ans = 'R2023b'"
-    }
-  ],
+  "examples": [],
   "faqs": [
     {
       "question": "Is this MATLAB's exact version?",
@@ -43,7 +37,8 @@
   ],
   "links": [
     { "label": "verLessThan", "url": "./verLessThan" },
-    { "label": "isdeployed", "url": "./isdeployed" }
+    { "label": "isdeployed", "url": "./isdeployed" },
+    { "label": "Semantic compatibility policy", "url": "/docs/runtime/development/backwards-compat" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs`",

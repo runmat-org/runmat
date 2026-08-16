@@ -90,7 +90,7 @@ const ROOTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64.",
+        notes: "The compatibility target documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64.",
     }];
 pub const ROOTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

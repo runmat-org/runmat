@@ -38,7 +38,7 @@ const INTEGER_ENABLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "[integer-audit-open] R2026a documents numeric or logical scalar 1/0 for the Enable property but does not enumerate native numeric classes; RunMat accepts every exact integer class without floating conversion.",
+        notes: "[integer-audit-open] the compatibility target documents numeric or logical scalar 1/0 for the Enable property but does not enumerate native numeric classes; RunMat accepts every exact integer class without floating conversion.",
     }];
 const INTEGER_TARGET_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

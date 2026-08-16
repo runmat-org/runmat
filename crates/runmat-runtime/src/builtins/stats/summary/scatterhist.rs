@@ -156,7 +156,7 @@ const SCATTERHIST_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double observations; typed integers require exact binary64 representation before histogram and rendering computation.",
+        notes: "The compatibility target documents single and double observations; typed integers require exact binary64 representation before histogram and rendering computation.",
     },
     BuiltinIntegerInputCapability {
         name: "y",
@@ -180,7 +180,7 @@ const SCATTERHIST_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents these numeric controls as single or double. Exact structural flags/bin counts remain integer until validation; renderer-domain sizes, widths, bandwidths, and RGB values require checked binary64 conversion.",
+        notes: "The compatibility target documents these numeric controls as single or double. Exact structural flags/bin counts remain integer until validation; renderer-domain sizes, widths, bandwidths, and RGB values require checked binary64 conversion.",
     }];
 pub const SCATTERHIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

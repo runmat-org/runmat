@@ -53,7 +53,7 @@ const fn surface_integer_input(name: &'static str) -> BuiltinIntegerInputCapabil
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes:
-            "R2026a explicitly lists every native integer class for this surface coordinate role.",
+            "The compatibility target explicitly lists every native integer class for this surface coordinate role.",
     }
 }
 const fn surface_integer_capability(

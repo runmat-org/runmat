@@ -219,7 +219,7 @@ const POLYVAL_INTEGER_COEFFICIENTS_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved.",
+        notes: "The compatibility target documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved.",
     }];
 const POLYVAL_INTEGER_POINTS_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -227,7 +227,7 @@ const POLYVAL_INTEGER_POINTS_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary.",
+        notes: "The compatibility target documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary.",
     }];
 const POLYVAL_INTEGER_OPTIONS_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

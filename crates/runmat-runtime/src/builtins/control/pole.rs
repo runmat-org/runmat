@@ -77,7 +77,7 @@ const POLE_INTEGER_MODEL_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation.",
+        notes: "The compatibility target documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation.",
     }];
 pub const POLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

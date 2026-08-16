@@ -33,7 +33,7 @@
     "The default delimiter is whitespace (`isspace`), and consecutive whitespace is treated as a single separator (equivalent to `'CollapseDelimiters', true`).",
     "When you supply explicit delimiters, they can be a string scalar, string array, character array (rows), or a cell array of character vectors. Delimiters are matched left to right and the longest delimiter wins when several candidates match at the same position.",
     "RunMat mode retains the advanced `'CollapseDelimiters'` and `'IncludeDelimiters'` options behind one compatibility gate; they are not presented as MATLAB-compatible `split` options.",
-    "A documented positive double `dim` controls output orientation. Typed integer dimensions remain evidence-open and are available only in RunMat mode because the public page does not enumerate their storage classes. RunMat rejects dimensions above its supported rank ceiling of 1024 before allocating shape metadata.",
+    "A documented positive double `dim` controls output orientation. Typed integer dimensions are available only in RunMat mode because the compatibility target does not enumerate their storage classes. RunMat rejects dimensions above its supported rank ceiling of 1024 before allocating shape metadata.",
     "Without an explicit dimension, scalar input produces an N×1 string column, a column vector produces M×N, and a multidimensional input appends the token dimension. An explicit dimension inserts or replaces that dimension using column-major ordering.",
     "When requested, the second output contains the matched delimiters with the same orientation rules. Missing values are padded with `<missing>`.",
     "Missing string scalars propagate unchanged."

@@ -37,7 +37,7 @@
     "Character arrays are converted to their numeric code points and returned as doubles, matching MATLAB semantics.",
     "String arrays are not supported and raise an error (`real` expects numeric, logical, or character data).",
     "Sparse arrays are currently densified (sparse support is planned).",
-    "Integer gpuArray input remains resident: unsupported provider kernels use an exact owner-aware download and class-preserving restoration. The public reference does not explicitly state the integer output class, so this otherwise exact behavior remains evidence-open in the capability audit."
+    "Integer gpuArray input remains resident: unsupported provider kernels use an exact owner-aware download and class-preserving restoration. Integer input preserves its exact class and shape."
   ],
   "examples": [
     {

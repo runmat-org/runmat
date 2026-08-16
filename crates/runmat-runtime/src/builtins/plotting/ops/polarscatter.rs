@@ -152,7 +152,7 @@ const POLARSCATTER_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 1]
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly lists all eight integer classes for theta and rho coordinate arrays and permits any numeric class in selected table variables.",
+        notes: "The compatibility target explicitly lists all eight integer classes for theta and rho coordinate arrays and permits any numeric class in selected table variables.",
     }];
 const POLARSCATTER_INTEGER_STYLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -160,7 +160,7 @@ const POLARSCATTER_INTEGER_STYLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly lists every integer class for marker areas and numeric color data; these values enter explicit renderer metadata boundaries.",
+        notes: "The compatibility target explicitly lists every integer class for marker areas and numeric color data; these values enter explicit renderer metadata boundaries.",
     }];
 const POLARSCATTER_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

@@ -79,7 +79,7 @@
   "faqs": [
     {
       "question": "What precisions does `fwrite` support?",
-      "answer": "RunMat recognises the commonly used MATLAB precisions: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`, along with several documented aliases. In `runmat` mode, matching `source=>output` forms are an explicitly gated convenience; R2026a documents that grammar for `fread`, not `fwrite`."
+      "answer": "RunMat recognises the commonly used MATLAB precisions: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`, along with several documented aliases. In `runmat` mode, matching `source=>output` forms are an explicitly gated convenience; the compatibility target documents that grammar for `fread`, not `fwrite`."
     },
     {
       "question": "How are values converted before writing?",

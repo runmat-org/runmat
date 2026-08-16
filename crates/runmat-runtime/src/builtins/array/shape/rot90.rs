@@ -194,7 +194,7 @@ const ROT90_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents all eight integer array classes; rotation is a pure permutation of authoritative native storage.",
+        notes: "The compatibility target documents all eight integer array classes; rotation is a pure permutation of authoritative native storage.",
     },
     BuiltinIntegerInputCapability {
         name: "K",

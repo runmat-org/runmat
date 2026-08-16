@@ -139,7 +139,7 @@ const DOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes.",
+        notes: "The compatibility target documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes.",
     }];
 
 const DOT_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =

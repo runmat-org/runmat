@@ -86,7 +86,7 @@ const FREAD_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double file identifiers; typed integer identifiers are independently gated and checked exactly.",
+        notes: "The compatibility target documents double file identifiers; typed integer identifiers are independently gated and checked exactly.",
     }];
 const FREAD_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -94,7 +94,7 @@ const FREAD_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double size values; typed integer scalar and two-element size controls are independently gated.",
+        notes: "The compatibility target documents double size values; typed integer scalar and two-element size controls are independently gated.",
     }];
 const FREAD_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -102,7 +102,7 @@ const FREAD_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents a double skip scalar; typed integer skip values are independently gated.",
+        notes: "The compatibility target documents a double skip scalar; typed integer skip values are independently gated.",
     }];
 const FREAD_INTEGER_PROTOTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

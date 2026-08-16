@@ -32,7 +32,7 @@
   "description": "`sinpi(X)` computes `sin(X*pi)` without first materializing the approximate floating-point value `X*pi`. Integers return exactly zero and odd half-integers return exactly `+1` or `-1`.",
   "behaviors": [
     "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
-    "The documented R2026a input classes are single and double. Integer, logical, and character inputs are RunMat extensions; integer arrays return exact double zeros directly from native storage, including values above the exact binary64 range.",
+    "The compatibility target's documented input classes are single and double. Integer, logical, and character inputs are RunMat extensions; integer arrays return exact double zeros directly from native storage, including values above the exact binary64 range.",
     "Returns exactly 0 for integer inputs and exactly ±1 for odd half-integer inputs.",
     "Complex inputs use the analytic extension of `sin(pi*z)` while preserving exact real-axis sine/cosine factors when possible.",
     "Output shape matches the input shape; non-finite real inputs produce `NaN`.",

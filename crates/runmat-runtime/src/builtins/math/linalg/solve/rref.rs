@@ -162,7 +162,7 @@ const RREF_INTEGER_MATRIX_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double matrices; RunMat admits typed integers only when every matrix entry is exactly representable in binary64.",
+        notes: "The compatibility target documents single and double matrices; RunMat admits typed integers only when every matrix entry is exactly representable in binary64.",
     }];
 const RREF_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -170,7 +170,7 @@ const RREF_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents a single or double tolerance; the RunMat-only typed scalar form is exactness- and range-checked before conversion.",
+        notes: "The compatibility target documents a single or double tolerance; the RunMat-only typed scalar form is exactness- and range-checked before conversion.",
     }];
 pub const RREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

@@ -143,7 +143,7 @@ const POLYDER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double polynomial coefficients. RunMat admits typed integers only after exact conversion to the floating polynomial domain.",
+        notes: "The compatibility target documents single and double polynomial coefficients. RunMat admits typed integers only after exact conversion to the floating polynomial domain.",
     }];
 pub const POLYDER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

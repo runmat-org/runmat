@@ -26,7 +26,7 @@ const SUBTITLE_INTEGER_FONT_SIZE: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents every native integer class for the FontSize property.",
+        notes: "The compatibility target documents every native integer class for the FontSize property.",
     }];
 const SUBTITLE_INTEGER_AXES: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

@@ -66,7 +66,7 @@ const PIVOT_INTEGER_GROUP_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract.",
+        notes: "The compatibility target permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract.",
     }];
 const PIVOT_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -82,7 +82,7 @@ const PIVOT_INTEGER_BIN_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation.",
+        notes: "The compatibility target documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation.",
     }];
 const PIVOT_INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

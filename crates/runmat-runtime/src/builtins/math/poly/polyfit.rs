@@ -229,7 +229,7 @@ const POLYFIT_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved.",
+        notes: "The compatibility target documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved.",
     }];
 const POLYFIT_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -237,7 +237,7 @@ const POLYFIT_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary.",
+        notes: "The compatibility target documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary.",
     }];
 const POLYFIT_INTEGER_DEGREE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

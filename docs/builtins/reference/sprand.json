@@ -34,7 +34,7 @@
     "`density` must be finite and between `0` and `1`.",
     "`sprand(m, n, density, rc)` accepts a scalar reciprocal-condition target or a vector of singular values in `[0,1]`. RunMat starts from the requested singular profile and applies random orthogonal plane rotations to add sparse fill while preserving that profile.",
     "A trailing `\"double\"` or `\"single\"` typename selects the sparse output class.",
-    "All eight integer classes are documented for the pattern input `S`. Typed integer dimensions, density, and condition controls remain evidence-open RunMat extensions; dimensions are structural, while numerical controls reject if binary64 conversion would round.",
+    "All eight integer classes are documented for the pattern input `S`. Typed integer dimensions, density, and condition controls are RunMat extensions; dimensions are structural, while numerical controls reject if binary64 conversion would round.",
     "Large requested sparse patterns, condition-profile dense intermediates, and excessive plane-rotation work are rejected before allocating or running unbounded work."
   ],
   "examples": [

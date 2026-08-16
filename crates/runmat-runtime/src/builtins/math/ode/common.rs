@@ -69,7 +69,7 @@ macro_rules! define_ode_integer_contract {
                 classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
                 availability: runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
                 scalar_double: runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
-                notes: "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly.",
+                notes: "The compatibility target documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly.",
             }];
         const INTEGER_Y0_INPUT: [runmat_builtins::BuiltinIntegerInputCapability; 1] =
             [runmat_builtins::BuiltinIntegerInputCapability {
@@ -77,7 +77,7 @@ macro_rules! define_ode_integer_contract {
                 classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
                 availability: runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
                 scalar_double: runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
-                notes: "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly.",
+                notes: "The compatibility target documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly.",
             }];
         const INTEGER_OPTION_INPUT: [runmat_builtins::BuiltinIntegerInputCapability; 1] =
             [runmat_builtins::BuiltinIntegerInputCapability {
@@ -93,7 +93,7 @@ macro_rules! define_ode_integer_contract {
                 classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
                 availability: runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
                 scalar_double: runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
-                notes: "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion.",
+                notes: "The compatibility target requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion.",
             }];
         pub const INTEGER_CAPABILITIES: [runmat_builtins::BuiltinIntegerCapabilityDescriptor; 4] = [
             runmat_builtins::BuiltinIntegerCapabilityDescriptor { form: concat!("[t,y] = ", $builtin, "(odefun, integer_tspan, y0, ___)"), inputs: &INTEGER_TSPAN_INPUT, computation_domain: runmat_builtins::BuiltinIntegerComputationDomain::FloatingPoint, output_class: runmat_builtins::BuiltinIntegerOutputClassRule::Double, overflow: runmat_builtins::BuiltinIntegerOverflowRule::Error, backend: runmat_builtins::BuiltinIntegerBackendRule::GatherFallback, overload: runmat_builtins::BuiltinIntegerOverloadKind::Multiple, notes: "Integer time points are a checked RunMat-only input to the host double integration loop." },

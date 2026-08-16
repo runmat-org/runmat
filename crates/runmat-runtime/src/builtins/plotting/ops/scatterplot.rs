@@ -236,7 +236,7 @@ const SCATTERPLOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double samples; typed integer values require exact binary64 representation before constellation geometry is computed.",
+        notes: "The compatibility target documents single and double samples; typed integer values require exact binary64 representation before constellation geometry is computed.",
     }];
 const SCATTERPLOT_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
@@ -244,14 +244,14 @@ const SCATTERPLOT_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a specifies a double positive-integer decimation factor; RunMat mode validates typed integer storage exactly.",
+        notes: "The compatibility target specifies a double positive-integer decimation factor; RunMat mode validates typed integer storage exactly.",
     },
     BuiltinIntegerInputCapability {
         name: "offset",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a specifies a double nonnegative-integer offset; RunMat mode validates it exactly and requires offset < n.",
+        notes: "The compatibility target specifies a double nonnegative-integer offset; RunMat mode validates it exactly and requires offset < n.",
     },
 ];
 pub const SCATTERPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [

@@ -105,7 +105,7 @@ const IMAG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat accepts every native real or componentwise-complex integer class. R2026a defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open.",
+        notes: "RunMat accepts every native real or componentwise-complex integer class. The compatibility target defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open.",
     }];
 
 pub const IMAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

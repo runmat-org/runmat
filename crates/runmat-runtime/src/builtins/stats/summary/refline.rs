@@ -177,7 +177,7 @@ const REFLINE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents single and double slopes. RunMat admits typed integers only at a checked binary64 graphics boundary.",
+        notes: "The compatibility target documents single and double slopes. RunMat admits typed integers only at a checked binary64 graphics boundary.",
     },
     BuiltinIntegerInputCapability {
         name: "b/coeffs",

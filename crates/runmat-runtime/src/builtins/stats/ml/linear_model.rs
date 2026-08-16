@@ -343,9 +343,9 @@ macro_rules! fitlm_integer_input {
         }];
     };
 }
-fitlm_integer_input!(FITLM_INTEGER_PREDICTOR_INPUT, "X or active table predictors", "R2026a documents single or double predictors. RunMat mode admits all eight integer classes at an exact binary64 fitting boundary.");
-fitlm_integer_input!(FITLM_INTEGER_RESPONSE_INPUT, "y or active table response", "R2026a documents single or double matrix responses and numeric/logical table responses, but not typed integers. RunMat mode requires exact binary64 representation.");
-fitlm_integer_input!(FITLM_INTEGER_WEIGHTS_INPUT, "Weights", "R2026a documents single or double weights. RunMat mode admits typed integers only at an exact binary64 weighting boundary.");
+fitlm_integer_input!(FITLM_INTEGER_PREDICTOR_INPUT, "X or active table predictors", "The compatibility target documents single or double predictors. RunMat mode admits all eight integer classes at an exact binary64 fitting boundary.");
+fitlm_integer_input!(FITLM_INTEGER_RESPONSE_INPUT, "y or active table response", "The compatibility target documents single or double matrix responses and numeric/logical table responses, but not typed integers. RunMat mode requires exact binary64 representation.");
+fitlm_integer_input!(FITLM_INTEGER_WEIGHTS_INPUT, "Weights", "The compatibility target documents single or double weights. RunMat mode admits typed integers only at an exact binary64 weighting boundary.");
 fitlm_integer_input!(FITLM_INTEGER_SELECTOR_INPUT, "Exclude and numeric selectors", "Typed-integer structural selectors are parsed exactly as one-based indices or logical-style masks after independent extension admission.");
 fitlm_integer_input!(FITLM_INTEGER_CONTROL_INPUT, "Intercept", "A typed-integer Intercept scalar is a RunMat-only exact zero/nonzero control and does not cross through binary64.");
 

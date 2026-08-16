@@ -426,7 +426,7 @@ const RANDI_WIDE_INTEGER_PROTOTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         ],
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a omits int64/uint64 from the documented output class and prototype lists; RunMat preserves both as independently gated exact host extensions.",
+        notes: "The compatibility target omits int64/uint64 from the documented output class and prototype lists; RunMat preserves both as independently gated exact host extensions.",
     }];
 pub const RANDI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
     BuiltinIntegerCapabilityDescriptor {

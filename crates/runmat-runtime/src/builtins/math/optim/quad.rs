@@ -68,7 +68,7 @@ const INTEGER_BOUND_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerI
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "R2026a documents single and double finite limits; typed integer bounds are gated and cross binary64 exactly.",
+    notes: "The compatibility target documents single and double finite limits; typed integer bounds are gated and cross binary64 exactly.",
 }];
 const INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -76,7 +76,7 @@ const INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double tolerance; typed integer tolerance is a checked RunMat extension.",
+        notes: "The compatibility target documents single and double tolerance; typed integer tolerance is a checked RunMat extension.",
     }];
 const INTEGER_TRACE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "trace",

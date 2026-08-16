@@ -31,7 +31,7 @@ const SUBPLOT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public R2026a data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly.",
+        notes: "The compatibility target's public data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly.",
     }];
 pub const SUBPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

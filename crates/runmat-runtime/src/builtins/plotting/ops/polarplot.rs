@@ -162,7 +162,7 @@ const POLARPLOT_INTEGER_SELECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents numeric scalar/vector table-variable indices; these are exact one-based structural selectors.",
+        notes: "The compatibility target documents numeric scalar/vector table-variable indices; these are exact one-based structural selectors.",
     }];
 pub const POLARPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

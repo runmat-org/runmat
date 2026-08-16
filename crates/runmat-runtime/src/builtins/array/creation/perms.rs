@@ -123,7 +123,7 @@ const PERMS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly documents every integer class and shows an int16 example. Values are rearranged without arithmetic or conversion.",
+        notes: "The compatibility target explicitly documents every integer class and shows an int16 example. Values are rearranged without arithmetic or conversion.",
     }];
 pub const PERMS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs use a separately declared RunMat-only resident-fallback extension: admitted inputs are gathered to host, parameter estimation runs on CPU, and the result is a host ProbabilityDistribution object. Strict R2026a compatibility mode rejects this fallback before provider access."
+    "notes": "GPU inputs use a separately declared RunMat-only resident-fallback extension: admitted inputs are gathered to host, parameter estimation runs on CPU, and the result is a host ProbabilityDistribution object. MATLAB-compatible mode rejects this fallback before provider access."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
@@ -19,8 +19,8 @@
   "description": "`fitdist(x,distname)` estimates distribution parameters from vector data and returns a `ProbabilityDistribution` object accepted by `pdf`, `cdf`, `icdf`, and `random`.",
   "behaviors": [
     "Supported fitted distributions are `\"Normal\"`, `\"Exponential\"`, `\"Lognormal\"`, `\"Gamma\"`, `\"Weibull\"`, and `\"Poisson\"`; common short aliases such as `\"norm\"`, `\"exp\"`, `\"logn\"`, `\"gam\"`, `\"wbl\"`, and `\"poiss\"` are accepted.",
-    "Input data must be a numeric vector. R2026a documents double observations; typed-integer observations are a mode-gated RunMat extension and must be exactly representable as binary64. `NaN` observations are ignored and `Inf` observations are rejected.",
-    "`fitdist(x,distname,\"Frequency\",w)` requires one nonnegative finite integer-valued count per observation. R2026a documents single or double count storage; typed-integer Frequency storage is an independently gated RunMat extension. Zero-frequency observations are ignored.",
+    "Input data must be a numeric vector. The compatibility target documents double observations; typed-integer observations are a mode-gated RunMat extension and must be exactly representable as binary64. `NaN` observations are ignored and `Inf` observations are rejected.",
+    "`fitdist(x,distname,\"Frequency\",w)` requires one nonnegative finite integer-valued count per observation. The compatibility target documents single or double count storage; typed-integer Frequency storage is an independently gated RunMat extension. Zero-frequency observations are ignored.",
     "Range constraints follow the selected distribution: exponential data must be nonnegative, lognormal/gamma/weibull data must be positive, and Poisson data must be nonnegative integers.",
     "The returned object exposes `DistributionName`, `DistName`, `ParameterNames`, `ParameterValues`, `NumParameters`, `NumObservations`, `NLogL`, `IsTruncated`, and scalar parameter properties such as `mu`, `sigma`, `lambda`, `a`, or `b`."
   ],
@@ -37,7 +37,7 @@
   "faqs": [
     {
       "question": "Can fitdist fit typed-integer observations or Frequency arrays?",
-      "answer": "In strict R2026a compatibility mode, no. RunMat mode adds separately declared integer-data and integer-Frequency extensions for all eight built-in integer classes, with exact binary64-boundary validation. Results remain host probability-distribution objects with floating parameters."
+      "answer": "In MATLAB-compatible mode, no. RunMat mode adds separately declared integer-data and integer-Frequency extensions for all eight built-in integer classes, with exact binary64-boundary validation. Results remain host probability-distribution objects with floating parameters."
     },
     {
       "question": "Does fitdist support censoring or custom optimization options?",

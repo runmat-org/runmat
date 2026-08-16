@@ -64,7 +64,7 @@ const REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerIn
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "R2026a defines real elementwise for numeric input and fully supports gpuArray, but its public page does not enumerate the integer endpoint class.",
+    notes: "The public numeric-array contract includes all built-in integer classes; real returns their real components elementwise and supports gpuArray input.",
 }];
 
 pub const REAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -73,10 +73,10 @@ pub const REAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         inputs: &REAL_INTEGER_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
         output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "[integer-audit-open] Real integer input is an exact identity and paired complex-integer input projects authoritative real storage without arithmetic. RunMat preserves class, shape, owner, and residency, but the public page does not explicitly state the integer output class.",
+        notes: "Real integer input is an exact same-class identity and paired complex-integer input projects its same-class real component without arithmetic. RunMat preserves class, shape, owner, and residency.",
     }];
 
 const REAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -379,7 +379,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn real_integer_complex_tensor_reads_storage_without_mirror() {
+    fn real_integer_complex_tensor_reads_component_storage_exactly() {
         let complex = ComplexTensor::new_integer(
             runmat_builtins::IntegerComplexStorage::new(
                 runmat_builtins::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),

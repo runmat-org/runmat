@@ -168,7 +168,7 @@ const STACKEDPLOT_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly documents integer arrays as table-variable selectors. RunMat decodes them as exact one-based structural indices.",
+        notes: "The compatibility target explicitly documents integer arrays as table-variable selectors. RunMat decodes them as exact one-based structural indices.",
     }];
 pub const STACKEDPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

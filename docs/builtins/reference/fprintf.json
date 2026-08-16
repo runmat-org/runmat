@@ -76,7 +76,7 @@
     },
     {
       "question": "Can I use `'stdout'` or `'stderr'` instead of numeric identifiers?",
-      "answer": "The numeric identifiers `1` and `2` are MATLAB-compatible. The case-insensitive strings `'stdout'` and `'stderr'` are an independently gated RunMat convenience rather than a documented R2026a form."
+      "answer": "The numeric identifiers `1` and `2` are MATLAB-compatible. The case-insensitive strings `'stdout'` and `'stderr'` are an independently gated RunMat convenience rather than a documented form."
     },
     {
       "question": "What happens if the file was opened read-only?",

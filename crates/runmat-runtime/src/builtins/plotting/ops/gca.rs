@@ -54,7 +54,7 @@ const GCA_INTEGER_FIGURE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a gca has no input form and returns a graphics object; typed integers are exact aliases for RunMat's numeric figure registry only.",
+        notes: "The compatibility target's gca contract has no input form and returns a graphics object; typed integers are exact aliases for RunMat's numeric figure registry only.",
     }];
 pub const GCA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

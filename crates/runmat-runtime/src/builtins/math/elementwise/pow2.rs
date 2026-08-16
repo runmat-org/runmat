@@ -189,7 +189,7 @@ const POW2_INTEGER_UNARY_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double exponent arrays; RunMat admits typed integers only after exact conversion to the floating exp2 domain.",
+        notes: "The compatibility target documents single and double exponent arrays; RunMat admits typed integers only after exact conversion to the floating exp2 domain.",
     }];
 const POW2_INTEGER_SIGNIFICAND_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -197,7 +197,7 @@ const POW2_INTEGER_SIGNIFICAND_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double significands; RunMat admits typed integers only after exact binary64 conversion is proved.",
+        notes: "The compatibility target documents single and double significands; RunMat admits typed integers only after exact binary64 conversion is proved.",
     }];
 const POW2_INTEGER_BINARY_EXPONENT_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -205,7 +205,7 @@ const POW2_INTEGER_BINARY_EXPONENT_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double exponents for the two-input scaling form; native integers are a checked RunMat extension.",
+        notes: "The compatibility target documents single and double exponents for the two-input scaling form; native integers are a checked RunMat extension.",
     }];
 pub const POW2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

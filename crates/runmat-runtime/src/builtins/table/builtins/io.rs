@@ -35,7 +35,7 @@ const DETECT_IMPORT_OPTIONS_INTEGER_HEADER_INPUT: [BuiltinIntegerInputCapability
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public R2026a datatype list is single/double; typed-integer values are admitted only in RunMat mode after an explicit extension gate.",
+        notes: "The compatibility target's public datatype list is single/double; typed-integer values are admitted only in RunMat mode after an explicit extension gate.",
     }];
 pub const DETECT_IMPORT_OPTIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -120,7 +120,7 @@ const TABLE_IMPORT_EXTENSION_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public R2026a datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access.",
+        notes: "The compatibility target's public datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access.",
     }];
 const SPREADSHEET_NUM_VARIABLES_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

@@ -45,7 +45,7 @@ const DET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerIn
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "R2026a documents square single/double matrices; RunMat mode additionally admits all eight real integer classes.",
+    notes: "The compatibility target documents square single/double matrices; RunMat mode additionally admits all eight real integer classes.",
 }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

@@ -46,7 +46,7 @@ const fn meshc_integer_input(name: &'static str) -> BuiltinIntegerInputCapabilit
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes:
-            "R2026a explicitly lists every built-in integer class for this surface coordinate role.",
+            "The compatibility target explicitly lists every built-in integer class for this surface coordinate role.",
     }
 }
 

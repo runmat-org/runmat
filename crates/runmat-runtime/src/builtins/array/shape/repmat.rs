@@ -183,7 +183,7 @@ const REPMAT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents all eight integer classes and class-preserving output.",
+        notes: "The compatibility target documents all eight integer classes and class-preserving output.",
     }];
 const REPMAT_INTEGER_FACTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

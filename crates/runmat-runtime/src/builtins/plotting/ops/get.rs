@@ -28,7 +28,7 @@ const GET_INTEGER_HANDLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents graphics objects, not typed numeric aliases; RunMat resolves exact aliases only under extension policy.",
+        notes: "The compatibility target documents graphics objects, not typed numeric aliases; RunMat resolves exact aliases only under extension policy.",
     }];
 pub const GET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

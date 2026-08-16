@@ -84,7 +84,7 @@
     "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/eigs.rs"
   },
   "gpu_behavior": [
-    "R2026a does not document GPU Array support for `eigs`. RunMat retains gpuArray arguments behind its explicit extension mode, gathers them, and returns host tensors because subset eigenvalue selection needs host-side ordering.",
+    "The compatibility target does not document GPU Array support for `eigs`. RunMat retains gpuArray arguments behind its explicit extension mode, gathers them, and returns host tensors because subset eigenvalue selection needs host-side ordering.",
     "The builtin is explicitly marked `ResidencyPolicy::GatherImmediately` so the runtime does not imply a false GPU fast path.",
     "A future provider implementation should add a true partial eigensolver hook in `runmat-accelerate` and parity tests against this exact fallback."
   ]

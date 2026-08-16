@@ -167,7 +167,7 @@ const PDF_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double evaluation points. RunMat gates typed integers before provider access and requires exact conversion at the floating density boundary.",
+        notes: "The compatibility target documents single and double evaluation points. RunMat gates typed integers before provider access and requires exact conversion at the floating density boundary.",
     }];
 const PDF_INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -175,7 +175,7 @@ const PDF_INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double named-distribution parameters. RunMat independently gates typed parameters and rejects lossy wide values.",
+        notes: "The compatibility target documents single and double named-distribution parameters. RunMat independently gates typed parameters and rejects lossy wide values.",
     }];
 pub const PDF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -337,7 +337,7 @@ const RANDOM_INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single/double named-distribution parameters; typed integers are gated before conversion and must be exactly representable as binary64.",
+        notes: "The compatibility target documents single/double named-distribution parameters; typed integers are gated before conversion and must be exactly representable as binary64.",
     }];
 const RANDOM_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -345,7 +345,7 @@ const RANDOM_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents single/double size controls; RunMat typed sizes are exact structural values and do not cross the distribution computation boundary.",
+        notes: "The compatibility target documents single/double size controls; RunMat typed sizes are exact structural values and do not cross the distribution computation boundary.",
     }];
 pub const RANDOM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -432,7 +432,7 @@ const FITDIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary.",
+        notes: "The compatibility target documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary.",
     }];
 const FITDIST_INTEGER_FREQUENCY_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -440,7 +440,7 @@ const FITDIST_INTEGER_FREQUENCY_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage.",
+        notes: "The compatibility target requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage.",
     }];
 pub const FITDIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

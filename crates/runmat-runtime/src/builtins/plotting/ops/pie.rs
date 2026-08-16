@@ -179,7 +179,7 @@ const PIE_INTEGER_VALUES_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a limits numeric pie values to double. RunMat admits typed integers only when exact binary64 chart geometry is possible.",
+        notes: "The compatibility target limits numeric pie values to double. RunMat admits typed integers only when exact binary64 chart geometry is possible.",
     }];
 const PIE_INTEGER_EXPLODE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

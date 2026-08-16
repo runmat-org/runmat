@@ -85,7 +85,7 @@ const FPRINTF_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order.",
+        notes: "The compatibility target documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order.",
     }];
 const FPRINTF_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -93,7 +93,7 @@ const FPRINTF_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents double identifiers; typed integer identifiers are an independently gated extension.",
+        notes: "The compatibility target documents double identifiers; typed integer identifiers are an independently gated extension.",
     }];
 const FPRINTF_INTEGER_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -101,7 +101,7 @@ const FPRINTF_INTEGER_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "R2026a documents character or string format specifications; numeric code vectors are a gated RunMat extension.",
+        notes: "The compatibility target documents character or string format specifications; numeric code vectors are a gated RunMat extension.",
     }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

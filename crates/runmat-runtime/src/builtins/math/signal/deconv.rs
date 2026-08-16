@@ -71,14 +71,14 @@ const DECONV_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
+        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
     },
     BuiltinIntegerInputCapability {
         name: "denominator",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
+        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
     },
 ];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

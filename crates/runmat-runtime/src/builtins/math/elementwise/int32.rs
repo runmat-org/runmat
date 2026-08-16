@@ -94,7 +94,7 @@ pub const INT32_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; R2026a complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap.",
+        notes: "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; the compatibility target's complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap.",
     }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::int32")]

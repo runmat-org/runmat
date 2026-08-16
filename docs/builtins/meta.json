@@ -23110,7 +23110,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "The output is single when either numeric input is single and double otherwise; integer and logical inputs never produce an integer result. Full orientation follows the R2026a both-columns rule, while same/valid follow u. Resident integer inputs gather exactly through their owning provider before floating convolution and the floating result is restored to that provider."
+          "notes": "The output is single when either numeric input is single and double otherwise; integer and logical inputs never produce an integer result. Full orientation follows the compatibility target's both-columns rule, while same/valid follow u. Resident integer inputs gather exactly through their owning provider before floating convolution and the floating result is restored to that provider."
         }
       ]
     },
@@ -28293,7 +28293,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Cumulative maximum preserves integer class and exact shape in forward or reverse direction; current R2026a exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated."
+          "notes": "Cumulative maximum preserves integer class and exact shape in forward or reverse direction; the compatibility target exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated."
         }
       ]
     },
@@ -29619,7 +29619,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Cumulative minimum preserves integer class and exact shape in forward or reverse direction; current R2026a exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated."
+          "notes": "Cumulative minimum preserves integer class and exact shape in forward or reverse direction; the compatibility target exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated."
         }
       ]
     },
@@ -36134,7 +36134,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients."
+              "notes": "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients."
             },
             {
               "name": "denominator",
@@ -36150,7 +36150,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients."
+              "notes": "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -36241,7 +36241,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents only single and double input; RunMat mode admits all eight real integer classes."
+              "notes": "The compatibility target documents only single and double input; RunMat mode admits all eight real integer classes."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -36472,7 +36472,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents square single/double matrices; RunMat mode additionally admits all eight real integer classes."
+              "notes": "The compatibility target documents square single/double matrices; RunMat mode additionally admits all eight real integer classes."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -36624,7 +36624,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "The public R2026a datatype list is single/double; typed-integer values are admitted only in RunMat mode after an explicit extension gate."
+              "notes": "The compatibility target's public datatype list is single/double; typed-integer values are admitted only in RunMat mode after an explicit extension gate."
             }
           ],
           "computation_domain": "Structural",
@@ -37278,7 +37278,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents every integer class for finite-difference data."
+              "notes": "The compatibility target documents every integer class for finite-difference data."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -38581,7 +38581,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes for zero-based row offsets."
+              "notes": "The compatibility target documents all eight integer classes for zero-based row offsets."
             },
             {
               "name": "C1/C2",
@@ -38597,7 +38597,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes for zero-based column offsets."
+              "notes": "The compatibility target documents all eight integer classes for zero-based column offsets."
             }
           ],
           "computation_domain": "Structural",
@@ -38851,7 +38851,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents all eight integer matrix classes; default formatting serializes authoritative values exactly."
+              "notes": "The compatibility target documents all eight integer matrix classes; default formatting serializes authoritative values exactly."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -38878,7 +38878,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes for the positive significant-digit count."
+              "notes": "The compatibility target documents all eight integer classes for the positive significant-digit count."
             }
           ],
           "computation_domain": "Structural",
@@ -39075,7 +39075,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length."
+              "notes": "The compatibility target documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length."
             },
             {
               "name": "PaddingValue",
@@ -39091,7 +39091,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary."
+              "notes": "The compatibility target documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -39224,7 +39224,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes."
+              "notes": "The compatibility target documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -39377,7 +39377,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values."
+              "notes": "The compatibility target documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -39567,7 +39567,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes."
+              "notes": "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes."
             }
           ],
           "computation_domain": "Structural",
@@ -39594,7 +39594,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N."
+              "notes": "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N."
             }
           ],
           "computation_domain": "Structural",
@@ -39707,7 +39707,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a lists single and double numeric grouping variables. RunMat mode additionally admits all eight integer classes as positive level labels; values outside the bounded feasible output domain reject before floating conversion."
+              "notes": "The compatibility target lists single and double numeric grouping variables. RunMat mode additionally admits all eight integer classes as positive level labels; values outside the bounded feasible output domain reject before floating conversion."
             }
           ],
           "computation_domain": "Structural",
@@ -42708,22 +42708,22 @@
       "extensions": [],
       "integer_capabilities": [
         {
-          "backend": "HostAndGpu",
-          "computation_domain": "FloatingPoint",
           "form": "Y = erf(X)",
           "inputs": [
             {
-              "availability": "Rejected",
-              "classes": [],
               "name": "X",
-              "notes": "Integer and logical inputs are rejected before real floating host or provider dispatch.",
-              "scalar_double": "NotApplicable"
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer and logical inputs are rejected before real floating host or provider dispatch."
             }
           ],
-          "notes": "erf has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+          "computation_domain": "FloatingPoint",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "ElementwiseShapePreserving"
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "erf has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers."
         }
       ],
       "name": "erf",
@@ -42771,22 +42771,22 @@
       "extensions": [],
       "integer_capabilities": [
         {
-          "backend": "HostAndGpu",
-          "computation_domain": "FloatingPoint",
           "form": "Y = erfcinv(X)",
           "inputs": [
             {
-              "availability": "Rejected",
-              "classes": [],
               "name": "X",
-              "notes": "Integer and logical inputs are rejected before real floating host or provider dispatch.",
-              "scalar_double": "NotApplicable"
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer and logical inputs are rejected before real floating host or provider dispatch."
             }
           ],
-          "notes": "erfcinv has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+          "computation_domain": "FloatingPoint",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "ElementwiseShapePreserving"
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "erfcinv has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers."
         }
       ],
       "name": "erfcinv",
@@ -42889,12 +42889,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FunctionSpecific",
           "form": "error(msg, integer_A) or error(errID, msg, integer_A)",
           "inputs": [
             {
-              "availability": "Documented",
+              "name": "A",
               "classes": [
                 "Int8",
                 "Int16",
@@ -42905,40 +42903,42 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "A",
-              "notes": "All eight typed-integer classes are documented numeric formatting values and remain exact through integer conversion specifiers.",
-              "scalar_double": "NotApplicable"
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight typed-integer classes are documented numeric formatting values and remain exact through integer conversion specifiers."
             }
           ],
-          "notes": "Host formatting is exact for integer conversions; documented GPU-array arguments gather only after host message and identifier validation.",
+          "computation_domain": "FunctionSpecific",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host formatting is exact for integer conversions; documented GPU-array arguments gather only after host message and identifier validation."
         },
         {
-          "backend": "HostOnly",
-          "computation_domain": "FunctionSpecific",
           "form": "error(integer_msg, ...) or error(integer_errID, ...)",
           "inputs": [
             {
-              "availability": "Rejected",
-              "classes": [],
               "name": "msg",
-              "notes": "The message role is a text scalar and never converts integer data to text implicitly.",
-              "scalar_double": "NotApplicable"
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The message role is a text scalar and never converts integer data to text implicitly."
             },
             {
-              "availability": "Rejected",
-              "classes": [],
               "name": "errID",
-              "notes": "The identifier role is a text scalar and rejects integer values before provider access.",
-              "scalar_double": "NotApplicable"
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The identifier role is a text scalar and rejects integer values before provider access."
             }
           ],
-          "notes": "Integer values are valid only in formatting-value roles, never as message or identifier text.",
+          "computation_domain": "FunctionSpecific",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "FunctionSpecific"
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer values are valid only in formatting-value roles, never as message or identifier text."
         }
       ],
       "name": "error",
@@ -43058,12 +43058,10 @@
       "extensions": [],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "h = errorbar(integer_Y, integer_E)",
           "inputs": [
             {
-              "availability": "Documented",
+              "name": "Y",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43074,12 +43072,12 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "Y",
-              "notes": "Y accepts every built-in integer class as coordinate data.",
-              "scalar_double": "Allowed"
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y accepts every built-in integer class as coordinate data."
             },
             {
-              "availability": "Documented",
+              "name": "E",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43090,39 +43088,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "E",
-              "notes": "E accepts every built-in integer class as symmetric error lengths.",
-              "scalar_double": "Allowed"
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "E accepts every built-in integer class as symmetric error lengths."
             }
           ],
-          "notes": "Authoritative integer storage crosses one explicit client graphics conversion boundary and returns opaque graphics handles.",
+          "computation_domain": "FloatingPoint",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative integer storage crosses one explicit client graphics conversion boundary and returns opaque graphics handles."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "h = errorbar(integer_X, integer_Y, integer_E)",
           "inputs": [
             {
-              "availability": "Documented",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
               "name": "X",
-              "notes": "X accepts every built-in integer class as coordinate data.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43133,12 +43115,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "X accepts every built-in integer class as coordinate data."
+            },
+            {
               "name": "Y",
-              "notes": "Y accepts every built-in integer class as coordinate data.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43149,39 +43131,39 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y accepts every built-in integer class as coordinate data."
+            },
+            {
               "name": "E",
-              "notes": "E accepts every built-in integer class as symmetric error lengths.",
-              "scalar_double": "Allowed"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "E accepts every built-in integer class as symmetric error lengths."
             }
           ],
-          "notes": "Coordinate and error inputs remain exact until the client graphics conversion boundary.",
+          "computation_domain": "FloatingPoint",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinate and error inputs remain exact until the client graphics conversion boundary."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos)",
           "inputs": [
             {
-              "availability": "Documented",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
               "name": "X",
-              "notes": "X accepts every built-in integer class as coordinate data.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43192,12 +43174,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "X accepts every built-in integer class as coordinate data."
+            },
+            {
               "name": "Y",
-              "notes": "Y accepts every built-in integer class as coordinate data.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43208,12 +43190,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y accepts every built-in integer class as coordinate data."
+            },
+            {
               "name": "YNeg",
-              "notes": "Negative error lengths accept every built-in integer class.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43224,39 +43206,39 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Negative error lengths accept every built-in integer class."
+            },
+            {
               "name": "YPos",
-              "notes": "Positive error lengths accept every built-in integer class.",
-              "scalar_double": "Allowed"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive error lengths accept every built-in integer class."
             }
           ],
-          "notes": "Asymmetric lengths remain exact until the client graphics conversion boundary.",
+          "computation_domain": "FloatingPoint",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Asymmetric lengths remain exact until the client graphics conversion boundary."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos, integer_XNeg, integer_XPos)",
           "inputs": [
             {
-              "availability": "Documented",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
               "name": "X",
-              "notes": "X accepts every built-in integer class as coordinate data.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43267,12 +43249,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "X accepts every built-in integer class as coordinate data."
+            },
+            {
               "name": "Y",
-              "notes": "Y accepts every built-in integer class as coordinate data.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43283,12 +43265,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y accepts every built-in integer class as coordinate data."
+            },
+            {
               "name": "YNeg",
-              "notes": "Negative vertical lengths accept every built-in integer class.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43299,12 +43281,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Negative vertical lengths accept every built-in integer class."
+            },
+            {
               "name": "YPos",
-              "notes": "Positive vertical lengths accept every built-in integer class.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43315,12 +43297,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive vertical lengths accept every built-in integer class."
+            },
+            {
               "name": "XNeg",
-              "notes": "Negative horizontal lengths accept every built-in integer class.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "Documented",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43331,15 +43313,33 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Negative horizontal lengths accept every built-in integer class."
+            },
+            {
               "name": "XPos",
-              "notes": "Positive horizontal lengths accept every built-in integer class.",
-              "scalar_double": "Allowed"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive horizontal lengths accept every built-in integer class."
             }
           ],
-          "notes": "Both-direction integer lengths gather authoritatively before client graphics conversion.",
+          "computation_domain": "FloatingPoint",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Both-direction integer lengths gather authoritatively before client graphics conversion."
         }
       ],
       "name": "errorbar",
@@ -43857,12 +43857,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "Y = exp(integer_X)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "X",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43873,15 +43871,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "X",
-              "notes": "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53].",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53]."
             }
           ],
-          "notes": "The RunMat-only overload validates exact binary64 conversion before exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "NotApplicable",
-          "overload": "ElementwiseShapePreserving"
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The RunMat-only overload validates exact binary64 conversion before exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double."
         }
       ],
       "name": "exp",
@@ -43948,12 +43948,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "Y = expm1(integer_X)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "X",
               "classes": [
                 "Int8",
                 "Int16",
@@ -43964,15 +43962,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "X",
-              "notes": "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53].",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53]."
             }
           ],
-          "notes": "The RunMat-only overload validates exact binary64 conversion before accurate exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "NotApplicable",
-          "overload": "ElementwiseShapePreserving"
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The RunMat-only overload validates exact binary64 conversion before accurate exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double."
         }
       ],
       "name": "expm1",
@@ -44039,12 +44039,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "r = exprnd(mu, sz1, sz2, ...)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "mu",
               "classes": [
                 "Int8",
                 "Int16",
@@ -44055,12 +44053,12 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "mu",
-              "notes": "Typed-integer means are gated and enter the floating exponential computation domain only after positivity validation.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer means are gated and enter the floating exponential computation domain only after positivity validation."
             },
             {
-              "availability": "RunMatOnly",
+              "name": "sz",
               "classes": [
                 "Int8",
                 "Int16",
@@ -44071,15 +44069,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "sz",
-              "notes": "Typed-integer size controls are gated and parsed exactly before allocation.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer size controls are gated and parsed exactly before allocation."
             }
           ],
-          "notes": "Typed-integer mean and size arguments are separate RunMat-only extensions; resident mean fallback restores output only to the exact source owner and only when that owner physically supports the required output precision.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed-integer mean and size arguments are separate RunMat-only extensions; resident mean fallback restores output only to the exact source owner and only when that owner physically supports the required output precision."
         }
       ],
       "name": "exprnd",
@@ -55111,7 +55111,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary."
+              "notes": "The compatibility target documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -55138,7 +55138,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage."
+              "notes": "The compatibility target requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -55344,7 +55344,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single or double predictors. RunMat mode admits all eight integer classes at an exact binary64 fitting boundary."
+              "notes": "The compatibility target documents single or double predictors. RunMat mode admits all eight integer classes at an exact binary64 fitting boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -55371,7 +55371,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single or double matrix responses and numeric/logical table responses, but not typed integers. RunMat mode requires exact binary64 representation."
+              "notes": "The compatibility target documents single or double matrix responses and numeric/logical table responses, but not typed integers. RunMat mode requires exact binary64 representation."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -55398,7 +55398,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single or double weights. RunMat mode admits typed integers only at an exact binary64 weighting boundary."
+              "notes": "The compatibility target documents single or double weights. RunMat mode admits typed integers only at an exact binary64 weighting boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -57879,7 +57879,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents double query identifiers; typed integer identifiers are checked exactly as one gated RunMat extension."
+              "notes": "The compatibility target documents double query identifiers; typed integer identifiers are checked exactly as one gated RunMat extension."
             }
           ],
           "computation_domain": "Structural",
@@ -58115,7 +58115,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order."
+              "notes": "The compatibility target documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order."
             }
           ],
           "computation_domain": "Structural",
@@ -58142,7 +58142,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents double identifiers; typed integer identifiers are an independently gated extension."
+              "notes": "The compatibility target documents double identifiers; typed integer identifiers are an independently gated extension."
             }
           ],
           "computation_domain": "Structural",
@@ -58169,7 +58169,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Rejected",
-              "notes": "R2026a documents character or string format specifications; numeric code vectors are a gated RunMat extension."
+              "notes": "The compatibility target documents character or string format specifications; numeric code vectors are a gated RunMat extension."
             }
           ],
           "computation_domain": "Structural",
@@ -58648,7 +58648,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents double file identifiers; typed integer identifiers are independently gated and checked exactly."
+              "notes": "The compatibility target documents double file identifiers; typed integer identifiers are independently gated and checked exactly."
             }
           ],
           "computation_domain": "Structural",
@@ -58675,7 +58675,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents double size values; typed integer scalar and two-element size controls are independently gated."
+              "notes": "The compatibility target documents double size values; typed integer scalar and two-element size controls are independently gated."
             }
           ],
           "computation_domain": "Structural",
@@ -58702,7 +58702,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents a double skip scalar; typed integer skip values are independently gated."
+              "notes": "The compatibility target documents a double skip scalar; typed integer skip values are independently gated."
             }
           ],
           "computation_domain": "Structural",
@@ -59341,7 +59341,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents double identifiers; all eight typed integer classes are one exact, independently gated extension."
+              "notes": "The compatibility target documents double identifiers; all eight typed integer classes are one exact, independently gated extension."
             }
           ],
           "computation_domain": "Structural",
@@ -61131,7 +61131,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer data classes; exact source values convert directly to the selected binary precision."
+              "notes": "The compatibility target documents all eight integer data classes; exact source values convert directly to the selected binary precision."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -61158,7 +61158,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents double identifiers; typed integer identifiers are independently gated."
+              "notes": "The compatibility target documents double identifiers; typed integer identifiers are independently gated."
             }
           ],
           "computation_domain": "Structural",
@@ -61185,7 +61185,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents a double skip scalar; typed integer skips are independently gated and range-checked exactly."
+              "notes": "The compatibility target documents a double skip scalar; typed integer skips are independently gated and range-checked exactly."
             }
           ],
           "computation_domain": "Structural",
@@ -62592,7 +62592,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a gca has no input form and returns a graphics object; typed integers are exact aliases for RunMat's numeric figure registry only."
+              "notes": "The compatibility target's gca contract has no input form and returns a graphics object; typed integers are exact aliases for RunMat's numeric figure registry only."
             }
           ],
           "computation_domain": "Structural",
@@ -63553,7 +63553,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents graphics objects, not typed numeric aliases; RunMat resolves exact aliases only under extension policy."
+              "notes": "The compatibility target documents graphics objects, not typed numeric aliases; RunMat resolves exact aliases only under extension policy."
             }
           ],
           "computation_domain": "Structural",
@@ -64273,7 +64273,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes plus integral single and double sizes. Negative signed dimensions are treated as zero."
+              "notes": "The compatibility target documents all eight integer classes plus integral single and double sizes. Negative signed dimensions are treated as zero."
             }
           ],
           "computation_domain": "Structural",
@@ -65047,7 +65047,7 @@
         {
           "id": "gray2rgb-callable",
           "mode": "RunMatOnly",
-          "description": "gray2rgb is a RunMat-provided image helper rather than an R2026a MATLAB product API",
+          "description": "gray2rgb is a RunMat-provided image helper rather than an API in the compatibility target",
           "error_identifier": "RunMat:compatibility:Gray2rgbCallExtension"
         }
       ],
@@ -73464,7 +73464,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "RunMat accepts every native real or componentwise-complex integer class. R2026a defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open."
+              "notes": "RunMat accepts every native real or componentwise-complex integer class. The compatibility target defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -77169,7 +77169,7 @@
           "overflow": "Saturate",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; R2026a complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap."
+          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native int32 device storage; the compatibility target's complex-input preservation is implemented on host, while paired complex-integer device storage remains an explicit architecture gap."
         }
       ]
     },
@@ -85926,7 +85926,7 @@
         {
           "id": "lab2rgb-explicit-gpu-input",
           "mode": "RunMatOnly",
-          "description": "lab2rgb with an explicitly requested gpuArray input is a RunMat extension because R2026a documents no interactive GPU Arrays capability",
+          "description": "lab2rgb with an explicitly requested gpuArray input is a RunMat extension because the compatibility target documents no interactive GPU Arrays capability",
           "error_identifier": "RunMat:compatibility:Lab2rgbExplicitGpuExtension"
         }
       ],
@@ -85948,7 +85948,7 @@
               ],
               "availability": "Rejected",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a accepts only single or double LAB input. Every integer class rejects from host or resident metadata before conversion or gather."
+              "notes": "The compatibility target accepts only single or double LAB input. Every integer class rejects from host or resident metadata before conversion or gather."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -92146,7 +92146,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents raw matrix Data as double; RunMat mode admits native integer M-by-4 matrices only when every price is exactly representable at the binary64 EMA boundary."
+              "notes": "The compatibility target documents raw matrix Data as double; RunMat mode admits native integer M-by-4 matrices only when every price is exactly representable at the binary64 EMA boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -95532,7 +95532,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every built-in integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -95559,7 +95559,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every built-in integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -95586,7 +95586,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every built-in integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -95762,7 +95762,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every built-in integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -95789,7 +95789,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every built-in integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -95816,7 +95816,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every built-in integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -103602,7 +103602,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "BroadcastCompatible",
-          "notes": "R2026a compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path."
+          "notes": "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path."
         }
       ]
     },
@@ -103688,7 +103688,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "BroadcastCompatible",
-          "notes": "R2026a compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path."
+          "notes": "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path."
         }
       ]
     },
@@ -103954,7 +103954,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "BroadcastCompatible",
-          "notes": "R2026a compatible-size comparison is exact across mixed integer and floating classes."
+          "notes": "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes."
         }
       ]
     },
@@ -104040,7 +104040,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "BroadcastCompatible",
-          "notes": "R2026a compatible-size comparison is exact across mixed integer and floating classes."
+          "notes": "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes."
         }
       ]
     },
@@ -105469,7 +105469,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "StructuralParameter",
-          "notes": "The R2026a option additionally accepts every empty integer shape while preserving the ordinary vector rule for nonempty values; callable and arguments-block paths share the same metadata-only predicate."
+          "notes": "The compatibility target's option additionally accepts every empty integer shape while preserving the ordinary vector rule for nonempty values; callable and arguments-block paths share the same metadata-only predicate."
         }
       ]
     },
@@ -110351,7 +110351,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double A; RunMat gates integer matrices and checks the binary64 null-space boundary before materialization."
+              "notes": "The compatibility target documents single and double A; RunMat gates integer matrices and checks the binary64 null-space boundary before materialization."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111253,7 +111253,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
+              "notes": "The compatibility target documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111280,7 +111280,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
+              "notes": "The compatibility target documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111334,7 +111334,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
+              "notes": "The compatibility target requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111596,7 +111596,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
+              "notes": "The compatibility target documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111623,7 +111623,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
+              "notes": "The compatibility target documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111677,7 +111677,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
+              "notes": "The compatibility target requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111939,7 +111939,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
+              "notes": "The compatibility target documents single and double tspan; integer time points are gated and must cross the binary64 solver boundary exactly."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -111966,7 +111966,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
+              "notes": "The compatibility target documents single and double initial conditions; integer states are gated and must cross the binary64 solver boundary exactly."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -112020,7 +112020,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
+              "notes": "The compatibility target requires single or double derivative output; RunMat gates integer derivatives and checks every floating conversion."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -112331,7 +112331,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents only single and double probability arrays; RunMat mode retains integer and logical zero/one arrays as a checked extension."
+              "notes": "The compatibility target documents only single and double probability arrays; RunMat mode retains integer and logical zero/one arrays as a checked extension."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -114579,7 +114579,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly documents single, double, and every built-in integer class for the nonnegative scalar output length."
+              "notes": "The compatibility target explicitly documents single, double, and every built-in integer class for the nonnegative scalar output length."
             }
           ],
           "computation_domain": "Structural",
@@ -115157,7 +115157,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] R2026a documents numeric or logical scalar 1/0 for the Enable property but does not enumerate native numeric classes; RunMat accepts every exact integer class without floating conversion."
+              "notes": "[integer-audit-open] the compatibility target documents numeric or logical scalar 1/0 for the Enable property but does not enumerate native numeric classes; RunMat accepts every exact integer class without floating conversion."
             }
           ],
           "computation_domain": "Structural",
@@ -115350,7 +115350,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
-          "notes": "R2026a explicitly lists every built-in integer class for m. The exact nonnegative length is read from authoritative host storage and used only as a guarded row count; the generated m-by-3 RGB colormap is double, and resident controls reject without provider dispatch."
+          "notes": "The compatibility target explicitly lists every built-in integer class for m. The exact nonnegative length is read from authoritative host storage and used only as a guarded row count; the generated m-by-3 RGB colormap is double, and resident controls reject without provider dispatch."
         }
       ]
     },
@@ -115589,7 +115589,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for X coordinates."
+              "notes": "The compatibility target explicitly lists every built-in integer class for X coordinates."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -115616,7 +115616,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for Y coordinates."
+              "notes": "The compatibility target explicitly lists every built-in integer class for Y coordinates."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -115643,7 +115643,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for Z coordinates."
+              "notes": "The compatibility target explicitly lists every built-in integer class for Z coordinates."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -115697,7 +115697,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for one-based face definitions."
+              "notes": "The compatibility target explicitly lists every built-in integer class for one-based face definitions."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -115724,7 +115724,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every built-in integer class for vertex coordinates."
+              "notes": "The compatibility target explicitly lists every built-in integer class for vertex coordinates."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -116013,7 +116013,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly lists every built-in integer class for the nonnegative real duration."
+              "notes": "The compatibility target explicitly lists every built-in integer class for the nonnegative real duration."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -116069,12 +116069,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "pp = pchip(integer_X, Y) or Vq = pchip(integer_X, Y, Xq)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "X",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116085,23 +116083,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "X",
-              "notes": "R2026a documents single and double sample locations. RunMat admits typed integers only when each value is exactly representable at the binary64 interpolation boundary.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double sample locations. RunMat admits typed integers only when each value is exactly representable at the binary64 interpolation boundary."
             }
           ],
-          "notes": "Typed sample locations are independently gated before gather and cross once into the floating PCHIP coefficient domain.",
+          "computation_domain": "FloatingPoint",
           "output_class": "FunctionSpecific",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed sample locations are independently gated before gather and cross once into the floating PCHIP coefficient domain."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "pp = pchip(X, integer_Y) or Vq = pchip(X, integer_Y, Xq)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "Y",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116112,23 +116110,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "Y",
-              "notes": "R2026a documents single and double sample values. RunMat admits typed integers only through the explicit floating interpolation boundary.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double sample values. RunMat admits typed integers only through the explicit floating interpolation boundary."
             }
           ],
-          "notes": "Typed sample values are independently gated before gather and produce floating coefficients or interpolated values.",
+          "computation_domain": "FloatingPoint",
           "output_class": "FunctionSpecific",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed sample values are independently gated before gather and produce floating coefficients or interpolated values."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "Vq = pchip(X, Y, integer_Xq)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "Xq",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116139,15 +116137,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "Xq",
-              "notes": "R2026a documents single and double query points. RunMat admits typed integers only when exact binary64 conversion is possible.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double query points. RunMat admits typed integers only when exact binary64 conversion is possible."
             }
           ],
-          "notes": "Typed query points are independently gated and converted only after exactness is proved.",
+          "computation_domain": "FloatingPoint",
           "output_class": "FunctionSpecific",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed query points are independently gated and converted only after exactness is proved."
         }
       ],
       "name": "pchip",
@@ -116391,12 +116391,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "y = pdf(pd, integer_x) or pdf(name, integer_x, A...)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "x",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116407,23 +116405,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "x",
-              "notes": "R2026a documents single and double evaluation points. RunMat gates typed integers before provider access and requires exact conversion at the floating density boundary.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double evaluation points. RunMat gates typed integers before provider access and requires exact conversion at the floating density boundary."
             }
           ],
-          "notes": "Typed evaluation points are a RunMat-only floating-boundary extension; density or mass values are floating outputs, and resident fallback restores the selected floating output class through the owning provider.",
+          "computation_domain": "FloatingPoint",
           "output_class": "FunctionSpecific",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed evaluation points are a RunMat-only floating-boundary extension; density or mass values are floating outputs, and resident fallback restores the selected floating output class through the owning provider."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "y = pdf(name, x, integer_A...D)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "A...D",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116434,15 +116432,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "A...D",
-              "notes": "R2026a documents single and double named-distribution parameters. RunMat independently gates typed parameters and rejects lossy wide values.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double named-distribution parameters. RunMat independently gates typed parameters and rejects lossy wide values."
             }
           ],
-          "notes": "Typed distribution parameters are independently gated and converted only after exactness is proved.",
+          "computation_domain": "FloatingPoint",
           "output_class": "FunctionSpecific",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed distribution parameters are independently gated and converted only after exactness is proved."
         }
       ],
       "name": "pdf",
@@ -116545,12 +116545,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "D = pdist(integer_X, ...)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "X",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116561,23 +116559,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "X",
-              "notes": "R2026a documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion."
             }
           ],
-          "notes": "All distance metrics consume one explicit binary64 view after admission; values beyond exact binary64 range reject rather than alias.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "All distance metrics consume one explicit binary64 view after admission; values beyond exact binary64 range reject rather than alias."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "D = pdist(X, Distance, integer_DistParameter_or_CacheSize)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "DistParameter or CacheSize",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116588,15 +116586,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "DistParameter or CacheSize",
-              "notes": "Documented metric parameters are single or double and CacheSize is double; typed values cross a checked floating control boundary.",
-              "scalar_double": "Allowed"
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Documented metric parameters are single or double and CacheSize is double; typed values cross a checked floating control boundary."
             }
           ],
-          "notes": "Typed numeric controls are independently gated and must be exactly representable before metric parsing.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "StructuralParameter"
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed numeric controls are independently gated and must be exactly representable before metric parsing."
         }
       ],
       "name": "pdist",
@@ -116691,12 +116691,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "D = pdist2(integer_X, integer_Y, ...)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "X",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116707,12 +116705,12 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "X",
-              "notes": "R2026a documents single and double X observations; RunMat requires exact binary64 conversion for typed integers.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double X observations; RunMat requires exact binary64 conversion for typed integers."
             },
             {
-              "availability": "RunMatOnly",
+              "name": "Y",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116723,23 +116721,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "Y",
-              "notes": "R2026a documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers."
             }
           ],
-          "notes": "Typed observations are gated before gather and enter the floating distance domain only after exactness is proved.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed observations are gated before gather and enter the floating distance domain only after exactness is proved."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "D = pdist2(X, Y, Distance, integer_DistParameter_or_CacheSize)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "DistParameter or CacheSize",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116750,23 +116748,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "DistParameter or CacheSize",
-              "notes": "Typed distance parameters and cache sizes are RunMat-only checked floating controls.",
-              "scalar_double": "Allowed"
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed distance parameters and cache sizes are RunMat-only checked floating controls."
             }
           ],
-          "notes": "Typed numerical controls are independently gated and cross a checked binary64 boundary.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "StructuralParameter"
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed numerical controls are independently gated and cross a checked binary64 boundary."
         },
         {
-          "backend": "HostOnly",
-          "computation_domain": "Structural",
           "form": "[D,I] = pdist2(X, Y, Smallest/Largest=integer_K)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "Smallest or Largest",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116777,15 +116775,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "Smallest or Largest",
-              "notes": "R2026a enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts.",
-              "scalar_double": "Allowed"
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The compatibility target enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts."
             }
           ],
-          "notes": "The typed selection count is decoded directly from authoritative storage; distances and MATLAB-compatible indices remain double.",
+          "computation_domain": "Structural",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "StructuralParameter"
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The typed selection count is decoded directly from authoritative storage; distances and MATLAB-compatible indices remain double."
         }
       ],
       "name": "pdist2",
@@ -116943,12 +116943,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "HostAndGpu",
-          "computation_domain": "Structural",
           "form": "[X,Y,Z] = peaks(integer_n)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "n",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116959,23 +116957,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "n",
-              "notes": "The public scalar form requires an integer value greater than one but does not enumerate typed integer storage. RunMat decodes all eight classes exactly as a structural grid size.",
-              "scalar_double": "Allowed"
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public scalar form requires an integer value greater than one but does not enumerate typed integer storage. RunMat decodes all eight classes exactly as a structural grid size."
             }
           ],
-          "notes": "Typed n is a gated structural extension; generated coordinates and surface values are floating and provider selection remains automatic.",
+          "computation_domain": "Structural",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "ScalarOnly"
+          "backend": "HostAndGpu",
+          "overload": "ScalarOnly",
+          "notes": "Typed n is a gated structural extension; generated coordinates and surface values are floating and provider selection remains automatic."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "[X,Y,Z] = peaks(integer_Xm, integer_Ym)",
           "inputs": [
             {
-              "availability": "Documented",
+              "name": "Xm",
               "classes": [
                 "Int8",
                 "Int16",
@@ -116986,12 +116984,12 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "Xm",
-              "notes": "R2026a explicitly documents all eight integer coordinate classes. X output preserves Xm exactly when requested, while Z crosses the peaks floating formula boundary.",
-              "scalar_double": "Allowed"
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The compatibility target explicitly documents all eight integer coordinate classes. X output preserves Xm exactly when requested, while Z crosses the peaks floating formula boundary."
             },
             {
-              "availability": "Documented",
+              "name": "Ym",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117002,15 +117000,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "Ym",
-              "notes": "R2026a explicitly documents all eight integer coordinate classes. Y output preserves Ym exactly when requested, while Z crosses the peaks floating formula boundary.",
-              "scalar_double": "Allowed"
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The compatibility target explicitly documents all eight integer coordinate classes. Y output preserves Ym exactly when requested, while Z crosses the peaks floating formula boundary."
             }
           ],
-          "notes": "Documented integer coordinates remain authoritative for returned X and Y; Z intentionally materializes a floating view for transcendental evaluation. Explicit gpuArray inputs are separately RunMat-only because the public page does not advertise GPU arrays.",
+          "computation_domain": "FloatingPoint",
           "output_class": "FunctionSpecific",
           "overflow": "NotApplicable",
-          "overload": "BroadcastCompatible"
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Documented integer coordinates remain authoritative for returned X and Y; Z intentionally materializes a floating view for transcendental evaluation. Explicit gpuArray inputs are separately RunMat-only because the public page does not advertise GPU arrays."
         }
       ],
       "name": "peaks",
@@ -117451,7 +117451,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents floating numeric, logical, text, cellstr, and categorical labels, but not typed-integer labels. RunMat compares native integer labels exactly without routing them through f64."
+              "notes": "The compatibility target documents floating numeric, logical, text, cellstr, and categorical labels, but not typed-integer labels. RunMat compares native integer labels exactly without routing them through f64."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -117478,7 +117478,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents floating classifier scores. RunMat accepts typed integers only when every score is exactly representable in the binary64 computation domain."
+              "notes": "The compatibility target documents floating classifier scores. RunMat accepts typed integers only when every score is exactly representable in the binary64 computation domain."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -117606,12 +117606,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "[pxx,f] = periodogram(integer_x, ...)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "x",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117622,39 +117620,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "x",
-              "notes": "R2026a documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion.",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion."
             }
           ],
-          "notes": "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion and supported resident floating paths remain unaffected.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion and supported resident floating paths remain unaffected."
         },
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FunctionSpecific",
           "form": "periodogram(x, integer_window_or_frequency_controls)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
               "name": "window",
-              "notes": "Documented window storage is single or double; typed windows cross a checked floating boundary.",
-              "scalar_double": "NotApplicable"
-            },
-            {
-              "availability": "RunMatOnly",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117665,12 +117647,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented window storage is single or double; typed windows cross a checked floating boundary."
+            },
+            {
               "name": "freqSpec/nfft",
-              "notes": "A scalar is decoded as an exact structural DFT length; a vector is a checked floating frequency grid.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "RunMatOnly",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117681,12 +117663,12 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A scalar is decoded as an exact structural DFT length; a vector is a checked floating frequency grid."
+            },
+            {
               "name": "Fs",
-              "notes": "Typed sample rates enter the floating frequency-scaling boundary only after exactness is proved.",
-              "scalar_double": "Allowed"
-            },
-            {
-              "availability": "RunMatOnly",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117697,15 +117679,33 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed sample rates enter the floating frequency-scaling boundary only after exactness is proved."
+            },
+            {
               "name": "confidence or numeric option",
-              "notes": "Additional supported numeric controls remain independently classified as checked floating inputs.",
-              "scalar_double": "Allowed"
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Additional supported numeric controls remain independently classified as checked floating inputs."
             }
           ],
-          "notes": "Typed numerical controls are independently gated; scalar DFT length is structural and remaining controls cross a checked binary64 boundary.",
+          "computation_domain": "FunctionSpecific",
           "output_class": "Double",
           "overflow": "Error",
-          "overload": "Multiple"
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed numerical controls are independently gated; scalar DFT length is structural and remaining controls cross a checked binary64 boundary."
         }
       ],
       "name": "periodogram",
@@ -117842,12 +117842,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "ExactInteger",
           "form": "P = perms(integer_v)",
           "inputs": [
             {
-              "availability": "Documented",
+              "name": "v",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117858,15 +117856,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "v",
-              "notes": "R2026a explicitly documents every integer class and shows an int16 example. Values are rearranged without arithmetic or conversion.",
-              "scalar_double": "Allowed"
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The compatibility target explicitly documents every integer class and shows an int16 example. Values are rearranged without arithmetic or conversion."
             }
           ],
-          "notes": "Every output element is copied from authoritative native storage in reverse lexicographic index order. Documented gpuArray inputs gather through their owner and the same-class result is restored to that owner.",
+          "computation_domain": "ExactInteger",
           "output_class": "PreserveInput",
           "overflow": "NotApplicable",
-          "overload": "ElementwiseShapePreserving"
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Every output element is copied from authoritative native storage in reverse lexicographic index order. Documented gpuArray inputs gather through their owner and the same-class result is restored to that owner."
         }
       ],
       "name": "perms",
@@ -117919,12 +117919,10 @@
       ],
       "integer_capabilities": [
         {
-          "backend": "HostAndGpu",
-          "computation_domain": "ExactInteger",
           "form": "B = permute(integer_A, dimorder)",
           "inputs": [
             {
-              "availability": "Documented",
+              "name": "A",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117935,23 +117933,23 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "A",
-              "notes": "The generic array contract includes every integer class. Permutation only reorders authoritative elements and preserves class exactly.",
-              "scalar_double": "Allowed"
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The generic array contract includes every integer class. Permutation only reorders authoritative elements and preserves class exactly."
             }
           ],
-          "notes": "Host, paired complex-integer, and provider-resident paths preserve exact class, shape, owner, and explicit residency while changing only layout.",
+          "computation_domain": "ExactInteger",
           "output_class": "PreserveInput",
           "overflow": "NotApplicable",
-          "overload": "ElementwiseShapePreserving"
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host, paired complex-integer, and provider-resident paths preserve exact class, shape, owner, and explicit residency while changing only layout."
         },
         {
-          "backend": "HostAndGpu",
-          "computation_domain": "Structural",
           "form": "B = permute(A, integer_dimorder)",
           "inputs": [
             {
-              "availability": "Documented",
+              "name": "dimorder",
               "classes": [
                 "Int8",
                 "Int16",
@@ -117962,15 +117960,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "dimorder",
-              "notes": "The public row-vector contract requires unique positive integer elements. RunMat decodes every supported integer class exactly.",
-              "scalar_double": "Allowed"
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public row-vector contract requires unique positive integer elements. RunMat decodes every supported integer class exactly."
             }
           ],
-          "notes": "Dimension order is parsed exactly as one-based usize values and validated as a complete permutation before data or provider dispatch.",
+          "computation_domain": "Structural",
           "output_class": "PreserveInput",
           "overflow": "Error",
-          "overload": "StructuralParameter"
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Dimension order is parsed exactly as one-based usize values and validated as a complete permutation before data or provider dispatch."
         }
       ],
       "name": "permute",
@@ -118192,7 +118192,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a limits numeric pie values to double. RunMat admits typed integers only when exact binary64 chart geometry is possible."
+              "notes": "The compatibility target limits numeric pie values to double. RunMat admits typed integers only when exact binary64 chart geometry is possible."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -118466,7 +118466,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract."
+              "notes": "The compatibility target permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -118520,7 +118520,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation."
+              "notes": "The compatibility target documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation."
             }
           ],
           "computation_domain": "Structural",
@@ -120306,7 +120306,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents real single and double angular coordinates; RunMat admits typed integers only after exact binary64 conversion is proved."
+              "notes": "The compatibility target documents real single and double angular coordinates; RunMat admits typed integers only after exact binary64 conversion is proved."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -120333,7 +120333,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents real single and double radial coordinates; RunMat admits typed integers only at its checked floating transform boundary."
+              "notes": "The compatibility target documents real single and double radial coordinates; RunMat admits typed integers only at its checked floating transform boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -120360,7 +120360,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents real single and double elevation coordinates; RunMat admits typed integers only when exact binary64 conversion is possible."
+              "notes": "The compatibility target documents real single and double elevation coordinates; RunMat admits typed integers only when exact binary64 conversion is possible."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -120550,7 +120550,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly documents all eight integer classes for direct theta data and any numeric class for the selected table variable."
+              "notes": "The compatibility target explicitly documents all eight integer classes for direct theta data and any numeric class for the selected table variable."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -120631,7 +120631,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a permits numeric table-variable indices; these are structural one-based selectors rather than histogram observations."
+              "notes": "The compatibility target permits numeric table-variable indices; these are structural one-based selectors rather than histogram observations."
             }
           ],
           "computation_domain": "Structural",
@@ -120855,7 +120855,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents numeric scalar/vector table-variable indices; these are exact one-based structural selectors."
+              "notes": "The compatibility target documents numeric scalar/vector table-variable indices; these are exact one-based structural selectors."
             }
           ],
           "computation_domain": "Structural",
@@ -121073,7 +121073,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly lists all eight integer classes for theta and rho coordinate arrays and permits any numeric class in selected table variables."
+              "notes": "The compatibility target explicitly lists all eight integer classes for theta and rho coordinate arrays and permits any numeric class in selected table variables."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -121100,7 +121100,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly lists every integer class for marker areas and numeric color data; these values enter explicit renderer metadata boundaries."
+              "notes": "The compatibility target explicitly lists every integer class for marker areas and numeric color data; these values enter explicit renderer metadata boundaries."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -121210,7 +121210,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation."
+              "notes": "The compatibility target documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation."
             }
           ],
           "computation_domain": "Structural",
@@ -121358,7 +121358,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double polynomial coefficients. RunMat admits typed integers only after exact conversion to the floating polynomial domain."
+              "notes": "The compatibility target documents single and double polynomial coefficients. RunMat admits typed integers only after exact conversion to the floating polynomial domain."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -121707,7 +121707,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved."
+              "notes": "The compatibility target documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -121734,7 +121734,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary."
+              "notes": "The compatibility target documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -122198,7 +122198,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved."
+              "notes": "The compatibility target documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -122225,7 +122225,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary."
+              "notes": "The compatibility target documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -122383,7 +122383,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double exponent arrays; RunMat admits typed integers only after exact conversion to the floating exp2 domain."
+              "notes": "The compatibility target documents single and double exponent arrays; RunMat admits typed integers only after exact conversion to the floating exp2 domain."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -122410,7 +122410,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double significands; RunMat admits typed integers only after exact binary64 conversion is proved."
+              "notes": "The compatibility target documents single and double significands; RunMat admits typed integers only after exact binary64 conversion is proved."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -122437,7 +122437,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double exponents for the two-input scaling form; native integers are a checked RunMat extension."
+              "notes": "The compatibility target documents single and double exponents for the two-input scaling form; native integers are a checked RunMat extension."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -122685,7 +122685,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double query points. RunMat admits typed integers only when every value is exactly representable at the floating piecewise-polynomial boundary."
+              "notes": "The compatibility target documents single and double query points. RunMat admits typed integers only when every value is exactly representable at the floating piecewise-polynomial boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -122854,7 +122854,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "The documented R2026a data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes."
+              "notes": "The compatibility target's documented data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -124501,7 +124501,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double signals. RunMat gates typed-integer signals before provider dispatch and admits only values exactly representable as binary64."
+              "notes": "The compatibility target documents single and double signals. RunMat gates typed-integer signals before provider dispatch and admits only values exactly representable as binary64."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -125058,7 +125058,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double sample data. RunMat admits typed integers only after exact binary64 representability is proved."
+              "notes": "The compatibility target documents single and double sample data. RunMat admits typed integers only after exact binary64 representability is proved."
             },
             {
               "name": "y",
@@ -125101,7 +125101,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double quantile percentages; typed integer percentages cross a checked binary64 normalization boundary."
+              "notes": "The compatibility target documents single and double quantile percentages; typed integer percentages cross a checked binary64 normalization boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -125815,7 +125815,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double finite limits; typed integer bounds are gated and cross binary64 exactly."
+              "notes": "The compatibility target documents single and double finite limits; typed integer bounds are gated and cross binary64 exactly."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -125842,7 +125842,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double tolerance; typed integer tolerance is a checked RunMat extension."
+              "notes": "The compatibility target documents single and double tolerance; typed integer tolerance is a checked RunMat extension."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -126092,7 +126092,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "The documented R2026a data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes."
+              "notes": "The compatibility target's documented data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -127154,7 +127154,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents only single and double input; RunMat mode admits all eight real integer classes after an exactness check."
+              "notes": "The compatibility target documents only single and double input; RunMat mode admits all eight real integer classes after an exactness check."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -127951,7 +127951,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a omits int64/uint64 from the documented output class and prototype lists; RunMat preserves both as independently gated exact host extensions."
+              "notes": "The compatibility target omits int64/uint64 from the documented output class and prototype lists; RunMat preserves both as independently gated exact host extensions."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -128340,7 +128340,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single/double named-distribution parameters; typed integers are gated before conversion and must be exactly representable as binary64."
+              "notes": "The compatibility target documents single/double named-distribution parameters; typed integers are gated before conversion and must be exactly representable as binary64."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -128367,7 +128367,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents single/double size controls; RunMat typed sizes are exact structural values and do not cross the distribution computation boundary."
+              "notes": "The compatibility target documents single/double size controls; RunMat typed sizes are exact structural values and do not cross the distribution computation boundary."
             }
           ],
           "computation_domain": "Structural",
@@ -128829,7 +128829,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents single/double n; RunMat typed range limits are exact structural controls and return double sampled indices."
+              "notes": "The compatibility target documents single/double n; RunMat typed range limits are exact structural controls and return double sampled indices."
             }
           ],
           "computation_domain": "Structural",
@@ -128856,7 +128856,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a lists single/double/logical/text/categorical populations; RunMat preserves exact typed-integer population values, orientation, class, and supported residency."
+              "notes": "The compatibility target lists single/double/logical/text/categorical populations; RunMat preserves exact typed-integer population values, orientation, class, and supported residency."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -129955,7 +129955,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "Public R2026a datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
+              "notes": "The compatibility target's public datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
             }
           ],
           "computation_domain": "Structural",
@@ -130341,7 +130341,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "The public R2026a datatype tables constrain implemented numeric controls to single/double. RunMat mode retains the typed-integer extension and reads structural values exactly; compatibility mode rejects before gather or file access."
+              "notes": "The compatibility target's public datatype tables constrain implemented numeric controls to single/double. RunMat mode retains the typed-integer extension and reads structural values exactly; compatibility mode rejects before gather or file access."
             }
           ],
           "computation_domain": "Structural",
@@ -130547,7 +130547,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "Public R2026a datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
+              "notes": "The compatibility target's public datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
             }
           ],
           "computation_domain": "Structural",
@@ -130782,15 +130782,15 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a defines real elementwise for numeric input and fully supports gpuArray, but its public page does not enumerate the integer endpoint class."
+              "notes": "The public numeric-array contract includes all built-in integer classes; real returns their real components elementwise and supports gpuArray input."
             }
           ],
           "computation_domain": "ExactInteger",
           "output_class": "PreserveInput",
-          "overflow": "EvidenceOpen",
+          "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "[integer-audit-open] Real integer input is an exact identity and paired complex-integer input projects authoritative real storage without arithmetic. RunMat preserves class, shape, owner, and residency, but the public page does not explicitly state the integer output class."
+          "notes": "Real integer input is an exact same-class identity and paired complex-integer input projects its same-class real component without arithmetic. RunMat preserves class, shape, owner, and residency."
         }
       ]
     },
@@ -131079,7 +131079,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double sample times; typed integers are an independently gated RunMat extension."
+              "notes": "The compatibility target documents single and double sample times; typed integers are an independently gated RunMat extension."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -131317,7 +131317,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents single and double slopes. RunMat admits typed integers only at a checked binary64 graphics boundary."
+              "notes": "The compatibility target documents single and double slopes. RunMat admits typed integers only at a checked binary64 graphics boundary."
             },
             {
               "name": "b/coeffs",
@@ -132378,7 +132378,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double response data; typed integers cross a checked binary64 regression boundary."
+              "notes": "The compatibility target documents single and double response data; typed integers cross a checked binary64 regression boundary."
             },
             {
               "name": "X",
@@ -132394,7 +132394,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double design data; typed integers cross the same checked boundary independently of y."
+              "notes": "The compatibility target documents single and double design data; typed integers cross the same checked boundary independently of y."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -132421,7 +132421,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double alpha; a typed integer is admitted only when exact in binary64 and within the open unit interval."
+              "notes": "The compatibility target documents single and double alpha; a typed integer is admitted only when exact in binary64 and within the open unit interval."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -133045,7 +133045,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes; authoritative elements are copied without arithmetic or floating conversion."
+              "notes": "The compatibility target documents all eight integer classes; authoritative elements are copied without arithmetic or floating conversion."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -133412,7 +133412,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes and class-preserving output."
+              "notes": "The compatibility target documents all eight integer classes and class-preserving output."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -133812,7 +133812,7 @@
               ],
               "availability": "Rejected",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double signal input; native integer signals reject before host or provider execution."
+              "notes": "The compatibility target documents single and double signal input; native integer signals reject before host or provider execution."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -133839,7 +133839,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values."
+              "notes": "The compatibility target lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values."
             }
           ],
           "computation_domain": "Structural",
@@ -134068,7 +134068,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a accepts numeric arrays; non-single integer data produces double output after a checked binary64 normalization boundary."
+              "notes": "The compatibility target accepts numeric arrays; non-single integer data produces double output after a checked binary64 normalization boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -134256,7 +134256,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents all eight integer classes and preserves the input datatype."
+              "notes": "The compatibility target documents all eight integer classes and preserves the input datatype."
             }
           ],
           "computation_domain": "Structural",
@@ -134630,7 +134630,7 @@
         {
           "id": "rgb2lab-explicit-gpu",
           "mode": "RunMatOnly",
-          "description": "rgb2lab with an explicitly requested gpuArray input is a RunMat extension because R2026a documents no interactive GPU Arrays capability",
+          "description": "rgb2lab with an explicitly requested gpuArray input is a RunMat extension because the compatibility target documents no interactive GPU Arrays capability",
           "error_identifier": "RunMat:compatibility:Rgb2labExplicitGpuExtension"
         }
       ],
@@ -135071,7 +135071,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double response data; typed integers require exact binary64 conversion."
+              "notes": "The compatibility target documents single and double response data; typed integers require exact binary64 conversion."
             },
             {
               "name": "X",
@@ -135087,7 +135087,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double predictors; typed integers require the same checked conversion."
+              "notes": "The compatibility target documents single and double predictors; typed integers require the same checked conversion."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -135141,7 +135141,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents scaled as numeric 0 or 1 but not a typed integer class; RunMat gates that convenience form independently."
+              "notes": "The compatibility target documents scaled as numeric 0 or 1 but not a typed integer class; RunMat gates that convenience form independently."
             }
           ],
           "computation_domain": "Structural",
@@ -136696,7 +136696,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64."
+              "notes": "The compatibility target documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -136815,7 +136815,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents all eight integer array classes; rotation is a pure permutation of authoritative native storage."
+              "notes": "The compatibility target documents all eight integer array classes; rotation is a pure permutation of authoritative native storage."
             },
             {
               "name": "K",
@@ -137018,7 +137018,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents N as double; RunMat mode accepts an exact scalar typed integer and range-checks it before selecting the rounding mode."
+              "notes": "The compatibility target documents N as double; RunMat mode accepts an exact scalar typed integer and range-checks it before selecting the rounding mode."
             }
           ],
           "computation_domain": "Structural",
@@ -137270,7 +137270,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double matrices; RunMat admits typed integers only when every matrix entry is exactly representable in binary64."
+              "notes": "The compatibility target documents single and double matrices; RunMat admits typed integers only when every matrix entry is exactly representable in binary64."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -137297,7 +137297,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents a single or double tolerance; the RunMat-only typed scalar form is exactness- and range-checked before conversion."
+              "notes": "The compatibility target documents a single or double tolerance; the RunMat-only typed scalar form is exactness- and range-checked before conversion."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -139185,7 +139185,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents all eight integer coordinate classes; native class, shape, and exact values remain authoritative as XData."
+              "notes": "The compatibility target documents all eight integer coordinate classes; native class, shape, and exact values remain authoritative as XData."
             },
             {
               "name": "Y",
@@ -139244,7 +139244,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly documents all eight integer classes for marker areas; validated values enter the floating renderer-size boundary."
+              "notes": "The compatibility target explicitly documents all eight integer classes for marker areas; validated values enter the floating renderer-size boundary."
             },
             {
               "name": "C",
@@ -139418,7 +139418,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double observations; typed integers require exact binary64 representation before histogram and rendering computation."
+              "notes": "The compatibility target documents single and double observations; typed integers require exact binary64 representation before histogram and rendering computation."
             },
             {
               "name": "y",
@@ -139488,7 +139488,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents these numeric controls as single or double. Exact structural flags/bin counts remain integer until validation; renderer-domain sizes, widths, bandwidths, and RGB values require checked binary64 conversion."
+              "notes": "The compatibility target documents these numeric controls as single or double. Exact structural flags/bin counts remain integer until validation; renderer-domain sizes, widths, bandwidths, and RGB values require checked binary64 conversion."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -139727,7 +139727,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double samples; typed integer values require exact binary64 representation before constellation geometry is computed."
+              "notes": "The compatibility target documents single and double samples; typed integer values require exact binary64 representation before constellation geometry is computed."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -139754,7 +139754,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a specifies a double positive-integer decimation factor; RunMat mode validates typed integer storage exactly."
+              "notes": "The compatibility target specifies a double positive-integer decimation factor; RunMat mode validates typed integer storage exactly."
             },
             {
               "name": "offset",
@@ -139770,7 +139770,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a specifies a double nonnegative-integer offset; RunMat mode validates it exactly and requires offset < n."
+              "notes": "The compatibility target specifies a double nonnegative-integer offset; RunMat mode validates it exactly and requires offset < n."
             }
           ],
           "computation_domain": "Structural",
@@ -144062,15 +144062,15 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Documented matrix storage is single, double, or logical; RunMat requires typed matrix values to be exact at the current binary64 diagonal-processing boundary."
+              "notes": "Documented matrix storage is single, double, or logical; RunMat gates typed matrix values and processes them directly in their integer class."
             }
           ],
-          "computation_domain": "FloatingPoint",
+          "computation_domain": "FunctionSpecific",
           "output_class": "FunctionSpecific",
-          "overflow": "Error",
+          "overflow": "Saturate",
           "backend": "GatherFallback",
           "overload": "FunctionSpecific",
-          "notes": "Typed matrix data is a gated extension and may enter the current binary64 diagonal engine only without rounding."
+          "notes": "Typed matrix data is a gated extension. Extraction and construction preserve the integer class exactly; replacement follows the target class, and duplicate same-class integer diagonals add with saturation."
         },
         {
           "form": "B/S = spdiags(A/B, integer_d, integer_m?, integer_n?)",
@@ -144089,7 +144089,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] Diagonal offsets are documented as integer-valued but typed storage is not established; RunMat decodes them exactly."
+              "notes": "Diagonal offsets are documented as integer-valued but typed storage is not established; RunMat gates typed offsets and decodes them exactly."
             },
             {
               "name": "m and n",
@@ -144105,7 +144105,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] Output dimensions are documented as nonnegative integers but typed storage is not established; RunMat decodes them exactly."
+              "notes": "Output dimensions are documented as nonnegative integers but typed storage is not established; RunMat gates typed dimensions and decodes them exactly."
             }
           ],
           "computation_domain": "Structural",
@@ -144113,7 +144113,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] Offsets and dimensions are evidence-open typed extensions decoded directly from authoritative storage."
+          "notes": "Typed offsets and dimensions are gated RunMat extensions decoded exactly before diagonal selection or allocation."
         }
       ]
     },
@@ -144449,7 +144449,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] Structural scalars are range checked and numerical vectors enter binary64 only after exact representability is proven; public documentation specifies integer-valued controls without establishing typed storage for every role."
+          "notes": "Typed numeric controls are gated RunMat extensions. Structural scalars are range checked, and numerical vectors enter binary64 only after exact representability is proven."
         }
       ]
     },
@@ -144887,7 +144887,7 @@
         {
           "id": "sphere-typed-face-count",
           "mode": "RunMatOnly",
-          "description": "sphere with a typed-integer face count is an evidence-open RunMat extension",
+          "description": "sphere with a typed-integer face count is a RunMat extension",
           "error_identifier": "RunMat:compatibility:SphereTypedFaceCountExtension"
         }
       ],
@@ -144909,15 +144909,15 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] R2026a calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior."
+              "notes": "The compatibility target calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior."
             }
           ],
           "computation_domain": "Structural",
           "output_class": "Double",
-          "overflow": "EvidenceOpen",
+          "overflow": "Error",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] n is decoded exactly, checked against allocation bounds, and controls only output shape. Coordinate generation and statement-form plotting use host double values."
+          "notes": "The typed face count is a gated RunMat extension. It is decoded exactly, checked against allocation bounds, and controls only output shape; coordinate generation and statement-form plotting use host double values."
         }
       ]
     },
@@ -145048,7 +145048,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double sample locations. RunMat mode admits typed integers only when every value is exactly representable at the binary64 interpolation boundary."
+              "notes": "The compatibility target documents single and double sample locations. RunMat mode admits typed integers only when every value is exactly representable at the binary64 interpolation boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -145075,7 +145075,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double sample values. RunMat mode admits typed integers only through the checked floating interpolation boundary."
+              "notes": "The compatibility target documents single and double sample values. RunMat mode admits typed integers only through the checked floating interpolation boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -145102,7 +145102,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double query points. RunMat mode admits typed integers only when exact binary64 conversion is possible."
+              "notes": "The compatibility target documents single and double query points. RunMat mode admits typed integers only when exact binary64 conversion is possible."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -145376,7 +145376,7 @@
         {
           "id": "split-typed-dimension",
           "mode": "RunMatOnly",
-          "description": "split with a typed-integer dimension is an evidence-open RunMat extension",
+          "description": "split with a typed-integer dimension",
           "error_identifier": "RunMat:compatibility:SplitTypedDimensionExtension"
         },
         {
@@ -145410,15 +145410,15 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] R2026a specifies a positive integer dimension but does not enumerate typed storage classes. RunMat accepts every exact integer class behind a compatibility gate; ordinary host double integer dimensions remain documented behavior."
+              "notes": "The compatibility target specifies a positive integer dimension but does not enumerate typed storage classes. RunMat accepts every exact integer class behind a compatibility gate; ordinary host double integer dimensions remain documented behavior."
             }
           ],
           "computation_domain": "Structural",
           "output_class": "NotApplicable",
-          "overflow": "EvidenceOpen",
+          "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] The exact one-based dimension controls only output orientation. Explicit resident dimensions are separately gated before gather; automatic residency may gather transparently."
+          "notes": "The typed dimension is a gated RunMat extension whose exact one-based value controls only output orientation. Explicit resident dimensions are separately gated before gather; automatic residency may gather transparently."
         }
       ]
     },
@@ -145530,7 +145530,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] Typed group identifiers are a gated extension and are decoded exactly; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently."
+          "notes": "Typed group identifiers are a gated RunMat extension and are decoded exactly; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently."
         }
       ]
     },
@@ -145948,7 +145948,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] Public documentation requires nonnegative integer values but does not establish typed storage; RunMat decodes admitted dimensions exactly."
+              "notes": "Public documentation requires nonnegative integer values but does not establish typed storage; RunMat gates typed dimensions and decodes them exactly."
             },
             {
               "name": "density or rc",
@@ -145964,7 +145964,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] Public documentation does not establish typed storage; admitted values must cross the binary64 random-generation boundary exactly."
+              "notes": "Public documentation does not establish typed storage for density or condition values; RunMat gates them and requires exact binary64 admission."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -145972,7 +145972,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] Typed controls are evidence-open RunMat extensions: dimensions remain structural while density and condition values require exact binary64 conversion."
+          "notes": "Typed controls are gated RunMat extensions: dimensions remain exact structural values, while density and condition values require exact binary64 admission."
         }
       ]
     },
@@ -146101,7 +146101,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "Public R2026a datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
+              "notes": "The compatibility target's public datatype tables restrict these implemented controls to floating or nonnumeric classes. RunMat mode retains exact typed-integer admission; compatibility mode rejects before gather or file access."
             }
           ],
           "computation_domain": "Structural",
@@ -146185,7 +146185,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly lists all eight integer classes. Integer conversions read authoritative values directly, including signed, unsigned, octal, hexadecimal, character-code, width, and precision roles."
+              "notes": "The compatibility target explicitly lists all eight integer classes. Integer conversions read authoritative values directly, including signed, unsigned, octal, hexadecimal, character-code, width, and precision roles."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -146264,7 +146264,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double input. RunMat mode admits real typed integers only when every authoritative value is exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported."
+              "notes": "The compatibility target documents single and double input. RunMat mode admits real typed integers only when every authoritative value is exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -146401,7 +146401,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a documents single and double sample times. RunMat mode admits typed integers only when every value is exactly representable at the binary64 waveform boundary."
+              "notes": "The compatibility target documents single and double sample times. RunMat mode admits typed integers only when every value is exactly representable at the binary64 waveform boundary."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -146428,7 +146428,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents single and double duty cycles. RunMat mode admits a typed integer scalar from 0 through 100 behind the nonfloating-input gate."
+              "notes": "The compatibility target documents single and double duty cycles. RunMat mode admits a typed integer scalar from 0 through 100 behind the nonfloating-input gate."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -146959,7 +146959,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] Each typed matrix is independently gated and checked before conversion; public documentation does not enumerate matrix storage classes, and the state-space object's numeric matrices are binary64."
+          "notes": "Each typed matrix is an independently gated RunMat extension and is checked before conversion; the state-space object's numeric matrices are binary64."
         },
         {
           "form": "sys = ss(A, B, C, D, integer_Ts)",
@@ -146986,7 +146986,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "[integer-audit-open] The sample time is stored as binary64 model metadata after an exact representability check; public documentation requires a numeric scalar without enumerating typed storage classes."
+          "notes": "Typed sample time is a gated RunMat extension stored as binary64 model metadata after an exact representability check; the public contract requires a numeric scalar without enumerating typed storage classes."
         }
       ]
     },
@@ -147282,7 +147282,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly documents integer arrays as table-variable selectors. RunMat decodes them as exact one-based structural indices."
+              "notes": "The compatibility target explicitly documents integer arrays as table-variable selectors. RunMat decodes them as exact one-based structural indices."
             }
           ],
           "computation_domain": "Structural",
@@ -147598,7 +147598,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data."
+              "notes": "The compatibility target explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -147696,7 +147696,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "The R2026a array-input datatype table excludes integer arrays. RunMat mode treats a bare integer array as an exact no-op because integer classes have no standard missing value."
+              "notes": "The compatibility target's array-input datatype table excludes integer arrays. RunMat mode treats a bare integer array as an exact no-op because integer classes have no standard missing value."
             }
           ],
           "computation_domain": "Structural",
@@ -147723,7 +147723,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly states that single, integer, and logical indicators also match double entries of A."
+              "notes": "The compatibility target explicitly states that single, integer, and logical indicators also match double entries of A."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -148359,7 +148359,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a lists single/double for numeric option fields and logical for parallel flags. RunMat mode additionally accepts all eight native integer classes after field-specific range validation."
+              "notes": "The compatibility target lists single/double for numeric option fields and logical for parallel flags. RunMat mode additionally accepts all eight native integer classes after field-specific range validation."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -149596,7 +149596,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data."
+              "notes": "The compatibility target explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data."
             }
           ],
           "computation_domain": "FunctionSpecific",
@@ -149859,7 +149859,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents positive scalar, two-element, and vector time forms without publishing native integer storage classes. RunMat conservatively gates typed integers and requires exact binary64 representation."
+              "notes": "The compatibility target documents positive scalar, two-element, and vector time forms without publishing native integer storage classes. RunMat conservatively gates typed integers and requires exact binary64 representation."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -150084,7 +150084,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "R2026a describes threshold values but does not enumerate typed integer storage. RunMat gates typed values and validates the option-specific floating range."
+              "notes": "The compatibility target describes threshold values but does not enumerate typed integer storage. RunMat gates typed values and validates the option-specific floating range."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -150653,7 +150653,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "[integer-audit-open] R2026a explicitly documents false, true, 0, and 1 but does not enumerate typed integer storage classes. RunMat mode accepts every exact scalar integer class; MATLAB-compatible mode retains only logical and double zero/one."
+              "notes": "[integer-audit-open] the compatibility target explicitly documents false, true, 0, and 1 but does not enumerate typed integer storage classes. RunMat mode accepts every exact scalar integer class; MATLAB-compatible mode retains only logical and double zero/one."
             }
           ],
           "computation_domain": "Predicate",
@@ -150802,7 +150802,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host and automatically resident integer arrays convert exactly to host strings, including wide integer values. Explicit gpuArray input is independently mode-gated because R2026a does not document interactive GPU-array input for string."
+          "notes": "Host and automatically resident integer arrays convert exactly to host strings, including wide integer values. Explicit gpuArray input is independently mode-gated because the compatibility target does not document interactive GPU-array input for string."
         },
         {
           "form": "str = string(formatSpec, A...)",
@@ -151036,7 +151036,7 @@
           "overflow": "Error",
           "backend": "HostAndGpu",
           "overload": "StructuralParameter",
-          "notes": "R2026a documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array."
+          "notes": "The compatibility target documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array."
         },
         {
           "form": "str = strings(..., 'like', prototype)",
@@ -151063,7 +151063,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "StructuralParameter",
-          "notes": "The like form is a mode-gated RunMat extension and is not presented as part of the R2026a strings contract."
+          "notes": "The like form is a mode-gated RunMat extension and is not presented as part of the compatibility target's strings contract."
         }
       ]
     },
@@ -152670,7 +152670,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "Public R2026a data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly."
+              "notes": "The compatibility target's public data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly."
             }
           ],
           "computation_domain": "Structural",
@@ -153033,7 +153033,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "R2026a documents every native integer class for the FontSize property."
+              "notes": "The compatibility target documents every native integer class for the FontSize property."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -153801,7 +153801,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every native integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -153828,7 +153828,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every native integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -153855,7 +153855,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every native integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -154031,7 +154031,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every native integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -154058,7 +154058,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every native integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -154085,7 +154085,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "R2026a explicitly lists every native integer class for this surface coordinate role."
+              "notes": "The compatibility target explicitly lists every native integer class for this surface coordinate role."
             }
           ],
           "computation_domain": "FloatingPoint",

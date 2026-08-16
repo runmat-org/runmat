@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "R2026a documents GPU-array size input with host execution. RunMat gathers size values through their owning provider and always returns a host string array."
+    "notes": "The compatibility target documents GPU-array size input with host execution. RunMat gathers size values through their owning provider and always returns a host string array."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,7 @@
     "`strings(n)` produces an `n`-by-`n` array of empty strings. Double, single, and all eight integer classes are accepted for the integer-valued size.",
     "`strings(sz1,...,szN)` and `strings(sz)` accept finite integer sizes. Negative values are treated as zero, and trailing dimensions of size one beyond the second dimension are ignored.",
     "Setting any dimension to `0` yields an empty array whose remaining dimensions still shape the result (for example, `strings(0, 5, 3)` is a `0×5×3` string array).",
-    "The `\"missing\"` or `\"empty\"` fill option is a mode-gated RunMat extension; R2026a `strings` creates empty strings.",
+    "The `\"missing\"` or `\"empty\"` fill option is a mode-gated RunMat extension; the documented `strings` contract creates empty strings.",
     "The `\"like\"` prototype form is a mode-gated RunMat extension. It inspects only prototype shape and does not convert an integer prototype payload.",
     "Fractional, infinite, NaN, or platform-unrepresentable sizes reject before allocation; negative finite integer values become zero.",
     "Only numeric or logical size arguments are supported. Other types (strings, structs, objects) raise descriptive errors."

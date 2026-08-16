@@ -172,7 +172,7 @@ pub const SPHERE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const SPHERE_TYPED_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "sphere-typed-face-count",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sphere with a typed-integer face count is an evidence-open RunMat extension",
+    description: "sphere with a typed-integer face count is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:SphereTypedFaceCountExtension"),
 };
 pub const SPHERE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPHERE_TYPED_N_EXTENSION];
@@ -182,7 +182,7 @@ const SPHERE_INTEGER_N_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "[integer-audit-open] R2026a calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior.",
+        notes: "The compatibility target calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior.",
     }];
 pub const SPHERE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -190,10 +190,10 @@ pub const SPHERE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         inputs: &SPHERE_INTEGER_N_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] n is decoded exactly, checked against allocation bounds, and controls only output shape. Coordinate generation and statement-form plotting use host double values.",
+        notes: "The typed face count is a gated RunMat extension. It is decoded exactly, checked against allocation bounds, and controls only output shape; coordinate generation and statement-form plotting use host double values.",
     }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::sphere")]
@@ -625,6 +625,21 @@ mod tests {
         )
         .expect("large n");
         assert!(block_on(parse_n_value(&Value::Tensor(too_large))).is_err());
+    }
+
+    #[test]
+    fn sphere_typed_integer_dimension_is_gated_before_generation() {
+        let n = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U8(vec![4]),
+            vec![1, 1],
+        )
+        .expect("typed n");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = call(vec![Value::Tensor(n)]).expect_err("typed n must be gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:SphereTypedFaceCountExtension")
+        );
     }
 
     #[test]

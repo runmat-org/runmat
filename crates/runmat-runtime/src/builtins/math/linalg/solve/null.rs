@@ -64,7 +64,7 @@ const INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinInteger
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "R2026a documents single and double A; RunMat gates integer matrices and checks the binary64 null-space boundary before materialization.",
+    notes: "The compatibility target documents single and double A; RunMat gates integer matrices and checks the binary64 null-space boundary before materialization.",
 }];
 const INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

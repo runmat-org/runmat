@@ -134,14 +134,14 @@ const RIDGE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double response data; typed integers require exact binary64 conversion.",
+        notes: "The compatibility target documents single and double response data; typed integers require exact binary64 conversion.",
     },
     BuiltinIntegerInputCapability {
         name: "X",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double predictors; typed integers require the same checked conversion.",
+        notes: "The compatibility target documents single and double predictors; typed integers require the same checked conversion.",
     },
 ];
 const RIDGE_INTEGER_K_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -158,7 +158,7 @@ const RIDGE_INTEGER_SCALED_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents scaled as numeric 0 or 1 but not a typed integer class; RunMat gates that convenience form independently.",
+        notes: "The compatibility target documents scaled as numeric 0 or 1 but not a typed integer class; RunMat gates that convenience form independently.",
     }];
 pub const RIDGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

@@ -171,7 +171,7 @@ const RESCALE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a accepts numeric arrays; non-single integer data produces double output after a checked binary64 normalization boundary.",
+        notes: "The compatibility target accepts numeric arrays; non-single integer data produces double output after a checked binary64 normalization boundary.",
     }];
 const RESCALE_INTEGER_BOUND_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

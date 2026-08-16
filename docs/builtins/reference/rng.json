@@ -27,7 +27,7 @@
     "unit": "builtins::stats::random::rng::tests",
     "integration": null
   },
-  "description": "`rng` queries or reconfigures the global pseudorandom number generator used by `rand`, `randn`, `randi`, and `randperm`. The call shapes and integer seed domain follow the R2026a surface, while RunMat's current LCG sequence and compact state representation are not MATLAB stream/state equivalents.",
+  "description": "`rng` queries or reconfigures the global pseudorandom number generator used by `rand`, `randn`, `randi`, and `randperm`. The call shapes and integer seed domain follow the compatibility target's surface, while RunMat's current LCG sequence and compact state representation are not MATLAB stream/state equivalents.",
   "behaviors": [
     "`rng()` returns a structure describing the current generator (fields `Type`, `Seed`, and `State`).",
     "`rng(seed)` reads a non-negative integer seed below `2^32` from scalar double or any of the eight native integer classes. Seeds at or above `2^32` are an independently gated RunMat extension.",

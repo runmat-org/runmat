@@ -39,7 +39,7 @@
     "Complex scalars and arrays remain complex, but both components are stored as double precision.",
     "Empty arrays stay empty, orientation is preserved, and singleton dimensions are untouched.",
     "String scalars and arrays convert each element as one numeric value; elements that do not represent one number become NaN.",
-    "Complex inputs preserve complexity even when the converted imaginary component is zero, matching the R2026a rule.",
+    "Complex inputs preserve complexity even when the converted imaginary component is zero, matching the compatibility target's rule.",
     "`double(X, \"like\", prototype)` is a separately declared RunMat-only compatibility extension and is rejected when RunMat extensions are disabled."
   ],
   "examples": [

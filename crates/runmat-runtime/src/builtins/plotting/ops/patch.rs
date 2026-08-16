@@ -53,17 +53,17 @@ macro_rules! patch_integer_input {
 const INTEGER_X: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
     "X",
     BuiltinIntegerInputAvailability::Documented,
-    "R2026a explicitly lists every built-in integer class for X coordinates."
+    "The compatibility target explicitly lists every built-in integer class for X coordinates."
 );
 const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
     "Y",
     BuiltinIntegerInputAvailability::Documented,
-    "R2026a explicitly lists every built-in integer class for Y coordinates."
+    "The compatibility target explicitly lists every built-in integer class for Y coordinates."
 );
 const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
     "Z",
     BuiltinIntegerInputAvailability::Documented,
-    "R2026a explicitly lists every built-in integer class for Z coordinates."
+    "The compatibility target explicitly lists every built-in integer class for Z coordinates."
 );
 const INTEGER_C: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
     "CData",
@@ -73,12 +73,12 @@ const INTEGER_C: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
 const INTEGER_FACES: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
     "Faces",
     BuiltinIntegerInputAvailability::Documented,
-    "R2026a explicitly lists every built-in integer class for one-based face definitions."
+    "The compatibility target explicitly lists every built-in integer class for one-based face definitions."
 );
 const INTEGER_VERTICES: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
     "Vertices",
     BuiltinIntegerInputAvailability::Documented,
-    "R2026a explicitly lists every built-in integer class for vertex coordinates."
+    "The compatibility target explicitly lists every built-in integer class for vertex coordinates."
 );
 const INTEGER_AX: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
     "ax",

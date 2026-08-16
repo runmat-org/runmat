@@ -1545,7 +1545,7 @@ pub const SPLITAPPLY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] Typed group identifiers are a gated extension and are decoded exactly; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently.",
+        notes: "Typed group identifiers are a gated RunMat extension and are decoded exactly; public documentation requires positive integer group values without establishing typed storage, and automatic residency may gather transparently.",
     },
 ];
 
@@ -3574,6 +3574,11 @@ fn normalize_outputs(value: Value, requested: usize, context: &str) -> BuiltinRe
 }
 
 fn collect_group_results(values: Vec<Value>, rows: usize, context: &str) -> BuiltinResult<Value> {
+    if let Some(storage) = homogeneous_integer_values(&values) {
+        return Tensor::new_integer(storage, vec![rows, 1])
+            .map(Value::Tensor)
+            .map_err(grouping_error);
+    }
     if values
         .iter()
         .all(|value| value_as_numeric_scalar(value).is_some())
@@ -4984,7 +4989,7 @@ mod tests {
     }
 
     #[test]
-    fn combinations_preserves_typed_integer_columns_without_f64_mirror() {
+    fn combinations_preserves_typed_integer_columns_exactly() {
         let first =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).unwrap();
         let out = block_on(combinations_builtin(
@@ -5171,6 +5176,51 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message().contains("must have 2 rows"));
+    }
+
+    #[test]
+    fn splitapply_preserves_integer_group_slices_and_gates_typed_groups() {
+        let base = 9_007_199_254_740_993_u64;
+        let data = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![base, 1, base + 2, 2]), vec![4, 1])
+                .unwrap(),
+        );
+        let groups = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![base, base + 1, base, base + 1]),
+                vec![4, 1],
+            )
+            .unwrap(),
+        );
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = block_on(splitapply_builtin(
+                Value::FunctionHandle("max".into()),
+                data.clone(),
+                vec![groups.clone()],
+            ))
+            .expect_err("typed groups must be gated");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:SplitapplyIntegerGroupVectorExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = block_on(splitapply_builtin(
+            Value::FunctionHandle("max".into()),
+            data,
+            vec![groups],
+        ))
+        .expect("exact integer group sums");
+        let Value::Tensor(output) = output else {
+            panic!("expected integer tensor output");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![base + 2, 2]))
+        );
     }
 
     #[test]

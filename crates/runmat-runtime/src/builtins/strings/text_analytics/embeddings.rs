@@ -459,14 +459,14 @@ const DOC2SEQUENCE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length.",
+        notes: "The compatibility target documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length.",
     },
     BuiltinIntegerInputCapability {
         name: "PaddingValue",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary.",
+        notes: "The compatibility target documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary.",
     },
 ];
 

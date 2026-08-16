@@ -198,7 +198,7 @@ const ROUND_INTEGER_DIGITS_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents N as double; RunMat mode accepts an exact scalar typed integer and range-checks it before selecting the rounding mode.",
+        notes: "The compatibility target documents N as double; RunMat mode accepts an exact scalar typed integer and range-checks it before selecting the rounding mode.",
     }];
 pub const ROUND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

@@ -159,7 +159,7 @@ const PCHIP_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double sample locations. RunMat admits typed integers only when each value is exactly representable at the binary64 interpolation boundary.",
+        notes: "The compatibility target documents single and double sample locations. RunMat admits typed integers only when each value is exactly representable at the binary64 interpolation boundary.",
     }];
 const PCHIP_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -167,7 +167,7 @@ const PCHIP_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double sample values. RunMat admits typed integers only through the explicit floating interpolation boundary.",
+        notes: "The compatibility target documents single and double sample values. RunMat admits typed integers only through the explicit floating interpolation boundary.",
     }];
 const PCHIP_INTEGER_XQ_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -175,7 +175,7 @@ const PCHIP_INTEGER_XQ_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double query points. RunMat admits typed integers only when exact binary64 conversion is possible.",
+        notes: "The compatibility target documents single and double query points. RunMat admits typed integers only when exact binary64 conversion is possible.",
     }];
 pub const PCHIP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

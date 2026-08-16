@@ -231,7 +231,7 @@ pub const SS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] Each typed matrix is independently gated and checked before conversion; public documentation does not enumerate matrix storage classes, and the state-space object's numeric matrices are binary64.",
+        notes: "Each typed matrix is an independently gated RunMat extension and is checked before conversion; the state-space object's numeric matrices are binary64.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "sys = ss(A, B, C, D, integer_Ts)",
@@ -241,7 +241,7 @@ pub const SS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] The sample time is stored as binary64 model metadata after an exact representability check; public documentation requires a numeric scalar without enumerating typed storage classes.",
+        notes: "Typed sample time is a gated RunMat extension stored as binary64 model metadata after an exact representability check; the public contract requires a numeric scalar without enumerating typed storage classes.",
     },
 ];
 

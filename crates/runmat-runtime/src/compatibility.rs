@@ -6,6 +6,14 @@ use runmat_thread_local::runmat_thread_local;
 use std::cell::Cell;
 use std::collections::HashSet;
 
+/// Public release identity used by compatibility-sensitive runtime queries.
+/// Keep this paired with `MATLAB_COMPATIBILITY_VERSION` and the canonical
+/// policy in `docs/development/backwards-compat.md`.
+pub const MATLAB_COMPATIBILITY_RELEASE: &str = "R2026a";
+
+/// Numeric product version corresponding to `MATLAB_COMPATIBILITY_RELEASE`.
+pub const MATLAB_COMPATIBILITY_VERSION: &str = "26.1";
+
 runmat_thread_local! {
     static RUNMAT_EXTENSIONS_ENABLED: Cell<bool> = const { Cell::new(false) };
 }
@@ -123,6 +131,15 @@ impl Drop for RunMatExtensionsGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn documented_compatibility_pin_matches_runtime_queries() {
+        let policy = include_str!("../../../docs/development/backwards-compat.md");
+        assert!(policy.contains(&format!("**MATLAB {MATLAB_COMPATIBILITY_RELEASE}**")));
+        assert!(policy.contains(&format!(
+            "product version, `{MATLAB_COMPATIBILITY_VERSION}`"
+        )));
+    }
 
     #[test]
     fn scoped_extension_policy_restores_previous_state() {

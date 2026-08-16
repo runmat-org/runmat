@@ -277,7 +277,7 @@ const PDIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion.",
+        notes: "The compatibility target documents single and double observation matrices. RunMat gates typed integers before gather and requires exact binary64 conversion.",
     }];
 const PDIST_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -316,14 +316,14 @@ const PDIST2_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double X observations; RunMat requires exact binary64 conversion for typed integers.",
+        notes: "The compatibility target documents single and double X observations; RunMat requires exact binary64 conversion for typed integers.",
     },
     BuiltinIntegerInputCapability {
         name: "Y",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers.",
+        notes: "The compatibility target documents single and double Y observations; RunMat requires exact binary64 conversion for typed integers.",
     },
 ];
 const PDIST2_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
@@ -341,7 +341,7 @@ const PDIST2_INTEGER_SELECTION_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts.",
+        notes: "The compatibility target enumerates single and double storage for the positive selection count. RunMat decodes typed integers exactly as structural counts.",
     }];
 pub const PDIST2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

@@ -71,14 +71,14 @@ const DLMREAD_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents all eight integer classes for zero-based row offsets.",
+        notes: "The compatibility target documents all eight integer classes for zero-based row offsets.",
     },
     BuiltinIntegerInputCapability {
         name: "C1/C2",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents all eight integer classes for zero-based column offsets.",
+        notes: "The compatibility target documents all eight integer classes for zero-based column offsets.",
     },
 ];
 pub const DLMREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

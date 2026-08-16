@@ -222,7 +222,7 @@ pub const STRINGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "R2026a documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array.",
+        notes: "The compatibility target documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "str = strings(..., 'like', prototype)",
@@ -232,7 +232,7 @@ pub const STRINGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The like form is a mode-gated RunMat extension and is not presented as part of the R2026a strings contract.",
+        notes: "The like form is a mode-gated RunMat extension and is not presented as part of the compatibility target's strings contract.",
     },
 ];
 

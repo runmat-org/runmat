@@ -292,7 +292,7 @@ pub const SPLIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const SPLIT_TYPED_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "split-typed-dimension",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "split with a typed-integer dimension is an evidence-open RunMat extension",
+    description: "split with a typed-integer dimension",
     error_identifier: Some("RunMat:compatibility:SplitTypedDimensionExtension"),
 };
 
@@ -322,7 +322,7 @@ const SPLIT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "[integer-audit-open] R2026a specifies a positive integer dimension but does not enumerate typed storage classes. RunMat accepts every exact integer class behind a compatibility gate; ordinary host double integer dimensions remain documented behavior.",
+        notes: "The compatibility target specifies a positive integer dimension but does not enumerate typed storage classes. RunMat accepts every exact integer class behind a compatibility gate; ordinary host double integer dimensions remain documented behavior.",
     }];
 
 pub const SPLIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -331,10 +331,10 @@ pub const SPLIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         inputs: &SPLIT_INTEGER_DIMENSION_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] The exact one-based dimension controls only output orientation. Explicit resident dimensions are separately gated before gather; automatic residency may gather transparently.",
+        notes: "The typed dimension is a gated RunMat extension whose exact one-based value controls only output orientation. Explicit resident dimensions are separately gated before gather; automatic residency may gather transparently.",
     }];
 
 const STRSPLIT_OUTPUT: [BuiltinParamDescriptor; 2] = [

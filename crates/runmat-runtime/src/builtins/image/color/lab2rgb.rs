@@ -109,7 +109,7 @@ pub const LAB2RGB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const LAB2RGB_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "lab2rgb-explicit-gpu-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lab2rgb with an explicitly requested gpuArray input is a RunMat extension because R2026a documents no interactive GPU Arrays capability",
+    description: "lab2rgb with an explicitly requested gpuArray input is a RunMat extension because the compatibility target documents no interactive GPU Arrays capability",
     error_identifier: Some("RunMat:compatibility:Lab2rgbExplicitGpuExtension"),
 };
 pub const LAB2RGB_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LAB2RGB_EXPLICIT_GPU_EXTENSION];
@@ -119,7 +119,7 @@ const LAB2RGB_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntege
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Rejected,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "R2026a accepts only single or double LAB input. Every integer class rejects from host or resident metadata before conversion or gather.",
+    notes: "The compatibility target accepts only single or double LAB input. Every integer class rejects from host or resident metadata before conversion or gather.",
 }];
 pub const LAB2RGB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
     form: "RGB = lab2rgb(LAB, OutputType=integer_type)",

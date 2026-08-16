@@ -33,7 +33,7 @@
     "Numeric and logical arrays preserve the original shape while converting each element; all eight integer classes retain exact decimal values, including values wider than binary64 can represent.",
     "Character arrays turn into columnar string arrays with one row per original row.",
     "Cell arrays must contain text-like or scalar numeric values; each cell becomes one string scalar.",
-    "RunMat also provides `string(formatSpec, A1, ..., An)` printf-style formatting and `string(X, encoding)` as mode-gated extensions. They are available in `runmat` mode but are not presented as R2026a `string(A)` forms.",
+    "RunMat also provides `string(formatSpec, A1, ..., An)` printf-style formatting and `string(X, encoding)` as mode-gated extensions. They are available in `runmat` mode but are not presented as documented `string(A)` forms.",
     "Empty inputs yield empty string arrays that match MATLAB's dimension rules.",
     "Unsupported types (structs, handle objects, events, functions) raise descriptive errors. Explicit GPU numeric input is separately gated, while an automatically resident intermediate may gather at this host string sink."
   ],

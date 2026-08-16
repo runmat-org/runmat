@@ -171,7 +171,7 @@ const QQPLOT_INTEGER_SAMPLES: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double sample data. RunMat admits typed integers only after exact binary64 representability is proved.",
+        notes: "The compatibility target documents single and double sample data. RunMat admits typed integers only after exact binary64 representability is proved.",
     },
     BuiltinIntegerInputCapability {
         name: "y",
@@ -186,7 +186,7 @@ const QQPLOT_INTEGER_PVEC: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerI
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "R2026a documents single and double quantile percentages; typed integer percentages cross a checked binary64 normalization boundary.",
+    notes: "The compatibility target documents single and double quantile percentages; typed integer percentages cross a checked binary64 normalization boundary.",
 }];
 pub const QQPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

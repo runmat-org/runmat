@@ -163,19 +163,19 @@ const SPRAND_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "[integer-audit-open] Public documentation requires nonnegative integer values but does not establish typed storage; RunMat decodes admitted dimensions exactly.",
+        notes: "Public documentation requires nonnegative integer values but does not establish typed storage; RunMat gates typed dimensions and decodes them exactly.",
     },
     BuiltinIntegerInputCapability {
         name: "density or rc",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "[integer-audit-open] Public documentation does not establish typed storage; admitted values must cross the binary64 random-generation boundary exactly.",
+        notes: "Public documentation does not establish typed storage for density or condition values; RunMat gates them and requires exact binary64 admission.",
     },
 ];
 pub const SPRAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor { form: "R = sprand(integer_S, typename?)", inputs: &SPRAND_INTEGER_PATTERN_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Only S's exact nonzero pattern is consumed; random values use double unless typename selects single." },
-    BuiltinIntegerCapabilityDescriptor { form: "R = sprand(integer_m, integer_n, integer_density/rc, typename?)", inputs: &SPRAND_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "[integer-audit-open] Typed controls are evidence-open RunMat extensions: dimensions remain structural while density and condition values require exact binary64 conversion." },
+    BuiltinIntegerCapabilityDescriptor { form: "R = sprand(integer_m, integer_n, integer_density/rc, typename?)", inputs: &SPRAND_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Typed controls are gated RunMat extensions: dimensions remain exact structural values, while density and condition values require exact binary64 admission." },
 ];
 
 const SPDIAGS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
@@ -200,15 +200,15 @@ const SPDIAGS_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented matrix storage is single, double, or logical; RunMat requires typed matrix values to be exact at the current binary64 diagonal-processing boundary.",
+        notes: "Documented matrix storage is single, double, or logical; RunMat gates typed matrix values and processes them directly in their integer class.",
     }];
 const SPDIAGS_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "d", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "[integer-audit-open] Diagonal offsets are documented as integer-valued but typed storage is not established; RunMat decodes them exactly." },
-    BuiltinIntegerInputCapability { name: "m and n", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "[integer-audit-open] Output dimensions are documented as nonnegative integers but typed storage is not established; RunMat decodes them exactly." },
+    BuiltinIntegerInputCapability { name: "d", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Diagonal offsets are documented as integer-valued but typed storage is not established; RunMat gates typed offsets and decodes them exactly." },
+    BuiltinIntegerInputCapability { name: "m and n", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Output dimensions are documented as nonnegative integers but typed storage is not established; RunMat gates typed dimensions and decodes them exactly." },
 ];
 pub const SPDIAGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(integer_A/B/Bin, ...)", inputs: &SPDIAGS_INTEGER_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Typed matrix data is a gated extension and may enter the current binary64 diagonal engine only without rounding." },
-    BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(A/B, integer_d, integer_m?, integer_n?)", inputs: &SPDIAGS_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "[integer-audit-open] Offsets and dimensions are evidence-open typed extensions decoded directly from authoritative storage." },
+    BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(integer_A/B/Bin, ...)", inputs: &SPDIAGS_INTEGER_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Typed matrix data is a gated extension. Extraction and construction preserve the integer class exactly; replacement follows the target class, and duplicate same-class integer diagonals add with saturation." },
+    BuiltinIntegerCapabilityDescriptor { form: "B/S = spdiags(A/B, integer_d, integer_m?, integer_n?)", inputs: &SPDIAGS_INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Typed offsets and dimensions are gated RunMat extensions decoded exactly before diagonal selection or allocation." },
 ];
 
 const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -647,13 +647,12 @@ async fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(data) = args.first() {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            data,
-            &SPDIAGS_INTEGER_DATA_EXTENSION,
-            "spdiags",
-            "matrix-data",
-        )
-        .await?;
+        if crate::builtins::common::validation::value_has_native_integer_class(data) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SPDIAGS_INTEGER_DATA_EXTENSION,
+                "spdiags",
+            )?;
+        }
     }
     if let Some(offsets) = args.get(1) {
         if crate::builtins::common::validation::value_has_native_integer_class(offsets) {
@@ -664,13 +663,12 @@ async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
     }
     if args.len() == 3 {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            &args[2],
-            &SPDIAGS_INTEGER_DATA_EXTENSION,
-            "spdiags",
-            "replacement-matrix",
-        )
-        .await?;
+        if crate::builtins::common::validation::value_has_native_integer_class(&args[2]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SPDIAGS_INTEGER_DATA_EXTENSION,
+                "spdiags",
+            )?;
+        }
     } else if args.len() == 4 {
         for dimension in &args[2..] {
             if crate::builtins::common::validation::value_has_native_integer_class(dimension) {
@@ -1615,9 +1613,49 @@ fn add_entry(entries: &mut BTreeMap<(usize, usize), f64>, col: usize, row: usize
     }
 }
 
+fn add_integer_entry(
+    entries: &mut BTreeMap<(usize, usize), IntValue>,
+    col: usize,
+    row: usize,
+    value: IntValue,
+) -> BuiltinResult<()> {
+    let key = (col, row);
+    if let Some(current) = entries.get(&key) {
+        let sum = current.saturating_add(&value).map_err(|err| {
+            sparse_error(
+                &SPARSE_ERROR_INTERNAL,
+                format!("spdiags: cannot combine duplicate integer diagonals: {err}"),
+            )
+        })?;
+        if sum.is_zero() {
+            entries.remove(&key);
+        } else {
+            entries.insert(key, sum);
+        }
+    } else if !value.is_zero() {
+        entries.insert(key, value);
+    }
+    Ok(())
+}
+
 fn spdiags_value(args: Vec<Value>) -> BuiltinResult<Value> {
     match args.len() {
         1 => {
+            if let Some(matrix) = integer_extraction_matrix_from_value(&args[0], "spdiags") {
+                let matrix = matrix?;
+                let offsets = nonzero_integer_diagonal_offsets(&matrix);
+                let bout = extract_integer_diagonals(&matrix, &offsets)?;
+                let id = tensor_column(offsets.iter().map(|&d| d as f64).collect(), "spdiags")?;
+                return match crate::output_count::current_output_count() {
+                    Some(0) => Ok(Value::OutputList(Vec::new())),
+                    Some(1) => Ok(Value::OutputList(vec![bout])),
+                    Some(out_count) => Ok(crate::output_count::output_list_with_padding(
+                        out_count,
+                        vec![bout, id],
+                    )),
+                    None => Ok(bout),
+                };
+            }
             let matrix = extraction_matrix_from_value(&args[0], "spdiags")?;
             let offsets = nonzero_diagonal_offsets(&matrix);
             let bout = extract_diagonals(&matrix, &offsets)?;
@@ -1633,21 +1671,173 @@ fn spdiags_value(args: Vec<Value>) -> BuiltinResult<Value> {
             }
         }
         2 => {
+            if let Some(matrix) = integer_extraction_matrix_from_value(&args[0], "spdiags") {
+                let matrix = matrix?;
+                let offsets = parse_diag_offsets(&args[1], "spdiags")?;
+                return extract_integer_diagonals(&matrix, &offsets);
+            }
             let matrix = extraction_matrix_from_value(&args[0], "spdiags")?;
             let offsets = parse_diag_offsets(&args[1], "spdiags")?;
             extract_diagonals(&matrix, &offsets)
         }
-        3 => replace_sparse_diagonals(&args[0], &args[1], &args[2]).map(Value::SparseTensor),
+        3 => {
+            let target = sparse_from_value(args[2].clone())?;
+            if target.integer_storage().is_some() {
+                replace_sparse_integer_diagonals(&args[0], &args[1], target)
+                    .map(Value::SparseTensor)
+            } else {
+                replace_sparse_diagonals(&args[0], &args[1], &args[2]).map(Value::SparseTensor)
+            }
+        }
         4 => {
             let offsets = parse_diag_offsets(&args[1], "spdiags")?;
             let rows = parse_size_arg(&args[2], "m")?;
             let cols = parse_size_arg(&args[3], "n")?;
-            construct_sparse_diagonals(&args[0], &offsets, rows, cols).map(Value::SparseTensor)
+            if let Some(bin) = integer_dense_matrix_from_value(&args[0], "spdiags") {
+                construct_sparse_integer_diagonals(&bin?, &offsets, rows, cols)
+                    .map(Value::SparseTensor)
+            } else {
+                construct_sparse_diagonals(&args[0], &offsets, rows, cols).map(Value::SparseTensor)
+            }
         }
         _ => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             "spdiags: expected spdiags(A), spdiags(A,d), spdiags(B,d,m,n), or spdiags(B,d,A)",
         )),
+    }
+}
+
+#[derive(Clone)]
+struct IntegerMatrix {
+    rows: usize,
+    cols: usize,
+    storage: IntegerStorage,
+}
+
+impl IntegerMatrix {
+    fn get(&self, row: usize, col: usize) -> IntValue {
+        self.storage
+            .value_at(row + col * self.rows)
+            .expect("validated integer matrix shape matches storage")
+    }
+}
+
+enum IntegerExtractionMatrix {
+    Dense(IntegerMatrix),
+    Sparse(SparseTensor),
+}
+
+impl IntegerExtractionMatrix {
+    fn rows(&self) -> usize {
+        match self {
+            Self::Dense(matrix) => matrix.rows,
+            Self::Sparse(matrix) => matrix.rows,
+        }
+    }
+
+    fn cols(&self) -> usize {
+        match self {
+            Self::Dense(matrix) => matrix.cols,
+            Self::Sparse(matrix) => matrix.cols,
+        }
+    }
+
+    fn prototype(&self) -> &IntegerStorage {
+        match self {
+            Self::Dense(matrix) => &matrix.storage,
+            Self::Sparse(matrix) => matrix
+                .integer_storage()
+                .expect("integer sparse extraction matrix retains integer storage"),
+        }
+    }
+
+    fn get(&self, row: usize, col: usize) -> IntValue {
+        match self {
+            Self::Dense(matrix) => matrix.get(row, col),
+            Self::Sparse(matrix) => matrix.integer_at(row, col).unwrap_or_else(|| {
+                matrix
+                    .integer_storage()
+                    .expect("integer sparse extraction matrix retains integer storage")
+                    .zeros_like(1)
+                    .value_at(0)
+                    .expect("one-element integer zero storage")
+            }),
+        }
+    }
+}
+
+fn integer_extraction_matrix_from_value(
+    value: &Value,
+    label: &str,
+) -> Option<BuiltinResult<IntegerExtractionMatrix>> {
+    match value {
+        Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {
+            Some(Ok(IntegerExtractionMatrix::Sparse(sparse.clone())))
+        }
+        _ => integer_dense_matrix_from_value(value, label)
+            .map(|result| result.map(IntegerExtractionMatrix::Dense)),
+    }
+}
+
+fn integer_dense_matrix_from_value(
+    value: &Value,
+    label: &str,
+) -> Option<BuiltinResult<IntegerMatrix>> {
+    match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            if tensor.shape.len() > 2 {
+                return Some(Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!("{label}: input must be a 2-D matrix"),
+                )));
+            }
+            Some(Ok(IntegerMatrix {
+                rows: tensor.rows(),
+                cols: tensor.cols(),
+                storage: tensor
+                    .integer_storage()
+                    .expect("checked integer tensor")
+                    .clone(),
+            }))
+        }
+        Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {
+            let total = match sparse.rows.checked_mul(sparse.cols) {
+                Some(total) => total,
+                None => {
+                    return Some(Err(sparse_error(
+                        &SPARSE_ERROR_INVALID_INPUT,
+                        format!("{label}: sparse dimensions overflow"),
+                    )))
+                }
+            };
+            if total > SPARSE_HELPER_DENSE_INPUT_LIMIT {
+                return Some(Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!(
+                        "{label}: cannot densify sparse matrix with {total} elements for diagonal processing"
+                    ),
+                )));
+            }
+            Some(
+                sparse
+                    .to_dense()
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+                    .map(|tensor| IntegerMatrix {
+                        rows: sparse.rows,
+                        cols: sparse.cols,
+                        storage: tensor
+                            .integer_storage()
+                            .expect("integer sparse tensor densifies to integer storage")
+                            .clone(),
+                    }),
+            )
+        }
+        Value::Int(value) => Some(Ok(IntegerMatrix {
+            rows: 1,
+            cols: 1,
+            storage: IntegerStorage::from_scalar(value.clone()),
+        })),
+        _ => None,
     }
 }
 
@@ -1821,9 +2011,8 @@ fn parse_diag_offsets(value: &Value, label: &str) -> BuiltinResult<Vec<isize>> {
         .collect()
 }
 
-/// Parse typed diagonal offsets from their integer backing storage.  Offsets
-/// are selectors, rather than numeric data, so routing them through the f64
-/// compatibility mirror can silently change wide `uint64` values.
+/// Parse typed diagonal offsets directly from integer storage. Offsets are
+/// selectors, so wide values must not pass through floating-point conversion.
 fn parse_integer_diag_offsets(value: &Value, label: &str) -> Option<BuiltinResult<Vec<isize>>> {
     let values = match value {
         Value::Int(value) => vec![value.clone()],
@@ -1859,6 +2048,211 @@ fn parse_integer_diag_offsets(value: &Value, label: &str) -> Option<BuiltinResul
             })
             .collect(),
     )
+}
+
+fn nonzero_integer_diagonal_offsets(matrix: &IntegerExtractionMatrix) -> Vec<isize> {
+    let mut offsets = BTreeSet::new();
+    match matrix {
+        IntegerExtractionMatrix::Sparse(sparse) => {
+            let storage = sparse
+                .integer_storage()
+                .expect("integer sparse extraction matrix retains integer storage");
+            for col in 0..sparse.cols {
+                for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+                    if !storage
+                        .value_at(idx)
+                        .expect("validated sparse integer storage")
+                        .is_zero()
+                    {
+                        offsets.insert(col as isize - sparse.row_indices[idx] as isize);
+                    }
+                }
+            }
+        }
+        IntegerExtractionMatrix::Dense(_) => {
+            for col in 0..matrix.cols() {
+                for row in 0..matrix.rows() {
+                    if !matrix.get(row, col).is_zero() {
+                        offsets.insert(col as isize - row as isize);
+                    }
+                }
+            }
+        }
+    }
+    offsets.into_iter().collect()
+}
+
+fn extract_integer_diagonals(
+    matrix: &IntegerExtractionMatrix,
+    offsets: &[isize],
+) -> BuiltinResult<Value> {
+    let rows = matrix.rows();
+    let cols = matrix.cols();
+    let out_rows = rows.min(cols);
+    let mut storage = matrix
+        .prototype()
+        .zeros_like(out_rows.saturating_mul(offsets.len()));
+    for (out_col, &offset) in offsets.iter().enumerate() {
+        for t in 0..diag_len(rows, cols, offset) {
+            let Some((row, col)) = diag_coord(offset, t) else {
+                continue;
+            };
+            if row >= rows || col >= cols {
+                continue;
+            }
+            let out_row = diag_bout_row(offset, t);
+            if out_row < out_rows {
+                storage
+                    .set_value(out_row + out_col * out_rows, matrix.get(row, col))
+                    .map_err(|err| {
+                        sparse_error(&SPARSE_ERROR_INTERNAL, format!("spdiags: {err}"))
+                    })?;
+            }
+        }
+    }
+    Tensor::new_integer(storage, vec![out_rows, offsets.len()])
+        .map(Value::Tensor)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("spdiags: {err}")))
+}
+
+fn construct_sparse_integer_diagonals(
+    bin: &IntegerMatrix,
+    offsets: &[isize],
+    rows: usize,
+    cols: usize,
+) -> BuiltinResult<SparseTensor> {
+    if offsets.is_empty() {
+        return Ok(SparseTensor::zeros_with_integer_storage(
+            rows,
+            cols,
+            &bin.storage,
+        ));
+    }
+    if bin.cols != offsets.len() {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "spdiags: Bin must have one column per diagonal, got {} columns for {} diagonals",
+                bin.cols,
+                offsets.len()
+            ),
+        ));
+    }
+
+    let mut entries = BTreeMap::new();
+    for (diag_index, &offset) in offsets.iter().enumerate() {
+        for t in 0..diag_len(rows, cols, offset) {
+            let Some((row, col)) = diag_coord(offset, t) else {
+                continue;
+            };
+            let source_row = diag_bout_row(offset, t);
+            if source_row < bin.rows {
+                add_integer_entry(&mut entries, col, row, bin.get(source_row, diag_index))?;
+            }
+        }
+    }
+    sparse_integer_from_entries(rows, cols, entries, &bin.storage, "spdiags")
+}
+
+fn replace_sparse_integer_diagonals(
+    bin: &Value,
+    offsets: &Value,
+    target: SparseTensor,
+) -> BuiltinResult<SparseTensor> {
+    let offsets = parse_diag_offsets(offsets, "spdiags")?;
+    let prototype = target
+        .integer_storage()
+        .expect("integer replacement target retains integer storage")
+        .clone();
+    let selected: BTreeSet<isize> = offsets.iter().copied().collect();
+    let mut entries = BTreeMap::new();
+    for col in 0..target.cols {
+        for idx in target.col_ptrs[col]..target.col_ptrs[col + 1] {
+            let row = target.row_indices[idx];
+            if !selected.contains(&(col as isize - row as isize)) {
+                entries.insert(
+                    (col, row),
+                    prototype
+                        .value_at(idx)
+                        .expect("validated sparse integer storage"),
+                );
+            }
+        }
+    }
+
+    let mut replacements = BTreeMap::new();
+    if let Some(integer_bin) = integer_dense_matrix_from_value(bin, "spdiags") {
+        let integer_bin = integer_bin?;
+        validate_spdiags_bin_columns(integer_bin.cols, offsets.len())?;
+        for (diag_index, &offset) in offsets.iter().enumerate() {
+            for t in 0..diag_len(target.rows, target.cols, offset) {
+                let Some((row, col)) = diag_coord(offset, t) else {
+                    continue;
+                };
+                let source_row = diag_bout_row(offset, t);
+                if source_row < integer_bin.rows {
+                    let value =
+                        prototype.cast_exact_assignment(&integer_bin.get(source_row, diag_index));
+                    add_integer_entry(&mut replacements, col, row, value)?;
+                }
+            }
+        }
+    } else {
+        let floating_bin = dense_matrix_from_value(bin, "spdiags")?;
+        validate_spdiags_bin_columns(floating_bin.cols, offsets.len())?;
+        for (diag_index, &offset) in offsets.iter().enumerate() {
+            for t in 0..diag_len(target.rows, target.cols, offset) {
+                let Some((row, col)) = diag_coord(offset, t) else {
+                    continue;
+                };
+                let source_row = diag_bout_row(offset, t);
+                if source_row < floating_bin.rows {
+                    let value =
+                        prototype.cast_f64_assignment(floating_bin.get(source_row, diag_index));
+                    add_integer_entry(&mut replacements, col, row, value)?;
+                }
+            }
+        }
+    }
+    entries.extend(replacements);
+    sparse_integer_from_entries(target.rows, target.cols, entries, &prototype, "spdiags")
+}
+
+fn validate_spdiags_bin_columns(actual: usize, expected: usize) -> BuiltinResult<()> {
+    if expected != 0 && actual != expected {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "spdiags: Bin must have one column per diagonal, got {actual} columns for {expected} diagonals"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn sparse_integer_from_entries(
+    rows: usize,
+    cols: usize,
+    entries: BTreeMap<(usize, usize), IntValue>,
+    prototype: &IntegerStorage,
+    label: &str,
+) -> BuiltinResult<SparseTensor> {
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::with_capacity(entries.len());
+    let mut values = Vec::with_capacity(entries.len());
+    col_ptrs.push(0);
+    for col in 0..cols {
+        for (&(entry_col, row), value) in entries.range((col, 0)..=(col, usize::MAX)) {
+            debug_assert_eq!(entry_col, col);
+            if !value.is_zero() {
+                row_indices.push(row);
+                values.push(value.clone());
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    SparseTensor::new_integer_like(rows, cols, col_ptrs, row_indices, values, prototype)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
 }
 
 fn extract_diagonals(matrix: &ExtractionMatrix, offsets: &[isize]) -> BuiltinResult<Value> {
@@ -4347,7 +4741,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn spdiags_reads_typed_integer_bin_and_offsets_exactly_at_float_boundary() {
+    fn spdiags_preserves_integer_construction_and_exact_offsets() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let bin = exact_integer_tensor(
             IntegerStorage::I16(vec![
@@ -4366,15 +4760,18 @@ pub(crate) mod tests {
             ])
             .expect("spdiags"),
         );
-        assert_eq!(sparse.integer_storage(), None);
-        assert_eq!(sparse.get(1, 0), Some(10.0));
-        assert_eq!(sparse.get(2, 1), Some(20.0));
-        assert_eq!(sparse.get(0, 1), Some(1.0));
-        assert_eq!(sparse.get(1, 2), Some(2.0));
+        assert_eq!(
+            sparse.integer_storage(),
+            Some(&IntegerStorage::I16(vec![10, 1, 20, 2]))
+        );
+        assert_eq!(sparse.integer_at(1, 0), Some(IntValue::I16(10)));
+        assert_eq!(sparse.integer_at(2, 1), Some(IntValue::I16(20)));
+        assert_eq!(sparse.integer_at(0, 1), Some(IntValue::I16(1)));
+        assert_eq!(sparse.integer_at(1, 2), Some(IntValue::I16(2)));
     }
 
     #[test]
-    fn spdiags_offset_parser_reads_all_integer_classes_without_f64_rounding() {
+    fn spdiags_offset_parser_decodes_all_integer_classes_exactly() {
         let cases = [
             (IntegerStorage::I8(vec![-1, 1]), vec![-1, 1]),
             (IntegerStorage::I16(vec![-2, 2]), vec![-2, 2]),
@@ -4408,6 +4805,115 @@ pub(crate) mod tests {
         let err = parse_diag_offsets(&Value::Int(IntValue::U64(u64::MAX)), "spdiags")
             .expect_err("wide uint64 offset must be rejected instead of rounded");
         assert!(err.to_string().contains("exceeds supported range"));
+    }
+
+    #[test]
+    fn spdiags_preserves_wide_integer_extraction_and_sparse_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = 9_007_199_254_740_993_u64;
+        let dense = exact_integer_tensor(
+            IntegerStorage::U64(vec![wide, 0, 0, 0, wide + 2, 0, 0, 0, u64::MAX]),
+            vec![3, 3],
+        );
+        let offsets = exact_integer_tensor(IntegerStorage::I8(vec![0]), vec![1, 1]);
+        let extracted = expect_tensor(
+            spdiags_builtin(vec![Value::Tensor(dense), Value::Tensor(offsets.clone())])
+                .expect("extract dense integer diagonal"),
+        );
+        assert_eq!(
+            extracted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, wide + 2, u64::MAX]))
+        );
+
+        let sparse = SparseTensor::new_integer(
+            SPARSE_HELPER_DENSE_INPUT_LIMIT + 1,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U64(vec![wide]),
+        )
+        .unwrap();
+        let extracted = expect_tensor(
+            spdiags_builtin(vec![Value::SparseTensor(sparse), Value::Tensor(offsets)])
+                .expect("extract sparse integer diagonal"),
+        );
+        assert_eq!(
+            extracted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide]))
+        );
+    }
+
+    #[test]
+    fn spdiags_integer_replacement_preserves_target_class_and_saturates_duplicates() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let target = SparseTensor::new_integer(
+            3,
+            3,
+            vec![0, 1, 2, 3],
+            vec![0, 1, 2],
+            IntegerStorage::U64(vec![u64::MAX, 7, 6]),
+        )
+        .unwrap();
+        let bin = exact_integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]);
+        let offsets = exact_integer_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]);
+        let replaced = expect_sparse(
+            spdiags_builtin(vec![
+                Value::Tensor(bin),
+                Value::Tensor(offsets),
+                Value::SparseTensor(target),
+            ])
+            .expect("replace integer diagonal"),
+        );
+        assert_eq!(replaced.integer_at(0, 0), Some(IntValue::U64(u64::MAX)));
+        assert_eq!(replaced.integer_at(1, 1), Some(IntValue::U64(7)));
+        assert_eq!(replaced.integer_at(2, 2), Some(IntValue::U64(6)));
+        assert_eq!(replaced.integer_at(0, 1), Some(IntValue::U64(2)));
+        assert_eq!(replaced.integer_at(1, 2), Some(IntValue::U64(3)));
+
+        let bin = exact_integer_tensor(IntegerStorage::U8(vec![250, 10]), vec![1, 2]);
+        let offsets = exact_integer_tensor(IntegerStorage::I8(vec![0, 0]), vec![1, 2]);
+        let saturated = expect_sparse(
+            spdiags_builtin(vec![
+                Value::Tensor(bin),
+                Value::Tensor(offsets),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ])
+            .expect("construct duplicate integer diagonals"),
+        );
+        assert_eq!(saturated.integer_at(0, 0), Some(IntValue::U8(u8::MAX)));
+    }
+
+    #[test]
+    fn sparse_random_and_diagonal_integer_extensions_gate_independently() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_data = exact_integer_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]);
+        let err = spdiags_builtin(vec![Value::Tensor(integer_data)])
+            .expect_err("typed spdiags data must be gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:SpdiagsIntegerDataExtension")
+        );
+
+        let floating = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let offsets = exact_integer_tensor(IntegerStorage::I8(vec![0]), vec![1, 1]);
+        let err = spdiags_builtin(vec![Value::Tensor(floating), Value::Tensor(offsets)])
+            .expect_err("typed spdiags offsets must be gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:SpdiagsIntegerControlExtension")
+        );
+
+        let err = sprand_builtin(vec![
+            Value::Int(IntValue::U8(2)),
+            Value::Num(2.0),
+            Value::Num(0.5),
+        ])
+        .expect_err("typed sprand dimensions must be gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:SprandIntegerNumericControlExtension")
+        );
     }
 
     #[test]

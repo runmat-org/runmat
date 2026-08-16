@@ -268,8 +268,8 @@ validator_integer_capability!(MUST_BE_A_INTEGER_CAPABILITIES, "mustBeA(integer_A
 validator_integer_capability!(MUST_BE_COLUMN_INTEGER_CAPABILITIES, "mustBeColumn(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::StructuralParameter, "Column validation reads shape metadata only and supports resident integer arrays without gathering.");
 validator_integer_capability!(MUST_BE_FINITE_INTEGER_CAPABILITIES, "mustBeFinite(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::ElementwiseShapePreserving, "Every native integer value is finite; compatibility is decided from exact class metadata without floating conversion.");
 validator_integer_capability!(MUST_BE_FLOAT_INTEGER_CAPABILITIES, "mustBeFloat(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::FunctionSpecific, "Every native integer class fails isfloat-style validation from metadata without gathering or conversion.");
-validator_integer_capability!(MUST_BE_GREATER_THAN_INTEGER_CAPABILITIES, "mustBeGreaterThan(integer_A, numeric_B)", &VALIDATOR_INTEGER_VALUE_AND_BOUND, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "R2026a compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path.");
-validator_integer_capability!(MUST_BE_GREATER_THAN_OR_EQUAL_INTEGER_CAPABILITIES, "mustBeGreaterThanOrEqual(integer_A, numeric_B)", &VALIDATOR_INTEGER_VALUE_AND_BOUND, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "R2026a compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path.");
+validator_integer_capability!(MUST_BE_GREATER_THAN_INTEGER_CAPABILITIES, "mustBeGreaterThan(integer_A, numeric_B)", &VALIDATOR_INTEGER_VALUE_AND_BOUND, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path.");
+validator_integer_capability!(MUST_BE_GREATER_THAN_OR_EQUAL_INTEGER_CAPABILITIES, "mustBeGreaterThanOrEqual(integer_A, numeric_B)", &VALIDATOR_INTEGER_VALUE_AND_BOUND, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes; resident values use an owner-preserving predicate path.");
 validator_integer_capability!(MUST_BE_IN_RANGE_INTEGER_CAPABILITIES, "mustBeInRange(integer_A, integer_lower, integer_upper, flags...)", &VALIDATOR_INTEGER_RANGE_INPUTS, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::BroadcastCompatible, "Documented same-class bounds and selectable open/closed endpoints compare exactly without binary64 materialization.");
 validator_integer_capability!(MUST_BE_INTEGER_INTEGER_CAPABILITIES, "mustBeInteger(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::HostAndGpu, BuiltinIntegerOverloadKind::ElementwiseShapePreserving, "Every native integer class is integral by construction; this validator checks value integrality rather than integer storage class.");
 validator_integer_capability!(
@@ -278,7 +278,7 @@ validator_integer_capability!(
     &VALIDATOR_INTEGER_VALUE_AND_BOUND,
     BuiltinIntegerBackendRule::GatherFallback,
     BuiltinIntegerOverloadKind::BroadcastCompatible,
-    "R2026a compatible-size comparison is exact across mixed integer and floating classes."
+    "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes."
 );
 validator_integer_capability!(
     MUST_BE_LESS_THAN_OR_EQUAL_INTEGER_CAPABILITIES,
@@ -286,7 +286,7 @@ validator_integer_capability!(
     &VALIDATOR_INTEGER_VALUE_AND_BOUND,
     BuiltinIntegerBackendRule::GatherFallback,
     BuiltinIntegerOverloadKind::BroadcastCompatible,
-    "R2026a compatible-size comparison is exact across mixed integer and floating classes."
+    "The compatibility target's compatible-size comparison is exact across mixed integer and floating classes."
 );
 validator_integer_capability!(MUST_BE_MEMBER_INTEGER_CAPABILITIES, "mustBeMember(integer_A, integer_or_double_S)", &VALIDATOR_INTEGER_MEMBER_INPUTS, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::Multiple, "Exact membership preserves the documented same-class rule and double cross-class exception without rounding wide integers.");
 validator_integer_capability!(MUST_BE_NEGATIVE_INTEGER_CAPABILITIES, "mustBeNegative(integer_A)", &VALIDATOR_INTEGER_VALUE, BuiltinIntegerBackendRule::GatherFallback, BuiltinIntegerOverloadKind::ElementwiseShapePreserving, "All elements compare exactly against zero; unsigned nonempty arrays fail and empty arrays pass.");
@@ -380,7 +380,7 @@ pub const MUST_BE_VECTOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescript
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The R2026a option additionally accepts every empty integer shape while preserving the ordinary vector rule for nonempty values; callable and arguments-block paths share the same metadata-only predicate.",
+        notes: "The compatibility target's option additionally accepts every empty integer shape while preserving the ordinary vector rule for nonempty values; callable and arguments-block paths share the same metadata-only predicate.",
     },
 ];
 

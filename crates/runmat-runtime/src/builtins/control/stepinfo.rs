@@ -165,7 +165,7 @@ const STEPINFO_INTEGER_THRESHOLD_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a describes threshold values but does not enumerate typed integer storage. RunMat gates typed values and validates the option-specific floating range.",
+        notes: "The compatibility target describes threshold values but does not enumerate typed integer storage. RunMat gates typed values and validates the option-specific floating range.",
     }];
 pub const STEPINFO_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

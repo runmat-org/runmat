@@ -161,7 +161,7 @@ pub const STRING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] =
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host and automatically resident integer arrays convert exactly to host strings, including wide integer values. Explicit gpuArray input is independently mode-gated because R2026a does not document interactive GPU-array input for string.",
+        notes: "Host and automatically resident integer arrays convert exactly to host strings, including wide integer values. Explicit gpuArray input is independently mode-gated because the compatibility target does not document interactive GPU-array input for string.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "str = string(formatSpec, A...)",

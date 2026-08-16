@@ -58,7 +58,7 @@ const DIFF_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents every integer class for finite-difference data.",
+        notes: "The compatibility target documents every integer class for finite-difference data.",
     }];
 const DIFF_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

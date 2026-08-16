@@ -136,7 +136,7 @@ const RECTPULS_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double sample times; typed integers are an independently gated RunMat extension.",
+        notes: "The compatibility target documents single and double sample times; typed integers are an independently gated RunMat extension.",
     }];
 const RECTPULS_INTEGER_W_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

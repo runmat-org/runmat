@@ -6,7 +6,7 @@
   "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Grouped callback execution runs on the host."},
   "tested": {"unit": "builtins::array::grouping::tests"},
   "description": "`Y = splitapply(func,X,G)` splits rows of `X` by the group vector `G` and invokes `func` once per nonmissing group.",
-  "behaviors": ["Supports one or more data arguments followed by a grouping vector.", "Callbacks are invoked through RunMat's `feval` path and may return numeric scalar or nonuniform values.", "Integer data arguments retain native class and exact values in each group slice passed to the callback. Typed integer group identifiers are an evidence-open RunMat-only extension and are compared without conversion through double."],
+  "behaviors": ["Supports one or more data arguments followed by a grouping vector.", "Callbacks are invoked through RunMat's `feval` path and may return numeric scalar or nonuniform values.", "Integer data arguments retain native class and exact values in each group slice passed to the callback. Typed integer group identifiers are a RunMat-only extension and are compared without floating-point conversion."],
   "examples": [{"description": "Sum by group", "input": "Y = splitapply(@sum,[1;2;3;4],[2;1;2;1])", "output": "Y = [6; 4]"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
 }

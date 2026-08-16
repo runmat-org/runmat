@@ -485,7 +485,7 @@ const SCATTER3_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents all eight integer coordinate classes; native class, shape, and exact values remain authoritative as XData.",
+        notes: "The compatibility target documents all eight integer coordinate classes; native class, shape, and exact values remain authoritative as XData.",
     },
     BuiltinIntegerInputCapability {
         name: "Y",
@@ -508,7 +508,7 @@ const SCATTER3_INTEGER_STYLE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly documents all eight integer classes for marker areas; validated values enter the floating renderer-size boundary.",
+        notes: "The compatibility target explicitly documents all eight integer classes for marker areas; validated values enter the floating renderer-size boundary.",
     },
     BuiltinIntegerInputCapability {
         name: "C",

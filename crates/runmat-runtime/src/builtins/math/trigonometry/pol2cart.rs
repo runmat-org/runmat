@@ -159,7 +159,7 @@ const POL2CART_INTEGER_THETA_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents real single and double angular coordinates; RunMat admits typed integers only after exact binary64 conversion is proved.",
+        notes: "The compatibility target documents real single and double angular coordinates; RunMat admits typed integers only after exact binary64 conversion is proved.",
     }];
 const POL2CART_INTEGER_RHO_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -167,7 +167,7 @@ const POL2CART_INTEGER_RHO_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents real single and double radial coordinates; RunMat admits typed integers only at its checked floating transform boundary.",
+        notes: "The compatibility target documents real single and double radial coordinates; RunMat admits typed integers only at its checked floating transform boundary.",
     }];
 const POL2CART_INTEGER_Z_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -175,7 +175,7 @@ const POL2CART_INTEGER_Z_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents real single and double elevation coordinates; RunMat admits typed integers only when exact binary64 conversion is possible.",
+        notes: "The compatibility target documents real single and double elevation coordinates; RunMat admits typed integers only when exact binary64 conversion is possible.",
     }];
 pub const POL2CART_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {

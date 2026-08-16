@@ -271,14 +271,14 @@ const REGRESS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double response data; typed integers cross a checked binary64 regression boundary.",
+        notes: "The compatibility target documents single and double response data; typed integers cross a checked binary64 regression boundary.",
     },
     BuiltinIntegerInputCapability {
         name: "X",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double design data; typed integers cross the same checked boundary independently of y.",
+        notes: "The compatibility target documents single and double design data; typed integers cross the same checked boundary independently of y.",
     },
 ];
 const REGRESS_INTEGER_ALPHA_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -287,7 +287,7 @@ const REGRESS_INTEGER_ALPHA_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double alpha; a typed integer is admitted only when exact in binary64 and within the open unit interval.",
+        notes: "The compatibility target documents single and double alpha; a typed integer is admitted only when exact in binary64 and within the open unit interval.",
     }];
 pub const REGRESS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

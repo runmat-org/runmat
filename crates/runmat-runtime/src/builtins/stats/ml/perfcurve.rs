@@ -210,7 +210,7 @@ const PERFCURVE_INTEGER_LABEL_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents floating numeric, logical, text, cellstr, and categorical labels, but not typed-integer labels. RunMat compares native integer labels exactly without routing them through f64.",
+        notes: "The compatibility target documents floating numeric, logical, text, cellstr, and categorical labels, but not typed-integer labels. RunMat compares native integer labels exactly without routing them through f64.",
     }];
 const PERFCURVE_INTEGER_SCORE_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -218,7 +218,7 @@ const PERFCURVE_INTEGER_SCORE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents floating classifier scores. RunMat accepts typed integers only when every score is exactly representable in the binary64 computation domain.",
+        notes: "The compatibility target documents floating classifier scores. RunMat accepts typed integers only when every score is exactly representable in the binary64 computation domain.",
     }];
 const PERFCURVE_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

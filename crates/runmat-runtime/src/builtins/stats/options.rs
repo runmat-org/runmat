@@ -318,7 +318,7 @@ const STATSET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a lists single/double for numeric option fields and logical for parallel flags. RunMat mode additionally accepts all eight native integer classes after field-specific range validation.",
+        notes: "The compatibility target lists single/double for numeric option fields and logical for parallel flags. RunMat mode additionally accepts all eight native integer classes after field-specific range validation.",
     }];
 pub const STATSET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

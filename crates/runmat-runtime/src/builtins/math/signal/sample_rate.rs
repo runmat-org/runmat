@@ -61,7 +61,7 @@ const DOWNSAMPLE_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
+        notes: "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
     }];
 const DOWNSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -69,7 +69,7 @@ const DOWNSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
+        notes: "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
     }];
 pub const DOWNSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
     BuiltinIntegerCapabilityDescriptor {
@@ -433,7 +433,7 @@ const RESAMPLE_REJECTED_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Rejected,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double signal input; native integer signals reject before host or provider execution.",
+        notes: "The compatibility target documents single and double signal input; native integer signals reject before host or provider execution.",
     }];
 const RESAMPLE_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -441,7 +441,7 @@ const RESAMPLE_INTEGER_STRUCTURAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values.",
+        notes: "The compatibility target lists single and double controls; RunMat mode additionally reads typed integer rate and dimension controls exactly as structural values.",
     }];
 const RESAMPLE_INTEGER_FLOAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

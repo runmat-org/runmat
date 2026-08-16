@@ -504,7 +504,7 @@ const RANDSAMPLE_INTEGER_RANGE_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a documents single/double n; RunMat typed range limits are exact structural controls and return double sampled indices.",
+        notes: "The compatibility target documents single/double n; RunMat typed range limits are exact structural controls and return double sampled indices.",
     }];
 const RANDSAMPLE_INTEGER_POPULATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -512,7 +512,7 @@ const RANDSAMPLE_INTEGER_POPULATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a lists single/double/logical/text/categorical populations; RunMat preserves exact typed-integer population values, orientation, class, and supported residency.",
+        notes: "The compatibility target lists single/double/logical/text/categorical populations; RunMat preserves exact typed-integer population values, orientation, class, and supported residency.",
     }];
 const RANDSAMPLE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {

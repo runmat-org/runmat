@@ -10,8 +10,6 @@ use runmat_macros::runtime_builtin;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const RUNMAT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const MATLAB_COMPAT_VERSION: &str = "9.15";
-const MATLAB_COMPAT_RELEASE: &str = "R2023b";
 
 const VALUE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
@@ -68,9 +66,12 @@ fn version_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return Err(error("version: expected zero or one argument"));
     }
     match text_scalar(&args[0])?.to_ascii_lowercase().as_str() {
-        "-release" => Ok(Value::from(MATLAB_COMPAT_RELEASE)),
+        "-release" => Ok(Value::from(
+            crate::compatibility::MATLAB_COMPATIBILITY_RELEASE,
+        )),
         "-description" => Ok(Value::from(format!(
-            "RunMat {RUNMAT_VERSION} (MATLAB compatibility {MATLAB_COMPAT_RELEASE})"
+            "RunMat {RUNMAT_VERSION} (MATLAB compatibility {})",
+            crate::compatibility::MATLAB_COMPATIBILITY_RELEASE
         ))),
         "-java" => Ok(Value::from("")),
         other => Err(error(format!("version: unsupported option '{other}'"))),
@@ -92,7 +93,10 @@ fn ver_less_than_builtin(product: Value, version: Value) -> BuiltinResult<Value>
         return Ok(Value::Bool(false));
     }
     Ok(Value::Bool(
-        compare_versions(MATLAB_COMPAT_VERSION, &requested) < 0,
+        compare_versions(
+            crate::compatibility::MATLAB_COMPATIBILITY_VERSION,
+            &requested,
+        ) < 0,
     ))
 }
 
@@ -166,7 +170,7 @@ mod tests {
         ));
         assert_eq!(
             version_builtin(vec![Value::from("-release")]).unwrap(),
-            Value::from(MATLAB_COMPAT_RELEASE)
+            Value::from(crate::compatibility::MATLAB_COMPATIBILITY_RELEASE)
         );
     }
 
@@ -175,6 +179,14 @@ mod tests {
         assert_eq!(isdeployed_builtin(Vec::new()).unwrap(), Value::Bool(false));
         assert_eq!(
             ver_less_than_builtin(Value::from("matlab"), Value::from("99.0")).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            ver_less_than_builtin(Value::from("matlab"), Value::from("26.1")).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            ver_less_than_builtin(Value::from("matlab"), Value::from("26.2")).unwrap(),
             Value::Bool(true)
         );
         assert_eq!(

@@ -56,7 +56,7 @@
     "Convert text containing numeric matrix literals to a numeric array.",
     "Parses bracketed numeric matrix text with whitespace, comma, and semicolon separators.",
     "When a second output is requested, returns a logical success flag instead of throwing for malformed numeric text.",
-    "RunMat currently implements numeric matrix literal parsing. The R2026a `Evaluation` option and general expression-evaluation surface remain implementation gaps."
+    "RunMat currently implements numeric matrix literal parsing. The compatibility target's `Evaluation` option and general expression-evaluation surface remain implementation gaps."
   ],
   "examples": [
     "[x,tf] = str2num(\"[1 2; 3 4]\") returns a 2-by-2 numeric matrix and true."

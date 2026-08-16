@@ -34,7 +34,7 @@
   "description": "`conv(a, b)` computes the one-dimensional linear convolution of vectors `a` and `b`. MATLAB documents all eight integer classes, logical, single, double, and complex inputs; any single input selects single output and every other combination returns double.",
   "behaviors": [
     "Accepts real or complex row/column vectors from all documented numeric and logical classes. Integer inputs cross an explicit floating boundary and never produce integer output.",
-    "In R2026a, full output is a row unless both inputs are columns; `'same'` and `'valid'` retain the orientation of the first input.",
+    "In the compatibility target, full output is a row unless both inputs are columns; `'same'` and `'valid'` retain the orientation of the first input.",
     "Supports the three MATLAB shape modes: `'full'` (default), `'same'`, and `'valid'`.",
     "Empty inputs normally return empty output. MATLAB's documented `'valid'` exception for an empty second vector returns a zero vector with the first input's length, orientation, class, and complexity.",
     "Logical inputs are promoted to double precision before the convolution.",

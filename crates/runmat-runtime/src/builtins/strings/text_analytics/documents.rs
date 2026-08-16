@@ -4144,7 +4144,7 @@ mod tests {
     }
 
     #[test]
-    fn erase_urls_supports_r2026a_tokenized_documents_and_preserves_shape() {
+    fn erase_urls_supports_compatibility_target_tokenized_documents_and_preserves_shape() {
         let input = StringArray::new(
             vec![
                 "visit https://example.com now".to_string(),

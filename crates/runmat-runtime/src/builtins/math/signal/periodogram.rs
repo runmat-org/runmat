@@ -227,7 +227,7 @@ const PERIODOGRAM_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion.",
+        notes: "The compatibility target documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion.",
     }];
 const PERIODOGRAM_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
     BuiltinIntegerInputCapability {

@@ -273,7 +273,7 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Cumulative minimum preserves integer class and exact shape in forward or reverse direction; current R2026a exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated.",
+        notes: "Cumulative minimum preserves integer class and exact shape in forward or reverse direction; the compatibility target exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated.",
     }];
 
 use crate::builtins::common::spec::{

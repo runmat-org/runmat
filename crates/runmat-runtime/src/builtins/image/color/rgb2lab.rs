@@ -103,7 +103,7 @@ pub const RGB2LAB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const RGB2LAB_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "rgb2lab-explicit-gpu",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rgb2lab with an explicitly requested gpuArray input is a RunMat extension because R2026a documents no interactive GPU Arrays capability",
+    description: "rgb2lab with an explicitly requested gpuArray input is a RunMat extension because the compatibility target documents no interactive GPU Arrays capability",
     error_identifier: Some("RunMat:compatibility:Rgb2labExplicitGpuExtension"),
 };
 pub const RGB2LAB_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RGB2LAB_EXPLICIT_GPU_EXTENSION];

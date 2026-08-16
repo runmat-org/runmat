@@ -88,7 +88,7 @@ const INTEGER_DURATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly lists every built-in integer class for the nonnegative real duration.",
+        notes: "The compatibility target explicitly lists every built-in integer class for the nonnegative real duration.",
     }];
 
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

@@ -149,7 +149,7 @@ const POLARHISTOGRAM_INTEGER_THETA_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a explicitly documents all eight integer classes for direct theta data and any numeric class for the selected table variable.",
+        notes: "The compatibility target explicitly documents all eight integer classes for direct theta data and any numeric class for the selected table variable.",
     }];
 const POLARHISTOGRAM_INTEGER_BINS_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -173,7 +173,7 @@ const POLARHISTOGRAM_INTEGER_SELECTOR_INPUT: [BuiltinIntegerInputCapability; 1] 
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "R2026a permits numeric table-variable indices; these are structural one-based selectors rather than histogram observations.",
+        notes: "The compatibility target permits numeric table-variable indices; these are structural one-based selectors rather than histogram observations.",
     }];
 pub const POLARHISTOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
     BuiltinIntegerCapabilityDescriptor {

@@ -167,7 +167,7 @@ const DOUBLE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "R2026a documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values.",
+        notes: "The compatibility target documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values.",
     }];
 
 pub const DOUBLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =

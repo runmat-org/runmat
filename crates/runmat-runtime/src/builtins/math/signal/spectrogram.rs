@@ -313,7 +313,7 @@ pub const SPECTROGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] Structural scalars are range checked and numerical vectors enter binary64 only after exact representability is proven; public documentation specifies integer-valued controls without establishing typed storage for every role.",
+        notes: "Typed numeric controls are gated RunMat extensions. Structural scalars are range checked, and numerical vectors enter binary64 only after exact representability is proven.",
     },
 ];
 
@@ -1154,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    fn spectrogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
+    fn spectrogram_scalar_detector_reads_typed_integer_storage_exactly() {
         let scalar =
             Tensor::new_integer(IntegerStorage::I16(vec![16]), vec![1, 1]).expect("scalar");
         let vector =
