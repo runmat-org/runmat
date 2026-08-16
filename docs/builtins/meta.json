@@ -159610,6 +159610,62 @@
           "when": "Internal plotting state update fails.",
           "message": "title: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = title(integer_txt)",
+          "inputs": [
+            {
+              "name": "txt",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A scalar integer title is formatted from its exact signed or unsigned decimal value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact decimal spelling becomes the stored String property; the graphics handle remains an ordinary double handle."
+        },
+        {
+          "form": "h = title(..., 'FontSize', integer_size)",
+          "inputs": [
+            {
+              "name": "FontSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for FontSize; accepted values are positive finite practical renderer sizes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "FontSize crosses the client-renderer scalar boundary only after the shared positive finite size validation."
+        }
       ]
     },
     {
@@ -159670,6 +159726,36 @@
           "identifier": "RunMat:toc:TooManyInputs",
           "when": "More than one input argument is supplied.",
           "message": "toc: too many input arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "toc-legacy-double-timer-handle",
+          "mode": "RunMatOnly",
+          "description": "toc accepts an older RunMat double-valued timer handle",
+          "error_identifier": "RunMat:compatibility:TocLegacyDoubleTimerHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "elapsed = toc(uint64_timerVal)",
+          "inputs": [
+            {
+              "name": "timerVal",
+              "classes": [
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "tic returns an opaque uint64 token; toc reads its exact bits without numeric conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The uint64 value is an opaque stopwatch token rather than an elapsed-time count."
         }
       ]
     },
@@ -159741,6 +159827,86 @@
           "when": "Output allocation or gpuArray gather fails.",
           "message": "toeplitz: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "toeplitz-complex-integer-input",
+          "mode": "RunMatOnly",
+          "description": "toeplitz accepts native complex-integer vectors",
+          "error_identifier": "RunMat:compatibility:ToeplitzComplexIntegerInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = toeplitz(integer_c [, integer_r])",
+          "inputs": [
+            {
+              "name": "c",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "The first column retains its native integer class and exact values."
+            },
+            {
+              "name": "r",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "The first row must use the same native integer class as c and retains exact values."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Toeplitz placement copies exact native values without arithmetic. Two-input integer calls require one common class; resident output returns through the owning provider."
+        },
+        {
+          "form": "T = toeplitz(complex_integer_c [, complex_integer_r])",
+          "inputs": [
+            {
+              "name": "c and/or r",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "RunMat can structurally copy paired native integer components; the public integer domain does not support complex-integer operations."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat-only same-class paired integer-component construction preserves exact real and imaginary storage."
+        }
       ]
     },
     {
@@ -159777,7 +159943,11 @@
           "when": "Input is not a supported tokenizedDocument object or option form.",
           "message": "tokenDetails: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "tokenDetails accepts only tokenizedDocument objects. Its generated document, sentence, line, and dependency ordinals are table metadata stored as double columns rather than caller-provided integer data."
+      }
     },
     {
       "name": "tokenizedDocument",
@@ -159854,7 +160024,11 @@
           "when": "Inputs do not match a supported Text Analytics document or model helper form.",
           "message": "Text Analytics document helper received invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "tokenizedDocument accepts text, text containers, and text-valued tokenization options. Native integer arrays are neither document text nor valid option values; generated document counts remain double object metadata."
+      }
     },
     {
       "name": "tpdf",
@@ -159903,6 +160077,82 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "tpdf-integer-x",
+          "mode": "RunMatOnly",
+          "description": "tpdf accepts typed-integer evaluation points",
+          "error_identifier": "RunMat:compatibility:TpdfIntegerXExtension"
+        },
+        {
+          "id": "tpdf-integer-degrees-of-freedom",
+          "mode": "RunMatOnly",
+          "description": "tpdf accepts typed-integer degrees of freedom",
+          "error_identifier": "RunMat:compatibility:TpdfIntegerDegreesOfFreedomExtension"
+        },
+        {
+          "id": "tpdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "tpdf accepts logical numeric input",
+          "error_identifier": "RunMat:compatibility:TpdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = tpdf(integer_x, nu)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public tpdf evaluation points are single or double; native integers are independently gated and must cross the binary64 PDF boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Admitted integer x values are checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider."
+        },
+        {
+          "form": "y = tpdf(x, integer_nu)",
+          "inputs": [
+            {
+              "name": "nu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public tpdf degrees of freedom are single or double; native integers are independently gated and must cross the binary64 PDF boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Admitted integer nu values are checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider."
+        }
       ]
     },
     {
@@ -159944,6 +160194,55 @@
           "identifier": "RunMat:trace:Internal",
           "when": "Runtime cannot materialize or transport trace results.",
           "message": "trace: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "trace-integer-input",
+          "mode": "RunMatOnly",
+          "description": "trace accepts native integer matrices",
+          "error_identifier": "RunMat:compatibility:TraceIntegerInputExtension"
+        },
+        {
+          "id": "trace-logical-input",
+          "mode": "RunMatOnly",
+          "description": "trace accepts logical matrices",
+          "error_identifier": "RunMat:compatibility:TraceLogicalInputExtension"
+        },
+        {
+          "id": "trace-character-input",
+          "mode": "RunMatOnly",
+          "description": "trace accepts character matrices",
+          "error_identifier": "RunMat:compatibility:TraceCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "t = trace(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public trace input is single or double. Native integer matrices are independently gated and summed exactly before a checked double result boundary."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Diagonal values are accumulated in an exact wide integer domain; the call rejects a result outside binary64's exact integer range instead of rounding it."
         }
       ]
     },
@@ -160029,6 +160328,187 @@
           "identifier": "RunMat:trainWordEmbedding:InvalidInput",
           "when": "Inputs do not match a supported trainWordEmbedding form.",
           "message": "trainWordEmbedding received invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "train-word-embedding-native-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "trainWordEmbedding accepts native integer option values",
+          "error_identifier": "RunMat:compatibility:TrainWordEmbeddingIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "emb = trainWordEmbedding(source, Name, native_integer_value, ...)",
+          "inputs": [
+            {
+              "name": "Dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "Window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "DiscardFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "NumNegativeSamples",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "NumEpochs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "MinCount",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "NGramRange",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "InitialLearnRate",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "UpdateRate",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            },
+            {
+              "name": "Verbose",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Counts, sizes, ranges, and boolean controls decode from native storage without a compatibility mirror. Floating training-rate options require exact binary64 representation. Automatic residency gathers transparently; explicit gpuArray option intent is unsupported."
         }
       ]
     },

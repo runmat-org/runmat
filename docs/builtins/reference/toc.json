@@ -27,12 +27,13 @@
     "unit": "builtins::timing::toc::tests",
     "integration": "builtins::timing::toc::tests"
   },
-  "description": "`toc` reads elapsed wall-clock seconds since the most recent global `tic` or since an explicit `tic` handle argument. It follows MATLAB-compatible stopwatch timing workflows.",
+  "description": "`toc` returns elapsed wall-clock seconds since the latest `tic` or since an explicit opaque `uint64` timer token.",
   "behaviors": [
-    "`toc` without inputs pops the most recent `tic` from the stopwatch stack and returns the elapsed seconds.",
+    "`toc` without inputs reads the latest `tic` start and returns elapsed seconds without consuming that timer.",
     "`toc(t)` accepts a handle previously produced by `tic` and measures the time since that handle without altering the stack.",
     "Calling `toc` before `tic` raises the MATLAB-compatible error identifier `RunMat:toc:NoMatchingTic`.",
-    "Passing anything other than a finite, non-negative scalar handle raises `RunMat:toc:InvalidTimerHandle`.",
+    "The documented explicit input is the opaque `uint64` token returned by `tic`. Other integer classes and malformed tokens raise `RunMat:toc:InvalidTimerHandle`.",
+    "RunMat mode accepts timer tokens produced by older RunMat releases as double values. MATLAB compatibility modes require the documented `uint64` form.",
     "The stopwatch uses a monotonic host clock, so measurements are immune to wall-clock adjustments."
   ],
   "examples": [
@@ -46,7 +47,7 @@
     },
     {
       "description": "Timing nested stages with toc",
-      "input": "tic;          % Outer stopwatch\nstage1();\ninner = tic;  % Nested stopwatch\nstage2();\nstage2Time = toc(inner);\ntotalTime = toc"
+      "input": "outer = tic;  % Keep the outer timer token\nstage1();\ninner = tic;  % Start a second stopwatch\nstage2();\nstage2Time = toc(inner);\ntotalTime = toc(outer)"
     },
     {
       "description": "Printing elapsed time without capturing output",
@@ -64,7 +65,7 @@
     },
     {
       "question": "Does `toc` remove the matching `tic`?",
-      "answer": "Yes when called without arguments. The most-recent stopwatch entry is popped so nested timers unwind in order. When you pass a handle (`toc(t)`), the stack remains unchanged and you may reuse the handle multiple times."
+      "answer": "No. Both `toc` and `toc(timerVal)` are read operations, so repeated calls report increasing elapsed times from the same start."
     },
     {
       "question": "Can I reuse a `tic` handle after calling `toc(t)`?",

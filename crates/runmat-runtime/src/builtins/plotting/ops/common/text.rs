@@ -84,6 +84,48 @@ pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResul
     })
 }
 
+pub fn parse_numeric_text_command(
+    builtin: &'static str,
+    args: &[Value],
+) -> BuiltinResult<TextCommand> {
+    let (target, rest) = if args.len() == 1 {
+        (current_axes_target(), args)
+    } else {
+        split_axes_target(builtin, args)?
+    };
+    if rest.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected text input"),
+        ));
+    }
+    let text = value_as_text_string(&rest[0])
+        .or_else(|| format_numeric_text(&rest[0]))
+        .ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!(
+                    "{builtin}: expected text as char array, string, string array, cell array of strings, or numeric scalar"
+                ),
+            )
+        })?;
+    let style = parse_text_style_pairs(builtin, &rest[1..])?;
+    Ok(TextCommand {
+        target,
+        text,
+        style,
+    })
+}
+
+/// Format a numeric annotation scalar without routing native integers through binary64.
+pub fn format_numeric_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Int(value) => Some(value.decimal_string()),
+        Value::Num(value) if value.is_finite() => Some(format!("{value}")),
+        _ => None,
+    }
+}
+
 pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinResult<LegendCommand> {
     let (target, rest) = split_axes_target(builtin, args)?;
     let (rest, style) = split_legend_style_pairs(builtin, rest)?;

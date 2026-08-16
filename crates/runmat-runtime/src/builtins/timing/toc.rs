@@ -1,18 +1,22 @@
 //! MATLAB-compatible `toc` builtin that reports elapsed stopwatch time.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_time::Instant;
-use std::convert::TryFrom;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::timing::tic::{decode_handle, elapsed_since, take_latest_start};
+use crate::builtins::timing::tic::{decode_handle, elapsed_since, latest_start};
 use crate::builtins::timing::type_resolvers::toc_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::toc")]
@@ -43,6 +47,35 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "toc";
+
+const LEGACY_DOUBLE_HANDLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "toc-legacy-double-timer-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "toc accepts an older RunMat double-valued timer handle",
+    error_identifier: Some("RunMat:compatibility:TocLegacyDoubleTimerHandleExtension"),
+};
+pub const TOC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LEGACY_DOUBLE_HANDLE_EXTENSION];
+
+const UINT64_TIMER_CLASS: [BuiltinIntegerClass; 1] = [BuiltinIntegerClass::Uint64];
+const TOC_TIMER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "timerVal",
+    classes: &UINT64_TIMER_CLASS,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+    notes:
+        "tic returns an opaque uint64 token; toc reads its exact bits without numeric conversion.",
+}];
+pub const TOC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "elapsed = toc(uint64_timerVal)",
+        inputs: &TOC_TIMER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The uint64 value is an opaque stopwatch token rather than an elapsed-time count.",
+    }];
 
 const TOC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "elapsed",
@@ -127,6 +160,8 @@ fn toc_error_with_message(
     keywords = "toc,timing,profiling,benchmark",
     type_resolver(toc_type),
     descriptor(crate::builtins::timing::toc::TOC_DESCRIPTOR),
+    extensions(crate::builtins::timing::toc::TOC_EXTENSIONS),
+    integer_capabilities(crate::builtins::timing::toc::TOC_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::timing::toc"
 )]
 pub async fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -141,7 +176,7 @@ pub async fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 }
 
 fn latest_elapsed() -> Result<f64, crate::RuntimeError> {
-    let start = take_latest_start(BUILTIN_NAME)?.ok_or_else(|| {
+    let start = latest_start(BUILTIN_NAME)?.ok_or_else(|| {
         toc_error_with_message(
             TOC_ERROR_NO_MATCHING_TIC.message,
             &TOC_ERROR_NO_MATCHING_TIC,
@@ -151,9 +186,17 @@ fn latest_elapsed() -> Result<f64, crate::RuntimeError> {
 }
 
 fn elapsed_from_value(value: &Value) -> Result<f64, crate::RuntimeError> {
-    let handle = f64::try_from(value).map_err(|_| {
-        toc_error_with_message(TOC_ERROR_INVALID_HANDLE.message, &TOC_ERROR_INVALID_HANDLE)
-    })?;
+    let handle = match value {
+        Value::Int(IntValue::U64(handle)) => *handle,
+        Value::Tensor(tensor) if tensor.len() == 1 => match tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+        {
+            Some(IntValue::U64(handle)) => handle,
+            _ => legacy_or_invalid_handle(value)?,
+        },
+        _ => legacy_or_invalid_handle(value)?,
+    };
     let instant = decode_handle(handle, BUILTIN_NAME, &TOC_ERROR_INVALID_HANDLE)?;
     let now = Instant::now();
     let elapsed = now.checked_duration_since(instant).ok_or_else(|| {
@@ -162,15 +205,43 @@ fn elapsed_from_value(value: &Value) -> Result<f64, crate::RuntimeError> {
     Ok(elapsed.as_secs_f64())
 }
 
+fn legacy_or_invalid_handle(value: &Value) -> Result<u64, crate::RuntimeError> {
+    let seconds = match value {
+        Value::Num(seconds) => *seconds,
+        Value::Tensor(tensor) if tensor.len() == 1 && tensor.integer_storage().is_none() => {
+            crate::builtins::common::tensor::tensor_value_f64(tensor, 0)
+        }
+        _ => {
+            return Err(toc_error_with_message(
+                TOC_ERROR_INVALID_HANDLE.message,
+                &TOC_ERROR_INVALID_HANDLE,
+            ))
+        }
+    };
+    if !seconds.is_finite() || seconds.is_sign_negative() {
+        return Err(toc_error_with_message(
+            TOC_ERROR_INVALID_HANDLE.message,
+            &TOC_ERROR_INVALID_HANDLE,
+        ));
+    }
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &LEGACY_DOUBLE_HANDLE_EXTENSION,
+        BUILTIN_NAME,
+    )?;
+    Ok(seconds.to_bits())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::timing::tic::{encode_instant, record_tic, take_latest_start, TEST_GUARD};
+    use crate::builtins::timing::tic::{
+        clear_stopwatch_for_test, encode_instant, record_tic, TEST_GUARD,
+    };
     use futures::executor::block_on;
     use std::time::Duration;
 
     fn clear_tic_stack() {
-        while let Ok(Some(_)) = take_latest_start(BUILTIN_NAME) {}
+        clear_stopwatch_for_test();
     }
 
     fn assert_toc_error_identifier(err: crate::RuntimeError, identifier: &str) {
@@ -200,7 +271,7 @@ pub(crate) mod tests {
         std::thread::sleep(Duration::from_millis(5));
         let elapsed = block_on(toc_builtin(Vec::new())).expect("toc");
         assert!(elapsed >= 0.0);
-        assert!(take_latest_start(BUILTIN_NAME).unwrap().is_none());
+        assert!(latest_start(BUILTIN_NAME).unwrap().is_some());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -210,9 +281,10 @@ pub(crate) mod tests {
         clear_tic_stack();
         let handle = record_tic("tic").expect("tic");
         std::thread::sleep(Duration::from_millis(5));
-        let elapsed = block_on(toc_builtin(vec![Value::Num(handle)])).expect("toc(handle)");
+        let elapsed =
+            block_on(toc_builtin(vec![Value::Int(IntValue::U64(handle))])).expect("toc(handle)");
         assert!(elapsed >= 0.0);
-        // Stack still contains the entry so a subsequent toc pops it.
+        // Stack still contains the entry, and no-argument toc reads it again.
         let later = block_on(toc_builtin(Vec::new())).expect("second toc");
         assert!(later >= elapsed);
     }
@@ -231,8 +303,22 @@ pub(crate) mod tests {
     fn toc_rejects_overflowing_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(toc_builtin(vec![Value::Num(f64::MAX)])).unwrap_err();
         assert_toc_error_identifier(err, TOC_ERROR_INVALID_HANDLE.identifier.unwrap());
+    }
+
+    #[test]
+    fn toc_rejects_legacy_double_token_in_matlab_mode() {
+        let _guard = TEST_GUARD.lock().unwrap();
+        clear_tic_stack();
+        let handle = record_tic("tic").expect("tic");
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(toc_builtin(vec![Value::Num(f64::from_bits(handle))])).unwrap_err();
+        assert_toc_error_identifier(
+            err,
+            LEGACY_DOUBLE_HANDLE_EXTENSION.error_identifier.unwrap(),
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -240,8 +326,11 @@ pub(crate) mod tests {
     fn toc_rejects_future_handle() {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
-        let future_handle = encode_instant(Instant::now()) + 10_000.0;
-        let err = block_on(toc_builtin(vec![Value::Num(future_handle)])).unwrap_err();
+        let future_seconds = f64::from_bits(encode_instant(Instant::now())) + 10_000.0;
+        let err = block_on(toc_builtin(vec![Value::Int(IntValue::U64(
+            future_seconds.to_bits(),
+        ))]))
+        .unwrap_err();
         assert_toc_error_identifier(err, TOC_ERROR_INVALID_HANDLE.identifier.unwrap());
     }
 
@@ -275,8 +364,8 @@ pub(crate) mod tests {
         let inner = block_on(toc_builtin(Vec::new())).expect("inner toc");
         assert!(inner >= 0.0);
         std::thread::sleep(Duration::from_millis(2));
-        let outer = block_on(toc_builtin(Vec::new())).expect("outer toc");
-        assert!(outer >= inner);
+        let inner_again = block_on(toc_builtin(Vec::new())).expect("second inner toc");
+        assert!(inner_again >= inner);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

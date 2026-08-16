@@ -4,7 +4,7 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, Value,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -183,7 +183,7 @@ pub(super) fn sgtitle_impl(builtin: &'static str, args: Vec<Value>) -> crate::Bu
         ));
     }
     let text = super::op_common::value_as_text_string(&rest[0])
-        .or_else(|| format_num_as_title_text(&rest[0]))
+        .or_else(|| super::op_common::format_numeric_text(&rest[0]))
         .ok_or_else(|| {
             plotting_error(
                 builtin,
@@ -219,35 +219,6 @@ fn split_figure_target<'a>(
 
 /// Converts a finite scalar number to a title string, matching MATLAB's behaviour of
 /// accepting numeric values wherever text is expected in annotation builtins.
-fn format_num_as_title_text(value: &Value) -> Option<String> {
-    let n = match value {
-        Value::Int(value) => return Some(format_integer_title(value)),
-        Value::Num(n) => *n,
-        _ => return None,
-    };
-    if !n.is_finite() {
-        return None;
-    }
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        Some(format!("{}", n as i64))
-    } else {
-        Some(format!("{n}"))
-    }
-}
-
-fn format_integer_title(value: &IntValue) -> String {
-    match value {
-        IntValue::I8(value) => value.to_string(),
-        IntValue::I16(value) => value.to_string(),
-        IntValue::I32(value) => value.to_string(),
-        IntValue::I64(value) => value.to_string(),
-        IntValue::U8(value) => value.to_string(),
-        IntValue::U16(value) => value.to_string(),
-        IntValue::U32(value) => value.to_string(),
-        IntValue::U64(value) => value.to_string(),
-    }
-}
-
 fn try_parse_figure_target(value: &Value) -> Option<FigureHandle> {
     let scalar = value_as_f64(value)?;
     if !scalar.is_finite() || scalar <= 0.0 || scalar.fract().abs() > f64::EPSILON {
@@ -266,6 +237,7 @@ mod tests {
         clear_figure, clone_figure, current_figure_handle, figure::figure_builtin,
         reset_hold_state_for_run,
     };
+    use runmat_builtins::IntValue;
 
     fn figure_children_count(handle: f64) -> usize {
         let children =

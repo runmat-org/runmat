@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_time::Instant;
@@ -49,6 +50,11 @@ static STOPWATCH: Lazy<Mutex<StopwatchState>> = Lazy::new(|| Mutex::new(Stopwatc
 #[cfg(test)]
 pub(crate) static TEST_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+#[cfg(test)]
+pub(crate) fn clear_stopwatch_for_test() {
+    STOPWATCH.lock().unwrap().stack.clear();
+}
+
 #[derive(Default)]
 struct StopwatchState {
     stack: Vec<Instant>,
@@ -59,8 +65,8 @@ impl StopwatchState {
         self.stack.push(instant);
     }
 
-    fn pop(&mut self) -> Option<Instant> {
-        self.stack.pop()
+    fn latest(&self) -> Option<Instant> {
+        self.stack.last().copied()
     }
 }
 
@@ -121,12 +127,12 @@ fn stopwatch_error_with_message(
     descriptor(crate::builtins::timing::tic::TIC_DESCRIPTOR),
     builtin_path = "crate::builtins::timing::tic"
 )]
-pub async fn tic_builtin() -> crate::BuiltinResult<f64> {
-    record_tic(BUILTIN_NAME)
+pub async fn tic_builtin() -> crate::BuiltinResult<Value> {
+    record_tic(BUILTIN_NAME).map(|handle| Value::Int(IntValue::U64(handle)))
 }
 
 /// Record a `tic` start time and return the encoded handle.
-pub(crate) fn record_tic(builtin: &str) -> Result<f64, crate::RuntimeError> {
+pub(crate) fn record_tic(builtin: &str) -> Result<u64, crate::RuntimeError> {
     let _origin = *MONOTONIC_ORIGIN;
     let now = Instant::now();
     {
@@ -142,32 +148,34 @@ pub(crate) fn record_tic(builtin: &str) -> Result<f64, crate::RuntimeError> {
     Ok(encode_instant(now))
 }
 
-/// Remove and return the most recently recorded `tic`, if any.
-pub(crate) fn take_latest_start(builtin: &str) -> Result<Option<Instant>, crate::RuntimeError> {
-    let mut guard = STOPWATCH.lock().map_err(|_| {
+/// Return the most recently recorded `tic` without consuming it.
+pub(crate) fn latest_start(builtin: &str) -> Result<Option<Instant>, crate::RuntimeError> {
+    let guard = STOPWATCH.lock().map_err(|_| {
         stopwatch_error_with_message(builtin, TIC_ERROR_STATE_LOCK.message, &TIC_ERROR_STATE_LOCK)
     })?;
-    Ok(guard.pop())
+    Ok(guard.latest())
 }
 
 /// Encode an `Instant` into the scalar handle returned by `tic`.
-pub(crate) fn encode_instant(instant: Instant) -> f64 {
+pub(crate) fn encode_instant(instant: Instant) -> u64 {
     instant
         .checked_duration_since(*MONOTONIC_ORIGIN)
         .unwrap_or(Duration::ZERO)
         .as_secs_f64()
+        .to_bits()
 }
 
 /// Decode a scalar handle into an `Instant`.
 pub(crate) fn decode_handle(
-    handle: f64,
+    handle: u64,
     builtin: &str,
     error: &BuiltinErrorDescriptor,
 ) -> Result<Instant, crate::RuntimeError> {
-    if !handle.is_finite() || handle.is_sign_negative() {
+    let seconds = f64::from_bits(handle);
+    if !seconds.is_finite() || seconds.is_sign_negative() {
         return Err(stopwatch_error_with_message(builtin, error.message, error));
     }
-    let duration = Duration::try_from_secs_f64(handle)
+    let duration = Duration::try_from_secs_f64(seconds)
         .map_err(|_| stopwatch_error_with_message(builtin, error.message, error))?;
     (*MONOTONIC_ORIGIN)
         .checked_add(duration)
@@ -207,8 +215,8 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
         let handle = block_on(tic_builtin()).expect("tic");
-        assert!(handle >= 0.0);
-        assert!(take_latest_start(BUILTIN_NAME).expect("take").is_some());
+        assert!(matches!(handle, Value::Int(IntValue::U64(_))));
+        assert!(latest_start(BUILTIN_NAME).expect("latest").is_some());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -219,7 +227,13 @@ pub(crate) mod tests {
         let first = block_on(tic_builtin()).expect("tic");
         thread::sleep(Duration::from_millis(5));
         let second = block_on(tic_builtin()).expect("tic");
-        assert!(second > first);
+        let Value::Int(IntValue::U64(first)) = first else {
+            panic!("uint64 timer")
+        };
+        let Value::Int(IntValue::U64(second)) = second else {
+            panic!("uint64 timer")
+        };
+        assert!(f64::from_bits(second) > f64::from_bits(first));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -228,30 +242,31 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
         let handle = block_on(tic_builtin()).expect("tic");
+        let Value::Int(IntValue::U64(handle)) = handle else {
+            panic!("uint64 timer")
+        };
         let decoded = decode_handle(handle, "toc", &TEST_INVALID_HANDLE_ERROR).expect("decode");
         let round_trip = encode_instant(decoded);
-        let delta = (round_trip - handle).abs();
+        let delta = (f64::from_bits(round_trip) - f64::from_bits(handle)).abs();
         assert!(delta < 1e-9, "delta {delta}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn take_latest_start_pops_stack() {
+    fn latest_start_does_not_consume_timer() {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
         block_on(tic_builtin()).expect("tic");
-        assert!(take_latest_start(BUILTIN_NAME).expect("take").is_some());
-        assert!(take_latest_start(BUILTIN_NAME)
-            .expect("second take")
-            .is_none());
+        assert!(latest_start(BUILTIN_NAME).expect("latest").is_some());
+        assert!(latest_start(BUILTIN_NAME).expect("second latest").is_some());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn decode_handle_rejects_invalid_values() {
         let _guard = TEST_GUARD.lock().unwrap();
-        assert!(decode_handle(f64::NAN, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
-        assert!(decode_handle(-1.0, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
-        assert!(decode_handle(f64::MAX, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
+        assert!(decode_handle(f64::NAN.to_bits(), "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
+        assert!(decode_handle((-1.0_f64).to_bits(), "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
+        assert!(decode_handle(f64::MAX.to_bits(), "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
     }
 }

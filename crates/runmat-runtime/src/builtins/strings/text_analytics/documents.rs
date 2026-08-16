@@ -278,6 +278,12 @@ pub const TOKENIZED_DOCUMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+pub const TOKENIZED_DOCUMENT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "tokenizedDocument accepts text, text containers, and text-valued tokenization options. Native integer arrays are neither document text nor valid option values; generated document counts remain double object metadata.",
+    };
 
 pub const BAG_OF_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
@@ -575,11 +581,20 @@ fn property_def(name: &str) -> PropertyDef {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_builtin(
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if args.iter().any(direct_numeric_or_resident_document_input) {
+        return Err(text_analytics_error(
+            "tokenizedDocument",
+            "tokenizedDocument: inputs and option values must be host text or supported text containers",
+        ));
+    }
     let gathered = gather_args(args, "tokenizedDocument").await?;
     let (input, options) = parse_tokenized_document_args(gathered)?;
     let parsed = match input {
@@ -591,6 +606,21 @@ pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_bui
         },
     };
     tokenized_document_value(parsed.documents, parsed.shape, options, parsed.type_details)
+}
+
+fn direct_numeric_or_resident_document_input(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Tensor(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::LogicalArray(_)
+            | Value::Bool(_)
+            | Value::SparseTensor(_)
+            | Value::GpuTensor(_)
+    )
 }
 
 #[runtime_builtin(

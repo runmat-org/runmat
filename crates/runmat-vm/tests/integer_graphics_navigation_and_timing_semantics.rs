@@ -64,3 +64,12 @@ fn compiled_openfig_rejects_integer_filename_roles() {
         );
     }
 }
+
+#[test]
+fn compiled_timer_title_toeplitz_trace_and_tpdf_semantics_are_exact() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        "timerVal=tic(); if ~isa(timerVal,'uint64'); error('tic token class'); end; first=toc(timerVal); pause(0.001); second=toc(); if second<first; error('toc consumed latest timer'); end; wide=bitshift(uint64(1),53)+uint64(1); h=title(wide); if ~strcmp(get(h,'String'),'9007199254740993'); error('title integer formatting'); end; T=toeplitz(uint64([wide wide+uint64(1)])); if ~isa(T,'uint64') || T(2,1)~=wide+uint64(1); error('toeplitz exact storage'); end; tr=trace(uint64([1 2;3 4])); if ~isa(tr,'double') || tr~=5; error('trace integer boundary'); end; p=tpdf(uint16(0),uint16(5)); if ~isa(p,'double') || p<=0; error('tpdf integer extension'); end;",
+    )
+    .expect("compiled timing, text, shape, and statistical semantics");
+}
