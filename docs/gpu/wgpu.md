@@ -142,7 +142,7 @@ The `AccelProvider` contract separates `upload_integer`/`download_integer` and n
 
 The buffer entry's integer-type annotation and the API-level handle registry must be copied to every derived handle and cleared when a handle is released. Losing that annotation can make an exact word buffer look like floating storage, so metadata propagation is part of correctness rather than optional introspection.
 
-This split registry is the current representation, not the endpoint of the numeric-storage migration. The target provider contract uses one exhaustive numeric element type for `f64`, `f32`, and all eight integer classes, with that metadata directly owned by the durable handle/provider state. Floating and integer transfers may keep specialized implementations, but must dispatch from the same authoritative type contract and must not require a host compatibility mirror.
+GPU handles retain durable storage, precision, integer-class, logical, provenance, and device-owner metadata. Floating and integer transfers use specialized physical paths, but runtime dispatch derives behavior from that coherent handle metadata. A fallback that cannot preserve the required class, precision, or owner returns an unsupported result instead of relabeling the payload.
 
 ## Pipeline and Shader Management
 

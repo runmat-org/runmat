@@ -47,7 +47,7 @@ const GPU_DEVICE_DOCUMENTED_INTEGER_INDEX: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "ind",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
+        availability: BuiltinIntegerInputAvailability::Rejected,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "The documented selector is a positive scalar integer in the available device-index range, but RunMat does not yet implement the required GPUDevice object and reset lifecycle.",
     }];
@@ -70,7 +70,7 @@ pub const GPU_DEVICE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "[integer-audit-open] MATLAB selection returns a GPUDevice object and resets the selected device even when already current; RunMat does not yet implement that object/lifecycle surface.",
+        notes: "The documented selection form returns a GPUDevice object and resets the selected device even when already current. RunMat does not implement that object/lifecycle form and rejects it in MATLAB-compatible mode rather than substituting provider metadata.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "info = gpuDevice(integer_ind)",

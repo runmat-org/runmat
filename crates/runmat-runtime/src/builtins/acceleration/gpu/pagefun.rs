@@ -20,7 +20,7 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -64,7 +64,7 @@ pub const PAGEFUN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
         overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
         backend: BuiltinIntegerBackendRule::GpuRestricted,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "[integer-audit-open] R2026a requires each page to satisfy mtimes, including its integer-scalar restriction. RunMat currently rejects typed integer pages before floating materialization because neither the WGPU page kernel nor the host result assembler preserves typed integer storage; exact scalar-page execution remains to be implemented.",
+        notes: "Each page is dispatched through mtimes. Integer pages retain authoritative same-class storage and per-operation saturation when the other page operand is scalar; resident integer inputs use exact owner-aware host fallback because the provider page kernel is floating-only.",
     }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::pagefun")]
@@ -323,11 +323,18 @@ async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::Bui
 
     operation.validate_arity(operands.len())?;
 
+    let resident_source = gpu_helpers::select_resident_output_source(
+        operands.iter().filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        BUILTIN_NAME,
+    )?;
+
     if let Some(value) = try_pagefun_gpu(&operation, &operands)? {
         return Ok(value);
     }
 
-    let wants_gpu = operands.iter().any(|v| matches!(v, Value::GpuTensor(_)));
     let mut host_values = Vec::with_capacity(operands.len());
     for value in operands {
         host_values.push(gather_if_needed_async(&value).await?);
@@ -396,11 +403,11 @@ async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::Bui
             &prepared_inputs,
             &result_page_dims,
             output_kind,
-            wants_gpu,
+            resident_source.as_ref(),
         );
     }
 
-    let mut real_data: Option<Vec<f64>> = None;
+    let mut real_data: Option<NumericStorage> = None;
     let mut complex_data: Option<Vec<(f64, f64)>> = None;
     let mut multi_index = vec![0usize; rank];
 
@@ -415,19 +422,19 @@ async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::Bui
         evaluated = gather_if_needed_async(&evaluated).await?;
         match output_kind {
             OutputKind::Real => {
-                let (data, rows, cols) = tensor_matrix_data(evaluated)?;
+                let (data, rows, cols) = tensor_matrix_storage(evaluated)?;
                 if real_data.is_none() {
                     result_rows = rows;
                     result_cols = cols;
-                    real_data = Some(Vec::with_capacity(rows * cols * page_volume));
+                    real_data = Some(empty_storage_like(&data, rows * cols * page_volume));
                 } else if rows != result_rows || cols != result_cols {
                     return Err(pagefun_error_with_detail(
                         &PAGEFUN_ERROR_RESULT_SHAPE,
                         "result matrices must be the same size",
                     ));
                 }
-                if let Some(vec) = real_data.as_mut() {
-                    vec.extend(data);
+                if let Some(storage) = real_data.as_mut() {
+                    extend_same_class(storage, data)?;
                 }
             }
             OutputKind::Complex => {
@@ -458,8 +465,8 @@ async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::Bui
     let final_shape = assemble_shape(result_rows, result_cols, &result_page_dims);
     let output = match output_kind {
         OutputKind::Real => {
-            let data = real_data.unwrap_or_default();
-            let tensor = Tensor::new(data, final_shape).map_err(|e| {
+            let data = real_data.unwrap_or_else(|| NumericStorage::F64(Vec::new()));
+            let tensor = Tensor::from_numeric_storage(data, final_shape).map_err(|e| {
                 pagefun_error_with_detail(
                     &PAGEFUN_ERROR_INTERNAL,
                     format!("failed to construct result tensor ({e})"),
@@ -479,7 +486,7 @@ async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::Bui
         }
     };
 
-    output.into_value(wants_gpu)
+    output.into_value(resident_source.as_ref())
 }
 
 fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> BuiltinResult<Option<Value>> {
@@ -490,6 +497,11 @@ fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> BuiltinResu
         .iter()
         .all(|value| matches!(value, Value::GpuTensor(_)))
     {
+        return Ok(None);
+    }
+    if operands.iter().any(|value| {
+        matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some() || runmat_accelerate_api::handle_is_logical(handle))
+    }) {
         return Ok(None);
     }
 
@@ -635,7 +647,7 @@ fn finalise_empty_output(
     inputs: &[PreparedInput],
     page_dims: &[usize],
     output_kind: OutputKind,
-    wants_gpu: bool,
+    resident_source: Option<&GpuTensorHandle>,
 ) -> BuiltinResult<Value> {
     let (rows, cols) = operation.output_matrix_shape(inputs, output_kind)?;
     let final_shape = assemble_shape(rows, cols, page_dims);
@@ -651,13 +663,16 @@ fn finalise_empty_output(
         .unwrap_or(0);
     match output_kind {
         OutputKind::Real => {
-            let tensor = Tensor::new(vec![0.0; entries], final_shape).map_err(|e| {
-                pagefun_error_with_detail(
-                    &PAGEFUN_ERROR_INTERNAL,
-                    format!("failed to build empty tensor ({e})"),
-                )
-            })?;
-            FinalOutput::Real(tensor).into_value(wants_gpu)
+            let dtype = operation.output_numeric_dtype(inputs);
+            let tensor =
+                Tensor::from_numeric_storage(NumericStorage::zeros(dtype, entries), final_shape)
+                    .map_err(|e| {
+                        pagefun_error_with_detail(
+                            &PAGEFUN_ERROR_INTERNAL,
+                            format!("failed to build empty tensor ({e})"),
+                        )
+                    })?;
+            FinalOutput::Real(tensor).into_value(resident_source)
         }
         OutputKind::Complex => {
             let tensor =
@@ -667,7 +682,7 @@ fn finalise_empty_output(
                         format!("failed to build empty complex tensor ({e})"),
                     )
                 })?;
-            FinalOutput::Complex(tensor).into_value(wants_gpu)
+            FinalOutput::Complex(tensor).into_value(resident_source)
         }
     }
 }
@@ -710,44 +725,16 @@ enum FinalOutput {
 }
 
 impl FinalOutput {
-    fn into_value(self, wants_gpu: bool) -> BuiltinResult<Value> {
-        match self {
-            FinalOutput::Real(tensor) => {
-                if wants_gpu {
-                    #[cfg(all(test, feature = "wgpu"))]
-                    {
-                        if runmat_accelerate_api::provider().is_none() {
-                            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                            );
-                        }
-                    }
-                    if let Some(provider) = runmat_accelerate_api::provider() {
-                        if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
-                            return Ok(Value::GpuTensor(handle));
-                        }
-                    }
-                }
-                Ok(Value::Tensor(tensor))
+    fn into_value(self, resident_source: Option<&GpuTensorHandle>) -> BuiltinResult<Value> {
+        let value = match self {
+            FinalOutput::Real(tensor) => Value::Tensor(tensor),
+            FinalOutput::Complex(tensor) => Value::ComplexTensor(tensor),
+        };
+        match resident_source {
+            Some(source) => {
+                gpu_helpers::restore_class_preserving_value(source, value, BUILTIN_NAME)
             }
-            FinalOutput::Complex(tensor) => {
-                if wants_gpu {
-                    #[cfg(all(test, feature = "wgpu"))]
-                    {
-                        if runmat_accelerate_api::provider().is_none() {
-                            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                            );
-                        }
-                    }
-                    if let Some(provider) = runmat_accelerate_api::provider() {
-                        if let Ok(handle) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                            return Ok(Value::GpuTensor(handle));
-                        }
-                    }
-                }
-                Ok(Value::ComplexTensor(tensor))
-            }
+            None => Ok(value),
         }
     }
 }
@@ -762,22 +749,18 @@ struct PageInput {
 
 #[derive(Clone)]
 enum PageData {
-    Real(Vec<f64>),
+    Real(NumericStorage),
     Complex(Vec<(f64, f64)>),
 }
 
 impl PageInput {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
-            Value::Tensor(t) => Self::from_tensor(t),
-            Value::Num(n) => Self::from_tensor(
-                Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
+            value @ (Value::Tensor(_) | Value::Num(_) | Value::Int(_)) => Self::from_tensor(
+                tensor_utils::value_into_tensor_for(BUILTIN_NAME, value).map_err(|error| {
+                    pagefun_error_with_detail(&PAGEFUN_ERROR_INVALID_INPUT, error.to_string())
+                })?,
             ),
-            Value::Int(_) => Err(pagefun_error_with_detail(
-                &PAGEFUN_ERROR_INVALID_INPUT,
-                "pagefun has no typed integer kernel; refusing f64 fallback",
-            )),
             Value::Bool(flag) => Self::from_tensor(
                 Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
                     .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
@@ -796,14 +779,10 @@ impl PageInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if tensor.integer_storage().is_some() {
-            return Err(pagefun_error_with_detail(
-                &PAGEFUN_ERROR_INVALID_INPUT,
-                "pagefun has no typed integer kernel; refusing f64 fallback",
-            ));
-        }
         let shape = canonical_matrix_shape(&tensor.shape);
-        let data = tensor_utils::tensor_into_values_f64(tensor);
+        let data = tensor
+            .into_numeric_storage()
+            .map_err(|error| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, error))?;
         if data.len() != shape.iter().copied().product::<usize>() {
             return Err(pagefun_error_with_detail(
                 &PAGEFUN_ERROR_INTERNAL,
@@ -854,6 +833,13 @@ impl PageInput {
 
     fn is_complex(&self) -> bool {
         matches!(self.data, PageData::Complex(_))
+    }
+
+    fn numeric_dtype(&self) -> Option<NumericDType> {
+        match &self.data {
+            PageData::Real(storage) => Some(storage.numeric_dtype()),
+            PageData::Complex(_) => None,
+        }
     }
 }
 
@@ -906,11 +892,16 @@ impl PreparedInput {
         match &self.data.data {
             PageData::Real(buffer) => {
                 let end = offset + self.data.page_size();
-                let slice = buffer
-                    .get(offset..end)
-                    .ok_or_else(|| pagefun_internal_error("page slice out of bounds"))?;
-                let tensor = Tensor::new(slice.to_vec(), vec![self.data.rows, self.data.cols])
-                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?;
+                if end > buffer.len() {
+                    return Err(pagefun_internal_error("page slice out of bounds"));
+                }
+                let indices = (offset..end).collect::<Vec<_>>();
+                let storage = buffer
+                    .gather(&indices)
+                    .map_err(|error| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, error))?;
+                let tensor =
+                    Tensor::from_numeric_storage(storage, vec![self.data.rows, self.data.cols])
+                        .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?;
                 Ok(Value::Tensor(tensor))
             }
             PageData::Complex(buffer) => {
@@ -937,15 +928,9 @@ fn compute_strides(dims: &[usize]) -> Vec<usize> {
     strides
 }
 
-fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
+fn tensor_matrix_storage(value: Value) -> BuiltinResult<(NumericStorage, usize, usize)> {
     match value {
         Value::Tensor(t) => {
-            if t.integer_storage().is_some() {
-                return Err(pagefun_error_with_detail(
-                    &PAGEFUN_ERROR_RESULT_TYPE,
-                    "pagefun callback returned a typed integer tensor; refusing f64 fallback",
-                ));
-            }
             if t.shape.len() > 2 {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_TYPE,
@@ -955,7 +940,9 @@ fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
             let canonical = canonical_matrix_shape(&t.shape);
             let rows = canonical[0];
             let cols = canonical[1];
-            let data = tensor_utils::tensor_into_values_f64(t);
+            let data = t
+                .into_numeric_storage()
+                .map_err(|error| pagefun_error_with_detail(&PAGEFUN_ERROR_RESULT_TYPE, error))?;
             if rows * cols != data.len() {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_SHAPE,
@@ -964,16 +951,70 @@ fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
             }
             Ok((data, rows, cols))
         }
-        Value::Num(n) => Ok((vec![n], 1, 1)),
-        Value::Int(_) => Err(pagefun_error_with_detail(
-            &PAGEFUN_ERROR_RESULT_TYPE,
-            "pagefun callback returned an integer scalar; refusing f64 fallback",
-        )),
+        value @ (Value::Num(_) | Value::Int(_)) => {
+            let tensor =
+                tensor_utils::value_into_tensor_for(BUILTIN_NAME, value).map_err(|error| {
+                    pagefun_error_with_detail(&PAGEFUN_ERROR_RESULT_TYPE, error.to_string())
+                })?;
+            let data = tensor
+                .into_numeric_storage()
+                .map_err(|error| pagefun_error_with_detail(&PAGEFUN_ERROR_RESULT_TYPE, error))?;
+            Ok((data, 1, 1))
+        }
         other => Err(pagefun_error_with_detail(
             &PAGEFUN_ERROR_RESULT_TYPE,
             format!(
                 "expected numeric matrix result, received {}",
                 other.type_name()
+            ),
+        )),
+    }
+}
+
+fn empty_storage_like(storage: &NumericStorage, capacity: usize) -> NumericStorage {
+    macro_rules! empty {
+        ($variant:ident) => {
+            NumericStorage::$variant(Vec::with_capacity(capacity))
+        };
+    }
+    match storage {
+        NumericStorage::F64(_) => empty!(F64),
+        NumericStorage::F32(_) => empty!(F32),
+        NumericStorage::I8(_) => empty!(I8),
+        NumericStorage::I16(_) => empty!(I16),
+        NumericStorage::I32(_) => empty!(I32),
+        NumericStorage::I64(_) => empty!(I64),
+        NumericStorage::U8(_) => empty!(U8),
+        NumericStorage::U16(_) => empty!(U16),
+        NumericStorage::U32(_) => empty!(U32),
+        NumericStorage::U64(_) => empty!(U64),
+    }
+}
+
+fn extend_same_class(target: &mut NumericStorage, source: NumericStorage) -> BuiltinResult<()> {
+    macro_rules! extend {
+        ($target:ident, $source:ident) => {{
+            $target.extend($source);
+            Ok(())
+        }};
+    }
+    match (target, source) {
+        (NumericStorage::F64(target), NumericStorage::F64(source)) => extend!(target, source),
+        (NumericStorage::F32(target), NumericStorage::F32(source)) => extend!(target, source),
+        (NumericStorage::I8(target), NumericStorage::I8(source)) => extend!(target, source),
+        (NumericStorage::I16(target), NumericStorage::I16(source)) => extend!(target, source),
+        (NumericStorage::I32(target), NumericStorage::I32(source)) => extend!(target, source),
+        (NumericStorage::I64(target), NumericStorage::I64(source)) => extend!(target, source),
+        (NumericStorage::U8(target), NumericStorage::U8(source)) => extend!(target, source),
+        (NumericStorage::U16(target), NumericStorage::U16(source)) => extend!(target, source),
+        (NumericStorage::U32(target), NumericStorage::U32(source)) => extend!(target, source),
+        (NumericStorage::U64(target), NumericStorage::U64(source)) => extend!(target, source),
+        (target, source) => Err(pagefun_error_with_detail(
+            &PAGEFUN_ERROR_RESULT_TYPE,
+            format!(
+                "operator returned inconsistent page classes ({} then {})",
+                target.class_name(),
+                source.class_name()
             ),
         )),
     }
@@ -1088,7 +1129,10 @@ impl PageOperation {
             Self::Mtimes => {
                 let lhs = &inputs[0];
                 let rhs = &inputs[1];
-                if lhs.cols() != rhs.rows() {
+                if lhs.rows() * lhs.cols() != 1
+                    && rhs.rows() * rhs.cols() != 1
+                    && lhs.cols() != rhs.rows()
+                {
                     return Err(pagefun_error_with_detail(
                         &PAGEFUN_ERROR_MATRIX_DIM_MISMATCH,
                         format!(
@@ -1132,12 +1176,45 @@ impl PageOperation {
             Self::Mtimes => {
                 let lhs = &inputs[0];
                 let rhs = &inputs[1];
-                let rows = lhs.rows();
-                let cols = rhs.cols();
+                let (rows, cols) = if lhs.rows() * lhs.cols() == 1 {
+                    (rhs.rows(), rhs.cols())
+                } else if rhs.rows() * rhs.cols() == 1 {
+                    (lhs.rows(), lhs.cols())
+                } else {
+                    (lhs.rows(), rhs.cols())
+                };
                 match kind {
                     OutputKind::Real | OutputKind::Complex => Ok((rows, cols)),
                 }
             }
+        }
+    }
+
+    fn output_numeric_dtype(&self, inputs: &[PreparedInput]) -> NumericDType {
+        match self {
+            Self::Mtimes => inputs
+                .iter()
+                .filter_map(|input| input.data.numeric_dtype())
+                .find(|dtype| {
+                    matches!(
+                        dtype,
+                        NumericDType::I8
+                            | NumericDType::I16
+                            | NumericDType::I32
+                            | NumericDType::I64
+                            | NumericDType::U8
+                            | NumericDType::U16
+                            | NumericDType::U32
+                            | NumericDType::U64
+                    )
+                })
+                .or_else(|| {
+                    inputs
+                        .iter()
+                        .filter_map(|input| input.data.numeric_dtype())
+                        .find(|dtype| *dtype == NumericDType::F32)
+                })
+                .unwrap_or(NumericDType::F64),
         }
     }
 }
@@ -1228,7 +1305,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    };
     use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, StringArray, Type};
 
     #[test]
@@ -1305,21 +1384,31 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn pagefun_rejects_poisoned_typed_integer_inputs_before_float_materialization() {
-        let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
-        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
+    fn pagefun_preserves_wide_integer_pages_without_float_materialization() {
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let rhs = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).unwrap();
 
         let result = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         );
-        let error = block_on(result).expect_err("typed integer page inputs must not use f64");
-        assert!(error.to_string().contains("typed integer kernel"));
+        let result = block_on(result).expect("typed integer page inputs");
+        let Value::Tensor(result) = result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
     }
 
     #[test]
-    fn pagefun_integer_capability_keeps_typed_scalar_mtimes_open() {
+    fn pagefun_integer_capability_records_typed_scalar_mtimes() {
         assert_eq!(PAGEFUN_INTEGER_CAPABILITIES.len(), 1);
         let capability = &PAGEFUN_INTEGER_CAPABILITIES[0];
         assert_eq!(
@@ -1327,33 +1416,69 @@ pub(crate) mod tests {
             BuiltinIntegerInputAvailability::Documented
         );
         assert_eq!(capability.overload, BuiltinIntegerOverloadKind::ScalarOnly);
-        assert!(capability.notes.contains("[integer-audit-open]"));
+        assert!(!capability.notes.contains("[integer-audit-open]"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn pagefun_matrix_result_reader_rejects_poisoned_typed_integer_storage() {
+    fn pagefun_matrix_result_reader_preserves_wide_typed_integer_storage() {
         let result = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, 7]),
             vec![1, 2],
         )
         .unwrap();
 
-        let error = tensor_matrix_data(Value::Tensor(result))
-            .expect_err("typed callback result must not use f64");
-        assert!(error.to_string().contains("typed integer tensor"));
+        let (storage, rows, cols) =
+            tensor_matrix_storage(Value::Tensor(result)).expect("typed callback result");
+        assert_eq!(rows, 1);
+        assert_eq!(cols, 2);
+        assert_eq!(storage, NumericStorage::U64(vec![9_007_199_254_740_993, 7]));
     }
 
     #[test]
-    fn pagefun_rejects_wide_integer_scalar_before_float_materialization() {
+    fn pagefun_preserves_wide_integer_scalar_without_float_materialization() {
         let result = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
             vec![Value::Num(1.0)],
         );
 
-        let error = block_on(result).expect_err("wide integer scalar must not use f64");
-        assert!(error.to_string().contains("typed integer kernel"));
+        let result = block_on(result).expect("wide integer scalar");
+        let Value::Tensor(result) = result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn pagefun_resident_integer_fallback_restores_exact_owner_and_class() {
+        test_support::with_test_provider(|provider| {
+            let source = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[9_007_199_254_740_993, u64::MAX]),
+                    shape: &[1, 2],
+                })
+                .expect("resident integer input");
+            let result = block_on(pagefun_impl(
+                Value::FunctionHandle("mtimes".into()),
+                Value::GpuTensor(source.clone()),
+                vec![Value::Int(runmat_builtins::IntValue::U64(1))],
+            ))
+            .expect("owner-aware integer fallback");
+            let Value::GpuTensor(result) = result else {
+                panic!("expected resident result");
+            };
+            assert_eq!(result.device_id, source.device_id);
+            assert_eq!(
+                block_on(provider.download_integer(&result))
+                    .expect("download exact result")
+                    .data,
+                HostIntegerDataOwned::U64(vec![9_007_199_254_740_993, u64::MAX])
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

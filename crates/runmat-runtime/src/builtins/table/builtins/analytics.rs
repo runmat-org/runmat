@@ -178,7 +178,7 @@ pub const GROUPSUMMARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] Documented integer array and table data uses exact native-class min/max and explicit floating computation for mean, sum, median, and counts. The implemented one-group numeric-edge form compares integer values exactly; multi-group bin specifications, time bins, full scalar-count discretize edge/label parity, additional named methods, and function handles remain open.",
+        notes: "Documented integer array and table data uses exact native-class min and max plus explicit floating computation for mean, sum, median, and counts. One-group numeric-edge and scalar-count forms compare integers exactly; multi-group bin specifications, time bins, additional named methods, and function handles currently reject explicitly.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "groupsummary(T,groupvars,integer_numbins,method,___) or integer boolean controls",

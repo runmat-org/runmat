@@ -143,7 +143,7 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `nonlinear` | `IncrementCount=12`, `MaxNewtonIters=24`, `MaxLineSearchBacktracks=6`, `TangentRefreshInterval=2` | `Tolerance=1e-6`, `ResidualConvergenceFactor=5`, `IncrementNormTolerance=1e-7`, `LineSearchReduction=0.5` |
 | `electromagnetic` | `HarmonicMaxIterations=96` | `ResidualTarget=1e-6`, `HarmonicTolerance=1e-7`, `SweepFrequencyHz=[]` |
 
-The table defines 18 integer-capability forms: one exact structural and one binary64 physical form for each of the nine numeric solver families. Exact controls accept all eight integer classes and ordinary integral doubles without passing through an `f64` mirror. Physical controls accept real scalars and perform one explicit binary64 conversion after field, solver, and scalar-shape validation; solver-specific finiteness and range checks run before execution. Logical options require logical scalars. Structural output properties remain exact; physical properties remain double.
+The table defines 18 integer-capability forms: one exact structural and one binary64 physical form for each of the nine numeric solver families. Exact controls accept all eight integer classes and ordinary integral doubles and retain their exact values through validation. Physical controls accept real scalars and perform one explicit binary64 conversion after field, solver, and scalar-shape validation; solver-specific finiteness and range checks run before execution. Logical options require logical scalars. Structural output properties remain exact; physical properties remain double.
 
 ### Results query options
 

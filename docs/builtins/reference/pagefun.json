@@ -36,8 +36,8 @@
     "The first two dimensions of each input form the matrix operated on by the builtin. Dimensions three and up identify individual pages. Inputs with fewer pages are broadcast so long as the page extent is `1`.",
     "Any combination of empty matrices and empty page extents produces empty results with MATLAB-compatible shapes.",
     "MATLAB-compatible calls require at least one distributed or `gpuArray` input. In `runmat` compatibility mode, all-host operands are accepted as a RunMat extension and return host results.",
-    "When any operand is a `gpuArray`, provider fallback gathers inputs to the host and uploads uniform real or complex numeric results back to the GPU so documented mixed host/GPU calls preserve output residency.",
-    "Integer operands inherit the selected function's contract. For the currently implemented `@mtimes`, the documented scalar-integer cases remain open: RunMat rejects typed integer pages before floating materialization until the provider kernel and host page assembler can preserve exact typed results."
+    "When any operand is a `gpuArray`, provider fallback gathers inputs through the provider that owns them and restores supported results to that same provider. Automatic residency remains transparent, while an explicit `gpuArray` remains resident whenever its class can be represented by the owner.",
+    "Integer operands inherit the selected function's contract. For `@mtimes`, one operand must be scalar when either operand is an integer class; each page uses exact native integer storage, applies the class-preserving saturation rules of `mtimes`, and never passes through a floating copy."
   ],
   "examples": [
     {
@@ -109,6 +109,6 @@
   },
   "gpu_residency": "No. RunMat's auto-offload planner migrates tensors to the GPU when beneficial. When you explicitly pass any `gpuArray` input, `pagefun` returns supported real or complex numeric results on the device whenever the provider can accept the upload.",
   "gpu_behavior": [
-    "RunMat Accelerate exposes a custom `pagefun` provider hook. When every operand is a `gpuArray` and the active provider implements the operation (the WGPU backend does for `@mtimes`), pages stay on the device and execute via a tiled compute shader. Mixed host/GPU inputs and unsupported provider operations gather to the host, evaluate using the CPU builtin, and re-upload real or complex numeric outputs so the documented GPU result remains resident."
+    "RunMat Accelerate exposes a custom `pagefun` provider hook. When every operand is a floating `gpuArray` and the owning provider implements the operation (the WGPU backend does for `@mtimes`), pages stay on the device and execute via a tiled compute shader. Mixed host/GPU inputs, integer pages, and unsupported provider operations use owner-aware host fallback; exact native storage is retained and supported outputs are restored to the original provider."
   ]
 }

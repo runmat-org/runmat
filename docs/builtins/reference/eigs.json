@@ -25,7 +25,7 @@
     "`eigs(A)` returns up to six eigenvalues with largest magnitude.",
     "`eigs(A,k)` clamps `k` to `size(A,2)` when larger than the matrix order.",
     "Typed-integer `k` is an exact documented structural control. Typed-integer `sigma` and typed-integer `StartVector` are separately named RunMat-only extensions because the public data-type lists for those roles are single and double.",
-    "Admitted integer coefficient and sigma values must be exactly representable at the explicit binary64 dense-fallback boundary; integer k and CholeskyPermutation are parsed structurally without a floating mirror.",
+    "Admitted integer coefficient and sigma values must be exactly representable at the explicit binary64 dense-fallback boundary; integer k and CholeskyPermutation are parsed structurally.",
     "`eigs(A,k,sigma)` supports numeric `sigma` and the documented text selectors `largestabs`, `smallestabs`, `largestreal`, `smallestreal`, `bothendsreal`, `largestimag`, `smallestimag`, and `bothendsimag`, plus documented short aliases.",
     "`eigs(A,B,...)` solves the generalized problem by reusing `eig(A,B)` and then selecting the requested subset.",
     "Two outputs return selected right eigenvectors and a diagonal eigenvalue matrix. Three outputs append convergence flag `0` because the current exact fallback either succeeds fully or raises an error.",

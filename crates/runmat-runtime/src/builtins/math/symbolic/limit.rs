@@ -66,7 +66,7 @@ pub const LIMIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "[integer-audit-open] The point is read from authoritative integer storage and must convert exactly before substitution into RunMat's binary64 symbolic representation; exact symbolic support beyond binary64's integer range remains to be implemented.",
+        notes: "The point is read from authoritative integer storage and must convert exactly before substitution into RunMat's current binary64 symbolic representation. Wider integer points reject explicitly instead of rounding.",
     },
 ];
 

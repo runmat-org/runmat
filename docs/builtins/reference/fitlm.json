@@ -36,7 +36,7 @@
     "Matrix model specifications `constant`, `linear`, `interactions`, `purequadratic`, and `quadratic` are supported.",
     "Rows containing `NaN` in predictors, response, or zero weights are omitted before fitting; `Inf` values are rejected.",
     "`Exclude` accepts logical masks or one-based numeric row indices. `Weights` accepts a numeric vector, and table input also accepts a weights variable name.",
-    "All eight typed-integer classes are RunMat-only inputs. Predictor, response, and weight values must be exactly representable at the binary64 fitting boundary; Exclude indices and Intercept zero/nonzero controls are parsed from authoritative integer storage without a floating mirror.",
+    "All eight typed-integer classes are RunMat-only inputs. Predictor, response, and weight values must be exactly representable at the binary64 fitting boundary; Exclude indices and Intercept zero/nonzero controls are parsed from authoritative integer storage.",
     "The returned model exposes `Coefficients`, `Fitted`, `Residuals.Raw`, `NumObservations`, `DFE`, `RMSE`, `Rsquared`, `Formula`, `PredictorNames`, and `ResponseName` properties.",
     "The `Coefficients` table contains `Estimate`, `SE`, `tStat`, and `pValue` variables with coefficient names in `Properties.RowNames`.",
     "Categorical predictors, robust regression, and Wilkinson interaction formula terms are not supported yet and raise explicit errors."

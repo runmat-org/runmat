@@ -19,7 +19,7 @@
     "`\"Replace\",false` samples without replacement and requires `k` to be no larger than the sampled dimension.",
     "`\"Weights\",w` samples proportionally to nonnegative weights with at least one positive value.",
     "Documented ordinary populations include single, double, logical, character, string, and table data. RunMat currently supports numeric, logical, character, string, and cell populations; table and tall-array paths remain unimplemented.",
-    "Typed-integer population data is a RunMat extension sampled directly from authoritative integer storage, preserving every selected value and its integer class without a floating mirror.",
+    "Typed-integer population data is a RunMat extension sampled directly from authoritative integer storage, preserving every selected value and its integer class.",
     "Typed-integer `k`, typed-integer `dim`, typed-integer weights, logical weights, numeric `Replace`, and resident inputs are independently gated RunMat extensions. Compatibility-mode `k`, `dim`, and weights use documented single or double forms, and `Replace` uses logical.",
     "The default sampled dimension is the first nonsingleton dimension.",
     "The documented `RandStream` calling form, tables, and tall-array execution are not yet implemented."

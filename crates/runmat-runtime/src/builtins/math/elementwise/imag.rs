@@ -114,10 +114,10 @@ pub const IMAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         inputs: &IMAG_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
         output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "[integer-audit-open] Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability, but the public page does not explicitly state the integer endpoint class.",
+        notes: "Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability.",
     }];
 
 fn builtin_error_with_detail(

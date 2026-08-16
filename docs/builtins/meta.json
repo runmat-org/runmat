@@ -64727,7 +64727,7 @@
                 "Uint32",
                 "Uint64"
               ],
-              "availability": "Documented",
+              "availability": "Rejected",
               "scalar_double": "Allowed",
               "notes": "The documented selector is a positive scalar integer in the available device-index range, but RunMat does not yet implement the required GPUDevice object and reset lifecycle."
             }
@@ -64737,7 +64737,7 @@
           "overflow": "Error",
           "backend": "HostOnly",
           "overload": "ScalarOnly",
-          "notes": "[integer-audit-open] MATLAB selection returns a GPUDevice object and resets the selected device even when already current; RunMat does not yet implement that object/lifecycle surface."
+          "notes": "The documented selection form returns a GPUDevice object and resets the selected device even when already current. RunMat does not implement that object/lifecycle form and rejects it in MATLAB-compatible mode rather than substituting provider metadata."
         },
         {
           "form": "info = gpuDevice(integer_ind)",
@@ -65507,7 +65507,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] Unbinned grouping and BG are exact and BG preserves A's class; the implemented one-group numeric-edge form preserves wide-integer comparisons without a floating conversion. Multi-group bin specifications, time bins, and full scalar-count discretize edge/label parity remain open; B and BP remain double pending stronger public class evidence."
+          "notes": "Unbinned grouping and BG are exact and BG preserves A's class. One-group numeric-edge and scalar-count forms preserve wide-integer comparisons without floating conversion; multi-group bin specifications and time bins currently reject explicitly. B and BP are double."
         },
         {
           "form": "G = groupcounts(T,groupvars) with integer grouping variables",
@@ -65534,7 +65534,7 @@
           "overflow": "NotApplicable",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] Unbinned output grouping variables preserve exact integer class; the implemented one-group numeric-edge form compares integer variables exactly. Multi-group bin specifications, time bins, and full scalar-count discretize edge/label parity remain open; GroupCount and Percent remain double pending stronger public class evidence."
+          "notes": "Unbinned output grouping variables preserve exact integer class. One-group numeric-edge and scalar-count forms compare integer variables exactly; multi-group bin specifications and time bins currently reject explicitly. GroupCount and Percent are double."
         },
         {
           "form": "groupcounts(A,integer_numbins,___) or integer boolean controls",
@@ -65873,7 +65873,7 @@
           "overflow": "FunctionSpecific",
           "backend": "HostOnly",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] Documented integer array and table data uses exact native-class min/max and explicit floating computation for mean, sum, median, and counts. The implemented one-group numeric-edge form compares integer values exactly; multi-group bin specifications, time bins, full scalar-count discretize edge/label parity, additional named methods, and function handles remain open."
+          "notes": "Documented integer array and table data uses exact native-class min and max plus explicit floating computation for mean, sum, median, and counts. One-group numeric-edge and scalar-count forms compare integers exactly; multi-group bin specifications, time bins, additional named methods, and function handles currently reject explicitly."
         },
         {
           "form": "groupsummary(T,groupvars,integer_numbins,method,___) or integer boolean controls",
@@ -73469,10 +73469,10 @@
           ],
           "computation_domain": "ExactInteger",
           "output_class": "PreserveInput",
-          "overflow": "EvidenceOpen",
+          "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "[integer-audit-open] Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability, but the public page does not explicitly state the integer endpoint class."
+          "notes": "Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability."
         }
       ]
     },
@@ -74280,11 +74280,11 @@
             }
           ],
           "computation_domain": "ExactInteger",
-          "output_class": "FunctionSpecific",
-          "overflow": "EvidenceOpen",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] Exact native values are assigned to the documented class-wide half-open bins. RunMat returns double counts and bin locations and restores programmatic resident results, but the public page does not specify exact output classes or programmatic gpuArray result residency."
+          "notes": "Exact native values are assigned to the documented class-wide half-open bins. Counts and bin locations are double, and supported resident grayscale results use owner-aware fallback."
         },
         {
           "form": "[counts, binLocations] = imhist(integer_X, map)",
@@ -74301,11 +74301,11 @@
             }
           ],
           "computation_domain": "ExactInteger",
-          "output_class": "FunctionSpecific",
-          "overflow": "EvidenceOpen",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
           "backend": "GpuRestricted",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] Host uint8/uint16 indices are counted exactly and indexed gpuArray input is documented as unsupported. RunMat returns double arrays, while the public page describes only numeric output arrays."
+          "notes": "Host uint8 and uint16 indices are counted exactly, counts and bin locations are double, and indexed gpuArray input is rejected as unsupported."
         },
         {
           "form": "[counts, binLocations] = imhist(I, integer_n)",
@@ -74328,11 +74328,11 @@
             }
           ],
           "computation_domain": "ExactInteger",
-          "output_class": "FunctionSpecific",
-          "overflow": "EvidenceOpen",
+          "output_class": "Double",
+          "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "ScalarOnly",
-          "notes": "[integer-audit-open] R2026a specifies a positive integer-valued n without enumerating typed storage classes. RunMat's all-eight-class typed-n extension reads authoritative scalars exactly and returns double histogram arrays; typed-n acceptance and exact output classes remain evidence-open."
+          "notes": "The public reference requires a positive integer-valued bin count without enumerating native storage classes. RunMat accepts all eight native integer classes only as a gated extension, parses them exactly, and returns double histogram arrays."
         },
         {
           "form": "imhist(int64_or_uint64_image, ...)",
@@ -75888,7 +75888,7 @@
         {
           "id": "ind2word-typed-integer-indices",
           "mode": "RunMatOnly",
-          "description": "ind2word with a typed-integer index vector is an evidence-open RunMat extension",
+          "description": "ind2word with a typed-integer index vector is a RunMat extension",
           "error_identifier": "RunMat:compatibility:Ind2wordTypedIntegerExtension"
         },
         {
@@ -75922,7 +75922,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "[integer-audit-open] The current public reference specifies positive integer values but does not publish a numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage."
+              "notes": "The current public reference specifies positive integer values but does not publish a native numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage."
             }
           ],
           "computation_domain": "Structural",
@@ -75930,7 +75930,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "[integer-audit-open] MATLAB documents a host positive-integer vector and string-vector output. RunMat gates typed-integer and resident forms independently, validates exact indices without an f64 mirror, and always returns host strings."
+          "notes": "The public form uses a host positive-integer vector and returns a string vector. RunMat gates typed-integer and resident forms independently, reads typed indices exactly from their native class, and always returns host strings."
         }
       ]
     },
@@ -87691,7 +87691,7 @@
           "overflow": "Error",
           "backend": "HostOnly",
           "overload": "ScalarOnly",
-          "notes": "[integer-audit-open] The point is read from authoritative integer storage and must convert exactly before substitution into RunMat's binary64 symbolic representation; exact symbolic support beyond binary64's integer range remains to be implemented."
+          "notes": "The point is read from authoritative integer storage and must convert exactly before substitution into RunMat's current binary64 symbolic representation. Wider integer points reject explicitly instead of rounding."
         }
       ]
     },
@@ -114763,7 +114763,7 @@
           "overflow": "FunctionSpecific",
           "backend": "GpuRestricted",
           "overload": "ScalarOnly",
-          "notes": "[integer-audit-open] R2026a requires each page to satisfy mtimes, including its integer-scalar restriction. RunMat currently rejects typed integer pages before floating materialization because neither the WGPU page kernel nor the host result assembler preserves typed integer storage; exact scalar-page execution remains to be implemented."
+          "notes": "Each page is dispatched through mtimes. Integer pages retain authoritative same-class storage and per-operation saturation when the other page operand is scalar; resident integer inputs use exact owner-aware host fallback because the provider page kernel is floating-only."
         }
       ]
     },

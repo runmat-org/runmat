@@ -198,7 +198,7 @@ pub const GROUPCOUNTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] Unbinned grouping and BG are exact and BG preserves A's class; the implemented one-group numeric-edge form preserves wide-integer comparisons without a floating conversion. Multi-group bin specifications, time bins, and full scalar-count discretize edge/label parity remain open; B and BP remain double pending stronger public class evidence.",
+        notes: "Unbinned grouping and BG are exact and BG preserves A's class. One-group numeric-edge and scalar-count forms preserve wide-integer comparisons without floating conversion; multi-group bin specifications and time bins currently reject explicitly. B and BP are double.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "G = groupcounts(T,groupvars) with integer grouping variables",
@@ -208,7 +208,7 @@ pub const GROUPCOUNTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] Unbinned output grouping variables preserve exact integer class; the implemented one-group numeric-edge form compares integer variables exactly. Multi-group bin specifications, time bins, and full scalar-count discretize edge/label parity remain open; GroupCount and Percent remain double pending stronger public class evidence.",
+        notes: "Unbinned output grouping variables preserve exact integer class. One-group numeric-edge and scalar-count forms compare integer variables exactly; multi-group bin specifications and time bins currently reject explicitly. GroupCount and Percent are double.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "groupcounts(A,integer_numbins,___) or integer boolean controls",

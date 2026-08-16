@@ -30,7 +30,7 @@
   "description": "`strncmp(A, B, N)` compares corresponding text elements and returns logical `true` when the first `N` characters match exactly. It follows MATLAB-compatible case-sensitive comparison and implicit expansion behavior.",
   "behaviors": [
     "**Accepted text types**: String scalars/arrays, character vectors or character arrays, and cell arrays of character vectors.",
-    "**Scalar `N` requirement**: The third argument accepts double, single, or any of the eight integer classes as an integer scalar. It is read from native storage without an f64 mirror.",
+    "**Scalar `N` requirement**: The third argument accepts double, single, or any of the eight integer classes as an integer scalar. It is read from native storage.",
     "**Implicit expansion**: Scalars expand to match the size of the other operand before comparison.",
     "**Character arrays**: Rows are treated as independent character vectors. Each row is compared against the other operand and the result is returned as a column vector.",
     "**Unicode-aware comparisons**: Prefixes are counted in MATLAB characters (Unicode scalar values), so multi-byte UTF-8 sequences are handled transparently.",

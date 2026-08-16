@@ -52,55 +52,34 @@ The enum lives in `runmat-builtins` because builtins, VM dispatch, runtime servi
 
 ## Dense Arrays And Shape
 
-RunMat stores dense numeric arrays as `Tensor` or `ComplexTensor`. During the authoritative-storage migration, the current `Tensor` owns both the ordinary floating representation and, for integer arrays, an authoritative exact backing store:
+RunMat stores dense real numeric arrays as `Tensor` and dense complex numeric arrays as `ComplexTensor`. Each value owns one private homogeneous payload whose Rust element type matches its RunMat numeric class:
 
 ```rust
 pub struct Tensor {
-    pub data: Vec<f64>,                       // compatibility view
-    pub integer_data: Option<IntegerStorage>, // authoritative for integer dtype
-    pub shape: Vec<usize>,                    // MATLAB-visible N-D shape
-    pub rows: usize,                          // cached 2-D dimensions
+    storage: TensorStorage,
+    pub shape: Vec<usize>,
+    pub rows: usize,
     pub cols: usize,
-    pub dtype: NumericDType,
+}
+
+enum TensorStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    Integer(IntegerStorage),
 }
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `data` | Contiguous column-major floating data. For integer tensors this is a compatibility mirror only and can be inexact for `int64`/`uint64`. |
-| `integer_data` | Exact homogeneous `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64` storage. When present, it is authoritative for values and dtype. |
-| `shape` | MATLAB-visible N-D shape. |
-| `rows` / `cols` | Cached 2-D dimensions for common matrix paths and interop. |
-| `dtype` | MATLAB-visible numeric class. Integer dtypes must agree with `integer_data`. |
+`IntegerStorage` has native variants for `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`. The storage variant determines the numeric class, so wide integer values retain their full precision through indexing, comparison, ordering, hashing, class-preserving arithmetic, serialization, and host/device transfer.
 
-`IntegerStorage` is not optional optimization metadata. Integer-aware code must read it before `data`; mutation must update exact storage and then repair the mirror. The mirror exists for legacy algorithms and intentional conversions to a floating computation domain. It must not be used for integer comparison, ordering, hashing, indexing, assignment into integer storage, class-preserving arithmetic, serialization, or exact host/device transfer.
+`NumericStorage`, `NumericScalar`, `NumericStorageView`, and `NumericStorageViewMut` provide the exhaustive all-class APIs used by runtime code. Constructors validate that payload length matches shape. Scalar access, same-class mutation, allocation, clone, gather, and reorder preserve the class. Operations that intentionally enter a floating computation use explicitly named materialization methods at that boundary.
 
-`ComplexTensor` follows the same rule. Ordinary complex values use `Vec<(f64,f64)>`; typed complex integers additionally carry authoritative paired `IntegerStorage` values for their real and imaginary components.
+`ComplexTensor` follows the same model with private `F64`, `F32`, and paired same-class integer component storage. `SparseTensor` stores CSC column pointers and row indices with one private `F64`, `F32`, integer, or logical value payload. Dense, sparse, and complex containers share numeric class semantics while retaining layouts appropriate to their representation.
 
-`SparseTensor` stores CSC structure plus a floating `values` compatibility view. Typed sparse integers carry authoritative `IntegerStorage` for stored nonzeros. Exact consumers use `integer_storage`/`integer_at`, not the legacy floating `get` path.
+Column-major shape semantics are preserved across construction, indexing, builtin dispatch, workspace inspection, serialization, and provider transfer. `rows` and `cols` cache the first two dimensions for common matrix paths; the complete N-D shape remains authoritative.
 
-Column-major shape semantics are preserved across tensor construction, indexing, builtin dispatch, workspace inspection, and host materialization. Code that reports memory footprint must account for both the compatibility view and native storage while both are retained.
+### Numeric conversion boundaries
 
-### Authoritative-storage target
-
-The compatibility mirror is transitional, not the target value model. Dense real numeric tensors are moving to one private homogeneous storage enum with native variants for `f64`, `f32`, and all eight integer classes. Dtype will be derived from that storage, `single` will use native `f32`, and no integer tensor will retain an eager or persistent `f64` mirror.
-
-`NumericStorage`, `NumericScalar`, `NumericStorageView`, and `NumericStorageViewMut` define that exhaustive native storage contract in `runmat-builtins`. Exact scalar access, same-class mutation, zero/one allocation, shape-validated clone, gather, and reorder preserve the storage variant; `materialize_f64` and `materialize_f32` are the explicitly named potentially lossy boundaries. During Phase 1 these primitives coexist with the current public `Tensor` fields; the later field-privatization migration moves `Tensor` ownership onto this contract and uses compiler diagnostics to enumerate every consumer.
-
-`Tensor::from_numeric_storage` is the Phase 2 construction boundary for all ten native classes, and `Tensor::into_numeric_storage` is the transitional consuming ownership bridge. Until field privatization completes, the constructor derives legacy public compatibility fields from its native input; new construction paths should enter through this boundary rather than assemble those fields independently.
-
-Sparse values, complex values, provider transfer views, and GPU handle metadata will use the same authoritative element-type contract while retaining container/backend-appropriate physical layouts. In particular, “unified” does not require sparse CSC values and packed WGPU words to share an in-memory layout.
-
-### Numeric boundary rule
-
-Until the migration removes `Tensor::data`, a consumer that reads it from a value that may be integer must fall into one of these categories:
-
-1. **Exact consumer:** branch on `integer_storage` and operate on `IntegerStorage`/`IntValue`.
-2. **Intentional floating boundary:** the documented operation converts integer input to single/double output or a floating algorithm domain. The conversion is explicit and any loss above `flintmax` is part of that public conversion.
-3. **Validated scalar parameter:** convert only after proving the exact integer is in the destination domain, such as `usize`, `u32`, or the exact-double interval.
-4. **Unsupported integer input:** reject before reading the mirror.
-
-A direct mirror read without one of these justifications is an integer threading defect. Poisoned-mirror tests should replace `data`/`values` with invalid sentinels while retaining exact storage and verify that exact consumers still produce the right result. The repository census script remains a discovery and regression aid; completion is established by private storage, exhaustive typed dispatch, compiler diagnostics, and semantic tests.
+An operation that produces floating results from integer input declares that behavior at the operation boundary. Structural controls such as dimensions and indices are decoded into their bounded host representation after range validation. Class-preserving operations remain in the input class, and unsupported integer forms reject before conversion. This keeps numeric conversion local to the behavior that requires it and prevents unrelated structural or data-movement operations from changing a value's class or precision.
 
 Logical arrays use `LogicalArray`. Logical scalars use `Bool`, while logical N-D arrays store normalized `0` or `1` bytes with an explicit shape.
 

@@ -31,7 +31,7 @@ pub const WORD_ENCODING_CLASS: &str = "wordEncoding";
 const IND2WORD_TYPED_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "ind2word-typed-integer-indices",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ind2word with a typed-integer index vector is an evidence-open RunMat extension",
+    description: "ind2word with a typed-integer index vector is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:Ind2wordTypedIntegerExtension"),
 };
 const IND2WORD_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
@@ -58,7 +58,7 @@ const IND2WORD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "[integer-audit-open] The current public reference specifies positive integer values but does not publish a numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage.",
+        notes: "The current public reference specifies positive integer values but does not publish a native numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage.",
     }];
 pub const IND2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -69,7 +69,7 @@ pub const IND2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1]
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] MATLAB documents a host positive-integer vector and string-vector output. RunMat gates typed-integer and resident forms independently, validates exact indices without an f64 mirror, and always returns host strings.",
+        notes: "The public form uses a host positive-integer vector and returns a string vector. RunMat gates typed-integer and resident forms independently, reads typed indices exactly from their native class, and always returns host strings.",
     }];
 
 thread_local! {

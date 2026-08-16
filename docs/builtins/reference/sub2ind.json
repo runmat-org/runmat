@@ -37,7 +37,7 @@
     "The size vector can be a row or column vector. Each element must be a positive integer.",
     "Complex, NaN, or infinite values are rejected.",
     "The result uses the same shape as the subscript arrays. Scalars produce a scalar double.",
-    "The size vector and every subscript accept `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `int64`, and `uint64`; RunMat reads their authoritative values directly and performs checked column-major index arithmetic without an `f64` mirror.",
+    "The size vector and every subscript accept `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `int64`, and `uint64`; RunMat reads their authoritative values directly and performs checked column-major index arithmetic.",
     "The result is always double. Floating-point resident subscripts use the provider hook where available, while integer resident inputs gather exactly and return a resident double result when the owner supports upload."
   ],
   "examples": [

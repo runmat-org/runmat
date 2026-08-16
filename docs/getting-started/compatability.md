@@ -13,6 +13,8 @@ RunMat is a high-performance runtime designed for MATLAB-syntax code. It targets
 
 RunMat provides three distinct compatibility modes to balance parity with MATLAB's legacy behaviors and modern execution strictness. These are configured via the `compat` key in the [project configuration](/docs/runtime/getting-started/config).
 
+RunMat-only syntax and builtin forms are documented in [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions). That page also explains why internal optimizations such as automatic GPU residency and transparent gathering are not language extensions.
+
 
 | Mode   | Behavior                                                                                                                                |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------- |

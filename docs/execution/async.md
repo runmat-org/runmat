@@ -50,7 +50,7 @@ If a host-only builtin receives GPU values and the first implementation fails on
 
 ## RunMat Async Language Extensions (Beta)
 
-RunMat accepts `async function` and `await(...)` as RunMat extensions to the MATLAB language. MATLAB-strict compatibility mode rejects these forms before execution (see [Configuration Reference](/docs/runtime/getting-started/config) for more details on setting the compatibility mode).
+RunMat accepts `async function` and `await(...)` as RunMat extensions to the MATLAB language. MATLAB-compatible mode rejects these forms before execution. See [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions) for the extension model and how to select a compatibility mode.
 
 Calling an async function returns a future. The function body does not run when the future is created; it runs when the future is awaited.
 
@@ -68,7 +68,7 @@ y = await(f); % prompt happens here
 
 ## Spawn Handles
 
-`spawn(value)` is also a RunMat language extension to the MATLAB language. It accepts a future and returns a single-use spawn handle. It currently resolves the future before returning the handle, but this will change in a future release to return the future itself.
+`spawn(value)` is also a RunMat language extension. It accepts a future and returns a single-use spawn handle. The current implementation resolves the future before returning the handle.
 
 ```matlab
 async function y = ask()

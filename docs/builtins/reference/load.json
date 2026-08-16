@@ -38,7 +38,7 @@
     "`load(filename, 'A', 'B')` restricts the operation to the listed variable names. String scalars, char vectors, string arrays, or cell arrays of character vectors are accepted.",
     "`load(filename, '-regexp', '^foo', 'bar$')` selects variables whose names match any of the supplied regular expressions.",
     "Repeated names are deduplicated so that the last occurrence wins, mirroring MATLAB's behavior.",
-    "Unsupported data classes trigger descriptive errors. RunMat supports Level-5 double and single real/complex arrays, all eight native integer scalar and tensor classes, paired complex-integer components, logical arrays, character arrays, string arrays (stored as cell-of-char data), scalar structs, typed real sparse matrices, RunMat object envelopes, and cells whose elements are composed of the supported types. Integer class tags reconstruct authoritative native storage without a binary64 mirror.",
+    "Unsupported data classes trigger descriptive errors. RunMat supports Level-5 double and single real/complex arrays, all eight native integer scalar and tensor classes, paired complex-integer components, logical arrays, character arrays, string arrays (stored as cell-of-char data), scalar structs, typed real sparse matrices, RunMat object envelopes, and cells whose elements are composed of the supported types. Integer class tags reconstruct authoritative native storage.",
     "Little-endian, big-endian, and compressed (`miCOMPRESSED`) Level-5 MAT-files are supported. MATLAB v7.3 MAT-files are HDF5-backed and currently report an explicit unsupported-version error."
   ],
   "examples": [

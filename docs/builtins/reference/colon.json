@@ -179,5 +179,5 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/colon.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/colon.rs"
   },
-  "gpu_residency": "Resident floating inputs use the owning provider's `linspace` hook when available and otherwise upload the host-generated floating vector through that owner. Resident typed integers gather exact scalar storage, build the progression without a floating mirror, and upload it through the owning provider; resident int64 and uint64 require RunMat mode. Typed complex-integer resident buffers remain an explicit provider-contract gap tracked separately."
+  "gpu_residency": "Resident floating inputs use the owning provider's `linspace` hook when available and otherwise upload the host-generated floating vector through that owner. Resident typed integers gather exact scalar storage, build the progression, and upload it through the owning provider; resident int64 and uint64 require RunMat mode. Typed complex-integer resident buffers remain an explicit provider-contract gap tracked separately."
 }

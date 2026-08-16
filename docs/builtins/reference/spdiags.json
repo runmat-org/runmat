@@ -38,7 +38,7 @@
     "Positive diagonal offsets are padded at the top of extracted columns; negative offsets are padded at the bottom.",
     "Sparse extraction scans RunMat CSC storage directly instead of densifying the entire sparse input.",
     "RunMat sparse storage supports real double, single, logical, and mode-gated native integer CSC payloads; complex sparse diagonal construction is not yet represented.",
-    "Typed integer matrix data is a RunMat-only extension and enters the current diagonal engine only when binary64 conversion is exact. Typed offsets and dimensions remain evidence-open extensions decoded structurally without a floating mirror."
+    "Typed integer matrix data is a RunMat-only extension and enters the current diagonal engine only when binary64 conversion is exact. Typed offsets and dimensions remain evidence-open extensions decoded structurally."
   ],
   "examples": [
     {
