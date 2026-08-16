@@ -168,6 +168,36 @@ const TABLE_INPUTS_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor
     default: None,
     description: "Variables to assemble as table columns.",
 }];
+const TABLE_INPUTS_PREALLOCATE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "Size",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-element table size vector [rows variables].",
+    },
+    BuiltinParamDescriptor {
+        name: "VariableTypes",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "String array or cellstr naming each preallocated variable type.",
+    },
+    BuiltinParamDescriptor {
+        name: "VariableNames",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional names for the preallocated variables.",
+    },
+    BuiltinParamDescriptor {
+        name: "RowNames",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional names for the preallocated rows.",
+    },
+];
 const GROUPSUMMARY_TABLE_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "T",
@@ -679,11 +709,18 @@ const PARQUETINFO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatur
     inputs: &PARQUETINFO_INPUTS,
     outputs: &ANY_OUTPUT,
 }];
-const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "T = table(variables...)",
-    inputs: &TABLE_INPUTS_VALUES,
-    outputs: &ANY_OUTPUT,
-}];
+const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "T = table(variables...)",
+        inputs: &TABLE_INPUTS_VALUES,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "T = table(Size=sz, VariableTypes=varTypes, Name=Value...)",
+        inputs: &TABLE_INPUTS_PREALLOCATE,
+        outputs: &ANY_OUTPUT,
+    },
+];
 const ARRAY2TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "T = array2table(A)",

@@ -8,20 +8,66 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::trigonometry::degree_helpers::reduce_degrees;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tand";
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
+
+pub const TAND_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tand-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tand with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TandIntegerInputExtension"),
+};
+pub const TAND_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tand-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tand with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TandLogicalInputExtension"),
+};
+pub const TAND_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tand-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tand with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TandCharacterInputExtension"),
+};
+pub const TAND_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    TAND_INTEGER_INPUT_EXTENSION,
+    TAND_LOGICAL_INPUT_EXTENSION,
+    TAND_CHARACTER_INPUT_EXTENSION,
+];
+const TAND_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "RunMat admits all eight real integer classes and reduces every value exactly modulo 360 before entering the floating degree-tangent kernel.",
+}];
+pub const TAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = tand(integer_X)",
+        inputs: &TAND_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Exact integer modular reduction makes wide int64 and uint64 inputs unambiguous, preserves canonical zero/unit/pole results, and avoids a lossy binary64 angle mirror; resident input gathers through authoritative typed storage.",
+    }];
 
 const TAND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -132,9 +178,12 @@ fn tand_complex(re: f64, im: f64) -> (f64, f64) {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::tand::TAND_DESCRIPTOR),
+    extensions(TAND_EXTENSIONS),
+    integer_capabilities(TAND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::tand"
 )]
 async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
+    ensure_tand_extensions(&value)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "tand")?;
     match value {
         Value::GpuTensor(handle) => tand_gpu(handle).await,
@@ -148,18 +197,80 @@ async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+fn ensure_tand_extensions(value: &Value) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TAND_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TAND_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TAND_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 async fn tand_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    tand_tensor(tensor).map(tensor::tensor_into_value)
+    let source = handle.clone();
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let host = match gathered {
+        Value::Complex(re, im) => {
+            let (out_re, out_im) = tand_complex(re, im);
+            Ok(Value::Complex(out_re, out_im))
+        }
+        Value::ComplexTensor(tensor) => tand_complex_tensor(tensor),
+        Value::Tensor(tensor) => tand_tensor(tensor).map(tensor::tensor_into_value),
+        Value::Num(value) => Ok(Value::Num(tand_scalar(value))),
+        other => Err(tand_error_with_detail(
+            &TAND_ERROR_INVALID_INPUT,
+            format!("unsupported gathered gpuArray value {other:?}"),
+        )),
+    }?;
+    gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
 }
 
 fn tand_real(value: Value) -> BuiltinResult<Value> {
+    if let Value::Int(value) = value {
+        return Ok(Value::Num(tand_integer_scalar(&value)));
+    }
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
         .map_err(|e| tand_error_with_detail(&TAND_ERROR_INVALID_INPUT, e))?;
     tand_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_storage() {
+        let data = storage
+            .exact_values()
+            .iter()
+            .map(tand_integer_scalar)
+            .collect();
+        return Tensor::new(data, tensor.shape.clone())
+            .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err));
+    }
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        let data = tensor
+            .as_f32_slice()
+            .expect("single tensor storage")
+            .iter()
+            .map(|&value| tand_scalar(f64::from(value)) as f32)
+            .collect();
+        return Tensor::from_f32(data, tensor.shape.clone())
+            .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err));
+    }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| tand_scalar(value))
@@ -169,20 +280,51 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| tand_complex(re, im))
-        .collect::<Vec<_>>();
-    let converted = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err))?;
+    let shape = tensor.shape.clone();
+    let converted = match tensor.into_complex_storage() {
+        ComplexStorage::F32(values) => ComplexTensor::from_f32(
+            values
+                .into_iter()
+                .map(|(re, im)| {
+                    let (out_re, out_im) = tand_complex(f64::from(re), f64::from(im));
+                    (out_re as f32, out_im as f32)
+                })
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::F64(values) => ComplexTensor::new(
+            values
+                .into_iter()
+                .map(|(re, im)| tand_complex(re, im))
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::Integer(_) => Err("typed complex integer input is unsupported".into()),
+    }
+    .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err))?;
     Ok(complex_tensor_into_value(converted))
+}
+
+fn tand_integer_scalar(value: &IntValue) -> f64 {
+    let reduced = match value {
+        IntValue::I8(value) => i64::from(*value) % 360,
+        IntValue::I16(value) => i64::from(*value) % 360,
+        IntValue::I32(value) => i64::from(*value) % 360,
+        IntValue::I64(value) => *value % 360,
+        IntValue::U8(value) => i64::from(*value) % 360,
+        IntValue::U16(value) => i64::from(*value) % 360,
+        IntValue::U32(value) => i64::from(*value) % 360,
+        IntValue::U64(value) => (*value % 360) as i64,
+    };
+    tand_scalar(reduced as f64)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
 
     fn tand_builtin(value: Value) -> BuiltinResult<Value> {
@@ -262,6 +404,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tand_int_input_returns_exact() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(
             expect_num(tand_builtin(Value::Int(IntValue::I32(45))).unwrap()),
             1.0,
@@ -309,6 +452,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tand_reads_typed_integer_tensor_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![0, 45]),
             vec![1, 2],
@@ -331,6 +475,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tand_logical_array_promotes() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let result = tand_builtin(Value::LogicalArray(logical)).expect("tand");
         match result {
@@ -342,6 +487,29 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tand_gpu_fallback_preserves_single_and_source_owner() {
+        test_support::with_f32_test_provider(|provider| {
+            let input = [0.0, 45.0, 90.0];
+            let source = provider
+                .upload(&HostTensorView {
+                    data: &input,
+                    shape: &[3, 1],
+                })
+                .expect("upload");
+            let source_device = source.device_id;
+            let result =
+                block_on(super::tand_builtin(Value::GpuTensor(source))).expect("tand fallback");
+            let Value::GpuTensor(handle) = &result else {
+                panic!("expected resident result")
+            };
+            assert_eq!(handle.device_id, source_device);
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.shape, vec![3, 1]);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -130631,6 +130631,12 @@
           "mode": "RunMatOnly",
           "description": "readtimetable accepts typed-integer controls whose public datatype tables are floating-only as a RunMat extension",
           "error_identifier": "RunMat:compatibility:ReadtimetableTypedIntegerControlExtension"
+        },
+        {
+          "id": "table2timetable-numeric-row-times",
+          "mode": "RunMatOnly",
+          "description": "table2timetable with a numeric row-time vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Table2TimetableNumericRowTimesExtension"
         }
       ],
       "integer_capabilities": [
@@ -154891,6 +154897,48 @@
               "description": "Result value."
             }
           ]
+        },
+        {
+          "label": "T = table(Size=sz, VariableTypes=varTypes, Name=Value...)",
+          "inputs": [
+            {
+              "name": "Size",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element table size vector [rows variables]."
+            },
+            {
+              "name": "VariableTypes",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "String array or cellstr naming each preallocated variable type."
+            },
+            {
+              "name": "VariableNames",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional names for the preallocated variables."
+            },
+            {
+              "name": "RowNames",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional names for the preallocated rows."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
         }
       ],
       "errors": [
@@ -154923,6 +154971,70 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "table-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "table with an explicit interactive GPU variable is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TableGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = table(integer_var1, ..., integer_varN, Name=Value...)",
+          "inputs": [
+            {
+              "name": "var1,...,varN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Any table variable may use one of the eight real integer classes and retains its own class and authoritative payload."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host and automatically resident variables become host table variables without an f64 mirror; unsupported explicit GPU intent is independently gated before gather."
+        },
+        {
+          "form": "T = table(Size=integer_sz, VariableTypes=integer_type_names, Name=Value...)",
+          "inputs": [
+            {
+              "name": "sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented two-element numeric size vector is decoded exactly from native storage and its second element must match VariableTypes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "int8 through uint64 VariableTypes allocate zero-filled authoritative native columns directly; floating VariableTypes allocate native f64 or f32 columns."
         }
       ]
     },
@@ -154932,30 +155044,23 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "A = table2array(T)",
           "inputs": [
             {
-              "name": "A",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
-            },
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Name-value options or conversion arguments."
+              "description": "Input table or timetable."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "B",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Converted output value."
             }
           ]
         }
@@ -154978,18 +155083,35 @@
           "identifier": "RunMat:table:InvalidVariable",
           "when": "A table variable name or value is invalid.",
           "message": "table: invalid variable"
-        },
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.READTABLE.IO",
-          "identifier": "RunMat:readtable:IOError",
-          "when": "readtable cannot open or read the requested file.",
-          "message": "readtable: file read failed"
-        },
-        {
-          "code": "RM.READTABLE.UNSUPPORTED_FILE",
-          "identifier": "RunMat:readtable:UnsupportedFileType",
-          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
-          "message": "readtable: unsupported file type"
+          "form": "A = table2array(T_with_integer_variables)",
+          "inputs": [
+            {
+              "name": "integer variables contained in T",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer table variables retain authoritative class and payload while the host container is converted."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Same-class integer variables concatenate without conversion; mixed compatible numeric variables follow table concatenation dominance and assignment conversion without routing integer values through binary64."
         }
       ]
     },
@@ -154999,30 +155121,23 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "C = table2cell(T)",
           "inputs": [
             {
-              "name": "A",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
-            },
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Name-value options or conversion arguments."
+              "description": "Input table or timetable."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "B",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Converted output value."
             }
           ]
         }
@@ -155045,18 +155160,35 @@
           "identifier": "RunMat:table:InvalidVariable",
           "when": "A table variable name or value is invalid.",
           "message": "table: invalid variable"
-        },
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.READTABLE.IO",
-          "identifier": "RunMat:readtable:IOError",
-          "when": "readtable cannot open or read the requested file.",
-          "message": "readtable: file read failed"
-        },
-        {
-          "code": "RM.READTABLE.UNSUPPORTED_FILE",
-          "identifier": "RunMat:readtable:UnsupportedFileType",
-          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
-          "message": "readtable: unsupported file type"
+          "form": "C = table2cell(T_with_integer_variables)",
+          "inputs": [
+            {
+              "name": "integer variables contained in T",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer table variables retain authoritative class and payload while the host container is converted."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Each cell receives the exact same-class integer scalar or row slice from its source variable, including wide int64 and uint64 values."
         }
       ]
     },
@@ -155066,30 +155198,30 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "S = table2struct(T, ToScalar=tf)",
           "inputs": [
             {
-              "name": "A",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Input table or timetable."
             },
             {
-              "name": "args",
+              "name": "ToScalar",
               "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Name-value options or conversion arguments."
+              "arity": "Optional",
+              "default": "false",
+              "description": "Logical selector for scalar-struct output."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "B",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Converted output value."
             }
           ]
         }
@@ -155112,18 +155244,70 @@
           "identifier": "RunMat:table:InvalidVariable",
           "when": "A table variable name or value is invalid.",
           "message": "table: invalid variable"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "table2struct-integer-toscalar",
+          "mode": "RunMatOnly",
+          "description": "table2struct with a typed-integer ToScalar value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Table2StructIntegerToScalarExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = table2struct(T_with_integer_variables, ToScalar=tf)",
+          "inputs": [
+            {
+              "name": "integer variables contained in T",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer table variables retain authoritative class and payload while the host container is converted."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Row structs contain exact typed scalars; scalar-struct fields retain the entire original integer variable unchanged."
         },
         {
-          "code": "RM.READTABLE.IO",
-          "identifier": "RunMat:readtable:IOError",
-          "when": "readtable cannot open or read the requested file.",
-          "message": "readtable: file read failed"
-        },
-        {
-          "code": "RM.READTABLE.UNSUPPORTED_FILE",
-          "identifier": "RunMat:readtable:UnsupportedFileType",
-          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
-          "message": "readtable: unsupported file type"
+          "form": "S = table2struct(T, ToScalar=integer_tf)",
+          "inputs": [
+            {
+              "name": "ToScalar",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public selector is logical; RunMat mode additionally accepts an exact typed-integer scalar as a truth value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Compatibility mode rejects before resident provider access; RunMat mode gathers an admitted scalar control and interprets zero as false and nonzero as true."
         }
       ]
     },
@@ -155133,64 +155317,163 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "TT = table2timetable(T, Name=Value...)",
           "inputs": [
             {
-              "name": "A",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Input table."
             },
             {
-              "name": "args",
+              "name": "Name,Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options or conversion arguments."
+              "description": "RowTimes, SampleRate, TimeStep, and StartTime options."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "TT",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Output timetable."
             }
           ]
         }
       ],
-      "errors": [
+      "errors": [],
+      "extensions": [
         {
-          "code": "RM.TABLE.INVALID_ARGUMENT",
-          "identifier": "RunMat:table:InvalidArgument",
-          "when": "Arguments or table metadata are invalid.",
-          "message": "table: invalid argument"
+          "id": "table2timetable-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "table2timetable with an explicit resident GPU payload is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Table2TimetableGpuInputExtension"
         },
         {
-          "code": "RM.TABLE.INVALID_INDEX",
-          "identifier": "RunMat:table:InvalidIndex",
-          "when": "Table indexing is invalid.",
-          "message": "table: invalid index"
+          "id": "table2timetable-generated-row-times",
+          "mode": "RunMatOnly",
+          "description": "table2timetable without a time variable or timing option uses generated row times as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Table2TimetableGeneratedTimesExtension"
         },
         {
-          "code": "RM.TABLE.INVALID_VARIABLE",
-          "identifier": "RunMat:table:InvalidVariable",
-          "when": "A table variable name or value is invalid.",
-          "message": "table: invalid variable"
+          "id": "table2timetable-numeric-row-times",
+          "mode": "RunMatOnly",
+          "description": "table2timetable with a numeric row-time vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Table2TimetableNumericRowTimesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "TT = table2timetable(T_with_integer_variables, Name=Value...)",
+          "inputs": [
+            {
+              "name": "integer variables contained in T",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Non-time table variables retain their exact integer class and payload in the output timetable."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Timetable construction changes container metadata only; unrelated integer variables are cloned without a binary64 mirror."
         },
         {
-          "code": "RM.READTABLE.IO",
-          "identifier": "RunMat:readtable:IOError",
-          "when": "readtable cannot open or read the requested file.",
-          "message": "readtable: file read failed"
+          "form": "TT = table2timetable(T, RowTimes=integer_time_variable_index)",
+          "inputs": [
+            {
+              "name": "RowTimes variable index",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A positive one-based scalar index selects a datetime or duration table variable and is decoded exactly from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The selected time variable becomes row-time metadata and is removed from the data-variable list; the selector never passes through f64."
         },
         {
-          "code": "RM.READTABLE.UNSUPPORTED_FILE",
-          "identifier": "RunMat:readtable:UnsupportedFileType",
-          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
-          "message": "readtable: unsupported file type"
+          "form": "TT = table2timetable(T, SampleRate=integer_Fs, StartTime=t0)",
+          "inputs": [
+            {
+              "name": "Fs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positive numeric SampleRate scalar enters the deliberate floating seconds-to-days timing boundary after exact sign validation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Fs determines double duration/datetime row times; all table data variables retain their independent classes."
+        },
+        {
+          "form": "TT = table2timetable(T, RowTimes=integer_vector)",
+          "inputs": [
+            {
+              "name": "numeric RowTimes vector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode preserves the numeric vector as exact row-time metadata; MATLAB-compatible mode requires datetime or duration row times."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "The RunMat-only numeric row-time vector retains authoritative integer storage and must be a height-by-one column."
         }
       ]
     },
@@ -155378,6 +155661,61 @@
           "when": "Internal tensor conversion/allocation/provider flow failed.",
           "message": "tan: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "tan-integer-input",
+          "mode": "RunMatOnly",
+          "description": "tan with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TanIntegerInputExtension"
+        },
+        {
+          "id": "tan-logical-input",
+          "mode": "RunMatOnly",
+          "description": "tan with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TanLogicalInputExtension"
+        },
+        {
+          "id": "tan-character-input",
+          "mode": "RunMatOnly",
+          "description": "tan with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TanCharacterInputExtension"
+        },
+        {
+          "id": "tan-like-output",
+          "mode": "RunMatOnly",
+          "description": "tan with a like output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TanLikeOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = tan(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode checks authoritative integer storage before conversion; host output is double and resident fallback returns through the owning provider."
+        }
       ]
     },
     {
@@ -155420,6 +155758,55 @@
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "tand: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "tand-integer-input",
+          "mode": "RunMatOnly",
+          "description": "tand with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TandIntegerInputExtension"
+        },
+        {
+          "id": "tand-logical-input",
+          "mode": "RunMatOnly",
+          "description": "tand with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TandLogicalInputExtension"
+        },
+        {
+          "id": "tand-character-input",
+          "mode": "RunMatOnly",
+          "description": "tand with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TandCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = tand(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat admits all eight real integer classes and reduces every value exactly modulo 360 before entering the floating degree-tangent kernel."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Exact integer modular reduction makes wide int64 and uint64 inputs unambiguous, preserves canonical zero/unit/pole results, and avoids a lossy binary64 angle mirror; resident input gathers through authoritative typed storage."
+        }
       ]
     },
     {
@@ -155461,6 +155848,55 @@
           "identifier": "RunMat:tanh:Internal",
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "tanh: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "tanh-integer-input",
+          "mode": "RunMatOnly",
+          "description": "tanh with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TanhIntegerInputExtension"
+        },
+        {
+          "id": "tanh-logical-input",
+          "mode": "RunMatOnly",
+          "description": "tanh with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TanhLogicalInputExtension"
+        },
+        {
+          "id": "tanh-character-input",
+          "mode": "RunMatOnly",
+          "description": "tanh with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TanhCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = tanh(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes require exact binary64 representability before hyperbolic evaluation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode validates native integer storage before conversion; resident fallback returns through the owner and finite integer inputs naturally approach unit magnitude."
         }
       ]
     },

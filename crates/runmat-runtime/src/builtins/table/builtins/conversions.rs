@@ -12,6 +12,140 @@ use runmat_macros::runtime_builtin;
 
 const BUILTIN_NAME: &str = "array2table";
 
+const TABLE_CONVERSION_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Converted output value.",
+}];
+const TABLE_CONVERSION_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "T",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input table or timetable.",
+}];
+const TABLE2STRUCT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "T",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input table or timetable.",
+    },
+    BuiltinParamDescriptor {
+        name: "ToScalar",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("false"),
+        description: "Logical selector for scalar-struct output.",
+    },
+];
+const TABLE2ARRAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "A = table2array(T)",
+    inputs: &TABLE_CONVERSION_INPUT,
+    outputs: &TABLE_CONVERSION_OUTPUT,
+}];
+const TABLE2CELL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "C = table2cell(T)",
+    inputs: &TABLE_CONVERSION_INPUT,
+    outputs: &TABLE_CONVERSION_OUTPUT,
+}];
+const TABLE2STRUCT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "S = table2struct(T, ToScalar=tf)",
+    inputs: &TABLE2STRUCT_INPUTS,
+    outputs: &TABLE_CONVERSION_OUTPUT,
+}];
+pub const TABLE2ARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TABLE2ARRAY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CELL2TABLE_ERRORS,
+};
+pub const TABLE2CELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TABLE2CELL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CELL2TABLE_ERRORS,
+};
+pub const TABLE2STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TABLE2STRUCT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CELL2TABLE_ERRORS,
+};
+
+pub(crate) const TABLE2STRUCT_INTEGER_TO_SCALAR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "table2struct-integer-toscalar",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "table2struct with a typed-integer ToScalar value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Table2StructIntegerToScalarExtension"),
+    };
+pub const TABLE2STRUCT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [TABLE2STRUCT_INTEGER_TO_SCALAR_EXTENSION];
+const TABLE_VARIABLE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer variables contained in T",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer table variables retain authoritative class and payload while the host container is converted.",
+    }];
+const TABLE2STRUCT_INTEGER_TO_SCALAR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ToScalar",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public selector is logical; RunMat mode additionally accepts an exact typed-integer scalar as a truth value.",
+    }];
+pub const TABLE2ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "A = table2array(T_with_integer_variables)",
+        inputs: &TABLE_VARIABLE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Same-class integer variables concatenate without conversion; mixed compatible numeric variables follow table concatenation dominance and assignment conversion without routing integer values through binary64.",
+    }];
+pub const TABLE2CELL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = table2cell(T_with_integer_variables)",
+        inputs: &TABLE_VARIABLE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Each cell receives the exact same-class integer scalar or row slice from its source variable, including wide int64 and uint64 values.",
+    }];
+pub const TABLE2STRUCT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = table2struct(T_with_integer_variables, ToScalar=tf)",
+        inputs: &TABLE_VARIABLE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Row structs contain exact typed scalars; scalar-struct fields retain the entire original integer variable unchanged.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = table2struct(T, ToScalar=integer_tf)",
+        inputs: &TABLE2STRUCT_INTEGER_TO_SCALAR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Compatibility mode rejects before resident provider access; RunMat mode gathers an admitted scalar control and interprets zero as false and nonzero as true.",
+    },
+];
+
 const STRUCT2TABLE_INTEGER_FIELDS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "struct field values",
@@ -418,10 +552,24 @@ pub(crate) async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> Buil
     summary = "Convert a table into row structs or a scalar struct of variables.",
     keywords = "table2struct,table,struct,ToScalar",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    descriptor(crate::builtins::table::builtins::conversions::TABLE2STRUCT_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::conversions::TABLE2STRUCT_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::conversions::TABLE2STRUCT_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if rest.chunks_exact(2).any(|pair| {
+        scalar_text(&pair[0], "table2struct option")
+            .is_ok_and(|name| name.eq_ignore_ascii_case("ToScalar"))
+            && crate::builtins::common::validation::value_has_native_integer_class(&pair[1])
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TABLE2STRUCT_INTEGER_TO_SCALAR_EXTENSION,
+            "table2struct",
+        )?;
+    }
     let host = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;
@@ -456,7 +604,10 @@ pub(crate) async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> Buil
     summary = "Convert table variables into a homogeneous array when possible.",
     keywords = "table2array,table,array",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    descriptor(crate::builtins::table::builtins::conversions::TABLE2ARRAY_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::table::builtins::conversions::TABLE2ARRAY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
@@ -473,7 +624,10 @@ pub(crate) async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Convert table variables into a cell array.",
     keywords = "table2cell,table,cell",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    descriptor(crate::builtins::table::builtins::conversions::TABLE2CELL_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::table::builtins::conversions::TABLE2CELL_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table2cell_builtin(value: Value) -> BuiltinResult<Value> {

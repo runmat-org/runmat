@@ -8,8 +8,8 @@
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
   "description": "`table2struct(T)` converts each table row into a struct with fields matching table variable names. `table2struct(T, \"ToScalar\", true)` returns one scalar struct whose fields contain whole table variables.",
-  "behaviors": ["Variable order is preserved.", "The default conversion returns one row struct per table row.", "`\"ToScalar\"` controls whether table variables are kept whole in one scalar struct."],
+  "behaviors": ["Variable order is preserved.", "The default conversion returns one row struct per table row; integer fields retain their exact scalar class and value.", "`\"ToScalar\"` keeps every complete table variable in one scalar struct without converting integer storage.", "The documented logical `ToScalar` selector works in MATLAB-compatible mode. Typed-integer selector values are available only when RunMat extensions are enabled."],
   "examples": [{"description": "Convert rows to structs", "input": "S = table2struct(T)", "output": "S = struct array with table variable fields"}, {"description": "Convert variables to one scalar struct", "input": "S = table2struct(T, 'ToScalar', true)", "output": "S = scalar struct with table variable fields"}],
   "links": [{"label": "struct2table", "url": "./struct2table"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/conversions.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/conversions.rs"}
 }

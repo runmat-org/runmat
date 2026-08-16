@@ -2,9 +2,13 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +25,55 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::SymbolicFunction;
 
 const BUILTIN_NAME: &str = "tan";
+
+pub const TAN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tan with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanIntegerInputExtension"),
+};
+pub const TAN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tan with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanLogicalInputExtension"),
+};
+pub const TAN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tan with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanCharacterInputExtension"),
+};
+pub const TAN_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-like-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tan with a like output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanLikeOutputExtension"),
+};
+pub const TAN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    TAN_INTEGER_INPUT_EXTENSION,
+    TAN_LOGICAL_INPUT_EXTENSION,
+    TAN_CHARACTER_INPUT_EXTENSION,
+    TAN_LIKE_OUTPUT_EXTENSION,
+];
+const TAN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary.",
+}];
+pub const TAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = tan(integer_X)",
+        inputs: &TAN_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat mode checks authoritative integer storage before conversion; host output is double and resident fallback returns through the owning provider.",
+    }];
 
 const TAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -195,10 +248,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::tan::TAN_DESCRIPTOR),
+    extensions(TAN_EXTENSIONS),
+    integer_capabilities(TAN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::tan"
 )]
 async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
+    ensure_tan_extensions(&value, &rest).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "tan")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Tan) {
         return apply_output_template(symbolic, &template).await;
@@ -222,16 +278,52 @@ async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     apply_output_template(base, &template).await
 }
 
+async fn ensure_tan_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &TAN_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TAN_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TAN_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if !rest.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TAN_LIKE_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 async fn tan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_tan(&handle).await {
-            return Ok(Value::GpuTensor(out));
+    let exact_fallback = runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle);
+    if !exact_fallback {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+            if let Ok(out) = provider.unary_tan(&handle).await {
+                return Ok(Value::GpuTensor(out));
+            }
         }
     }
+    let source = handle.clone();
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    match gathered {
+    let host = match gathered {
         Value::Complex(re, im) => {
             let (out_re, out_im) = tan_complex_components(re, im);
             Ok(Value::Complex(out_re, out_im))
@@ -243,7 +335,8 @@ async fn tan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             &TAN_ERROR_INVALID_INPUT,
             format!("unsupported gathered gpuArray value {other:?}"),
         )),
-    }
+    }?;
+    gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
 }
 
 fn tan_real(value: Value) -> BuiltinResult<Value> {
@@ -253,6 +346,16 @@ fn tan_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn tan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        let data = tensor
+            .as_f32_slice()
+            .expect("single tensor storage")
+            .iter()
+            .map(|&v| v.tan())
+            .collect();
+        return Tensor::from_f32(data, tensor.shape.clone())
+            .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e));
+    }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&v| v.tan())
@@ -262,13 +365,28 @@ fn tan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn tan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mapped = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| tan_complex_components(re, im))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
+    let shape = ct.shape.clone();
+    let tensor = match ct.into_complex_storage() {
+        ComplexStorage::F32(values) => ComplexTensor::from_f32(
+            values
+                .into_iter()
+                .map(|(re, im)| {
+                    let (out_re, out_im) = tan_complex_components(f64::from(re), f64::from(im));
+                    (out_re as f32, out_im as f32)
+                })
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::F64(values) => ComplexTensor::new(
+            values
+                .into_iter()
+                .map(|(re, im)| tan_complex_components(re, im))
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::Integer(_) => Err("typed complex integer input is unsupported".into()),
+    }
+    .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -591,6 +709,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_reads_typed_integer_tensor_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
             vec![3, 1],
@@ -642,6 +761,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_int_promotes() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = tan_builtin(Value::Int(IntValue::I32(1)), Vec::new()).expect("tan");
         match result {
             Value::Num(v) => assert!((v - 1f64.tan()).abs() < 1e-12),
@@ -680,6 +800,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_char_array_roundtrip() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
         let result = tan_builtin(Value::CharArray(chars), Vec::new()).expect("tan");
         match result {
@@ -715,6 +836,29 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn tan_gpu_fallback_preserves_single_and_source_owner() {
+        test_support::with_f32_test_provider(|provider| {
+            let input = [0.0, 0.5, 1.0];
+            let source = provider
+                .upload(&HostTensorView {
+                    data: &input,
+                    shape: &[3, 1],
+                })
+                .expect("upload");
+            let source_device = source.device_id;
+            let result = block_on(super::tan_builtin(Value::GpuTensor(source), Vec::new()))
+                .expect("tan fallback");
+            let Value::GpuTensor(handle) = &result else {
+                panic!("expected resident result")
+            };
+            assert_eq!(handle.device_id, source_device);
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.shape, vec![3, 1]);
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_missing_prototype_errors() {
@@ -728,6 +872,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_complex_prototype_returns_complex() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = tan_builtin(
             Value::Num(1.0),
             vec![Value::from("like"), Value::Complex(0.0, 1.0)],
@@ -787,6 +932,7 @@ pub(crate) mod tests {
 
     #[test]
     fn tan_like_complex_gpu_prototype_uploads_complex_result() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![0.0, 0.5], vec![2, 1]).unwrap();
             let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
@@ -819,6 +965,7 @@ pub(crate) mod tests {
 
     #[test]
     fn tan_like_complex_gpu_prototype_converts_resident_real_gpu_result() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![0.0, 0.5], vec![2, 1]).unwrap();
             let input_view = HostTensorView {
@@ -857,6 +1004,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_gpu_prototype() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.3, 0.6], vec![3, 1]).unwrap();
             let proto_view = HostTensorView {
@@ -885,6 +1033,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_host_with_gpu_input_gathers() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.5], vec![2, 1]).unwrap();
             let view = HostTensorView {
@@ -925,6 +1074,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_keyword_case_insensitive() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![0.0, 0.1], vec![2, 1]).unwrap();
         let result = tan_builtin(
             Value::Tensor(tensor.clone()),
@@ -945,6 +1095,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_char_array_keyword() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let keyword = CharArray::new_row("like");
         let result = tan_builtin(
             Value::Num(0.0),
@@ -960,6 +1111,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_like_string_array_keyword() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let keyword = StringArray::new(vec!["LIKE".to_string()], vec![1]).unwrap();
         let result = tan_builtin(
             Value::Num(0.0),

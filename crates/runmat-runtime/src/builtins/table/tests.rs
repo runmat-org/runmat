@@ -2663,6 +2663,7 @@ fn explicit_variable_names_reject_duplicates_and_accept_current_identifiers() {
 
 #[test]
 fn timetable_conversion_predicates_and_head_work() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let values = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
     let times = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
     let timetable = block_on(timetable_builtin(vec![
@@ -4139,6 +4140,7 @@ fn writetable_and_readcell_cover_delimited_interop() {
 
 #[test]
 fn timetable_rowtimes_option_keeps_all_variables_and_table2timetable_does_not_drop_data() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let a = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap());
     let b = Value::Tensor(Tensor::new(vec![30.0, 40.0], vec![2, 1]).unwrap());
     let times = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());

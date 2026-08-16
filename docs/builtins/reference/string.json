@@ -64,7 +64,7 @@
       "output": "S = 1×3 string\n    \"true\"    \"17\"    \"runmat\""
     },
     {
-      "description": "Formatting numbers with a template",
+      "description": "Formatting Numeric Values",
       "input": "labels = string(\"Trial %d\", 1:4)",
       "output": "labels = 1×4 string\n    \"Trial 1\"    \"Trial 2\"    \"Trial 3\"    \"Trial 4\""
     },

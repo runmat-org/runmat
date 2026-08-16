@@ -1,0 +1,16 @@
+{
+  "title": "table",
+  "category": "table",
+  "keywords": ["table", "VariableNames", "RowNames", "Size", "VariableTypes"],
+  "summary": "Create a table from column variables or preallocate numeric table variables.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Tables are host containers. Automatically resident variables may gather transparently; explicit GPU variables require RunMat extension mode."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests", "integration": "integer_table_and_tangent_semantics"},
+  "description": "`table(var1, ..., varN)` stores arrays with the same row count as named table variables. `table(Size=sz, VariableTypes=types)` preallocates numeric variables from a two-element size vector.",
+  "behaviors": ["Each input variable keeps its own class, shape after the row dimension, and authoritative payload; integer variables are not mirrored through double.", "Preallocation currently supports `double`, `single`, and all eight built-in integer variable types. Integer columns are initialized directly in native storage with same-class zeros.", "`Size` accepts floating or any built-in integer class, must contain exactly two nonnegative integer values, and must request the same number of variables listed by `VariableTypes`.", "`VariableNames` and `RowNames` can label the variables and rows. Names must satisfy the table naming and uniqueness rules.", "Other documented preallocation types, including logical, string, categorical, datetime, duration, and calendar duration, remain implementation gaps."],
+  "examples": [{"description": "Creating A Table From Existing Variables", "input": "age = int16([31; 42]);\nscore = single([0.8; 0.9]);\nT = table(age, score, VariableNames=[\"Age\" \"Score\"])", "output": "T = 2x2 table"}, {"description": "Preallocating Integer Variables", "input": "T = table(Size=uint16([3 2]), VariableTypes=[\"int32\" \"uint64\"], VariableNames=[\"Count\" \"Identifier\"])", "output": "T = 3x2 table with zero-filled int32 and uint64 variables"}],
+  "faqs": [{"question": "Do integer variables lose precision when stored in a table?", "answer": "No. Each integer variable retains its exact signedness, width, shape, and values, including int64 and uint64 values above `flintmax`."}, {"question": "Can a table contain variables of different types?", "answer": "Yes. Variables can use different supported classes and widths as long as they have the same number of rows."}],
+  "links": [{"label": "array2table", "url": "./array2table"}, {"label": "table2array", "url": "./table2array"}, {"label": "table2cell", "url": "./table2cell"}, {"label": "table2struct", "url": "./table2struct"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/constructors.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/constructors.rs"}
+}

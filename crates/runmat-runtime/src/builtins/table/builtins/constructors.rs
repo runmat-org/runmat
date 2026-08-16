@@ -10,6 +10,53 @@ use runmat_macros::runtime_builtin;
 
 const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
 
+pub(crate) const TABLE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "table-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "table with an explicit interactive GPU variable is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TableGpuInputExtension"),
+    };
+pub const TABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TABLE_GPU_INPUT_EXTENSION];
+const TABLE_INTEGER_VARIABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "var1,...,varN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Any table variable may use one of the eight real integer classes and retains its own class and authoritative payload.",
+    }];
+const TABLE_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented two-element numeric size vector is decoded exactly from native storage and its second element must match VariableTypes.",
+    }];
+pub const TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = table(integer_var1, ..., integer_varN, Name=Value...)",
+        inputs: &TABLE_INTEGER_VARIABLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host and automatically resident variables become host table variables without an f64 mirror; unsupported explicit GPU intent is independently gated before gather.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = table(Size=integer_sz, VariableTypes=integer_type_names, Name=Value...)",
+        inputs: &TABLE_INTEGER_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "int8 through uint64 VariableTypes allocate zero-filled authoritative native columns directly; floating VariableTypes allocate native f64 or f32 columns.",
+    },
+];
+
 pub const ROWFILTER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
         kind: BuiltinIntegerAuditKind::NotApplicable,
@@ -351,18 +398,131 @@ pub const DICTIONARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::table::TABLE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::TABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::TABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TABLE_GPU_INPUT_EXTENSION,
+            "table",
+        )?;
+    }
     let gathered = gather_values(&args).await?;
     let (variables, options) = split_table_constructor_args(gathered)?;
+    if options.size.is_some() || options.variable_types.is_some() {
+        return preallocated_table(variables, options);
+    }
     let names = if let Some(names) = options.variable_names {
         names
     } else {
         generated_variable_names(variables.len())
     };
     table_from_columns_with_properties(names, variables, options.row_names)
+}
+
+fn preallocated_table(
+    variables: Vec<Value>,
+    options: TableConstructorOptions,
+) -> BuiltinResult<Value> {
+    if !variables.is_empty() {
+        return Err(invalid_argument(
+            "table: Size/VariableTypes preallocation cannot be combined with data variables",
+        ));
+    }
+    let size = options
+        .size
+        .as_ref()
+        .ok_or_else(|| invalid_argument("table: preallocation requires Size"))?;
+    let variable_types = options
+        .variable_types
+        .as_ref()
+        .ok_or_else(|| invalid_argument("table: preallocation requires VariableTypes"))?;
+    let [rows, width] = table_preallocation_size(size)?;
+    if variable_types.len() != width {
+        return Err(invalid_argument(format!(
+            "table: VariableTypes has {} entries but Size requests {width} variables",
+            variable_types.len()
+        )));
+    }
+    let mut columns = Vec::with_capacity(width);
+    for type_name in variable_types {
+        let dtype = table_preallocation_numeric_dtype(type_name).ok_or_else(|| {
+            invalid_argument(format!(
+                "table: preallocation type '{type_name}' is not yet supported; use double, single, or a built-in integer type"
+            ))
+        })?;
+        columns.push(Value::Tensor(
+            crate::builtins::common::tensor::zeros_with_dtype(&[rows, 1], dtype)
+                .map_err(invalid_variable)?,
+        ));
+    }
+    let names = options
+        .variable_names
+        .unwrap_or_else(|| generated_variable_names(width));
+    table_from_columns_with_properties(names, columns, options.row_names)
+}
+
+fn table_preallocation_size(value: &Value) -> BuiltinResult<[usize; 2]> {
+    let Value::Tensor(tensor) = value else {
+        return Err(invalid_argument(
+            "table: Size must be a two-element numeric vector",
+        ));
+    };
+    if tensor.len() != 2 || (tensor.rows() != 1 && tensor.cols() != 1) {
+        return Err(invalid_argument(
+            "table: Size must be a two-element numeric vector",
+        ));
+    }
+    let mut size = [0usize; 2];
+    for (index, output) in size.iter_mut().enumerate() {
+        let scalar = tensor
+            .numeric_value_at(index)
+            .ok_or_else(|| invalid_argument("table: Size contains a missing value"))?;
+        *output = match scalar {
+            runmat_builtins::NumericScalar::F64(value) => table_size_float(value)?,
+            runmat_builtins::NumericScalar::F32(value) => table_size_float(f64::from(value))?,
+            integer => integer
+                .into_int_value()
+                .and_then(|value| value.try_to_usize())
+                .ok_or_else(|| {
+                    invalid_argument("table: Size values must be nonnegative platform integers")
+                })?,
+        };
+    }
+    Ok(size)
+}
+
+fn table_size_float(value: f64) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= usize::MAX as f64 {
+        return Err(invalid_argument(
+            "table: Size values must be nonnegative platform integers",
+        ));
+    }
+    Ok(value as usize)
+}
+
+fn table_preallocation_numeric_dtype(type_name: &str) -> Option<NumericDType> {
+    match type_name.trim().to_ascii_lowercase().as_str() {
+        "double" => Some(NumericDType::F64),
+        "single" => Some(NumericDType::F32),
+        "int8" => Some(NumericDType::I8),
+        "int16" => Some(NumericDType::I16),
+        "int32" => Some(NumericDType::I32),
+        "int64" => Some(NumericDType::I64),
+        "uint8" => Some(NumericDType::U8),
+        "uint16" => Some(NumericDType::U16),
+        "uint32" => Some(NumericDType::U32),
+        "uint64" => Some(NumericDType::U64),
+        _ => None,
+    }
 }
 
 #[runtime_builtin(

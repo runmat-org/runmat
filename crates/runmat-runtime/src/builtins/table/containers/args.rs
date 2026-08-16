@@ -18,6 +18,8 @@ pub(in crate::builtins::table) async fn gather_values(
 pub(in crate::builtins::table) struct TableConstructorOptions {
     pub(in crate::builtins::table) variable_names: Option<Vec<String>>,
     pub(in crate::builtins::table) row_names: Option<Vec<String>>,
+    pub(in crate::builtins::table) size: Option<Value>,
+    pub(in crate::builtins::table) variable_types: Option<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -46,6 +48,10 @@ pub(in crate::builtins::table) fn split_table_constructor_args(
                     options.variable_names = Some(variable_name_list(value)?);
                 } else if name.eq_ignore_ascii_case("RowNames") {
                     options.row_names = Some(string_list(value)?);
+                } else if name.eq_ignore_ascii_case("Size") {
+                    options.size = Some(value.clone());
+                } else if name.eq_ignore_ascii_case("VariableTypes") {
+                    options.variable_types = Some(string_list(value)?);
                 }
                 idx += 2;
                 continue;
@@ -58,7 +64,10 @@ pub(in crate::builtins::table) fn split_table_constructor_args(
 }
 
 pub(in crate::builtins::table) fn is_table_constructor_option(name: &str) -> bool {
-    name.eq_ignore_ascii_case("VariableNames") || name.eq_ignore_ascii_case("RowNames")
+    name.eq_ignore_ascii_case("VariableNames")
+        || name.eq_ignore_ascii_case("RowNames")
+        || name.eq_ignore_ascii_case("Size")
+        || name.eq_ignore_ascii_case("VariableTypes")
 }
 
 pub(in crate::builtins::table) fn parse_table_options(
