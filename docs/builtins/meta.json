@@ -155975,6 +155975,82 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "tcdf-integer-x",
+          "mode": "RunMatOnly",
+          "description": "tcdf with typed-integer evaluation points is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcdfIntegerXExtension"
+        },
+        {
+          "id": "tcdf-integer-degrees-of-freedom",
+          "mode": "RunMatOnly",
+          "description": "tcdf with typed-integer degrees of freedom is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcdfIntegerDegreesOfFreedomExtension"
+        },
+        {
+          "id": "tcdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "tcdf with logical numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = tcdf(integer_x, nu [, \"upper\"])",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public tcdf inputs are single or double. Typed-integer evaluation points are independently gated and must cross the binary64 CDF boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "RunMat-only integer x is checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider when possible."
+        },
+        {
+          "form": "p = tcdf(x, integer_nu [, \"upper\"])",
+          "inputs": [
+            {
+              "name": "nu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public tcdf degrees of freedom are single or double. Typed-integer values are independently gated and must cross the binary64 CDF boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "RunMat-only integer nu is checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider when possible."
+        }
       ]
     },
     {
@@ -156077,6 +156153,159 @@
           "when": "Internal stream setup or metadata query fails.",
           "message": "tcpclient: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "tcpclient-integer-port",
+          "mode": "RunMatOnly",
+          "description": "tcpclient with a typed-integer port is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpclientIntegerPortExtension"
+        },
+        {
+          "id": "tcpclient-integer-timeout",
+          "mode": "RunMatOnly",
+          "description": "tcpclient with a typed-integer Timeout is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpclientIntegerTimeoutExtension"
+        },
+        {
+          "id": "tcpclient-integer-connect-timeout",
+          "mode": "RunMatOnly",
+          "description": "tcpclient with a typed-integer ConnectTimeout is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpclientIntegerConnectTimeoutExtension"
+        },
+        {
+          "id": "tcpclient-zero-port",
+          "mode": "RunMatOnly",
+          "description": "tcpclient port zero is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpclientZeroPortExtension"
+        },
+        {
+          "id": "tcpclient-legacy-constructor-options",
+          "mode": "RunMatOnly",
+          "description": "tcpclient legacy constructor options are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpclientLegacyOptionsExtension"
+        },
+        {
+          "id": "tcpclient-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "tcpclient with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpclientExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "client = tcpclient(address, integer_port, ...)",
+          "inputs": [
+            {
+              "name": "port",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public Port datatype is double. RunMat mode additionally decodes all eight typed integer classes directly into the validated 1..65535 structural range."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The port is range-checked from authoritative integer storage before any socket connection. Public object properties remain double-valued."
+        },
+        {
+          "form": "client = tcpclient(..., Timeout=integer_timeout, ConnectTimeout=integer_connect_timeout)",
+          "inputs": [
+            {
+              "name": "Timeout",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public Timeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode."
+            },
+            {
+              "name": "ConnectTimeout",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public ConnectTimeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Each typed timeout is independently gated and must be exactly representable as binary64 before host networking observes it."
+        },
+        {
+          "form": "client = tcpclient(..., InputBufferSize=integer_n, OutputBufferSize=integer_n)",
+          "inputs": [
+            {
+              "name": "InputBufferSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "InputBufferSize is part of RunMat's gated legacy constructor-option surface and is decoded exactly into a bounded host size."
+            },
+            {
+              "name": "OutputBufferSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "OutputBufferSize is part of RunMat's gated legacy constructor-option surface and is decoded exactly into a bounded host size."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Legacy buffer controls are gated before provider access and decoded exactly without a floating round trip."
+        }
       ]
     },
     {
@@ -156178,6 +156407,94 @@
           "identifier": "RunMat:tcpserver:InternalError",
           "when": "Internal listener metadata retrieval fails.",
           "message": "tcpserver: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "tcpserver-integer-port",
+          "mode": "RunMatOnly",
+          "description": "tcpserver with a typed-integer port is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpserverIntegerPortExtension"
+        },
+        {
+          "id": "tcpserver-integer-timeout",
+          "mode": "RunMatOnly",
+          "description": "tcpserver with a typed-integer Timeout is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpserverIntegerTimeoutExtension"
+        },
+        {
+          "id": "tcpserver-zero-port",
+          "mode": "RunMatOnly",
+          "description": "tcpserver ephemeral port selection with port zero is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpserverZeroPortExtension"
+        },
+        {
+          "id": "tcpserver-legacy-constructor-options",
+          "mode": "RunMatOnly",
+          "description": "tcpserver legacy constructor options are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpserverLegacyOptionsExtension"
+        },
+        {
+          "id": "tcpserver-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "tcpserver with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TcpserverExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "server = tcpserver(address, integer_port, ...)",
+          "inputs": [
+            {
+              "name": "port",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public ServerPort datatype is double. RunMat mode additionally decodes all eight typed integer classes directly into the validated 1..65535 structural range."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The port is range-checked from authoritative integer storage before socket binding. Public object properties remain double-valued."
+        },
+        {
+          "form": "server = tcpserver(..., Timeout=integer_timeout)",
+          "inputs": [
+            {
+              "name": "Timeout",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public Timeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Typed Timeout is gated before provider access and must be exactly representable as binary64 before host networking observes it."
         }
       ]
     },
@@ -156347,6 +156664,34 @@
               "description": "Logical observation mask for one or more test sets."
             }
           ]
+        },
+        {
+          "label": "mask = test(c, \"all\")",
+          "inputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "cvpartition object."
+            },
+            {
+              "name": "i",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based test-set index, vector of indices, or 'all'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mask",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical observation mask for one or more test sets."
+            }
+          ]
         }
       ],
       "errors": [
@@ -156361,6 +156706,49 @@
           "identifier": "RunMat:cvpartition:Internal",
           "when": "RunMat cannot allocate or construct a partition output.",
           "message": "cvpartition: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cvpartition-test-integer-index",
+          "mode": "RunMatOnly",
+          "description": "test with typed-integer repetition indices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionTestIntegerIndexExtension"
+        },
+        {
+          "id": "cvpartition-test-logical-index",
+          "mode": "RunMatOnly",
+          "description": "test with logical repetition indices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionTestLogicalIndexExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "idx = test(c, integer_i)",
+          "inputs": [
+            {
+              "name": "i",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public repetition indices are single or double. RunMat mode additionally decodes all eight integer classes exactly as one-based structural indices."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed repetition indices are gated before provider access, decoded without binary64 conversion, and select logical output columns."
         }
       ]
     },
@@ -156641,6 +157029,108 @@
           "identifier": "RunMat:text:Internal",
           "when": "Internal plotting state update fails while creating annotation.",
           "message": "text: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "text-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "text with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TextIntegerAxesHandleExtension"
+        },
+        {
+          "id": "text-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "text with explicit gpuArray coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TextExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = text(integer_x, integer_y [, integer_z], label, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The public Position property explicitly accepts all eight integer classes; native coordinate identity is retained before the renderer boundary."
+            },
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer y coordinates are documented graphics data and cross to f32 only in the derived render cache."
+            },
+            {
+              "name": "z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer z coordinates are documented graphics data and cross to f32 only in the derived render cache."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Documented native coordinates remain the semantic source while the plotting backend receives an explicitly derived f32 position."
+        },
+        {
+          "form": "h = text(integer_ax, x, y [, z], label, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The axes-alias extension gate runs before target selection or graphics mutation."
         }
       ]
     },
@@ -156970,6 +157460,108 @@
           "when": "Internal plotting state update fails while creating or mutating TextScatter.",
           "message": "textscatter: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "textscatter-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "textscatter with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TextScatterIntegerAxesHandleExtension"
+        },
+        {
+          "id": "textscatter-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "textscatter with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TextScatterExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ts = textscatter(integer_coordinates, labels, ...)",
+          "inputs": [
+            {
+              "name": "XData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented coordinate data and remain authoritative outside the derived render cache."
+            },
+            {
+              "name": "YData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented coordinate data and remain authoritative outside the derived render cache."
+            },
+            {
+              "name": "ZData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "ZData applies to textscatter3 and retains its native integer class and exact values."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Documented coordinate properties retain native source storage; only annotation and marker geometry enter the floating renderer domain."
+        },
+        {
+          "form": "ts = textscatter(integer_ax, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The axes-alias extension gate runs before target selection or graphics mutation."
+        }
       ]
     },
     {
@@ -157102,6 +157694,108 @@
           "identifier": "RunMat:textscatter:Internal",
           "when": "Internal plotting state update fails while creating or mutating TextScatter.",
           "message": "textscatter: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "textscatter3-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "textscatter3 with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TextScatter3IntegerAxesHandleExtension"
+        },
+        {
+          "id": "textscatter3-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "textscatter3 with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TextScatter3ExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ts = textscatter(integer_coordinates, labels, ...)",
+          "inputs": [
+            {
+              "name": "XData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented coordinate data and remain authoritative outside the derived render cache."
+            },
+            {
+              "name": "YData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented coordinate data and remain authoritative outside the derived render cache."
+            },
+            {
+              "name": "ZData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "ZData applies to textscatter3 and retains its native integer class and exact values."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Documented coordinate properties retain native source storage; only annotation and marker geometry enter the floating renderer domain."
+        },
+        {
+          "form": "ts = textscatter(integer_ax, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The axes-alias extension gate runs before target selection or graphics mutation."
         }
       ]
     },
@@ -157349,6 +158043,116 @@
           "identifier": "RunMat:tf:Internal",
           "when": "Internal tensor/object construction failed.",
           "message": "tf: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "tf-integer-coefficients",
+          "mode": "RunMatOnly",
+          "description": "tf with typed-integer coefficients is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TfIntegerCoefficientsExtension"
+        },
+        {
+          "id": "tf-logical-coefficients",
+          "mode": "RunMatOnly",
+          "description": "tf with logical coefficients is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TfLogicalCoefficientsExtension"
+        },
+        {
+          "id": "tf-integer-sample-time",
+          "mode": "RunMatOnly",
+          "description": "tf with a typed-integer sample time is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TfIntegerSampleTimeExtension"
+        },
+        {
+          "id": "tf-variable-shorthand-alias",
+          "mode": "RunMatOnly",
+          "description": "tf variable shorthand other than documented s and z forms is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TfVariableShorthandExtension"
+        },
+        {
+          "id": "tf-default-discrete-sample-time",
+          "mode": "RunMatOnly",
+          "description": "tf discrete-variable shorthand without an explicit sample time is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TfDefaultDiscreteSampleTimeExtension"
+        },
+        {
+          "id": "tf-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "tf with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TfExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "sys = tf(integer_numerator, integer_denominator, ...)",
+          "inputs": [
+            {
+              "name": "numerator",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public page describes numeric real or complex coefficient arrays without enumerating typed integer classes. RunMat mode admits them only at a checked binary64 model boundary."
+            },
+            {
+              "name": "denominator",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed denominator coefficients are independently read from authoritative storage and must be exactly representable in the model's double coefficient domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each integer coefficient role is gated before provider access, checked for exact binary64 conversion, and stored as host double or complex-double model metadata."
+        },
+        {
+          "form": "sys = tf(..., integer_Ts)",
+          "inputs": [
+            {
+              "name": "Ts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed sample time is gated independently and crosses one exact binary64 metadata boundary; documented double values include positive periods and -1 for unspecified discrete time."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Typed Ts is checked before conversion and does not determine coefficient or object class."
         }
       ]
     },
@@ -158840,6 +159644,34 @@
               "description": "Logical observation mask for one or more test sets."
             }
           ]
+        },
+        {
+          "label": "mask = training(c, \"all\")",
+          "inputs": [
+            {
+              "name": "c",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "cvpartition object."
+            },
+            {
+              "name": "i",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "One-based test-set index, vector of indices, or 'all'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mask",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical observation mask for one or more test sets."
+            }
+          ]
         }
       ],
       "errors": [
@@ -158854,6 +159686,49 @@
           "identifier": "RunMat:cvpartition:Internal",
           "when": "RunMat cannot allocate or construct a partition output.",
           "message": "cvpartition: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cvpartition-training-integer-index",
+          "mode": "RunMatOnly",
+          "description": "training with typed-integer repetition indices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionTrainingIntegerIndexExtension"
+        },
+        {
+          "id": "cvpartition-training-logical-index",
+          "mode": "RunMatOnly",
+          "description": "training with logical repetition indices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionTrainingLogicalIndexExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "idx = training(c, integer_i)",
+          "inputs": [
+            {
+              "name": "i",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Public repetition indices are single or double. RunMat mode additionally decodes all eight integer classes exactly as one-based structural indices."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The adjacent training method shares test's exact typed-index policy and returns logical mask columns."
         }
       ]
     },

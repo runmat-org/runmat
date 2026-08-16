@@ -281,6 +281,31 @@ impl Scatter3Plot {
         })
     }
 
+    /// Replace point coordinates while retaining their native source class and values.
+    pub fn update_numeric_data(
+        &mut self,
+        x: NumericPlotData,
+        y: NumericPlotData,
+        z: NumericPlotData,
+    ) -> Result<(), String> {
+        if x.len() != y.len() || x.len() != z.len() {
+            return Err("scatter3 source lengths must match".to_string());
+        }
+        self.points = x
+            .materialize_f64()
+            .into_iter()
+            .zip(y.materialize_f64())
+            .zip(z.materialize_f64())
+            .map(|((x, y), z)| Vec3::new(x as f32, y as f32, z as f32))
+            .collect();
+        self.source_x = Some(x);
+        self.source_y = Some(y);
+        self.source_z = Some(z);
+        self.invalidate_gpu_vertices();
+        self.clear_gpu_source_inputs();
+        Ok(())
+    }
+
     /// Build a scatter plot directly from a GPU vertex buffer, bypassing CPU copies.
     pub fn from_gpu_buffer(
         buffer: GpuVertexBuffer,

@@ -45,6 +45,12 @@ pub fn numeric_plot_data(tensor: Tensor) -> BuiltinResult<NumericPlotData> {
     NumericPlotData::new(storage, shape).map_err(|err| plotting_error("plotting", err))
 }
 
+pub fn numeric_plot_data_value(data: &NumericPlotData, name: &'static str) -> BuiltinResult<Value> {
+    Tensor::from_numeric_storage(data.storage().clone(), data.shape().to_vec())
+        .map(Value::Tensor)
+        .map_err(|err| plotting_error(name, err))
+}
+
 pub fn numeric_plot_data_pair(
     x: Tensor,
     y: Tensor,

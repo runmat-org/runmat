@@ -812,7 +812,6 @@ struct TArgs {
     x: Vec<f64>,
     nu: Vec<f64>,
     shape: Vec<usize>,
-    upper: bool,
 }
 
 struct ThreeArgs {
@@ -875,24 +874,7 @@ fn broadcast_tensor_to(
     Ok(out)
 }
 
-async fn t_args(
-    name: &str,
-    first: Value,
-    rest: Vec<Value>,
-    allow_upper: bool,
-) -> BuiltinResult<TArgs> {
-    let mut rest = rest;
-    let mut upper = false;
-    if allow_upper {
-        if let Some(last) = rest.last() {
-            if let Some(keyword) = crate::builtins::common::random_args::keyword_of(last) {
-                if keyword.eq_ignore_ascii_case("upper") {
-                    upper = true;
-                    rest.pop();
-                }
-            }
-        }
-    }
+async fn t_args(name: &str, first: Value, rest: Vec<Value>) -> BuiltinResult<TArgs> {
     if rest.len() != 1 {
         return Err(normal_error(
             name,
@@ -902,12 +884,7 @@ async fn t_args(
     let x = value_to_tensor(name, first).await?;
     let nu = value_to_tensor(name, rest[0].clone()).await?;
     let (x, nu, shape) = broadcast_pair(name, &x, &nu)?;
-    Ok(TArgs {
-        x,
-        nu,
-        shape,
-        upper,
-    })
+    Ok(TArgs { x, nu, shape })
 }
 
 async fn three_args(
@@ -1410,7 +1387,7 @@ pub mod tpdf {
         builtin_path = "crate::builtins::stats::summary::distributions::tpdf"
     )]
     pub(crate) async fn tpdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::t_args("tpdf", value, rest, false).await?;
+        let args = super::t_args("tpdf", value, rest).await?;
         let data = args
             .x
             .iter()
@@ -1425,6 +1402,69 @@ pub mod tcdf {
     use super::*;
     normal_descriptor!("tcdf", T_CDF_SIGNATURES);
 
+    const INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "tcdf-integer-x",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "tcdf with typed-integer evaluation points is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TcdfIntegerXExtension"),
+    };
+    const INTEGER_NU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "tcdf-integer-degrees-of-freedom",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "tcdf with typed-integer degrees of freedom is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TcdfIntegerDegreesOfFreedomExtension"),
+    };
+    const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "tcdf-logical-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "tcdf with logical numeric input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TcdfLogicalInputExtension"),
+    };
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+        INTEGER_X_EXTENSION,
+        INTEGER_NU_EXTENSION,
+        LOGICAL_INPUT_EXTENSION,
+    ];
+
+    const INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "x",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Public tcdf inputs are single or double. Typed-integer evaluation points are independently gated and must cross the binary64 CDF boundary exactly.",
+        }];
+    const INTEGER_NU_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "nu",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Public tcdf degrees of freedom are single or double. Typed-integer values are independently gated and must cross the binary64 CDF boundary exactly.",
+        }];
+    pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+        BuiltinIntegerCapabilityDescriptor {
+            form: "p = tcdf(integer_x, nu [, \"upper\"])",
+            inputs: &INTEGER_X_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+            notes: "RunMat-only integer x is checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider when possible.",
+        },
+        BuiltinIntegerCapabilityDescriptor {
+            form: "p = tcdf(x, integer_nu [, \"upper\"])",
+            inputs: &INTEGER_NU_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+            notes: "RunMat-only integer nu is checked before binary64 evaluation. Documented single input selects single output, and resident fallback restores through the exact owning provider when possible.",
+        },
+    ];
+
     #[runtime_builtin(
         name = "tcdf",
         category = "stats/summary",
@@ -1432,10 +1472,12 @@ pub mod tcdf {
         keywords = "tcdf,student t,cdf,upper tail,statistics,distribution",
         type_resolver(super::normal_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::tcdf"
     )]
     pub(crate) async fn tcdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::t_args("tcdf", value, rest, true).await?;
+        let args = parse_args(value, rest).await?;
         let data = args
             .x
             .iter()
@@ -1448,7 +1490,60 @@ pub mod tcdf {
                 }
             })
             .collect();
-        super::finish(args.shape, data)
+        args.output.finish("tcdf", args.shape, data)
+    }
+
+    struct Args {
+        x: Vec<f64>,
+        nu: Vec<f64>,
+        shape: Vec<usize>,
+        upper: bool,
+        output: NormalOutputPlan,
+    }
+
+    async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<Args> {
+        let upper = rest
+            .last()
+            .and_then(crate::builtins::common::random_args::keyword_of)
+            .is_some_and(|keyword| keyword.eq_ignore_ascii_case("upper"));
+        if upper {
+            rest.pop();
+        }
+        if rest.len() != 1 {
+            return Err(super::normal_error(
+                "tcdf",
+                "tcdf: expected x and nu, optionally followed by 'upper'",
+            ));
+        }
+        let nu_value = rest.pop().expect("one nu argument");
+        ensure_extensions(&value, &nu_value)?;
+        let output = NormalOutputPlan::inspect("tcdf", &value, std::slice::from_ref(&nu_value))?;
+        let x = super::normal_value_to_tensor("tcdf", "x", value).await?;
+        let nu = super::normal_value_to_tensor("tcdf", "nu", nu_value).await?;
+        let (x, nu, shape) = super::broadcast_pair("tcdf", &x, &nu)?;
+        Ok(Args {
+            x,
+            nu,
+            shape,
+            upper,
+            output,
+        })
+    }
+
+    fn ensure_extensions(x: &Value, nu: &Value) -> BuiltinResult<()> {
+        if super::is_typed_integer_value(x) {
+            crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_X_EXTENSION, "tcdf")?;
+        }
+        if super::is_typed_integer_value(nu) {
+            crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_NU_EXTENSION, "tcdf")?;
+        }
+        if super::is_logical_value(x) || super::is_logical_value(nu) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_INPUT_EXTENSION,
+                "tcdf",
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -1466,7 +1561,7 @@ pub mod tinv {
         builtin_path = "crate::builtins::stats::summary::distributions::tinv"
     )]
     pub(crate) async fn tinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::t_args("tinv", value, rest, false).await?;
+        let args = super::t_args("tinv", value, rest).await?;
         let data = args
             .x
             .iter()
@@ -2456,7 +2551,7 @@ pub mod icdf {
     }
 
     async fn student_t_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::t_args("icdf", p, rest, false).await?;
+        let args = super::t_args("icdf", p, rest).await?;
         let data = args
             .x
             .iter()
@@ -2479,7 +2574,7 @@ pub mod icdf {
     }
 
     async fn chi_square_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::t_args("icdf", p, rest, false).await?;
+        let args = super::t_args("icdf", p, rest).await?;
         let data = args
             .x
             .iter()
@@ -3162,6 +3257,52 @@ mod tests {
             Value::Num(value) => assert_close(value, 5.469_9e-17, 1e-20),
             other => panic!("expected scalar upper cdf, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tcdf_integer_roles_follow_compatibility_mode_and_exact_double_boundary() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let integer_x = block_on(tcdf::tcdf_builtin(
+                mirrorless_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
+                vec![Value::Num(5.0)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                integer_x.identifier(),
+                Some("RunMat:compatibility:TcdfIntegerXExtension")
+            );
+            let integer_nu = block_on(tcdf::tcdf_builtin(
+                Value::Num(1.0),
+                vec![mirrorless_int_tensor(
+                    IntegerStorage::U16(vec![5]),
+                    vec![1, 1],
+                )],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                integer_nu.identifier(),
+                Some("RunMat:compatibility:TcdfIntegerDegreesOfFreedomExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let exact = block_on(tcdf::tcdf_builtin(
+            mirrorless_int_tensor(IntegerStorage::U64(vec![1]), vec![1, 1]),
+            vec![mirrorless_int_tensor(
+                IntegerStorage::U64(vec![5]),
+                vec![1, 1],
+            )],
+        ))
+        .expect("exact integer tcdf inputs");
+        assert!(matches!(exact, Value::Num(value) if value > 0.8 && value < 0.9));
+
+        let inexact = block_on(tcdf::tcdf_builtin(
+            mirrorless_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1]),
+            vec![Value::Num(5.0)],
+        ))
+        .unwrap_err();
+        assert!(inexact.message().contains("exactly representable"));
     }
 
     #[test]

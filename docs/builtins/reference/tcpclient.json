@@ -8,13 +8,13 @@
     "networking",
     "client"
   ],
-  "summary": "Open TCP client connections and return MATLAB-compatible client structs for socket I/O workflows.",
+  "summary": "Open a TCP client connection for socket I/O workflows.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "All networking executes on the host CPU. GPU-resident scalars are gathered automatically before connecting."
+    "notes": "Networking executes on the host. Automatically resident inputs are gathered through their owning provider; explicit gpuArray input is a RunMat-mode extension."
   },
   "fusion": {
     "elementwise": false,
@@ -27,13 +27,15 @@
     "unit": "builtins::io::net::tcpclient::tests",
     "integration": "builtins::io::net::tcpclient::tests::tcpclient_connects_to_loopback_server"
   },
-  "description": "`tcpclient(host, port)` opens a TCP/IP connection to a remote endpoint and returns a MATLAB-compatible client struct. The struct stores socket metadata and an internal handle used by related networking builtins like `read`, `write`, and `readline`.",
+  "description": "`tcpclient(host,port)` opens a TCP/IP connection to a remote endpoint. The returned client value exposes connection and configuration properties used by `read`, `write`, and `readline`.",
   "behaviors": [
-    "`tcpclient(host, port)` resolves the hostname (IPv4, IPv6, or DNS) and connects using the default 10 second `ConnectTimeout`. Ports must lie in the range `0–65535`.",
-    "Name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, determines read/write timeouts), `ConnectTimeout` (non-negative seconds, controls how long connection establishment waits), `ByteOrder` (`\"little-endian\"` or `\"big-endian\"`), `InputBufferSize`, `OutputBufferSize`, `UserData`, and `Name`. Unknown options raise `RunMat:tcpclient:InvalidNameValue`.",
-    "Successful calls return a struct whose fields match MATLAB’s `tcpclient` object, including callback placeholders (`BytesAvailableFcn`, `BytesAvailableFcnMode`, `BytesAvailableFcnCount`), connection metadata (`Address`, `Port`, `ServerAddress`, `ServerPort`, `LocalAddress`, `LocalPort`), and configuration (`Timeout`, `ConnectTimeout`, buffer sizes, `ByteOrder`). Hidden fields `__tcpclient_id` and `__tcpserver_id` retain the live socket handle for companion networking builtins.",
+    "`tcpclient(host,port)` resolves IPv4, IPv6, or DNS hostnames and connects using a default 10-second `ConnectTimeout`. The documented port range is 1 through 65535.",
+    "`Timeout` and `ConnectTimeout` accept nonnegative double values or `Inf`. The currently documented `EnableTransferDelay` option is not implemented yet.",
+    "RunMat mode additionally accepts typed-integer port and timeout values, port zero, and the legacy constructor options `ByteOrder`, `InputBufferSize`, `OutputBufferSize`, `UserData`, and `Name`. Integer values that enter a seconds boundary must be exactly representable as double.",
+    "Successful calls currently return a RunMat client structure rather than a MATLAB handle object. Public port properties are double values; private fields retain the live socket identity for companion networking builtins.",
     "Read and write timeouts are enforced using the `Timeout` value. Passing `inf` keeps operations blocking. The returned struct reports the configured timeout verbatim.",
-    "Connection failures raise `RunMat:tcpclient:ConnectionFailed` with the OS error message. Invalid addresses, ports, or name-value arguments raise the corresponding MATLAB-style diagnostics."
+    "Connection failures raise `RunMat:tcpclient:ConnectionFailed` with the operating-system error message. Invalid addresses, ports, or name-value arguments use stable RunMat error identifiers.",
+    "Automatically resident inputs are gathered transparently. Explicit gpuArray input requires RunMat mode and still produces a host client value."
   ],
   "examples": [
     {
@@ -65,7 +67,7 @@
   "faqs": [
     {
       "question": "Which byte orders are supported?",
-      "answer": "`\"little-endian\"` (default) and `\"big-endian\"`. Any other string raises `RunMat:tcpclient:InvalidNameValue`."
+      "answer": "In RunMat mode, the legacy `ByteOrder` constructor option accepts `\"little-endian\"` and `\"big-endian\"`. Other values raise `RunMat:tcpclient:InvalidNameValue`."
     },
     {
       "question": "Can I pass `inf` for `Timeout` or `ConnectTimeout`?",
@@ -73,11 +75,11 @@
     },
     {
       "question": "How do I close the client?",
-      "answer": "A companion builtin will release the socket. Until then, tests can use internal helpers to drop clients when finished."
+      "answer": "Call `close(client)` to release the socket."
     },
     {
       "question": "Where do buffer sizes apply?",
-      "answer": "`InputBufferSize` and `OutputBufferSize` store the desired limits for future buffered I/O builtins. The current implementation records the values for compatibility."
+      "answer": "The RunMat-mode `InputBufferSize` and `OutputBufferSize` options record desired limits for future buffered I/O behavior. They are not part of the current documented constructor surface."
     },
     {
       "question": "Does the builtin support IPv6?",
@@ -86,6 +88,10 @@
     {
       "question": "What happens when the server rejects the connection?",
       "answer": "`tcpclient` raises `RunMat:tcpclient:ConnectionFailed` with the OS error (such as “connection refused”)."
+    },
+    {
+      "question": "Can I pass an integer port?",
+      "answer": "MATLAB-compatible mode expects the documented double port. RunMat mode also accepts every typed-integer class and validates the value directly in the 1-through-65535 structural range."
     }
   ],
   "links": [
@@ -126,8 +132,8 @@
     "label": "crates/runmat-runtime/src/builtins/io/net/tcpclient.rs",
     "url": "crates/runmat-runtime/src/builtins/io/net/tcpclient.rs"
   },
-  "gpu_residency": "No. RunMat automatically gathers GPU scalars before opening sockets. The returned struct—and all networking operations—run on the CPU, so `gpuArray` offers no benefit for `tcpclient`.",
+  "gpu_residency": "No. Networking and the returned client value are host-side. Automatic residency is gathered transparently; explicit gpuArray input is accepted only in RunMat mode.",
   "gpu_behavior": [
-    "Networking always happens on the host CPU. If `host`, `port`, or name-value arguments reside on the GPU, RunMat gathers them automatically before the socket is created. The returned struct is CPU-resident, and no acceleration-provider hooks are required."
+    "Networking always happens on the host CPU. RunMat gathers automatically resident arguments through their exact owning provider before creating the socket. Explicit gpuArray intent is checked separately before provider access."
   ]
 }

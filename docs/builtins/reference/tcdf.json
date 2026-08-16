@@ -6,17 +6,19 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+    "notes": "GPU arrays are supported. When no native provider hook is available, RunMat gathers through the owning provider, evaluates on the host, and restores the result to that provider."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
   "description": "`tcdf(x,nu)` evaluates the Student's t cumulative distribution function. `tcdf(x,nu,\"upper\")` returns the complementary upper-tail probability.",
   "behaviors": [
-    "`x` and `nu` may be scalars or matching-size numeric arrays.",
+    "`x` and `nu` may be scalars or compatible-size single- or double-precision arrays.",
     "Scalar inputs broadcast over matching-size array inputs.",
+    "Single-precision input produces single-precision output; otherwise the result is double precision.",
+    "In RunMat mode, typed-integer and logical inputs are available as extensions. Integer values must be exactly representable as double before evaluation.",
     "Nonpositive or `NaN` degrees of freedom produce `NaN` elementwise.",
     "`nu = Inf` uses the standard normal distribution."
   ],
@@ -24,7 +26,11 @@
     { "description": "Distribution midpoint", "input": "p = tcdf(0, 10)" },
     { "description": "Upper tail", "input": "p = tcdf(10, 99, \"upper\")" }
   ],
-  "faqs": [{ "question": "Does tcdf support upper-tail probabilities?", "answer": "Yes. Pass `\"upper\"` as the final argument to compute the complementary tail." }],
+  "faqs": [
+    { "question": "Does tcdf support upper-tail probabilities?", "answer": "Yes. Pass `\"upper\"` as the final argument to compute the complementary tail." },
+    { "question": "Can I use integer arrays with `tcdf`?", "answer": "RunMat mode accepts all eight integer classes when every value is exactly representable as double. MATLAB-compatible mode accepts the documented single- and double-precision forms." },
+    { "question": "What happens to a GPU result when RunMat uses a host fallback?", "answer": "The result is copied back to the exact provider that owns the input, with single or double precision preserved." }
+  ],
   "links": [{ "label": "tpdf", "url": "./tpdf" }, { "label": "tinv", "url": "./tinv" }, { "label": "trnd", "url": "./trnd" }],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",

@@ -725,7 +725,7 @@ pub fn validate_variable_domain(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     let discrete_variable = is_discrete_variable(variable);
-    if discrete_variable && sample_time <= 0.0 {
+    if discrete_variable && sample_time != -1.0 && sample_time <= 0.0 {
         return Err(control_error(
             builtin,
             "RunMat:tf:InvalidSampleTime",
@@ -734,7 +734,7 @@ pub fn validate_variable_domain(
             ),
         ));
     }
-    if !discrete_variable && sample_time > 0.0 {
+    if !discrete_variable && sample_time != 0.0 {
         return Err(control_error(
             builtin,
             "RunMat:tf:InvalidVariable",
@@ -745,11 +745,11 @@ pub fn validate_variable_domain(
 }
 
 pub fn validate_sample_time(sample_time: f64, builtin: &'static str) -> BuiltinResult<()> {
-    if !sample_time.is_finite() || sample_time < 0.0 {
+    if !sample_time.is_finite() || (sample_time < 0.0 && sample_time != -1.0) {
         return Err(control_error(
             builtin,
             invalid_sample_time_identifier(builtin),
-            format!("{builtin}: sample time must be a finite non-negative scalar"),
+            format!("{builtin}: sample time must be -1 or a finite non-negative scalar"),
         ));
     }
     Ok(())

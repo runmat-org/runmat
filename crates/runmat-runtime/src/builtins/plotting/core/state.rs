@@ -701,6 +701,7 @@ pub struct TextAnnotationHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
     pub annotation_index: usize,
+    pub position_source: Option<runmat_plot::plots::NumericPlotData>,
 }
 
 #[derive(Clone, Debug)]
@@ -710,6 +711,9 @@ pub struct TextScatterHandleState {
     pub annotation_indices: Vec<usize>,
     pub marker_plot_index: Option<usize>,
     pub is_3d: bool,
+    pub x_data: runmat_plot::plots::NumericPlotData,
+    pub y_data: runmat_plot::plots::NumericPlotData,
+    pub z_data: Option<runmat_plot::plots::NumericPlotData>,
     pub text_data: Vec<String>,
     pub text_density_percentage: f64,
     pub max_text_length: usize,
@@ -1754,12 +1758,13 @@ pub fn set_zlabel_for_axes(
     Ok(object_handle)
 }
 
-pub fn add_text_annotation_for_axes(
+pub fn add_text_annotation_for_axes_with_source(
     handle: FigureHandle,
     axes_index: usize,
     position: glam::Vec3,
     text: &str,
     style: TextStyle,
+    position_source: Option<runmat_plot::plots::NumericPlotData>,
 ) -> Result<f64, FigureError> {
     let (annotation_index, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state
@@ -1767,10 +1772,11 @@ pub fn add_text_annotation_for_axes(
             .add_axes_text_annotation(axes_index, position, text.to_string(), style)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(register_text_annotation_handle(
+    Ok(register_text_annotation_handle_with_source(
         handle,
         axes_index,
         annotation_index,
+        position_source,
     ))
 }
 
@@ -1781,8 +1787,8 @@ pub fn set_text_annotation_properties_for_axes(
     text: Option<String>,
     position: Option<glam::Vec3>,
     style: Option<TextStyle>,
-) -> Result<f64, FigureError> {
-    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         if let Some(text) = text {
             state
                 .figure
@@ -1798,10 +1804,9 @@ pub fn set_text_annotation_properties_for_axes(
                 .figure
                 .set_axes_text_annotation_style(axes_index, annotation_index, style);
         }
-        register_text_annotation_handle(handle, axes_index, annotation_index)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(object_handle)
+    Ok(())
 }
 
 pub fn toggle_box() -> bool {
@@ -4156,10 +4161,11 @@ pub fn register_pie_handle(figure: FigureHandle, axes_index: usize, plot_index: 
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Pie)
 }
 
-pub fn register_text_annotation_handle(
+pub fn register_text_annotation_handle_with_source(
     figure: FigureHandle,
     axes_index: usize,
     annotation_index: usize,
+    position_source: Option<runmat_plot::plots::NumericPlotData>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -4170,9 +4176,29 @@ pub fn register_text_annotation_handle(
             figure,
             axes_index,
             annotation_index,
+            position_source,
         }),
     );
     id as f64
+}
+
+pub fn update_text_annotation_position_source(
+    figure: FigureHandle,
+    axes_index: usize,
+    annotation_index: usize,
+    position_source: runmat_plot::plots::NumericPlotData,
+) {
+    let mut reg = registry();
+    for state in reg.plot_children.values_mut() {
+        if let PlotChildHandleState::Text(text) = state {
+            if text.figure == figure
+                && text.axes_index == axes_index
+                && text.annotation_index == annotation_index
+            {
+                text.position_source = Some(position_source.clone());
+            }
+        }
+    }
 }
 
 pub fn register_textscatter_handle(state: TextScatterHandleState) -> f64 {

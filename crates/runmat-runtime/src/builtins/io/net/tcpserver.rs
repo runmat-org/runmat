@@ -2,7 +2,11 @@
 
 use once_cell::sync::OnceCell;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, StructValue, Tensor, Value,
 };
@@ -20,6 +24,81 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
 const BUILTIN_NAME: &str = "tcpserver";
+
+const INTEGER_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tcpserver-integer-port",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tcpserver with a typed-integer port is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TcpserverIntegerPortExtension"),
+};
+const INTEGER_TIMEOUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tcpserver-integer-timeout",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tcpserver with a typed-integer Timeout is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TcpserverIntegerTimeoutExtension"),
+};
+const ZERO_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tcpserver-zero-port",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tcpserver ephemeral port selection with port zero is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TcpserverZeroPortExtension"),
+};
+const LEGACY_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tcpserver-legacy-constructor-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tcpserver legacy constructor options are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TcpserverLegacyOptionsExtension"),
+};
+const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tcpserver-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tcpserver with explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TcpserverExplicitGpuInputExtension"),
+};
+pub const TCPSERVER_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    INTEGER_PORT_EXTENSION,
+    INTEGER_TIMEOUT_EXTENSION,
+    ZERO_PORT_EXTENSION,
+    LEGACY_OPTIONS_EXTENSION,
+    EXPLICIT_GPU_INPUT_EXTENSION,
+];
+
+const INTEGER_PORT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "port",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "The public ServerPort datatype is double. RunMat mode additionally decodes all eight typed integer classes directly into the validated 1..65535 structural range.",
+}];
+const INTEGER_TIMEOUT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "Timeout",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "The public Timeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode.",
+}];
+pub const TCPSERVER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "server = tcpserver(address, integer_port, ...)",
+        inputs: &INTEGER_PORT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The port is range-checked from authoritative integer storage before socket binding. Public object properties remain double-valued.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "server = tcpserver(..., Timeout=integer_timeout)",
+        inputs: &INTEGER_TIMEOUT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Typed Timeout is gated before provider access and must be exactly representable as binary64 before host networking observes it.",
+    },
+];
 
 const TCPSERVER_OUTPUT_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "server",
@@ -288,10 +367,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "tcpserver",
     category = "io/net",
-    summary = "Create TCP server listeners and return MATLAB-compatible server structs.",
+    summary = "Create TCP server listeners and return server metadata.",
     keywords = "tcpserver,tcp,network,server",
     type_resolver(crate::builtins::io::type_resolvers::tcpserver_type),
     descriptor(crate::builtins::io::net::tcpserver::TCPSERVER_DESCRIPTOR),
+    extensions(crate::builtins::io::net::tcpserver::TCPSERVER_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::net::tcpserver::TCPSERVER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::net::tcpserver"
 )]
 pub(crate) async fn tcpserver_builtin(
@@ -299,6 +380,23 @@ pub(crate) async fn tcpserver_builtin(
     port: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if std::iter::once(&address)
+        .chain(std::iter::once(&port))
+        .chain(rest.iter())
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EXPLICIT_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_native_integer_class(&port) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_PORT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    preflight_name_value_extensions(&rest).await?;
     let address = gather_if_needed_async(&address).await?;
     let port = gather_if_needed_async(&port).await?;
 
@@ -306,6 +404,9 @@ pub(crate) async fn tcpserver_builtin(
         .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_ADDRESS, err.to_string()))?;
     let port = parse_port(&port)
         .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_PORT, err.to_string()))?;
+    if port == 0 {
+        crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
+    }
 
     let options = parse_name_value_pairs(rest).await?;
 
@@ -321,6 +422,36 @@ pub(crate) async fn tcpserver_builtin(
 
     let id = insert_server(listener, host.clone(), local_addr, &options);
     Ok(build_tcpserver_struct(id, &host, local_addr, &options))
+}
+
+async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
+    if !rest.len().is_multiple_of(2) {
+        return Ok(());
+    }
+    for pair in rest.chunks_exact(2) {
+        let Ok(name) = string_scalar(&pair[0], "OptionName") else {
+            continue;
+        };
+        match name.to_ascii_lowercase().as_str() {
+            "timeout" => {
+                crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                    &pair[1],
+                    &INTEGER_TIMEOUT_EXTENSION,
+                    BUILTIN_NAME,
+                    "Timeout",
+                )
+                .await?;
+            }
+            "userdata" | "name" => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LEGACY_OPTIONS_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -372,6 +503,13 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
             "timeout" => {
+                crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                    &value_raw,
+                    &INTEGER_TIMEOUT_EXTENSION,
+                    BUILTIN_NAME,
+                    "Timeout",
+                )
+                .await?;
                 let timeout_value = gather_if_needed_async(&value_raw)
                     .await
                     .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
@@ -382,8 +520,18 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                     )
                 })?
             }
-            "userdata" => options.user_data = value_raw,
+            "userdata" => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LEGACY_OPTIONS_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+                options.user_data = value_raw;
+            }
             "name" => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LEGACY_OPTIONS_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
                 let name_value = gather_if_needed_async(&value_raw)
                     .await
                     .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
@@ -447,12 +595,10 @@ fn build_tcpserver_struct(
         "ServerAddress".to_string(),
         Value::String(server_address.clone()),
     );
-    st.fields.insert(
-        "ServerPort".to_string(),
-        Value::Int(IntValue::U16(server_port)),
-    );
     st.fields
-        .insert("Port".to_string(), Value::Int(IntValue::U16(server_port)));
+        .insert("ServerPort".to_string(), Value::Num(f64::from(server_port)));
+    st.fields
+        .insert("Port".to_string(), Value::Num(f64::from(server_port)));
     st.fields.insert(
         "RequestedAddress".to_string(),
         Value::String(requested_address.to_string()),
@@ -461,8 +607,10 @@ fn build_tcpserver_struct(
         .insert("Connected".to_string(), Value::Bool(false));
     st.fields
         .insert("ClientAddress".to_string(), Value::String(String::new()));
-    st.fields
-        .insert("ClientPort".to_string(), Value::Int(IntValue::I32(0)));
+    st.fields.insert(
+        "ClientPort".to_string(),
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty client port")),
+    );
     st.fields.insert(
         "NumBytesAvailable".to_string(),
         Value::Int(IntValue::I32(0)),
@@ -729,21 +877,18 @@ pub(crate) mod tests {
     #[test]
     fn tcpserver_accepts_loopback_connection() {
         let _guard = net_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
-        let result = run_tcpserver(
-            Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(0)),
-            Vec::new(),
-        )
-        .expect("tcpserver");
+        let result = run_tcpserver(Value::from("127.0.0.1"), Value::Num(0.0), Vec::new())
+            .expect("tcpserver");
         let id = server_id(&result);
         let address = match struct_field(&result, "ServerAddress") {
             Value::String(s) => s.clone(),
             other => panic!("expected ServerAddress string, got {other:?}"),
         };
         let port = match struct_field(&result, "ServerPort") {
-            Value::Int(iv) => iv.to_i64() as u16,
-            other => panic!("expected ServerPort int, got {other:?}"),
+            Value::Num(value) => *value as u16,
+            other => panic!("expected double ServerPort, got {other:?}"),
         };
 
         TcpStream::connect((address.as_str(), port)).expect("connect to loopback server");
@@ -754,10 +899,11 @@ pub(crate) mod tests {
     #[test]
     fn tcpserver_applies_timeout_option() {
         let _guard = net_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let result = run_tcpserver(
             Value::from("localhost"),
-            Value::Int(IntValue::I32(0)),
+            Value::Num(0.0),
             vec![Value::from("Timeout"), Value::Num(5.0)],
         )
         .expect("tcpserver");
@@ -776,10 +922,11 @@ pub(crate) mod tests {
     #[test]
     fn tcpserver_supports_custom_name() {
         let _guard = net_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(0)),
+            Value::Num(0.0),
             vec![Value::from("Name"), Value::from("CustomListener")],
         )
         .expect("tcpserver");
@@ -798,10 +945,11 @@ pub(crate) mod tests {
     #[test]
     fn tcpserver_accepts_byte_order_option() {
         let _guard = net_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(0)),
+            Value::Num(0.0),
             vec![Value::from("ByteOrder"), Value::from("big-endian")],
         )
         .expect("tcpserver");
@@ -822,7 +970,7 @@ pub(crate) mod tests {
         let _guard = net_guard();
         let err = run_tcpserver(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(8000)),
+            Value::Num(8000.0),
             vec![Value::from("ByteOrder"), Value::from("middle-endian")],
         )
         .unwrap_err();
@@ -833,6 +981,7 @@ pub(crate) mod tests {
     #[test]
     fn tcpserver_accepts_scalar_tensor_port() {
         let _guard = net_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let tensor_port = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let result = run_tcpserver(
@@ -843,8 +992,8 @@ pub(crate) mod tests {
         .expect("tcpserver");
 
         let port = match struct_field(&result, "ServerPort") {
-            Value::Int(iv) => iv.to_i64() as u16,
-            other => panic!("expected ServerPort int, got {other:?}"),
+            Value::Num(value) => *value as u16,
+            other => panic!("expected double ServerPort, got {other:?}"),
         };
         assert!(port > 0);
 
@@ -855,13 +1004,50 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_rejects_invalid_port() {
-        let err = run_tcpserver(
+        let err =
+            run_tcpserver(Value::from("127.0.0.1"), Value::Num(-1.0), Vec::new()).unwrap_err();
+        assert_error_identifier(err, TCPSERVER_ERROR_INVALID_PORT.identifier.unwrap());
+    }
+
+    #[test]
+    fn tcpserver_extensions_reject_before_socket_access_in_compatibility_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_port = run_tcpserver(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(-1)),
+            Value::Int(IntValue::U16(1)),
             Vec::new(),
         )
         .unwrap_err();
-        assert_error_identifier(err, TCPSERVER_ERROR_INVALID_PORT.identifier.unwrap());
+        assert_eq!(
+            integer_port.identifier(),
+            INTEGER_PORT_EXTENSION.error_identifier
+        );
+
+        let zero_port =
+            run_tcpserver(Value::from("127.0.0.1"), Value::Num(0.0), Vec::new()).unwrap_err();
+        assert_eq!(zero_port.identifier(), ZERO_PORT_EXTENSION.error_identifier);
+
+        let integer_timeout = run_tcpserver(
+            Value::from("127.0.0.1"),
+            Value::Num(1.0),
+            vec![Value::from("Timeout"), Value::Int(IntValue::U8(5))],
+        )
+        .unwrap_err();
+        assert_eq!(
+            integer_timeout.identifier(),
+            INTEGER_TIMEOUT_EXTENSION.error_identifier
+        );
+
+        let legacy_option = run_tcpserver(
+            Value::from("127.0.0.1"),
+            Value::Num(1.0),
+            vec![Value::from("Name"), Value::from("server")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            legacy_option.identifier(),
+            LEGACY_OPTIONS_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -870,7 +1056,7 @@ pub(crate) mod tests {
         let _guard = net_guard();
         let err = run_tcpserver(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(9000)),
+            Value::Num(9000.0),
             vec![Value::from("Timeout")],
         )
         .unwrap_err();
@@ -881,6 +1067,7 @@ pub(crate) mod tests {
     #[test]
     fn tcpserver_stores_userdata() {
         let _guard = net_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let mut user_struct_value = StructValue::new();
         user_struct_value
@@ -890,7 +1077,7 @@ pub(crate) mod tests {
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(0)),
+            Value::Num(0.0),
             vec![Value::from("UserData"), user_struct.clone()],
         )
         .expect("tcpserver");
@@ -906,17 +1093,18 @@ pub(crate) mod tests {
     #[test]
     fn tcpserver_times_out_connect_attempt() {
         let _guard = net_guard();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(0)),
+            Value::Num(0.0),
             vec![Value::from("Timeout"), Value::Num(1.5)],
         )
         .expect("tcpserver");
         let id = server_id(&result);
         let port = match struct_field(&result, "ServerPort") {
-            Value::Int(iv) => iv.to_i64() as u16,
-            other => panic!("expected ServerPort int, got {other:?}"),
+            Value::Num(value) => *value as u16,
+            other => panic!("expected double ServerPort, got {other:?}"),
         };
 
         let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");

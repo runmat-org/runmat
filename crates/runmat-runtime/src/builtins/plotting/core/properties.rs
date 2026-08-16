@@ -2737,6 +2737,7 @@ fn text_position_value(position: glam::Vec3) -> Value {
     )
 }
 
+#[cfg(test)]
 fn parse_text_position(value: &Value, builtin: &'static str) -> BuiltinResult<glam::Vec3> {
     match value {
         Value::Tensor(t) if matches!(tensor::tensor_element_len(t), 2 | 3) => {
@@ -2751,6 +2752,47 @@ fn parse_text_position(value: &Value, builtin: &'static str) -> BuiltinResult<gl
             builtin,
             format!("{builtin}: Position must be a 2-element or 3-element vector"),
         )),
+    }
+}
+
+fn text_position_source(value: &Value, builtin: &'static str) -> BuiltinResult<NumericPlotData> {
+    let tensor = Tensor::try_from(value).map_err(|err| {
+        plotting_error(
+            builtin,
+            format!("{builtin}: Position must be a numeric vector: {err}"),
+        )
+    })?;
+    if !matches!(tensor::tensor_element_len(&tensor), 2 | 3) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: Position must be a 2-element or 3-element vector"),
+        ));
+    }
+    let mut storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| plotting_error(builtin, err))?;
+    if storage.len() == 2 {
+        let dtype = storage.numeric_dtype();
+        let mut expanded = runmat_builtins::NumericStorage::zeros(dtype, 3);
+        expanded
+            .set_value(0, storage.value_at(0).expect("two-element position"))
+            .map_err(|err| plotting_error(builtin, err))?;
+        expanded
+            .set_value(1, storage.value_at(1).expect("two-element position"))
+            .map_err(|err| plotting_error(builtin, err))?;
+        storage = expanded;
+    }
+    NumericPlotData::new(storage, vec![1, 3]).map_err(|err| plotting_error(builtin, err))
+}
+
+fn world_text_position_value(
+    handle: &super::state::TextAnnotationHandleState,
+    rendered: glam::Vec3,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match handle.position_source.as_ref() {
+        Some(source) => super::common::numeric_plot_data_value(source, builtin),
+        None => Ok(text_position_value(rendered)),
     }
 }
 
@@ -2769,7 +2811,10 @@ fn get_world_text_property(
         None => {
             let mut st = child_base_struct("text", handle.figure, handle.axes_index);
             st.insert("String", Value::String(annotation.text.clone()));
-            st.insert("Position", text_position_value(annotation.position));
+            st.insert(
+                "Position",
+                world_text_position_value(handle, annotation.position, builtin)?,
+            );
             if let Some(weight) = annotation.style.font_weight.clone() {
                 st.insert("FontWeight", Value::String(weight));
             }
@@ -2792,7 +2837,7 @@ fn get_world_text_property(
         Some("parent") => Ok(child_parent_handle(handle.figure, handle.axes_index)),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("string") => Ok(Value::String(annotation.text)),
-        Some("position") => Ok(text_position_value(annotation.position)),
+        Some("position") => world_text_position_value(handle, annotation.position, builtin),
         Some("fontweight") => Ok(annotation
             .style
             .font_weight
@@ -2838,6 +2883,7 @@ fn apply_world_text_property(
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text handle")))?;
     let mut text = None;
     let mut position = None;
+    let mut position_source = None;
     let mut style = annotation.style;
     match canonical_property_name(key).as_ref() {
         "string" => {
@@ -2845,7 +2891,16 @@ fn apply_world_text_property(
                 plotting_error(builtin, format!("{builtin}: String must be text"))
             })?);
         }
-        "position" => position = Some(parse_text_position(value, builtin)?),
+        "position" => {
+            let source = text_position_source(value, builtin)?;
+            let rendered = source.materialize_f64();
+            position = Some(glam::Vec3::new(
+                rendered[0] as f32,
+                rendered[1] as f32,
+                rendered[2] as f32,
+            ));
+            position_source = Some(source);
+        }
         other => apply_text_property(&mut text, &mut style, other, value, builtin)?,
     }
     set_text_annotation_properties_for_axes(
@@ -2857,6 +2912,14 @@ fn apply_world_text_property(
         Some(style),
     )
     .map_err(|err| map_figure_error(builtin, err))?;
+    if let Some(source) = position_source {
+        super::state::update_text_annotation_position_source(
+            handle.figure,
+            handle.axes_index,
+            handle.annotation_index,
+            source,
+        );
+    }
     Ok(())
 }
 
