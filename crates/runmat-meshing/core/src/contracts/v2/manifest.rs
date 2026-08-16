@@ -51,12 +51,34 @@ impl MeshingChunkMediaTypeV2 {
             Self::MeshingEvidence => "application/vnd.runmat.meshing-evidence.v2",
         }
     }
+
+    pub(super) fn from_media_type(value: &str) -> Option<Self> {
+        [
+            Self::GeometrySource,
+            Self::ExactGeometry,
+            Self::MetricField,
+            Self::CurvePartitions,
+            Self::SurfacePartitions,
+            Self::ProtectedBoundaryComplex,
+            Self::VolumeTopology,
+            Self::MeshNodes,
+            Self::MeshElements,
+            Self::MeshClassification,
+            Self::ValidationEvidence,
+            Self::DiagnosticEvidence,
+            Self::AnalysisMeshArtifact,
+            Self::MeshingEvidence,
+        ]
+        .into_iter()
+        .find(|candidate| candidate.media_type() == value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingChunkDescriptorV2 {
     pub ordinal: u32,
+    pub first_logical_entity_ordinal: u64,
     pub digest: StableDigest,
     pub media_type: MeshingChunkMediaTypeV2,
     pub schema_version: u16,
@@ -71,6 +93,7 @@ impl MeshingChunkDescriptorV2 {
             || self.schema_version == 0
             || self.encoded_length == 0
             || self.decoded_length == 0
+            || self.logical_entity_count == 0
         {
             return Err(MeshingContractError::invalid(
                 "meshing chunk descriptor",
@@ -136,14 +159,25 @@ impl MeshingStageManifestV2 {
         }
         let mut chunk_digests = BTreeSet::new();
         let mut total = 0_u64;
+        let mut next_entity_ordinal = 0_u64;
         for (ordinal, chunk) in self.chunks.iter().enumerate() {
             chunk.validate(ordinal)?;
-            if !chunk_digests.insert(chunk.digest) {
+            if chunk.first_logical_entity_ordinal != next_entity_ordinal
+                || !chunk_digests.insert(chunk.digest)
+            {
                 return Err(MeshingContractError::invalid(
                     "meshing stage manifest chunks",
-                    "chunk digests must be unique within a manifest",
+                    "chunk entity ranges must be contiguous and digests must be unique",
                 ));
             }
+            next_entity_ordinal = next_entity_ordinal
+                .checked_add(chunk.logical_entity_count)
+                .ok_or_else(|| {
+                    MeshingContractError::invalid(
+                        "meshing stage manifest chunks",
+                        "logical entity count overflow",
+                    )
+                })?;
             total = total.checked_add(chunk.encoded_length).ok_or_else(|| {
                 MeshingContractError::invalid(
                     "meshing stage manifest length",

@@ -3,8 +3,6 @@
 //! Callers hash these validated records with the domain-separated canonical codec. Partition
 //! indices and join inputs use canonical entity order, never worker completion order.
 
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 
 use super::{validate_token, MeshingContractError};
@@ -12,7 +10,6 @@ use super::{validate_token, MeshingContractError};
 pub const MESHING_IDENTITY_SCHEMA_VERSION: u16 = 2;
 const MAX_PREREQUISITE_DIGESTS: usize = 64;
 const MAX_JOIN_PARTITIONS: usize = 4096;
-const MAX_RESULT_CHUNKS: usize = 65_536;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -286,8 +283,10 @@ impl MeshingJoinIdentityV2 {
 pub struct MeshingStageResultIdentityV2 {
     pub schema_version: u16,
     pub stage: super::MeshingStageV2,
+    pub result_kind: super::MeshingStageResultKindV2,
     pub producer_identity_digest: StableDigest,
-    pub ordered_chunk_digests: Vec<StableDigest>,
+    pub logical_content_digest: StableDigest,
+    pub logical_entity_count: u64,
     pub invariant_summary_digest: StableDigest,
 }
 
@@ -298,23 +297,13 @@ impl MeshingStageResultIdentityV2 {
             .validate_nonzero("stage result producer identity")?;
         self.invariant_summary_digest
             .validate_nonzero("stage result invariant summary")?;
-        if self.ordered_chunk_digests.is_empty()
-            || self.ordered_chunk_digests.len() > MAX_RESULT_CHUNKS
-            || self
-                .ordered_chunk_digests
-                .iter()
-                .copied()
-                .collect::<BTreeSet<_>>()
-                .len()
-                != self.ordered_chunk_digests.len()
-        {
+        self.logical_content_digest
+            .validate_nonzero("stage result logical content")?;
+        if self.logical_entity_count == 0 {
             return Err(MeshingContractError::invalid(
-                "stage result chunks",
-                "must contain a bounded, non-empty ordered chunk list",
+                "stage result logical entity count",
+                "must be non-zero",
             ));
-        }
-        for digest in &self.ordered_chunk_digests {
-            digest.validate_nonzero("stage result chunk digest")?;
         }
         Ok(())
     }

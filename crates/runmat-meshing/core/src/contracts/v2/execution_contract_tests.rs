@@ -117,8 +117,10 @@ fn canonical_stage_partition_and_join_identities_round_trip() {
     MeshingStageResultIdentityV2 {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageV2::SurfaceMesh,
+        result_kind: MeshingStageResultKindV2::DeterministicJoin,
         producer_identity_digest: digest(13),
-        ordered_chunk_digests: vec![digest(14), digest(15)],
+        logical_content_digest: digest(14),
+        logical_entity_count: 16,
         invariant_summary_digest: digest(16),
     }
     .validate()
@@ -196,6 +198,7 @@ fn stage_manifest_closes_over_ordered_typed_chunks() {
         chunks: vec![
             MeshingChunkDescriptorV2 {
                 ordinal: 0,
+                first_logical_entity_ordinal: 0,
                 digest: digest(23),
                 media_type: MeshingChunkMediaTypeV2::SurfacePartitions,
                 schema_version: 2,
@@ -205,6 +208,7 @@ fn stage_manifest_closes_over_ordered_typed_chunks() {
             },
             MeshingChunkDescriptorV2 {
                 ordinal: 1,
+                first_logical_entity_ordinal: 16,
                 digest: digest(24),
                 media_type: MeshingChunkMediaTypeV2::ValidationEvidence,
                 schema_version: 2,

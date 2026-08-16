@@ -182,8 +182,10 @@ fn every_identity_manifest_and_result_contract_round_trips() {
     round_trip(&MeshingStageResultIdentityV2 {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageV2::SurfaceMesh,
+        result_kind: MeshingStageResultKindV2::DeterministicJoin,
         producer_identity_digest: digest(34),
-        ordered_chunk_digests: vec![digest(35), digest(36)],
+        logical_content_digest: digest(35),
+        logical_entity_count: 16,
         invariant_summary_digest: digest(37),
     });
     round_trip(&MeshingValidationIdentityV2 {
@@ -205,6 +207,7 @@ fn every_identity_manifest_and_result_contract_round_trips() {
         invariant_summary_digest: digest(41),
         chunks: vec![MeshingChunkDescriptorV2 {
             ordinal: 0,
+            first_logical_entity_ordinal: 0,
             digest: digest(42),
             media_type: MeshingChunkMediaTypeV2::SurfacePartitions,
             schema_version: 2,

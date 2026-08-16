@@ -3,6 +3,7 @@ mod artifact_classification;
 mod artifact_types;
 mod cancellation;
 mod canonical;
+mod chunk;
 mod error;
 mod evidence;
 mod failure;
@@ -21,6 +22,10 @@ pub use artifact_types::{
 };
 pub use cancellation::{CancellationPolicyV2, MeshingCancellationSignal, NeverCancelled};
 pub use canonical::{CanonicalMeshingContract, MeshingCanonicalLimits};
+pub use chunk::{
+    build_chunked_stage_payload, build_closed_stage_manifest, verify_stage_manifest_closure,
+    EncodedMeshingChunkV2, MeshingChunkPolicyV2, MeshingChunkStreamV2, MeshingChunkedPayloadV2,
+};
 pub use error::MeshingContractError;
 pub use evidence::{
     CacheAdmissionDecisionV2, ErrorDistributionV2, InvariantEvidenceV2, MeshingEvidenceV2,

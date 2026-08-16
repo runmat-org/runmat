@@ -24,14 +24,16 @@ pub use contracts::options::{
 pub use contracts::provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use contracts::topology::{BoundaryElementKind, VolumeElementKind};
 pub use contracts::v2::{
+    build_chunked_stage_payload, build_closed_stage_manifest, verify_stage_manifest_closure,
     AlgorithmVersionSet, AnalysisBoundaryEdgeV2, AnalysisBoundaryFaceV2, AnalysisMeshArtifactV2,
     AnalysisMeshNodeV2, AnalysisMeshTopologyV2, AnalysisVolumeElementV2, BoundaryFaceRoleV2,
     BoundaryTriangleOrderV2, CacheAdmissionDecisionV2, CancellationPolicyV2,
-    CanonicalEntityRangeV2, CanonicalMeshingContract, ContactPairV2, ErrorDistributionV2,
-    FieldTopologyLocationV2, FieldTopologyMapV2, GeometricWitness, GeometryRevisionRef,
-    GeometryTolerancePolicy, InvariantEvidenceV2, MaterialInterfaceV2, MeshElementOrderV2,
-    MeshNeighborV2, MeshRegionV2, MeshingCancellationSignal, MeshingCanonicalLimits,
-    MeshingCapabilityRequirementV2, MeshingChunkDescriptorV2, MeshingChunkMediaTypeV2,
+    CanonicalEntityRangeV2, CanonicalMeshingContract, ContactPairV2, EncodedMeshingChunkV2,
+    ErrorDistributionV2, FieldTopologyLocationV2, FieldTopologyMapV2, GeometricWitness,
+    GeometryRevisionRef, GeometryTolerancePolicy, InvariantEvidenceV2, MaterialInterfaceV2,
+    MeshElementOrderV2, MeshNeighborV2, MeshRegionV2, MeshingCancellationSignal,
+    MeshingCanonicalLimits, MeshingCapabilityRequirementV2, MeshingChunkDescriptorV2,
+    MeshingChunkMediaTypeV2, MeshingChunkPolicyV2, MeshingChunkStreamV2, MeshingChunkedPayloadV2,
     MeshingContractError, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingEvidenceV2,
     MeshingFailure, MeshingFailureCategory, MeshingJoinIdentityV2, MeshingManifestDispositionV2,
     MeshingOperationV2, MeshingPartitionDescriptorV2, MeshingPartitionIdentityV2,
