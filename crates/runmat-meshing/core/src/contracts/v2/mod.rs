@@ -6,9 +6,11 @@ mod error;
 mod evidence;
 mod failure;
 mod identity;
+mod manifest;
 mod metric;
 mod request;
 mod tolerance;
+mod workload;
 
 pub use artifact_types::{
     AnalysisBoundaryEdgeV2, AnalysisBoundaryFaceV2, AnalysisMeshArtifactV2, AnalysisMeshNodeV2,
@@ -27,7 +29,17 @@ pub use failure::{
     GeometricWitness, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure,
     MeshingFailureCategory, MeshingOperationV2, MeshingStageV2, MESHING_FAILURE_SCHEMA_VERSION,
 };
-pub use identity::{GeometryRevisionRef, PersistentEntityId, PersistentEntityKind, StableDigest};
+pub use identity::{
+    CanonicalEntityRangeV2, GeometryRevisionRef, MeshingJoinIdentityV2,
+    MeshingPartitionDescriptorV2, MeshingPartitionIdentityV2, MeshingPartitionKindV2,
+    MeshingPartitionResultRefV2, MeshingStageIdentityV2, MeshingStageResultIdentityV2,
+    MeshingValidationIdentityV2, PersistentEntityId, PersistentEntityKind, StableDigest,
+    MESHING_IDENTITY_SCHEMA_VERSION,
+};
+pub use manifest::{
+    MeshingChunkDescriptorV2, MeshingChunkMediaTypeV2, MeshingManifestDispositionV2,
+    MeshingStageManifestV2, MeshingStageResultKindV2, MESHING_STAGE_MANIFEST_SCHEMA_VERSION,
+};
 pub use metric::{
     MetricCombinationRule, MetricContribution, MetricContributionScope, MetricFieldRequestV2,
     MetricSourceKind, MetricTensor3,
@@ -38,6 +50,10 @@ pub use request::{
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 pub use tolerance::GeometryTolerancePolicy;
+pub use workload::{
+    MeshingCapabilityRequirementV2, MeshingProgressV2, MeshingWorkloadRequestV2,
+    MeshingWorkloadResultV2, MESHING_PROGRESS_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
+};
 
 pub(super) fn validate_token(
     field: &str,
@@ -67,5 +83,7 @@ pub(super) fn validate_finite(field: &str, value: f64) -> Result<(), MeshingCont
 
 #[cfg(test)]
 mod artifact_tests;
+#[cfg(test)]
+mod execution_contract_tests;
 #[cfg(test)]
 mod tests;
