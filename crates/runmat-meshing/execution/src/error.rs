@@ -10,6 +10,10 @@ pub enum MeshingExecutionError {
     MissingObject(Digest),
     #[error("meshing execution object identity mismatch: {0}")]
     Identity(&'static str),
+    #[error("invalid meshing execution projection: {0}")]
+    Invalid(String),
+    #[error("shared execution contract rejected meshing projection: {0}")]
+    Execution(#[from] runmat_execution::ContractError),
 }
 
 pub type MeshingExecutionResult<T> = Result<T, MeshingExecutionError>;

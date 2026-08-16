@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    identity::validate_digest_list, validate_token, MeshingContractError, MeshingFailure,
-    MeshingPartitionDescriptorV2, MeshingStageV2, StableDigest,
+    identity::validate_digest_list, validate_token, MeshElementOrderV2, MeshingContractError,
+    MeshingFailure, MeshingPartitionDescriptorV2, MeshingStageV2, StableDigest,
 };
 
 pub const MESHING_WORKLOAD_SCHEMA_VERSION: u16 = 2;
@@ -22,14 +22,22 @@ const MAX_PROGRESS_COUNTS: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MeshingCapabilityRequirementV2 {
+    HostWorkload { abi: String },
     ExactCadKernel { abi: String },
+    MeshingAlgorithm { version: String },
+    ElementOrder { order: MeshElementOrderV2 },
     DeterministicPlatformCohort { cohort: String },
 }
 
 impl MeshingCapabilityRequirementV2 {
     fn validate(&self) -> Result<(), MeshingContractError> {
         match self {
+            Self::HostWorkload { abi } => validate_token("meshing host ABI", abi, 128),
             Self::ExactCadKernel { abi } => validate_token("exact CAD kernel ABI", abi, 128),
+            Self::MeshingAlgorithm { version } => {
+                validate_token("meshing algorithm version", version, 128)
+            }
+            Self::ElementOrder { .. } => Ok(()),
             Self::DeterministicPlatformCohort { cohort } => {
                 validate_token("deterministic platform cohort", cohort, 128)
             }

@@ -6,9 +6,12 @@
 mod error;
 mod objects;
 mod publication;
+mod task;
 
 #[cfg(test)]
 mod publication_tests;
+#[cfg(test)]
+mod task_tests;
 #[cfg(test)]
 mod tests;
 
@@ -21,4 +24,8 @@ pub use objects::{
 pub use publication::{
     import_result_publication, prepare_result_publication, MeshingArtifactAccess,
     PreparedMeshingResultPublication,
+};
+pub use task::{
+    build_task_submission, MeshingExecutionContext, MeshingTaskEffectPolicy,
+    MESHING_EXECUTION_CALLABLE_OWNER,
 };

@@ -7,7 +7,7 @@ use super::{
 
 pub const MESHING_REQUEST_SCHEMA_VERSION: u16 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeshElementOrderV2 {
     Tet4,

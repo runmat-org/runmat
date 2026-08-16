@@ -54,8 +54,17 @@ pub(super) fn workload() -> MeshingWorkloadRequestV2 {
         partition: batch_partition(),
         input_manifest_digests: vec![digest(9)],
         required_capabilities: vec![
+            MeshingCapabilityRequirementV2::HostWorkload {
+                abi: "meshing-host-v2".into(),
+            },
             MeshingCapabilityRequirementV2::ExactCadKernel {
                 abi: "opencascade-7.9".into(),
+            },
+            MeshingCapabilityRequirementV2::MeshingAlgorithm {
+                version: "surface-cdt-v2".into(),
+            },
+            MeshingCapabilityRequirementV2::ElementOrder {
+                order: MeshElementOrderV2::Tet10,
             },
             MeshingCapabilityRequirementV2::DeterministicPlatformCohort {
                 cohort: "native-exact-cad-v1".into(),

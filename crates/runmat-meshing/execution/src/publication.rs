@@ -39,6 +39,15 @@ impl MeshingArtifactAccess {
         }
         Ok(())
     }
+
+    pub fn value_id(&self, logical_digest: Digest) -> ValueId {
+        ValueId::derive(&[
+            b"runmat-meshing-artifact-object-v2",
+            logical_digest.bytes(),
+            self.encryption_context.bytes(),
+            self.authorization_scope.as_bytes(),
+        ])
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,12 +170,7 @@ fn object_reference(
     };
     let reference = ValueRef {
         schema_version: VALUE_PAYLOAD_SCHEMA_V1,
-        id: ValueId::derive(&[
-            b"runmat-meshing-artifact-object-v2",
-            object.descriptor.digest.bytes(),
-            access.encryption_context.bytes(),
-            access.authorization_scope.as_bytes(),
-        ]),
+        id: access.value_id(object.descriptor.digest),
         logical_digest: object.descriptor.digest,
         encoded_length: object.descriptor.encoded_length,
         media_type: object.descriptor.media_type.clone(),
