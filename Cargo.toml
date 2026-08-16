@@ -56,6 +56,7 @@ members = [
     "crates/runmat-analysis/fea",
     "crates/runmat-meshing",
     "crates/runmat-meshing/core",
+    "crates/runmat-meshing/execution",
     "crates/runmat-meshing/cad",
     "crates/runmat-meshing/size",
     "crates/runmat-meshing/curve",
@@ -158,6 +159,7 @@ runmat-analysis-core = { version = "=0.6.1", path = "crates/runmat-analysis/core
 runmat-analysis-fea = { version = "=0.6.1", path = "crates/runmat-analysis/fea" }
 runmat-meshing = { version = "=0.6.1", path = "crates/runmat-meshing" }
 runmat-meshing-core = { version = "=0.6.1", path = "crates/runmat-meshing/core" }
+runmat-meshing-execution = { version = "=0.6.1", path = "crates/runmat-meshing/execution" }
 runmat-meshing-cad = { version = "=0.6.1", path = "crates/runmat-meshing/cad" }
 runmat-meshing-size = { version = "=0.6.1", path = "crates/runmat-meshing/size" }
 runmat-meshing-curve = { version = "=0.6.1", path = "crates/runmat-meshing/curve" }

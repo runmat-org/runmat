@@ -6798,6 +6798,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-meshing-execution"
+version = "0.6.1"
+dependencies = [
+ "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-meshing-core",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-meshing-opt"
 version = "0.6.1"
 dependencies = [
