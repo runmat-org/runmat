@@ -67,17 +67,17 @@
       "output": "firstTwo =\n     2     0\n     0     4"
     },
     {
-      "description": "RunMat extension: returning a vector without creating a matrix",
+      "description": "Returning a vector without creating a matrix",
       "input": "v = [10 20 30];\nd = diag(v, 'vector')",
       "output": "d =\n    10\n    20\n    30"
     },
     {
-      "description": "RunMat extension: creating a rectangular diagonal matrix with `sz`",
+      "description": "Creating a rectangular diagonal matrix with `sz`",
       "input": "v = [1 2];\nR = diag(v, [2 4])",
       "output": "R =\n     1     0     0     0\n     0     2     0     0"
     },
     {
-      "description": "RunMat extension: matching residency and type with `'like'`",
+      "description": "Matching residency and type with `'like'`",
       "input": "G = gpuArray([1 3 5]');\nD = diag([1 2 3], 'like', G)"
     }
   ],

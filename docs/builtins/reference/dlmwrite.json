@@ -77,7 +77,7 @@
       "input": "dlmwrite(\"fixed.txt\", rand(2, 2), \"precision\", \"%.6f\", \"delimiter\", \"\\t\")"
     },
     {
-      "description": "Using the RunMat resident-input extension with Windows line endings",
+      "description": "Writing resident data with Windows line endings",
       "input": "G = gpuArray(single([1.5; 2.5; 3.5]));\ndlmwrite(\"gpu_pc.txt\", G, \"newline\", \"pc\")",
       "output": "% Data is gathered from the GPU and written using CR/LF line endings."
     }

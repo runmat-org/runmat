@@ -57,7 +57,7 @@
       "output": "Y =\n    0          -0.5236    0.8481\n    1.5708      0.2527   -0.9273"
     },
     {
-      "description": "Using the RunMat-only logical-input extension with automatic double promotion",
+      "description": "Computing inverse sine values from logical input",
       "input": "mask = logical([0 1 1 0]);\nangles = asin(mask)",
       "output": "angles = [0 1.5708 1.5708 0]"
     },

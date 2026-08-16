@@ -79,7 +79,7 @@
       "input": "G1 = gpuArray(rand(256, 256));\nG2 = gpuArray(rand(256, 256));\nstacked = cat(3, G1, G2)"
     },
     {
-      "description": "RunMat extension: requesting GPU output with the `\"like\"` prototype",
+      "description": "Requesting GPU output with the `\"like\"` prototype",
       "input": "G = gpuArray(rand(3, 3));\nH = cat(3, zeros(3, 3), ones(3, 3), \"like\", G)"
     },
     {

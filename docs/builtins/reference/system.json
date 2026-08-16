@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Host-only process operation. Commands must be host character vectors or strings; resident numeric inputs are rejected without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -23,9 +23,11 @@
     "unit": "builtins::io::repl_fs::compat::tests",
     "integration": null
   },
-  "description": "Execute an operating-system command and return status and output text.",
+  "description": "`status = system(command)` runs a host operating-system command. `[status, output] = system(command)` also returns the command's combined standard output and standard error text.",
   "behaviors": [
     "Executes commands through cmd /C on Windows and sh -c on Unix-like hosts.",
+    "The command must be a character vector or string scalar. Numeric and GPU-resident values are rejected before any process is started.",
+    "Pass `'-echo'` as the optional second argument to write command output to the RunMat console while still returning the requested outputs.",
     "Returns status by default; with two requested outputs returns status and combined stdout/stderr text.",
     "When called with zero requested outputs, command output is written to the RunMat console stream.",
     "In WebAssembly builds, returns a nonzero status and an explanatory message because process execution is unavailable."

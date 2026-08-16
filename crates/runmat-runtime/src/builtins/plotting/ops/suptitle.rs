@@ -1,10 +1,17 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
+pub const SUPTITLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::AliasOf,
+    canonical_builtin: Some("sgtitle"),
+    notes: "suptitle delegates directly to sgtitle, which owns the integer title, handle-alias, and FontSize semantics.",
+};
 
 const SUPTITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -135,6 +142,7 @@ pub const SUPTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::suptitle::SUPTITLE_DESCRIPTOR),
+    integer_audit(crate::builtins::plotting::suptitle::SUPTITLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::suptitle"
 )]
 pub fn suptitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {

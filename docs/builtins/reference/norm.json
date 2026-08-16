@@ -55,7 +55,7 @@
       "output": "bound = 7"
     },
     {
-      "description": "RunMat extension: summing singular values with the nuclear norm",
+      "description": "Summing singular values with the nuclear norm",
       "input": "A = [2 0 0; 0 1 0];\ntau = norm(A, 'nuc')",
       "output": "tau = 3"
     },

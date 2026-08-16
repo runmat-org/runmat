@@ -306,14 +306,52 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
-simple_descriptor!(
-    SYSTEM_SIGNATURES,
-    SYSTEM_DESCRIPTOR,
-    "[status, output] = system(command)",
-    &INPUTS_ONE,
-    &OUTPUT_STATUS_MESSAGE,
-    BuiltinOutputMode::ByRequestedOutputCount
-);
+const SYSTEM_INPUTS_COMMAND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "command",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Operating-system command to execute.",
+}];
+const SYSTEM_INPUTS_ECHO: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "command",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Operating-system command to execute.",
+    },
+    BuiltinParamDescriptor {
+        name: "echo",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("'-echo'"),
+        description: "The literal '-echo', which also writes command output to the console.",
+    },
+];
+const SYSTEM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "[status, output] = system(command)",
+        inputs: &SYSTEM_INPUTS_COMMAND,
+        outputs: &OUTPUT_STATUS_MESSAGE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, output] = system(command, '-echo')",
+        inputs: &SYSTEM_INPUTS_ECHO,
+        outputs: &OUTPUT_STATUS_MESSAGE,
+    },
+];
+pub const SYSTEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SYSTEM_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+pub const SYSTEM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access.",
+};
 simple_descriptor!(
     WHAT_SIGNATURES,
     WHAT_DESCRIPTOR,
@@ -854,10 +892,10 @@ async fn pathsep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::system_type),
     descriptor(crate::builtins::io::repl_fs::compat::SYSTEM_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::SYSTEM_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("system", &args).await?;
     if args.is_empty() || args.len() > 2 {
         return Err(compat_error(
             "system",
@@ -865,7 +903,18 @@ async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let command = scalar_text(&args[0], "system", "command")?;
-    let echo = args.get(1).is_some_and(truthy);
+    let echo = if let Some(option) = args.get(1) {
+        let option = scalar_text(option, "system", "option")?;
+        if !option.eq_ignore_ascii_case("-echo") {
+            return Err(compat_error(
+                "system",
+                "system: optional second argument must be '-echo'",
+            ));
+        }
+        true
+    } else {
+        false
+    };
     let result = run_system_command(&command)?;
     let requested = output_count::current_output_count();
     if (echo || requested == Some(0)) && !result.1.is_empty() {
@@ -2474,6 +2523,25 @@ mod tests {
         };
         assert_eq!(values[0], Value::Num(0.0));
         assert_eq!(values[1], char_value("hello"));
+    }
+
+    #[test]
+    fn system_rejects_integer_commands_before_process_access() {
+        let error = run(system_builtin(vec![Value::Int(
+            runmat_builtins::IntValue::U64(u64::MAX),
+        )]))
+        .expect_err("integer command must reject");
+        assert!(error.message().contains("command must be"));
+    }
+
+    #[test]
+    fn system_rejects_integer_echo_options_before_process_access() {
+        let error = run(system_builtin(vec![
+            Value::String("printf should-not-run".to_string()),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ]))
+        .expect_err("integer option must reject");
+        assert!(error.message().contains("option must be"));
     }
 
     #[test]

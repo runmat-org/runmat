@@ -55,7 +55,7 @@
       "output": "% f is a positive numeric figure handle"
     },
     {
-      "description": "Create another figure with the RunMat-only 'next' selector",
+      "description": "Selecting the next available figure",
       "input": "f1 = figure();\nf2 = figure(\"next\")",
       "output": "% f2 is a different figure handle from f1"
     },

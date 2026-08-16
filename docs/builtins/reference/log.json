@@ -68,7 +68,7 @@
       "output": "result = [0.0000 0.6931; 1.3863 2.0794]"
     },
     {
-      "description": "Logging character codes in RunMat extension mode",
+      "description": "Logging character codes",
       "input": "C = 'ABC';\nvalues = log(C)",
       "output": "values = [4.1744 4.1897 4.2047]"
     }

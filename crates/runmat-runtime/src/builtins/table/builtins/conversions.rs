@@ -12,6 +12,45 @@ use runmat_macros::runtime_builtin;
 
 const BUILTIN_NAME: &str = "array2table";
 
+const STRUCT2TABLE_INTEGER_FIELDS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "struct field values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Compatible same-class integer fields become homogeneous table variables.",
+    }];
+const STRUCT2TABLE_INTEGER_AS_ARRAY: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "AsArray",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A typed integer scalar is accepted only when its exact value is zero or one.",
+    }];
+pub const STRUCT2TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = struct2table(S) with integer fields",
+        inputs: &STRUCT2TABLE_INTEGER_FIELDS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Scalar-struct fields pass through unchanged. Compatible struct-array fields are concatenated into exact homogeneous integer variables; incompatible values remain cells.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "T = struct2table(S, 'AsArray', integer_tf)",
+        inputs: &STRUCT2TABLE_INTEGER_AS_ARRAY,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The option is parsed from authoritative integer storage; values other than exact zero or one reject.",
+    },
+];
+
 const CELL2TABLE_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "T",
     ty: BuiltinParamType::Any,
@@ -305,6 +344,9 @@ fn integer_row_value(value: &Value, index: usize) -> Option<NumericScalar> {
     keywords = "struct2table,table,struct,AsArray,RowNames",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::table::builtins::conversions::STRUCT2TABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -353,9 +395,13 @@ pub(crate) async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> Buil
                     };
                     values.push(st.fields.get(name).cloned().unwrap_or(Value::Num(f64::NAN)));
                 }
-                columns.push(Value::Cell(
-                    CellArray::new(values, rows, 1).map_err(invalid_variable)?,
-                ));
+                if let Some(integer_column) = compatible_integer_column(&values, rows)? {
+                    columns.push(integer_column);
+                } else {
+                    columns.push(Value::Cell(
+                        CellArray::new(values, rows, 1).map_err(invalid_variable)?,
+                    ));
+                }
             }
             let names = options.table.variable_names.unwrap_or(field_names);
             table_from_columns_with_properties(names, columns, options.table.row_names)
@@ -545,5 +591,36 @@ mod cell2table_tests {
             CellArray::new_with_shape(vec![Value::Int(IntValue::U8(1))], vec![1, 1, 1]).unwrap();
         let err = block_on(cell2table_builtin(Value::Cell(cell), Vec::new())).unwrap_err();
         assert!(err.message().contains("two-dimensional"));
+    }
+
+    #[test]
+    fn struct_array_integer_fields_become_exact_homogeneous_variables() {
+        let mut first = StructValue::new();
+        first.insert("id", Value::Int(IntValue::U64(u64::MAX)));
+        let mut second = StructValue::new();
+        second.insert("id", Value::Int(IntValue::U64(1_u64 << 63)));
+        let structs = CellArray::new(vec![Value::Struct(first), Value::Struct(second)], 2, 1)
+            .expect("struct array");
+
+        let table =
+            block_on(struct2table_builtin(Value::Cell(structs), Vec::new())).expect("struct2table");
+        let variables = table_variables(&into_table_object(table, "test").unwrap()).unwrap();
+        let Value::Tensor(ids) = variables.fields.get("id").expect("id variable") else {
+            panic!("expected homogeneous integer variable");
+        };
+        assert_eq!(
+            ids.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
+        );
+    }
+
+    #[test]
+    fn struct2table_as_array_requires_numeric_zero_or_one() {
+        let err = block_on(struct2table_builtin(
+            Value::Struct(StructValue::new()),
+            vec![Value::from("AsArray"), Value::Int(IntValue::U8(2))],
+        ))
+        .expect_err("AsArray=2 must reject");
+        assert!(err.message().contains("0 or 1"));
     }
 }

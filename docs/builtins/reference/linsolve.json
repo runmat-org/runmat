@@ -53,7 +53,7 @@
       "output": "x =\n     3\n     2\n     1"
     },
     {
-      "description": "Solving the transposed system in RunMat extension mode",
+      "description": "Solving the transposed system",
       "input": "A = [2 1 0; 0 3 4; 0 0 5];\nb = [3; 11; 5];\nopts.UT = true;\nopts.TRANSA = 'T';\nx = linsolve(A, b, opts)",
       "output": "x =\n     1\n     2\n     1"
     },

@@ -55,7 +55,7 @@
       "input": "try\n    feof(9999);\ncatch err\n    disp(err.message);\nend"
     },
     {
-      "description": "Use RunMat-only typed and resident identifier forms when extensions are enabled",
+      "description": "Checking end-of-file with typed and resident identifiers",
       "input": "fid = gpuArray(int32(fopen('samples.dat', 'rb')));\ntf = feof(fid);        % resident and typed-integer extension gates apply before gathering"
     }
   ],

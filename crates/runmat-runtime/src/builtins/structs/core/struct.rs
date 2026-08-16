@@ -8,9 +8,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::structs::type_resolvers::struct_type;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StructValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -54,6 +57,26 @@ enum FieldValue {
 }
 
 const BUILTIN_NAME: &str = "struct";
+
+const STRUCT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "field values",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Integer scalars and arrays may be stored as struct field values.",
+}];
+
+pub const STRUCT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = struct(field, integer_value, ...)",
+        inputs: &STRUCT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Struct construction preserves each field's exact integer class, value, shape, and residency without numeric conversion.",
+    }];
 
 const STRUCT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -250,6 +273,7 @@ fn struct_error_with_message(
     keywords = "struct,structure,name-value,record",
     type_resolver(struct_type),
     descriptor(crate::builtins::structs::core::r#struct::STRUCT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::structs::core::r#struct::STRUCT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
 async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {

@@ -152074,6 +152074,35 @@
           "when": "Field name is not a valid MATLAB identifier.",
           "message": "struct: field names must be valid MATLAB identifiers"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = struct(field, integer_value, ...)",
+          "inputs": [
+            {
+              "name": "field values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer scalars and arrays may be stored as struct field values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Struct construction preserves each field's exact integer class, value, shape, and residency without numeric conversion."
+        }
       ]
     },
     {
@@ -152140,6 +152169,62 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = struct2table(S) with integer fields",
+          "inputs": [
+            {
+              "name": "struct field values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Compatible same-class integer fields become homogeneous table variables."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Scalar-struct fields pass through unchanged. Compatible struct-array fields are concatenated into exact homogeneous integer variables; incompatible values remain cells."
+        },
+        {
+          "form": "T = struct2table(S, 'AsArray', integer_tf)",
+          "inputs": [
+            {
+              "name": "AsArray",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A typed integer scalar is accepted only when its exact value is zero or one."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The option is parsed from authoritative integer storage; values other than exact zero or one reject."
         }
       ]
     },
@@ -152347,6 +152432,35 @@
           "identifier": "RunMat:structfun:FunctionError",
           "when": "Callback execution or callback output arity fails.",
           "message": "structfun: callback execution error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = structfun(func, S, options...) with integer fields or results",
+          "inputs": [
+            {
+              "name": "integer field values and callback results",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Callbacks receive exact integer field values and may return scalar values in any native integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Host callbacks receive authoritative integer values. UniformOutput=true preserves a common integer class exactly and rejects mixed output classes; UniformOutput=false preserves each returned value in its field."
         }
       ]
     },
@@ -153153,7 +153267,11 @@
           "when": "The requested class is not present in RunMat class metadata.",
           "message": "superclasses: class metadata not found"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "superclasses accepts class-name text or class objects. Integer primitives are neither and reject from type metadata without numeric conversion or provider payload access."
+      }
     },
     {
       "name": "suptitle",
@@ -153286,7 +153404,12 @@
           "when": "Internal plotting state update fails.",
           "message": "suptitle: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "AliasOf",
+        "canonical_builtin": "sgtitle",
+        "notes": "suptitle delegates directly to sgtitle, which owns the integer title, handle-alias, and FontSize semantics."
+      }
     },
     {
       "name": "surf",
@@ -154031,6 +154154,35 @@
           "when": "Input cannot be represented as a scalar symbolic value.",
           "message": "sym: expected a scalar text, numeric, logical, or symbolic input"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = sym(integer_scalar)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The current RunMat symbolic implementation accepts integer scalars from every native class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The scalar is converted directly from authoritative integer storage to an arbitrary-precision symbolic integer; no binary floating-point boundary is crossed. Numeric-array symbolic construction remains outside the current scalar implementation."
+        }
       ]
     },
     {
@@ -154072,6 +154224,35 @@
           "identifier": "RunMat:symrcm:Internal",
           "when": "Runtime fails while constructing intermediate tensors or adjacency structures.",
           "message": "symrcm: internal runtime failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = symrcm(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer matrices contribute their exact zero/nonzero structure to the graph ordering."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Adjacency is derived with exact integer zero tests and the result is a one-based double permutation vector. Resident inputs use the provider hook or gather fallback."
         }
       ]
     },
@@ -154132,11 +154313,46 @@
           "label": "[status, output] = system(command)",
           "inputs": [
             {
-              "name": "input",
-              "ty": "Any",
+              "name": "command",
+              "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Input argument."
+              "description": "Operating-system command to execute."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "status",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "0 on success, nonzero on failure."
+            },
+            {
+              "name": "message",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Command output or diagnostic text."
+            }
+          ]
+        },
+        {
+          "label": "[status, output] = system(command, '-echo')",
+          "inputs": [
+            {
+              "name": "command",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Operating-system command to execute."
+            },
+            {
+              "name": "echo",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "'-echo'",
+              "description": "The literal '-echo', which also writes command output to the console."
             }
           ],
           "outputs": [
@@ -154157,7 +154373,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access."
+      }
     },
     {
       "name": "table",

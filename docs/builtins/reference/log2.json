@@ -69,7 +69,7 @@
       "output": "host = [0 2 4 6]"
     },
     {
-      "description": "Applying the gated RunMat character extension",
+      "description": "Computing base-2 logarithms of character codes",
       "input": "C = 'ABC';\nvalues = log2(C)",
       "output": "values = [6.0224 6.0444 6.0661]"
     }

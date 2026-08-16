@@ -61,12 +61,12 @@
       "output": "w = 1.3390 + 0.4024i"
     },
     {
-      "description": "Using the RunMat-only `'like'` output-template extension to keep the result on the GPU",
+      "description": "Matching output storage to a prototype",
       "input": "proto = gpuArray.zeros(1, 1);\nG = gpuArray([-3 -1 0 1 3]);\ndeviceResult = atan(G, 'like', proto);\nresult = gather(deviceResult)",
       "output": "result =\n   -1.2490   -0.7854         0    0.7854    1.2490"
     },
     {
-      "description": "Using the RunMat-only character-input extension",
+      "description": "Computing arctangent values from character codes",
       "input": "codes = atan('RUN')",
       "output": "codes =\n    1.5586    1.5590    1.5580"
     }

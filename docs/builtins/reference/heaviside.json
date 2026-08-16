@@ -57,7 +57,7 @@
       "output": "Y = [0 0.5; 1 NaN]"
     },
     {
-      "description": "Use the RunMat logical-input extension",
+      "description": "Evaluating logical step inputs",
       "input": "mask = [false true];\ny = heaviside(mask)",
       "output": "y = [0.5 1]"
     },
@@ -67,7 +67,7 @@
       "output": "y = heaviside(x)"
     },
     {
-      "description": "Use the RunMat GPU-resident-input extension",
+      "description": "Evaluating resident step inputs",
       "input": "G = gpuArray([-1 0 1]);\nY = heaviside(G);\nhost = gather(Y)"
     }
   ],

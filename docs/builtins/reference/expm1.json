@@ -63,7 +63,7 @@
       "output": "w = [0.4687 + 2.2874i, -1.3679 + 0.0000i]"
     },
     {
-      "description": "Use the RunMat character-input extension",
+      "description": "Computing exp(X)-1 from character codes",
       "input": "C = 'ABC';\nY = expm1(C)",
       "output": "Y = [1.6949e+28 4.6072e+28 1.2524e+29]"
     }

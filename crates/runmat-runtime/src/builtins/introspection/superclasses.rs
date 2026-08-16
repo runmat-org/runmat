@@ -9,8 +9,9 @@ use crate::builtins::introspection::type_resolvers::superclasses_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     superclass_chain, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, Value,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -67,6 +68,13 @@ const SUPERCLASSES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
 
 const BUILTIN_NAME: &str = "superclasses";
 
+pub const SUPERCLASSES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "superclasses accepts class-name text or class objects. Integer primitives are neither and reject from type metadata without numeric conversion or provider payload access.",
+    };
+
 const SUPERCLASSES_ERROR_CLASS_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SUPERCLASSES.CLASS_INVALID",
     identifier: Some("RunMat:SuperclassesClassInvalid"),
@@ -101,6 +109,7 @@ pub const SUPERCLASSES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(superclasses_type),
     descriptor(crate::builtins::introspection::superclasses::SUPERCLASSES_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::superclasses::SUPERCLASSES_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::superclasses"
 )]
 fn superclasses_builtin(value: Value) -> crate::BuiltinResult<Value> {

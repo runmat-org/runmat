@@ -61,12 +61,12 @@
       "output": "stems = 2×2 string\n    \"accel\"    \"gc\"\n    \"plot\"     \"cli\""
     },
     {
-      "description": "Use the RunMat row-wise character-matrix extension",
+      "description": "Extracting text row by row from a character matrix",
       "input": "chars = char(\"Device<GPU>\", \"Planner<Fusion>\");\ntokens = extractBetween(chars, \"<\", \">\")",
       "output": "tokens =\n\n  2×6 char array\n\n    \"GPU   \"\n    \"Fusion\""
     },
     {
-      "description": "Use the RunMat mixed-cell extension",
+      "description": "Extracting text from mixed cell contents",
       "input": "C = {'<missing>', 'A[B]C'; \"Planner <Fusion>\", \"Device<GPU>\"};\nout = extractBetween(C, \"<\", \">\")",
       "output": "out =\n  2×2 cell array\n    {'<missing>'}    {'B'}\n    {\"Fusion\"}       {\"GPU\"}"
     },

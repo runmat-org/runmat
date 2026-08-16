@@ -51,7 +51,7 @@
       "output": "tf = logical\n   1"
     },
     {
-      "description": "Ignore case using the RunMat positional extension",
+      "description": "Ignoring case with a positional flag",
       "input": "tf = startsWith(\"RUNMAT\", \"run\", true)",
       "output": "tf = logical\n   1"
     },

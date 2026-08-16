@@ -57,7 +57,7 @@
       "output": "Y =\n    1.5708    2.0944    0.7227\n         0    1.3181    2.4981"
     },
     {
-      "description": "Using the RunMat-only logical-input extension with automatic double promotion",
+      "description": "Computing inverse cosine values from logical input",
       "input": "mask = logical([0 1 0 1]);\nangles = acos(mask)",
       "output": "angles = [1.5708 0 1.5708 0]"
     },

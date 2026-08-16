@@ -72,7 +72,7 @@
       "output": "M =\n     1     0     3\n     0     5     0\n     7     8     0"
     },
     {
-      "description": "Using the RunMat numeric-delimiter extension",
+      "description": "Reading data with a numeric delimiter code",
       "input": "fid = fopen(\"pipe.txt\", \"w\");\nfprintf(fid, \"5|6|7\\n8|9|10\\n\");\nfclose(fid);\n\nM = dlmread(\"pipe.txt\", double('|'))\ndelete(\"pipe.txt\");",
       "output": "M =\n     5     6     7\n     8     9    10"
     }

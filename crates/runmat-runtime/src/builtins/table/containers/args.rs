@@ -134,7 +134,7 @@ pub(in crate::builtins::table) fn parse_struct2table_options(
         } else if name.eq_ignore_ascii_case("RowNames") {
             table.row_names = Some(string_list(&args[idx + 1])?);
         } else if name.eq_ignore_ascii_case("AsArray") {
-            as_array = bool_scalar(&args[idx + 1], "AsArray")?;
+            as_array = zero_one_bool_scalar(&args[idx + 1], "AsArray")?;
         } else {
             return Err(invalid_argument(format!(
                 "struct2table: unsupported option '{name}'"

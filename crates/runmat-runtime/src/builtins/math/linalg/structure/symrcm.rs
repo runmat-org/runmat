@@ -6,9 +6,13 @@ use std::collections::{HashSet, VecDeque};
 use log::debug;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexTensor, IntegerStorage, LogicalArray, ResolveContext,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -61,6 +65,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "symrcm";
+
+const SYMRCM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Integer matrices contribute their exact zero/nonzero structure to the graph ordering.",
+}];
+pub const SYMRCM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "p = symrcm(integer_A)",
+        inputs: &SYMRCM_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Adjacency is derived with exact integer zero tests and the result is a one-based double permutation vector. Resident inputs use the provider hook or gather fallback.",
+    }];
 
 const SYMRCM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "p",
@@ -134,6 +157,9 @@ fn symrcm_error_with_detail(
     accel = "graph",
     type_resolver(symrcm_type),
     descriptor(crate::builtins::math::linalg::structure::symrcm::SYMRCM_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::linalg::structure::symrcm::SYMRCM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
 async fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
@@ -163,7 +189,7 @@ fn value_into_tensor_for(value: Value) -> BuiltinResult<Tensor> {
         Value::LogicalArray(logical) => logical_to_tensor(&logical),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
             .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e)),
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+        Value::Int(i) => Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
             .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e)),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e)),
