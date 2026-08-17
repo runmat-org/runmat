@@ -147,22 +147,21 @@ mod tests {
         let canonical_policy = workspace_root.join("docs/development/backwards-compat.md");
         let runtime_policy = workspace_root.join("crates/runmat-runtime/src/compatibility.rs");
         let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
-        let mut pending = ["crates", "docs", "scripts"]
-            .into_iter()
-            .map(|directory| workspace_root.join(directory))
-            .collect::<Vec<_>>();
+        let mut pending = vec![workspace_root.clone()];
         while let Some(directory) = pending.pop() {
             for entry in std::fs::read_dir(&directory).expect("read repository directory") {
                 let path = entry.expect("read repository entry").path();
                 if path.is_dir() {
-                    pending.push(path);
-                } else if matches!(
-                    path.extension().and_then(|extension| extension.to_str()),
-                    Some("json" | "md" | "rs" | "sh" | "toml" | "yaml" | "yml")
-                ) && path != canonical_policy
-                    && path != runtime_policy
-                {
-                    let contents = std::fs::read_to_string(&path).expect("read repository file");
+                    if !matches!(
+                        path.file_name().and_then(|name| name.to_str()),
+                        Some(".git" | "target")
+                    ) {
+                        pending.push(path);
+                    }
+                } else if path != canonical_policy && path != runtime_policy {
+                    let Ok(contents) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
                     assert!(
                         !contents.to_ascii_lowercase().contains(&release_label),
                         "the compatibility release label must appear only in {} and the runtime policy: {}",

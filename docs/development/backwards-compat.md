@@ -31,11 +31,11 @@ This policy does not:
 
 Feature support is documented separately. A compatibility target identifies the reference used for matching semantic behavior. It does not imply that every toolbox or feature in that release is implemented, but language behavior will aim to match compatibility with existing code written for that release.
 
-## Current semantic target
+## Current compatibility pin
 
 The current semantic compatibility target for RunMat is **MATLAB R2026a**.
 
-Compatibility-sensitive runtime queries use this same pin: `version("-release")` reports the pinned release, and `verLessThan("matlab", requiredVersion)` compares against its product version, `26.1`. Per-builtin documentation refers to this as “the compatibility target” so changing the pin does not require release-label edits throughout the documentation tree.
+This document is the single reader-facing source of truth for the pin. Compatibility-sensitive runtime queries use the same value: `version("-release")` reports the pinned release, and `verLessThan("matlab", requiredVersion)` compares against its product version, `26.1`. All other documentation refers to it as “the compatibility pin” or “the compatibility target” so changing it does not require release-label edits throughout the documentation tree.
 
 ## Compatibility vocabulary
 
