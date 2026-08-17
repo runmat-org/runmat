@@ -32,7 +32,8 @@ pub use budget::{
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
 pub use geometry_objects::{
-    import_exact_geometry_objects, prepare_exact_geometry_objects, ExactGeometryObjectRoot,
+    import_exact_geometry_input, import_exact_geometry_objects, prepare_exact_geometry_input,
+    prepare_exact_geometry_objects, ExactGeometryObjectRoot, PreparedExactGeometryInput,
     PreparedExactGeometryObjects,
 };
 pub use host::{
