@@ -1,6 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::time::Duration;
 
+use runmat_execution::identity::ArtifactId;
+use runmat_execution::resource::Capability;
 use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::ProgramExecutionResponse;
@@ -16,18 +19,14 @@ use runmat_meshing_core::{
     MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_execution::{
-    import_result_publication, MeshingArtifactAccess, MeshingHostWorkloadV2,
-    MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel, NoopMeshingProgress,
-    ValidatedMeshingStageOutput,
+    build_task_submission, import_result_publication, MeshingArtifactAccess,
+    MeshingExecutionContext, MeshingHostWorkloadV2, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress, ValidatedMeshingStageOutput,
 };
-use runmat_process_host::environment::EnvironmentPolicy;
-use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
-use runmat_process_host::HostCommand;
-use tokio::io::BufReader;
 
 use runmat_execution_runner_native::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
-    NativeObjectStore,
+    NativeProgramSession, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
 struct AdmissionKernel;
@@ -78,24 +77,31 @@ impl MeshingStageKernel for SearchBudgetKernel {
     }
 }
 
+struct SlowKernel;
+
+impl MeshingStageKernel for SlowKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        std::thread::sleep(Duration::from_secs(5));
+        AdmissionKernel.execute(invocation)
+    }
+}
+
 fn main() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
-    if arguments
-        .get(1)
-        .is_some_and(|argument| argument == "--child")
-    {
-        let root = arguments.get(2).expect("child object-store root");
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(run_meshing_worker_stdio(
-                &AdmissionKernel,
-                Path::new(root),
-                limits(),
-            ))
-            .unwrap();
-        return;
+    if let Some(mode) = arguments.get(1) {
+        let root = std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV)
+            .expect("child object-store root from native driver");
+        if mode == "--child" {
+            run_child(&AdmissionKernel, Path::new(&root));
+            return;
+        }
+        if mode == "--slow-child" {
+            run_child(&SlowKernel, Path::new(&root));
+            return;
+        }
     }
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -104,52 +110,42 @@ fn main() {
         .block_on(parent());
 }
 
+fn run_child(kernel: &impl MeshingStageKernel, root: &Path) {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(run_meshing_worker_stdio(kernel, root, limits()))
+        .unwrap();
+}
+
 async fn parent() {
     let directory = tempfile::tempdir().unwrap();
-    let store_root = directory.path().join("objects");
-    let store = NativeObjectStore::open(&store_root, limits().inventory.max_object_bytes).unwrap();
     let (host, request) = fixture();
-
-    let mut command = HostCommand::new(std::env::current_exe().unwrap());
-    command.arguments = vec!["--child".into(), store_root.to_string_lossy().into_owned()];
-    command.environment_policy = EnvironmentPolicy::Clear;
-    let mut child = command.spawn().await.unwrap();
-    let stderr = child.captured_stderr();
-    let stdio = child.take_stdio().unwrap();
-    let mut reader = BufReader::new(stdio.stdout);
-    let mut writer = stdio.stdin;
-    let frame_limits = FrameLimits {
-        max_message_bytes: limits().max_message_bytes,
-    };
-    write_payload(
-        &mut writer,
-        &serde_json::to_vec(&request).unwrap(),
-        frame_limits,
-    )
+    let session = NativeProgramSession::new(config(directory.path(), "--child")).unwrap();
+    let task_submission = submission(&session, &host, &request);
+    let task = session.submit(request.clone(), task_submission).unwrap();
+    let success = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(result) = task.try_result() {
+                break result.unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
     .await
     .unwrap();
-    let payload = read_payload(&mut reader, frame_limits)
-        .await
-        .unwrap_or_else(|error| panic!("child frame failed: {error}; stderr: {}", stderr.text()));
-    let response: ProgramExecutionResponse = serde_json::from_slice(&payload).unwrap();
-    response.validate_against(&request).unwrap();
-    let ProgramExecutionResponse::ExternalizedSuccess {
-        outputs,
-        result_objects,
-    } = response
-    else {
-        panic!("native meshing child did not return an externalized success: {response:?}")
-    };
+    let outputs = success.outputs;
+    let result_objects = success.result_objects;
     assert!(serde_json::to_vec(&outputs).unwrap().len() < 4096);
     assert!(result_objects.len() >= 3);
     let [ValuePayload::Object(root)] = outputs.as_slice() else {
         panic!("native meshing child returned a non-object root")
     };
+    let store = session.object_store();
     let imported =
         import_result_publication(&store, root, host.artifact_access, limits().inventory).unwrap();
     assert_eq!(imported.result_objects(), result_objects);
-    let exit = child.wait().await.unwrap();
-    assert!(exit.success, "child failed: {}", stderr.text());
 
     let mut progress = NoopMeshingProgress;
     let mut local_store = store.clone();
@@ -178,6 +174,86 @@ async fn parent() {
         limits(),
     );
     assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
+
+    let cancellation_directory = tempfile::tempdir().unwrap();
+    let (cancel_host, cancel_request) = fixture();
+    let cancel_session =
+        NativeProgramSession::new(config(cancellation_directory.path(), "--slow-child")).unwrap();
+    let cancel_store_root = cancel_session.object_store().root().to_path_buf();
+    let cancel_task = cancel_session
+        .submit(
+            cancel_request.clone(),
+            submission(&cancel_session, &cancel_host, &cancel_request),
+        )
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    cancel_session.cancel(runmat_execution::CancellationReason::User);
+    let cancelled = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(result) = cancel_task.try_result() {
+                break result;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(cancelled, Err(message) if message.contains("cancelled")));
+    drop(cancel_task);
+    drop(cancel_session);
+    assert!(!cancel_store_root.exists());
+}
+
+fn config(root: &Path, worker_mode: &str) -> runmat_execution_runner_native::NativeExecutionConfig {
+    let mut config =
+        runmat_execution_runner_native::NativeExecutionConfig::for_current_executable().unwrap();
+    config.executable = std::env::current_exe().unwrap();
+    config.worker_arguments = vec![worker_mode.into()];
+    config.max_workers = 1;
+    config.store_root = root.join("native-session");
+    config.worker_capabilities = worker_capabilities();
+    config
+}
+
+fn submission(
+    session: &NativeProgramSession,
+    host: &MeshingHostWorkloadV2,
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+) -> runmat_execution_runner::TaskSubmission {
+    build_task_submission(
+        &host.workload,
+        &host.stage_identity,
+        &host.resolved_request,
+        &[],
+        BTreeSet::new(),
+        &MeshingExecutionContext {
+            scope_id: session.scope_id(),
+            pool_id: session.pool_id(),
+            program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
+            artifact_access: host.artifact_access.clone(),
+            cpu_millicores: 1000,
+            maximum_egress_bytes: 0,
+            maximum_relay_bytes: 0,
+            deadline_unix_millis: None,
+            priority: 0,
+        },
+        MeshingTaskEffectPolicy::ContentAddressedPure {
+            maximum_attempts: 2,
+            replay_proof_digest: stable(91),
+        },
+    )
+    .unwrap()
+}
+
+fn worker_capabilities() -> BTreeSet<Capability> {
+    BTreeSet::from([
+        Capability::ProcessIsolation,
+        Capability::Custom("runmat.meshing.host:host-v2".into()),
+        Capability::Custom("runmat.meshing.exact-cad:occt-v1".into()),
+        Capability::Custom("runmat.meshing.algorithm:geometry/v2".into()),
+        Capability::Custom("runmat.meshing.element-order:tet4".into()),
+        Capability::Custom("runmat.meshing.cohort:native-cohort-v1".into()),
+    ])
 }
 
 fn fixture() -> (

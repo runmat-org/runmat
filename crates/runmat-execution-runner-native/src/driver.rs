@@ -1,7 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
@@ -17,16 +16,16 @@ use runmat_execution_runner::{
     AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction,
     DriverCommand, DriverConfig, PoolSpec, TaskSubmission, WorkerSpec,
 };
-use runmat_process_host::environment::EnvironmentPolicy;
-use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
-use runmat_process_host::HostCommand;
-use tokio::io::BufReader;
+
+mod process;
 
 use crate::local_store::{ArtifactStore, CheckpointStore};
-use crate::protocol::{
-    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+use crate::protocol::StoredProgram;
+use crate::{
+    NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeObjectStore,
 };
-use crate::{NativeExecutionConfig, NativeExecutionError, NativeExecutionResult};
+
+pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
 
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
@@ -66,6 +65,7 @@ pub(crate) struct LocalDriver {
     pool_id: PoolId,
     driver: Mutex<Driver>,
     artifacts: ArtifactStore,
+    objects: NativeObjectStore,
     checkpoints: CheckpointStore,
     completions: Mutex<HashMap<TaskId, Arc<TaskCompletion>>>,
 }
@@ -86,7 +86,7 @@ impl LocalDriver {
             memory_bytes: memory,
             scratch_bytes: memory,
             accelerators: Vec::new(),
-            capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+            capabilities: config.worker_capabilities.clone(),
         };
         let mut driver = Driver::new(DriverConfig::default(), 1)?;
         driver.handle(DriverCommand::RegisterScope {
@@ -115,11 +115,14 @@ impl LocalDriver {
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
                     accelerators: Vec::new(),
-                    capabilities: resources.capabilities.clone(),
+                    capabilities: config.worker_capabilities.clone(),
                 },
             }))?;
         }
         let artifacts = ArtifactStore::new(config.store_root.join("artifacts"))?;
+        let objects =
+            NativeObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let checkpoints = CheckpointStore::new(config.store_root.join("checkpoints"))?;
         let local = Arc::new(Self {
             store_root: config.store_root.clone(),
@@ -128,11 +131,24 @@ impl LocalDriver {
             pool_id,
             driver: Mutex::new(driver),
             artifacts,
+            objects,
             checkpoints,
             completions: Mutex::new(HashMap::new()),
         });
         local.checkpoint()?;
         Ok(local)
+    }
+
+    pub(crate) fn object_store(&self) -> NativeObjectStore {
+        self.objects.clone()
+    }
+
+    pub(crate) const fn scope_id(&self) -> ExecutionScopeId {
+        self.scope_id
+    }
+
+    pub(crate) const fn pool_id(&self) -> PoolId {
+        self.pool_id
     }
 
     pub(crate) fn submit(
@@ -144,20 +160,7 @@ impl LocalDriver {
         inputs: Vec<ValuePayload>,
         outputs: OutputContract,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        artifact.validate_against(&recipe).map_err(|error| {
-            NativeExecutionError::Protocol(format!(
-                "local program artifact failed validation: {error}"
-            ))
-        })?;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
-        let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        self.artifacts.put(artifact_id, &stored)?;
-        let completion = Arc::new(TaskCompletion::new());
-        self.completions
-            .lock()
-            .expect("completion registry poisoned")
-            .insert(task_id, Arc::clone(&completion));
         let request = TaskRequest {
             id: task_id,
             scope_id: self.scope_id,
@@ -184,15 +187,51 @@ impl LocalDriver {
             retry: RetryPolicy::Never,
             deadline_unix_millis: None,
         };
-        let actions =
-            self.driver
-                .lock()
-                .expect("local driver poisoned")
-                .handle(DriverCommand::Submit(Box::new(TaskSubmission {
-                    request,
-                    dependencies: BTreeSet::new(),
-                    priority: 0,
-                })))?;
+        self.submit_task(
+            TaskSubmission {
+                request,
+                dependencies: BTreeSet::new(),
+                priority: 0,
+            },
+            recipe,
+            artifact,
+        )
+    }
+
+    pub(crate) fn submit_task(
+        self: &Arc<Self>,
+        submission: TaskSubmission,
+        recipe: ProgramBuildRecipe,
+        artifact: ProgramArtifact,
+    ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        artifact.validate_against(&recipe).map_err(|error| {
+            NativeExecutionError::Protocol(format!(
+                "local program artifact failed validation: {error}"
+            ))
+        })?;
+        let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
+        if submission.request.scope_id != self.scope_id
+            || submission.request.pool_id != self.pool_id
+            || submission.request.program_artifact_id != artifact_id
+        {
+            return Err(NativeExecutionError::Protocol(
+                "local task submission differs from its session or program artifact".into(),
+            ));
+        }
+        let task_id = submission.request.id;
+        let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        self.artifacts.put(artifact_id, &stored)?;
+        let completion = Arc::new(TaskCompletion::new());
+        self.completions
+            .lock()
+            .expect("completion registry poisoned")
+            .insert(task_id, Arc::clone(&completion));
+        let actions = self
+            .driver
+            .lock()
+            .expect("local driver poisoned")
+            .handle(DriverCommand::Submit(Box::new(submission)))?;
         self.checkpoint()?;
         Self::dispatch(Arc::clone(self), actions);
         Ok(completion)
@@ -252,7 +291,7 @@ impl LocalDriver {
                 .get(&request.task_id)
                 .cloned()
                 .expect("scheduled task has completion");
-            let result = execute_attempt(&this, &request, &completion);
+            let result = process::execute_attempt(&this, &request, &completion);
             let report = match &result {
                 Ok(success) => AttemptReport::Succeeded {
                     result: success.clone(),
@@ -306,97 +345,6 @@ impl LocalDriver {
 impl Drop for LocalDriver {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.store_root);
-    }
-}
-
-fn execute_attempt(
-    driver: &LocalDriver,
-    request: &AttemptRequest,
-    completion: &TaskCompletion,
-) -> TransferResult {
-    let stored = driver
-        .artifacts
-        .get(request.task.program_artifact_id)
-        .map_err(|error| error.to_string())?;
-    let function = request
-        .task
-        .callable
-        .qualified_name
-        .parse::<usize>()
-        .map_err(|error| format!("invalid callable identity: {error}"))?;
-    let stored: StoredProgram =
-        serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
-    let worker_request = WorkerRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-        recipe: stored.recipe,
-        artifact: stored.artifact,
-        function,
-        arguments: request.task.inputs.clone(),
-        requested_outputs: request.task.outputs.requested_outputs,
-    };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| error.to_string())?;
-    runtime.block_on(run_process(driver, worker_request, completion))
-}
-
-async fn run_process(
-    driver: &LocalDriver,
-    request: WorkerRequest,
-    completion: &TaskCompletion,
-) -> TransferResult {
-    let mut command = HostCommand::new(&driver.config.executable);
-    command.arguments = driver.config.worker_arguments.clone();
-    command.environment_policy = EnvironmentPolicy::Inherit;
-    command.max_stderr_bytes = driver.config.max_stderr_bytes;
-    let mut child = command.spawn().await.map_err(|error| error.to_string())?;
-    let stderr = child.captured_stderr();
-    let stdio = child.take_stdio().map_err(|error| error.to_string())?;
-    let mut reader = BufReader::new(stdio.stdout);
-    let mut writer = stdio.stdin;
-    let limits = FrameLimits {
-        max_message_bytes: driver.config.max_message_bytes,
-    };
-    let payload = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
-    write_payload(&mut writer, &payload, limits)
-        .await
-        .map_err(|error| error.to_string())?;
-    let payload = loop {
-        tokio::select! {
-            response = read_payload(&mut reader, limits) => {
-                break response.map_err(|error| {
-                    let stderr = stderr.text();
-                    if stderr.is_empty() { error.to_string() } else { format!("{error}; worker stderr: {stderr}") }
-                })?;
-            }
-            _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                if completion.cancelled.load(Ordering::Acquire) {
-                    let _ = child.terminate_tree().await;
-                    return Err("execution was cancelled".into());
-                }
-            }
-        }
-    };
-    let response: WorkerResponse =
-        serde_json::from_slice(&payload).map_err(|error| error.to_string())?;
-    let _ = child.wait().await;
-    response
-        .validate_against(&request)
-        .map_err(|error| error.to_string())?;
-    match response {
-        WorkerResponse::Success { value } => Ok(AttemptSuccess {
-            outputs: vec![value],
-            result_objects: Vec::new(),
-        }),
-        WorkerResponse::ExternalizedSuccess {
-            outputs,
-            result_objects,
-        } => Ok(AttemptSuccess {
-            outputs,
-            result_objects,
-        }),
-        WorkerResponse::Failure { message } => Err(message),
     }
 }
 

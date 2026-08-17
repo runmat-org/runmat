@@ -1,4 +1,7 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
+
+use runmat_execution::resource::Capability;
 
 #[derive(Clone, Debug)]
 pub struct NativeExecutionConfig {
@@ -6,8 +9,10 @@ pub struct NativeExecutionConfig {
     pub worker_arguments: Vec<String>,
     pub max_workers: u32,
     pub max_message_bytes: u32,
+    pub max_object_bytes: u64,
     pub max_stderr_bytes: usize,
     pub store_root: PathBuf,
+    pub worker_capabilities: BTreeSet<Capability>,
 }
 
 impl NativeExecutionConfig {
@@ -23,8 +28,10 @@ impl NativeExecutionConfig {
             max_workers: std::thread::available_parallelism()
                 .map_or(1, |count| count.get().min(32) as u32),
             max_message_bytes: 64 * 1024 * 1024,
+            max_object_bytes: 512 * 1024 * 1024,
             max_stderr_bytes: 1024 * 1024,
             store_root,
+            worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
         })
     }
 
@@ -33,8 +40,12 @@ impl NativeExecutionConfig {
             || self.worker_arguments.is_empty()
             || self.max_workers == 0
             || self.max_message_bytes == 0
+            || self.max_object_bytes == 0
             || self.max_stderr_bytes == 0
             || self.store_root.as_os_str().is_empty()
+            || !self
+                .worker_capabilities
+                .contains(&Capability::ProcessIsolation)
         {
             return Err("native execution configuration contains an empty bound".into());
         }
