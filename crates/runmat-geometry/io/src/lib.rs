@@ -1,6 +1,7 @@
 //! Geometry import and normalization pipeline.
 
 pub mod cad;
+pub mod exact;
 pub mod import;
 pub mod normalize;
 pub mod preview;
@@ -9,6 +10,9 @@ pub mod sniff;
 
 mod occt;
 
+pub use exact::{
+    import_exact_cad, ExactCadImportOptions, ExactCadKernelShape, ExactCadTopologyInventory,
+};
 pub use import::{
     import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
     GeometryImportContext, GeometryImportOptions,

@@ -165,6 +165,31 @@ pub(crate) fn import_cad_topology(
     native::import_cad_topology(path, bytes, format, options, context).map(Some)
 }
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn import_exact_cad_shape(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &crate::exact::ExactCadImportOptions,
+    context: &GeometryImportContext,
+) -> Result<crate::exact::ExactCadKernelShape, GeometryImportError> {
+    native::import_exact_cad_shape(path, bytes, format, options, context)
+}
+
+#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+pub(crate) fn import_exact_cad_shape(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &crate::exact::ExactCadImportOptions,
+    context: &GeometryImportContext,
+) -> Result<crate::exact::ExactCadKernelShape, GeometryImportError> {
+    let _ = (path, bytes, format, options, context);
+    Err(GeometryImportError::BackendUnavailable(
+        "exact CAD import requires a native OCCT host".into(),
+    ))
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
 pub(crate) fn import_cad_topology(
     path: &str,

@@ -2,6 +2,9 @@
 
 #include <BRep_Builder.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
@@ -11,6 +14,7 @@
 #include <IMeshTools_Parameters.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <Message_ProgressRange.hxx>
+#include <Standard_Version.hxx>
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Quantity_Color.hxx>
@@ -29,10 +33,12 @@
 #include <TopAbs_Orientation.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc.hxx>
 #include <XCAFDoc_ColorTool.hxx>
@@ -42,6 +48,7 @@
 #include <XCAFDoc_MaterialTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Mat.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
@@ -930,6 +937,96 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   return result;
 }
 
+OcctExactShapePayload import_exact_cad_bytes(
+    rust::Str path,
+    rust::Slice<const std::uint8_t> bytes,
+    OcctCadFormat format,
+    OcctImportOptions options) {
+  const std::string path_string = str_from_rust(path);
+  check_cancelled(options);
+  CadDocument document = read_shape(path_string, bytes, format, options);
+  check_cancelled(options);
+
+  // Polygonal data is a derived display cache. Removing it before serialization ensures the
+  // representation consumed by exact evaluators cannot accidentally carry tessellation authority.
+  BRepTools::Clean(document.shape);
+  check_cancelled(options);
+
+  std::ostringstream representation_stream;
+  RunmatCancelProgressIndicator write_progress(options);
+  BRepTools::Write(document.shape, representation_stream, write_progress.Start());
+  check_cancelled(options);
+  const std::string representation = representation_stream.str();
+  if (representation.empty()) {
+    throw std::runtime_error("OCCT exact representation serialization produced no bytes");
+  }
+  if (static_cast<std::uint64_t>(representation.size()) >
+      options.max_exact_representation_bytes) {
+    throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+  }
+
+  OcctExactShapePayload result;
+  result.kernel_version = OCC_VERSION_COMPLETE;
+  result.kernel_abi = std::string("occt/") + OCC_VERSION_COMPLETE + "/brep-v3";
+  result.representation.reserve(representation.size());
+  for (std::size_t index = 0; index < representation.size(); ++index) {
+    if ((index & 0xffff) == 0) {
+      check_cancelled(options);
+    }
+    result.representation.push_back(
+        static_cast<std::uint8_t>(static_cast<unsigned char>(representation[index])));
+  }
+
+  const std::pair<TopAbs_ShapeEnum, std::uint64_t*> inventories[] = {
+      {TopAbs_COMPOUND, &result.compound_count},
+      {TopAbs_COMPSOLID, &result.compsolid_count},
+      {TopAbs_SOLID, &result.solid_count},
+      {TopAbs_SHELL, &result.shell_count},
+      {TopAbs_FACE, &result.face_count},
+      {TopAbs_WIRE, &result.wire_count},
+      {TopAbs_EDGE, &result.edge_count},
+      {TopAbs_VERTEX, &result.vertex_count},
+  };
+  for (const auto& inventory : inventories) {
+    check_cancelled(options);
+    TopTools_IndexedMapOfShape shapes;
+    TopExp::MapShapes(document.shape, inventory.first, shapes);
+    *inventory.second = static_cast<std::uint64_t>(shapes.Extent());
+    if (*inventory.second > options.max_exact_entities) {
+      throw std::runtime_error("OCCT exact topology exceeded its entity budget");
+    }
+  }
+
+  BRepCheck_Analyzer analyzer(document.shape, Standard_True);
+  result.kernel_valid = analyzer.IsValid();
+  check_cancelled(options);
+
+  GProp_GProps surface_properties;
+  BRepGProp::SurfaceProperties(document.shape, surface_properties);
+  result.surface_area = surface_properties.Mass();
+
+  GProp_GProps volume_properties;
+  BRepGProp::VolumeProperties(document.shape, volume_properties);
+  result.volume = volume_properties.Mass();
+  result.has_volume_properties = result.solid_count > 0 && finite_value(result.volume) &&
+                                 result.volume > 0.0;
+  if (result.has_volume_properties) {
+    const gp_Pnt centroid = volume_properties.CentreOfMass();
+    const gp_Mat inertia = volume_properties.MatrixOfInertia();
+    result.centroid_x = centroid.X();
+    result.centroid_y = centroid.Y();
+    result.centroid_z = centroid.Z();
+    result.inertia_xx = inertia.Value(1, 1);
+    result.inertia_yy = inertia.Value(2, 2);
+    result.inertia_zz = inertia.Value(3, 3);
+    result.inertia_xy = inertia.Value(1, 2);
+    result.inertia_xz = inertia.Value(1, 3);
+    result.inertia_yz = inertia.Value(2, 3);
+  }
+  check_cancelled(options);
+  return result;
+}
+
 OcctPreviewSessionStartPayload start_cad_preview_session(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
@@ -982,6 +1079,8 @@ OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
   options.relative_deflection = session.mesh_parameters.Relative;
   options.max_triangles = std::numeric_limits<std::uint64_t>::max();
   options.truncate_at_max_triangles = false;
+  options.max_exact_representation_bytes = std::numeric_limits<std::uint64_t>::max();
+  options.max_exact_entities = std::numeric_limits<std::uint64_t>::max();
   options.cancel_token_id = chunk_options.cancel_token_id;
   check_cancelled(options);
 

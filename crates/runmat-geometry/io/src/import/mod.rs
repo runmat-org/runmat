@@ -100,8 +100,16 @@ pub enum GeometryImportError {
     ParseFailed(String),
     #[error("GEOMETRY_BACKEND_UNAVAILABLE: {0}")]
     BackendUnavailable(String),
+    #[error("GEOMETRY_INVALID: {0}")]
+    InvalidGeometry(String),
     #[error("CAPACITY_LIMIT_EXCEEDED: triangle count {triangles} exceeds limit {limit}")]
     CapacityExceeded { triangles: u64, limit: u64 },
+    #[error("EXACT_REPRESENTATION_LIMIT_EXCEEDED: representation exceeds {limit} bytes")]
+    ExactRepresentationCapacityExceeded { limit: u64 },
+    #[error("EXACT_ENTITY_LIMIT_EXCEEDED: a topology inventory exceeds {limit} entities")]
+    ExactEntityCapacityExceeded { limit: u64 },
+    #[error("GEOMETRY_IMPORT_OPTIONS_INVALID: {0}")]
+    InvalidOptions(String),
     #[error("GEOMETRY_IMPORT_CANCELLED: geometry import cancelled")]
     Cancelled,
 }

@@ -3,9 +3,11 @@ use super::{
     OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic,
     OcctRawTopology,
 };
+use crate::exact::{ExactCadImportOptions, ExactCadKernelShape, ExactCadTopologyInventory};
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
+use runmat_geometry_core::{BodyMassProperties, UnitSystem};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
@@ -27,35 +29,123 @@ pub(crate) fn import_cad_topology(
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
-    let linear_deflection = options
-        .tessellation_profile
-        .chord_tolerance
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(DEFAULT_LINEAR_DEFLECTION);
-    let angular_deflection = options
-        .tessellation_profile
-        .angle_tolerance_deg
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .map(f64::to_radians)
-        .unwrap_or(DEFAULT_ANGULAR_DEFLECTION);
     let payload = ffi::bridge::import_cad_bytes(
         path,
         bytes,
         ffi_format(format),
-        ffi::bridge::OcctImportOptions {
-            linear_deflection,
-            angular_deflection,
-            relative_deflection: options.relative_deflection,
-            max_triangles: options.max_triangles.unwrap_or(u64::MAX),
-            truncate_at_max_triangles: options.budget_policy
-                == GeometryImportBudgetPolicy::Truncate,
-            cancel_token_id: cancel_token.id(),
-        },
+        ffi_import_options(options, cancel_token.id()),
     )
     .map_err(|err| occt_bridge_error("OCCT CAD import failed", err))?;
     context.check_cancelled()?;
 
     payload_to_topology(payload, options, context)
+}
+
+pub(crate) fn import_exact_cad_shape(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &ExactCadImportOptions,
+    context: &GeometryImportContext,
+) -> Result<ExactCadKernelShape, GeometryImportError> {
+    NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
+    context.check_cancelled()?;
+    let meters_per_source_unit = meters_per_unit(options.source_units)?;
+    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
+    let payload = ffi::bridge::import_exact_cad_bytes(
+        path,
+        bytes,
+        ffi_format(format),
+        ffi_exact_import_options(options, cancel_token.id()),
+    )
+    .map_err(|err| exact_bridge_error(err, options))?;
+    context.check_cancelled()?;
+    if !payload.kernel_valid {
+        return Err(GeometryImportError::InvalidGeometry(
+            "OCCT BRepCheck rejected the imported exact shape".into(),
+        ));
+    }
+    if payload.face_count == 0
+        || payload.wire_count == 0
+        || payload.edge_count == 0
+        || payload.vertex_count == 0
+    {
+        return Err(GeometryImportError::InvalidGeometry(
+            "OCCT exact shape has incomplete boundary topology".into(),
+        ));
+    }
+    if payload.solid_count > 0 && !payload.has_volume_properties {
+        return Err(GeometryImportError::InvalidGeometry(
+            "OCCT exact solid has non-positive or non-finite oriented volume".into(),
+        ));
+    }
+    let measured_values = [
+        payload.volume,
+        payload.surface_area,
+        payload.centroid_x,
+        payload.centroid_y,
+        payload.centroid_z,
+        payload.inertia_xx,
+        payload.inertia_yy,
+        payload.inertia_zz,
+        payload.inertia_xy,
+        payload.inertia_xz,
+        payload.inertia_yz,
+    ];
+    if payload.surface_area <= 0.0 || measured_values.iter().any(|value| !value.is_finite()) {
+        return Err(GeometryImportError::InvalidGeometry(
+            "OCCT exact shape produced invalid mass-property evidence".into(),
+        ));
+    }
+    let mass_properties = payload.has_volume_properties.then(|| {
+        let length2 = meters_per_source_unit * meters_per_source_unit;
+        let length3 = length2 * meters_per_source_unit;
+        let length5 = length3 * length2;
+        BodyMassProperties {
+            volume_m3: payload.volume * length3,
+            surface_area_m2: payload.surface_area * length2,
+            centroid_m: [
+                payload.centroid_x * meters_per_source_unit,
+                payload.centroid_y * meters_per_source_unit,
+                payload.centroid_z * meters_per_source_unit,
+            ],
+            inertia_about_centroid_m5: [
+                payload.inertia_xx * length5,
+                payload.inertia_yy * length5,
+                payload.inertia_zz * length5,
+                payload.inertia_xy * length5,
+                payload.inertia_xz * length5,
+                payload.inertia_yz * length5,
+            ],
+        }
+    });
+    Ok(ExactCadKernelShape {
+        kernel_version: payload.kernel_version,
+        kernel_abi: payload.kernel_abi,
+        representation: payload.representation,
+        topology: ExactCadTopologyInventory {
+            compound_count: payload.compound_count,
+            compsolid_count: payload.compsolid_count,
+            solid_count: payload.solid_count,
+            shell_count: payload.shell_count,
+            face_count: payload.face_count,
+            wire_count: payload.wire_count,
+            edge_count: payload.edge_count,
+            vertex_count: payload.vertex_count,
+        },
+        mass_properties,
+    })
+}
+
+fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {
+    match units {
+        UnitSystem::Meter => Ok(1.0),
+        UnitSystem::Millimeter => Ok(0.001),
+        UnitSystem::Inch => Ok(0.0254),
+        UnitSystem::Unspecified => Err(GeometryImportError::InvalidOptions(
+            "exact CAD import requires explicit source units".into(),
+        )),
+    }
 }
 
 pub(crate) fn start_cad_preview_session(
@@ -122,6 +212,26 @@ fn occt_bridge_error(operation: &str, err: impl std::fmt::Display) -> GeometryIm
         GeometryImportError::Cancelled
     } else {
         GeometryImportError::ParseFailed(format!("{operation}: {message}"))
+    }
+}
+
+fn exact_bridge_error(
+    err: impl std::fmt::Display,
+    options: &ExactCadImportOptions,
+) -> GeometryImportError {
+    let message = err.to_string();
+    if message.contains(OCCT_IMPORT_CANCELLED_MESSAGE) {
+        GeometryImportError::Cancelled
+    } else if message.contains("exact representation exceeded") {
+        GeometryImportError::ExactRepresentationCapacityExceeded {
+            limit: options.max_representation_bytes,
+        }
+    } else if message.contains("exact topology exceeded") {
+        GeometryImportError::ExactEntityCapacityExceeded {
+            limit: options.max_entities,
+        }
+    } else {
+        GeometryImportError::ParseFailed(format!("OCCT exact CAD import failed: {message}"))
     }
 }
 
@@ -212,6 +322,24 @@ fn ffi_import_options(
         relative_deflection: options.relative_deflection,
         max_triangles: options.max_triangles.unwrap_or(u64::MAX),
         truncate_at_max_triangles: options.budget_policy == GeometryImportBudgetPolicy::Truncate,
+        max_exact_representation_bytes: u64::MAX,
+        max_exact_entities: u64::MAX,
+        cancel_token_id,
+    }
+}
+
+fn ffi_exact_import_options(
+    options: &ExactCadImportOptions,
+    cancel_token_id: u64,
+) -> ffi::bridge::OcctImportOptions {
+    ffi::bridge::OcctImportOptions {
+        linear_deflection: DEFAULT_LINEAR_DEFLECTION,
+        angular_deflection: DEFAULT_ANGULAR_DEFLECTION,
+        relative_deflection: false,
+        max_triangles: u64::MAX,
+        truncate_at_max_triangles: false,
+        max_exact_representation_bytes: options.max_representation_bytes,
+        max_exact_entities: options.max_entities,
         cancel_token_id,
     }
 }

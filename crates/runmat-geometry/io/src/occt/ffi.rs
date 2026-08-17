@@ -21,6 +21,8 @@ pub(crate) mod bridge {
         relative_deflection: bool,
         max_triangles: u64,
         truncate_at_max_triangles: bool,
+        max_exact_representation_bytes: u64,
+        max_exact_entities: u64,
         cancel_token_id: u64,
     }
 
@@ -83,6 +85,34 @@ pub(crate) mod bridge {
     }
 
     #[derive(Debug, Clone)]
+    struct OcctExactShapePayload {
+        kernel_version: String,
+        kernel_abi: String,
+        representation: Vec<u8>,
+        compound_count: u64,
+        compsolid_count: u64,
+        solid_count: u64,
+        shell_count: u64,
+        face_count: u64,
+        wire_count: u64,
+        edge_count: u64,
+        vertex_count: u64,
+        kernel_valid: bool,
+        has_volume_properties: bool,
+        volume: f64,
+        surface_area: f64,
+        centroid_x: f64,
+        centroid_y: f64,
+        centroid_z: f64,
+        inertia_xx: f64,
+        inertia_yy: f64,
+        inertia_zz: f64,
+        inertia_xy: f64,
+        inertia_xz: f64,
+        inertia_yz: f64,
+    }
+
+    #[derive(Debug, Clone)]
     struct OcctPreviewSessionStartPayload {
         session_id: u64,
         face_count: u64,
@@ -113,6 +143,13 @@ pub(crate) mod bridge {
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctImportPayload>;
+
+        fn import_exact_cad_bytes(
+            path: &str,
+            bytes: &[u8],
+            format: OcctCadFormat,
+            options: OcctImportOptions,
+        ) -> Result<OcctExactShapePayload>;
 
         fn start_cad_preview_session(
             path: &str,
