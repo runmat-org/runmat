@@ -2,8 +2,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use runmat_execution::value::ValuePayload;
 use runmat_execution::JobHandle;
+use runmat_execution_artifact::ProgramExecutionResponse;
 use runmat_runtime::execution::ExecutionServiceError;
 use runmat_value::Value;
 
@@ -16,7 +16,7 @@ enum Command {
     },
     Await {
         handle: JobHandle,
-        response: mpsc::Sender<Result<ValuePayload, ExecutionServiceError>>,
+        response: mpsc::Sender<Result<ProgramExecutionResponse, ExecutionServiceError>>,
     },
     Cancel {
         handle: JobHandle,
@@ -49,7 +49,12 @@ impl DurableJobBridge {
     }
 
     pub(crate) fn await_job(&self, handle: JobHandle) -> Result<Value, ExecutionServiceError> {
-        let payload = self.request(|response| Command::Await { handle, response })?;
+        let response = self.request(|response| Command::Await { handle, response })?;
+        let ProgramExecutionResponse::Success { value: payload } = response else {
+            return Err(ExecutionServiceError::Failed(
+                "durable runtime value cannot consume an externalized program response".into(),
+            ));
+        };
         runmat_runtime::execution::value_codec::decode_inline_value(&payload)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
     }
@@ -114,7 +119,7 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
 async fn await_job(
     client: &LocalSupervisorClient,
     handle: JobHandle,
-) -> Result<ValuePayload, ExecutionServiceError> {
+) -> Result<ProgramExecutionResponse, ExecutionServiceError> {
     loop {
         let attachment = client
             .attach(handle.id, 0, 0)
@@ -125,12 +130,12 @@ async fn await_job(
         }
         match attachment.record.state {
             LocalJobState::Succeeded => {
-                let payload = attachment.value.ok_or_else(|| {
+                let response = attachment.response.ok_or_else(|| {
                     ExecutionServiceError::Failed(
                         "durable program completed without a result".into(),
                     )
                 })?;
-                return Ok(payload);
+                return Ok(response);
             }
             LocalJobState::Failed | LocalJobState::Indeterminate => {
                 return Err(ExecutionServiceError::Failed(

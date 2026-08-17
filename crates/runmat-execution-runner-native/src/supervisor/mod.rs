@@ -11,12 +11,12 @@ mod tests;
 
 pub use client::LocalSupervisorClient;
 pub use driver::{
-    complete_batch_driver, complete_batch_driver_with_value, execute_program_batch,
+    complete_batch_driver, complete_batch_driver_with_response, execute_program_batch,
     prepare_batch_driver,
 };
 pub use model::{
     BatchDriverInvocation, BatchSubmission, JobAttachment, LocalJobRecord, LocalJobState,
-    ProgramBatchSubmission,
+    ProgramBatchSubmission, MIN_RETENTION_MILLIS,
 };
 pub use service::{run_local_supervisor, LocalSupervisor, LocalSupervisorConfig};
 pub use store::SupervisorPaths;

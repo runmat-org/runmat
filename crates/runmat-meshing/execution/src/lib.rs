@@ -6,6 +6,7 @@
 mod budget;
 mod curve_join_kernel;
 mod curve_kernel;
+mod dispatcher;
 mod error;
 mod faceted_geometry_objects;
 mod geometry_control;
@@ -41,6 +42,7 @@ pub use curve_kernel::{
     ExactCurveEvaluatorProvider, ExactCurveGeometryEvaluation, ExactCurveStageKernel,
     PortableCurveEvaluatorProvider,
 };
+pub use dispatcher::MeshingKernelDispatcher;
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
 pub use faceted_geometry_objects::{
     import_faceted_geometry_input, import_faceted_geometry_objects, prepare_faceted_geometry_input,

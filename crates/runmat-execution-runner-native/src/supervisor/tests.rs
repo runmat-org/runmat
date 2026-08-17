@@ -2,15 +2,17 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::time::Duration;
 
 use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
-use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
+use runmat_execution_artifact::{
+    ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionResponse,
+};
 
 use super::auth::{constant_time_eq, read_token};
 use super::model::{
-    BatchDriverInvocation, BatchSubmission, LocalJobState, ProgramBatchSubmission,
-    MIN_RETENTION_MILLIS,
+    BatchDriverInvocation, BatchSubmission, DriverCompletion, LocalJobState,
+    ProgramBatchSubmission, MIN_RETENTION_MILLIS,
 };
 use super::service::{LocalSupervisor, LocalSupervisorConfig};
-use super::store::{load_driver_invocation, JobStore, SupervisorPaths};
+use super::store::{load_driver_invocation, write_completion, JobStore, SupervisorPaths};
 
 fn test_config(temp: &tempfile::TempDir) -> LocalSupervisorConfig {
     let executable = temp.path().join("driver.sh");
@@ -28,7 +30,7 @@ else
   sleep 0.2
 fi
 tmp="$job/completion.helper.tmp"
-printf '{"schema_version":1,"success":true,"exit_code":0,"message":null,"value":null}' > "$tmp"
+printf '{"schema_version":2,"success":true,"exit_code":0,"message":null,"response":null}' > "$tmp"
 mv "$tmp" "$job/completion.json"
 "#,
     )
@@ -38,6 +40,7 @@ mv "$tmp" "$job/completion.json"
         executable,
         paths: SupervisorPaths::new(temp.path().join("state")).unwrap(),
         max_stderr_bytes: 1024,
+        max_object_bytes: 1024 * 1024,
     }
 }
 
@@ -222,4 +225,22 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     let (duplicate, created) = store.create_program(submission, 2).unwrap();
     assert!(!created);
     assert_eq!(duplicate.handle, record.handle);
+
+    let mut completion = DriverCompletion {
+        schema_version: 2,
+        success: false,
+        exit_code: None,
+        message: Some("typed worker failure".into()),
+        response: Some(ProgramExecutionResponse::Failure {
+            message: "typed worker failure".into(),
+        }),
+    };
+    write_completion(&store.job_dir(record.handle.id), &completion).unwrap();
+    assert_eq!(
+        store.completion(record.handle.id).unwrap(),
+        Some(completion.clone())
+    );
+    completion.success = true;
+    write_completion(&store.job_dir(record.handle.id), &completion).unwrap();
+    assert!(store.completion(record.handle.id).is_err());
 }

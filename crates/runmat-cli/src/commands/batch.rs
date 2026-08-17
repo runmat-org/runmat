@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver, complete_batch_driver_with_value, execute_program_batch,
+    complete_batch_driver, complete_batch_driver_with_response, execute_program_batch,
     prepare_batch_driver, BatchDriverInvocation, BatchSubmission, LocalJobRecord, LocalJobState,
     LocalSupervisorClient,
 };
@@ -122,25 +122,17 @@ pub async fn run_driver() -> std::process::ExitCode {
             ..
         } => run_script_driver(source_path, arguments, working_directory).await,
         BatchDriverInvocation::Program { submission, .. } => {
-            match execute_program_batch(*submission).await {
-                WorkerResponse::Success { value } => {
-                    if let Err(error) = complete_batch_driver_with_value(
-                        &job_directory,
-                        true,
-                        Some(0),
-                        None,
-                        Some(value),
-                    ) {
-                        Err(error.to_string())
-                    } else {
-                        return std::process::ExitCode::SUCCESS;
-                    }
-                }
-                WorkerResponse::ExternalizedSuccess { .. } => Err(
-                    "batch result uses externalized objects unsupported by the legacy batch sink"
-                        .into(),
-                ),
-                WorkerResponse::Failure { message } => Err(message),
+            let response = execute_program_batch(*submission).await;
+            let success = matches!(
+                response,
+                WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }
+            );
+            if let Err(error) = complete_batch_driver_with_response(&job_directory, response) {
+                Err(error.to_string())
+            } else if success {
+                return std::process::ExitCode::SUCCESS;
+            } else {
+                return std::process::ExitCode::from(1);
             }
         }
     };

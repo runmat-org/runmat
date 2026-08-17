@@ -204,6 +204,14 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
 fn main() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     if let Some(mode) = arguments.get(1) {
+        if mode == runmat_process_host::HiddenMode::ExecutionDriver.marker() {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(curve_pipeline::run_durable_driver());
+            return;
+        }
         let root = std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV)
             .expect("child object-store root from native driver");
         if mode == "--child" {
@@ -322,6 +330,7 @@ async fn parent() {
     exact_input::native_conformance().await;
     faceted_input::native_conformance().await;
     curve_pipeline::native_conformance().await;
+    curve_pipeline::durable_conformance().await;
 
     let cancellation_directory = tempfile::tempdir().unwrap();
     let (cancel_host, cancel_request) = fixture();

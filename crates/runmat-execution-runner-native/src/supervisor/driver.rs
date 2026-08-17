@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::model::{BatchDriverInvocation, DriverCompletion, ProgramBatchSubmission};
 use super::store::{load_driver_invocation, write_completion, write_driver_marker};
-use crate::protocol::{WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1};
+use crate::protocol::WorkerResponse;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub fn prepare_batch_driver() -> NativeExecutionResult<BatchDriverInvocation> {
@@ -24,36 +24,65 @@ pub fn complete_batch_driver(
     exit_code: Option<i32>,
     message: Option<String>,
 ) -> NativeExecutionResult<()> {
-    complete_batch_driver_with_value(job_directory, success, exit_code, message, None)
-}
-
-pub fn complete_batch_driver_with_value(
-    job_directory: &Path,
-    success: bool,
-    exit_code: Option<i32>,
-    message: Option<String>,
-    value: Option<runmat_execution::value::ValuePayload>,
-) -> NativeExecutionResult<()> {
     write_completion(
         job_directory,
         &DriverCompletion {
-            schema_version: 1,
+            schema_version: 2,
             success,
             exit_code,
             message,
-            value,
+            response: None,
+        },
+    )
+}
+
+pub fn complete_batch_driver_with_response(
+    job_directory: &Path,
+    response: WorkerResponse,
+) -> NativeExecutionResult<()> {
+    let (success, exit_code, message) = match &response {
+        WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. } => {
+            (true, Some(0), None)
+        }
+        WorkerResponse::Failure { message } => (false, None, Some(message.clone())),
+    };
+    write_completion(
+        job_directory,
+        &DriverCompletion {
+            schema_version: 2,
+            success,
+            exit_code,
+            message,
+            response: Some(response),
         },
     )
 }
 
 pub async fn execute_program_batch(submission: ProgramBatchSubmission) -> WorkerResponse {
-    crate::worker::execute(WorkerRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-        recipe: submission.recipe,
-        artifact: submission.artifact,
-        function: submission.function,
-        arguments: submission.arguments,
-        requested_outputs: submission.requested_outputs,
-    })
-    .await
+    let request = submission.program_request();
+    if request.artifact.form != runmat_execution_artifact::ExecutableForm::MeshingWorkload {
+        return crate::worker::execute(request).await;
+    }
+    let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
+        return WorkerResponse::Failure {
+            message: "durable meshing driver has no verified object store".into(),
+        };
+    };
+    let limits = crate::NativeMeshingHostLimits::default();
+    let mut store = match crate::NativeObjectStore::open(root, limits.inventory.max_object_bytes) {
+        Ok(store) => store,
+        Err(error) => {
+            return WorkerResponse::Failure {
+                message: error.to_string(),
+            }
+        }
+    };
+    crate::execute_meshing_program_request(
+        &request,
+        &mut store,
+        &runmat_meshing_execution::MeshingKernelDispatcher,
+        &runmat_meshing_core::NeverCancelled,
+        &mut runmat_meshing_execution::NoopMeshingProgress,
+        limits,
+    )
 }

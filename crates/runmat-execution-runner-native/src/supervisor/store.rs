@@ -270,15 +270,18 @@ impl JobStore {
             return Ok(None);
         }
         let completion: DriverCompletion = read_json(&path)?;
-        if completion.schema_version != 1
-            || completion
-                .message
-                .as_ref()
-                .is_some_and(|value| value.len() > 16 * 1024)
-        {
-            return Err(NativeExecutionError::Protocol(
-                "durable driver completion is malformed".into(),
-            ));
+        completion.validate()?;
+        let request: PersistedRequest = read_json(&self.job_dir(job_id).join("request.json"))?;
+        match (&request.workload, &completion.response) {
+            (PersistedWorkload::Script { .. }, None) => {}
+            (PersistedWorkload::Program { submission }, Some(response)) => response
+                .validate_against(&submission.program_request())
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
+            _ => {
+                return Err(NativeExecutionError::Protocol(
+                    "durable completion differs from its persisted workload kind".into(),
+                ))
+            }
         }
         Ok(Some(completion))
     }
@@ -315,9 +318,9 @@ impl JobStore {
             stderr,
             next_stdout_offset,
             next_stderr_offset,
-            value: self
+            response: self
                 .completion(job_id)?
-                .and_then(|completion| completion.value),
+                .and_then(|completion| completion.response),
         })
     }
 

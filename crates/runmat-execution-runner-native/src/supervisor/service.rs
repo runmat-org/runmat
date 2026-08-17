@@ -28,6 +28,7 @@ pub struct LocalSupervisorConfig {
     pub executable: std::path::PathBuf,
     pub paths: SupervisorPaths,
     pub max_stderr_bytes: usize,
+    pub max_object_bytes: u64,
 }
 
 impl LocalSupervisorConfig {
@@ -36,11 +37,15 @@ impl LocalSupervisorConfig {
             executable: std::env::current_exe().map_err(protocol_io)?,
             paths: SupervisorPaths::platform_default()?,
             max_stderr_bytes: 1024 * 1024,
+            max_object_bytes: 512 * 1024 * 1024,
         })
     }
 
     fn validate(&self) -> NativeExecutionResult<()> {
-        if self.executable.as_os_str().is_empty() || self.max_stderr_bytes == 0 {
+        if self.executable.as_os_str().is_empty()
+            || self.max_stderr_bytes == 0
+            || self.max_object_bytes == 0
+        {
             return Err(NativeExecutionError::Configuration(
                 "local supervisor configuration contains an empty bound".into(),
             ));
@@ -62,6 +67,14 @@ impl LocalSupervisor {
             config,
             store: Mutex::new(store),
         }))
+    }
+
+    pub fn object_store(&self) -> NativeExecutionResult<crate::NativeObjectStore> {
+        crate::NativeObjectStore::open(
+            self.config.paths.root.join("objects"),
+            self.config.max_object_bytes,
+        )
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))
     }
 
     pub async fn submit(
@@ -249,6 +262,15 @@ impl LocalSupervisor {
         command.environment.insert(
             "RUNMAT_EXECUTION_JOB_DIR".into(),
             job_dir.to_string_lossy().into_owned(),
+        );
+        command.environment.insert(
+            crate::NATIVE_OBJECT_STORE_ROOT_ENV.into(),
+            self.config
+                .paths
+                .root
+                .join("objects")
+                .to_string_lossy()
+                .into_owned(),
         );
         command.lifetime = ChildLifetime::Detached;
         command.stdio = StdioPolicy::Files {

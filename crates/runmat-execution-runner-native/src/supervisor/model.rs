@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{Digest, JobHandle};
-use runmat_execution_artifact::{ProgramArtifact, ProgramBuildRecipe};
+use runmat_execution_artifact::{
+    ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -89,13 +92,38 @@ pub struct ProgramBatchSubmission {
 }
 
 impl ProgramBatchSubmission {
+    pub fn from_request(
+        request: ProgramExecutionRequest,
+        idempotency_key: Option<String>,
+        retention_millis: u64,
+    ) -> Self {
+        Self {
+            recipe: request.recipe,
+            artifact: request.artifact,
+            function: request.function,
+            arguments: request.arguments,
+            requested_outputs: request.requested_outputs,
+            idempotency_key,
+            retention_millis,
+        }
+    }
+
+    pub fn program_request(&self) -> ProgramExecutionRequest {
+        ProgramExecutionRequest {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            recipe: self.recipe.clone(),
+            artifact: self.artifact.clone(),
+            function: self.function,
+            arguments: self.arguments.clone(),
+            requested_outputs: self.requested_outputs,
+        }
+    }
+
     pub fn validate(&self) -> NativeExecutionResult<()> {
-        self.artifact
-            .validate_against(&self.recipe)
+        self.program_request()
+            .validate_for_portable_host()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        if self.function.to_string() != self.recipe.entrypoint
-            || self.requested_outputs != self.recipe.outputs.requested_outputs
-            || self.arguments.len() > MAX_BATCH_ARGUMENTS
+        if self.arguments.len() > MAX_BATCH_ARGUMENTS
             || self
                 .idempotency_key
                 .as_deref()
@@ -197,7 +225,31 @@ pub struct DriverCompletion {
     pub success: bool,
     pub exit_code: Option<i32>,
     pub message: Option<String>,
-    pub value: Option<ValuePayload>,
+    pub response: Option<ProgramExecutionResponse>,
+}
+
+impl DriverCompletion {
+    pub fn validate(&self) -> NativeExecutionResult<()> {
+        let response_succeeded = self.response.as_ref().map(|response| {
+            matches!(
+                response,
+                ProgramExecutionResponse::Success { .. }
+                    | ProgramExecutionResponse::ExternalizedSuccess { .. }
+            )
+        });
+        if self.schema_version != 2
+            || self
+                .message
+                .as_ref()
+                .is_some_and(|value| value.len() > 16 * 1024)
+            || response_succeeded.is_some_and(|succeeded| succeeded != self.success)
+        {
+            return Err(NativeExecutionError::Protocol(
+                "durable driver completion is malformed".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -215,7 +267,7 @@ pub struct JobAttachment {
     pub stderr: Vec<u8>,
     pub next_stdout_offset: u64,
     pub next_stderr_offset: u64,
-    pub value: Option<ValuePayload>,
+    pub response: Option<ProgramExecutionResponse>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

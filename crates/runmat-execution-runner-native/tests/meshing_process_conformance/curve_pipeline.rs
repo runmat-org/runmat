@@ -1,22 +1,12 @@
 use super::*;
 
+use runmat_execution_runner_native::supervisor::{
+    complete_batch_driver_with_response, execute_program_batch, prepare_batch_driver,
+    BatchDriverInvocation, LocalJobState, LocalSupervisor, LocalSupervisorConfig,
+    ProgramBatchSubmission, SupervisorPaths, MIN_RETENTION_MILLIS,
+};
+pub(super) use runmat_meshing_execution::MeshingKernelDispatcher as CurvePipelineKernel;
 use runmat_meshing_execution::{ExactCurveJoinKernel, ExactCurveStageKernel};
-
-pub(super) struct CurvePipelineKernel;
-
-impl MeshingStageKernel for CurvePipelineKernel {
-    fn execute(
-        &self,
-        invocation: MeshingStageInvocation<'_, '_>,
-    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
-        match invocation.host.workload.partition.kind {
-            MeshingPartitionKind::DeterministicJoin => {
-                ExactCurveJoinKernel::default().execute(invocation)
-            }
-            _ => ExactCurveStageKernel::default().execute(invocation),
-        }
-    }
-}
 
 pub(super) struct CurveFixture {
     pub(super) partition_host: MeshingHostWorkload,
@@ -69,6 +59,116 @@ pub(super) async fn native_conformance() {
     let streams = publication.stage_objects().decoded_streams().unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].media_type, MeshingChunkMediaType::CurveMesh);
+}
+
+pub(super) async fn durable_conformance() {
+    let directory = tempfile::tempdir().unwrap();
+    let configuration = LocalSupervisorConfig {
+        executable: std::env::current_exe().unwrap(),
+        paths: SupervisorPaths::new(directory.path().join("durable-state")).unwrap(),
+        max_stderr_bytes: 1024 * 1024,
+        max_object_bytes: limits().inventory.max_object_bytes,
+    };
+    let fixture = fixture(revision(), "durable-curve-meshing-run");
+    let supervisor = LocalSupervisor::open(configuration.clone()).unwrap();
+    let mut store = supervisor.object_store().unwrap();
+    seed_exact_input(&mut store, &fixture.input);
+
+    let partition = supervisor
+        .submit_program(ProgramBatchSubmission::from_request(
+            fixture.partition_request.clone(),
+            Some("curve-partition".into()),
+            MIN_RETENTION_MILLIS,
+        ))
+        .await
+        .unwrap()
+        .0;
+    let partition = wait_for_durable(&supervisor, partition.handle.id).await;
+    let ProgramExecutionResponse::ExternalizedSuccess {
+        outputs,
+        result_objects,
+    } = partition.response.unwrap()
+    else {
+        panic!("durable curve partition did not externalize its result")
+    };
+    assert_eq!(outputs, fixture.expected_partition_outputs);
+    assert!(result_objects.iter().all(|reference| store
+        .read_verified(reference.logical_digest)
+        .unwrap()
+        .is_some()));
+
+    drop(supervisor);
+    let supervisor = LocalSupervisor::open(configuration).unwrap();
+    let recovered = supervisor
+        .attach(partition.record.handle.id, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(recovered.record.state, LocalJobState::Succeeded);
+    assert!(matches!(
+        recovered.response,
+        Some(ProgramExecutionResponse::ExternalizedSuccess { .. })
+    ));
+
+    let join = supervisor
+        .submit_program(ProgramBatchSubmission::from_request(
+            fixture.join_request.clone(),
+            Some("curve-join".into()),
+            MIN_RETENTION_MILLIS,
+        ))
+        .await
+        .unwrap()
+        .0;
+    let join = wait_for_durable(&supervisor, join.handle.id).await;
+    let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = join.response.unwrap()
+    else {
+        panic!("durable curve join did not externalize its result")
+    };
+    assert_eq!(outputs, fixture.expected_join_outputs);
+    let [ValuePayload::Object(root)] = outputs.as_slice() else {
+        panic!("durable curve join returned a non-object root")
+    };
+    let publication = import_result_publication(
+        &store,
+        root,
+        fixture.join_host.artifact_access,
+        limits().inventory,
+    )
+    .unwrap();
+    assert_eq!(
+        publication.stage_objects().decoded_streams().unwrap()[0].media_type,
+        MeshingChunkMediaType::CurveMesh
+    );
+}
+
+pub(super) async fn run_durable_driver() {
+    let invocation = prepare_batch_driver().unwrap();
+    let BatchDriverInvocation::Program {
+        job_directory,
+        submission,
+    } = invocation
+    else {
+        panic!("meshing conformance durable driver received a script")
+    };
+    let response = execute_program_batch(*submission).await;
+    complete_batch_driver_with_response(&job_directory, response).unwrap();
+}
+
+async fn wait_for_durable(
+    supervisor: &std::sync::Arc<LocalSupervisor>,
+    job_id: runmat_execution::JobId,
+) -> runmat_execution_runner_native::supervisor::JobAttachment {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let attachment = supervisor.attach(job_id, 0, 0).await.unwrap();
+            if attachment.record.state.is_terminal() {
+                assert_eq!(attachment.record.state, LocalJobState::Succeeded);
+                break attachment;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("durable curve stage timed out")
 }
 
 pub(super) async fn remote_conformance(
