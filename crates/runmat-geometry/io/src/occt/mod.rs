@@ -33,6 +33,8 @@ mod exact_projection;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod import_validation;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod native;
 #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
 mod wasm;

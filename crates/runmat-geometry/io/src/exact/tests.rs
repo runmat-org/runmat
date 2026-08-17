@@ -133,6 +133,18 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         ),
         Err(GeometryImportError::ExactEntityCapacityExceeded { limit: 5 })
     ));
+    let mut validation_limited = options;
+    validation_limited.max_validation_search_work = 1;
+    assert!(matches!(
+        import_exact_cad(
+            "box.brep",
+            BOX,
+            GeometryFormat::Brep,
+            &validation_limited,
+            &context,
+        ),
+        Err(GeometryImportError::ExactValidationBudgetExceeded(_))
+    ));
 
     let cancelled = Arc::new(AtomicBool::new(true));
     assert!(matches!(

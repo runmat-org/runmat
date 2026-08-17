@@ -1,7 +1,7 @@
 use super::{
-    exact_projection, ffi, topology_from_raw, OcctCadFormat, OcctCadPreviewSessionChunk,
-    OcctCadPreviewSessionStart, OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceEvaluationSample,
-    OcctRawFaceSemantic, OcctRawTopology,
+    exact_projection, ffi, import_validation, topology_from_raw, OcctCadFormat,
+    OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart, OcctCadTopology, OcctRawAssemblyNode,
+    OcctRawFaceEvaluationSample, OcctRawFaceSemantic, OcctRawTopology,
 };
 use crate::exact::{ExactCadImportOptions, ImportedExactCad};
 use crate::import::{
@@ -124,13 +124,30 @@ pub(crate) fn import_exact_cad_shape(
         meters_per_source_unit,
         mass_properties.as_ref(),
     )?;
-    Ok(ImportedExactCad {
+    let imported = ImportedExactCad {
         kernel_version: payload.kernel_version,
         meters_per_source_unit,
         representation: payload.representation,
         topology,
         evaluators,
-    })
+    };
+    let tolerance_m = imported
+        .topology
+        .vertices
+        .iter()
+        .map(|vertex| vertex.tolerance_m)
+        .fold(0.0_f64, f64::max)
+        .max(f64::EPSILON);
+    let evaluator = super::evaluator::OcctExactEvaluator::new(&imported)
+        .map_err(import_validation::map_validation_error)?;
+    evaluator
+        .validate_incidence_consistency(
+            &imported.topology,
+            tolerance_m,
+            &import_validation::ImportEvaluationControl::new(context, options),
+        )
+        .map_err(import_validation::map_validation_error)?;
+    Ok(imported)
 }
 
 fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {

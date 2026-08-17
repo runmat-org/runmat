@@ -588,6 +588,11 @@ fn load_error_mapping_covers_exact_import_failures() {
             "RM.GEOMETRY.LOAD.EXACT_ENTITY_LIMIT_EXCEEDED",
             OperationErrorType::Capacity,
         ),
+        (
+            GeometryImportError::ExactValidationBudgetExceeded("search work".into()),
+            "RM.GEOMETRY.LOAD.EXACT_VALIDATION_BUDGET_EXCEEDED",
+            OperationErrorType::Capacity,
+        ),
     ];
     for (source, code, error_type) in cases {
         let error = map_geometry_load_error("/part.brep", source, &context);

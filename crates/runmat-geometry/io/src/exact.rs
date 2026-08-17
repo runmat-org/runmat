@@ -39,6 +39,10 @@ pub struct ExactCadImportOptions {
     pub max_representation_bytes: u64,
     /// Hard per-kind bound for compounds, solids, shells, faces, wires, edges, and vertices.
     pub max_entities: u64,
+    /// Hard work bounds for independent exact-incidence admission after kernel import.
+    pub max_validation_iterations: u64,
+    pub max_validation_search_work: u64,
+    pub max_validation_allocation_bytes: u64,
 }
 
 impl Default for ExactCadImportOptions {
@@ -47,6 +51,9 @@ impl Default for ExactCadImportOptions {
             source_units: UnitSystem::Meter,
             max_representation_bytes: 512 * 1024 * 1024,
             max_entities: 10_000_000,
+            max_validation_iterations: 10_000_000,
+            max_validation_search_work: 100_000_000,
+            max_validation_allocation_bytes: 512 * 1024 * 1024,
         }
     }
 }
@@ -64,9 +71,14 @@ pub fn import_exact_cad(
             "exact CAD payload is empty".into(),
         ));
     }
-    if options.max_representation_bytes == 0 || options.max_entities == 0 {
+    if options.max_representation_bytes == 0
+        || options.max_entities == 0
+        || options.max_validation_iterations == 0
+        || options.max_validation_search_work == 0
+        || options.max_validation_allocation_bytes == 0
+    {
         return Err(GeometryImportError::InvalidOptions(
-            "exact representation and entity budgets must be nonzero".into(),
+            "exact representation, entity, and validation budgets must be nonzero".into(),
         ));
     }
     let format = OcctCadFormat::from_geometry_format(format)

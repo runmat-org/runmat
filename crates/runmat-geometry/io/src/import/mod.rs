@@ -108,6 +108,8 @@ pub enum GeometryImportError {
     ExactRepresentationCapacityExceeded { limit: u64 },
     #[error("EXACT_ENTITY_LIMIT_EXCEEDED: a topology inventory exceeds {limit} entities")]
     ExactEntityCapacityExceeded { limit: u64 },
+    #[error("EXACT_VALIDATION_BUDGET_EXCEEDED: {0}")]
+    ExactValidationBudgetExceeded(String),
     #[error("GEOMETRY_IMPORT_OPTIONS_INVALID: {0}")]
     InvalidOptions(String),
     #[error("GEOMETRY_IMPORT_CANCELLED: geometry import cancelled")]

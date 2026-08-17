@@ -2460,6 +2460,11 @@ fn map_geometry_load_error(
             OperationErrorType::Capacity,
             false,
         ),
+        GeometryImportError::ExactValidationBudgetExceeded(_) => (
+            "RM.GEOMETRY.LOAD.EXACT_VALIDATION_BUDGET_EXCEEDED",
+            OperationErrorType::Capacity,
+            false,
+        ),
         GeometryImportError::InvalidGeometry(_) => (
             "RM.GEOMETRY.LOAD.INVALID_GEOMETRY",
             OperationErrorType::Validation,
