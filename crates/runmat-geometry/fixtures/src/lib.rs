@@ -53,9 +53,13 @@ pub fn exact_circle() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorReg
             solid_ids: vec![solid.clone()],
         }],
         solids: vec![ExactSolid {
-            id: solid,
+            id: solid.clone(),
             outer_shell_id: shell.clone(),
             void_shell_ids: Vec::new(),
+        }],
+        regions: vec![ExactRegion {
+            id: id(PersistentEntityKind::Region, "region"),
+            solid_id: solid,
         }],
         shells: vec![ExactShell {
             id: shell,
@@ -302,6 +306,7 @@ fn exact_model() -> ExactBRepModel {
         body_count: 1,
         lump_count: 1,
         solid_count: 1,
+        region_count: 1,
         shell_count: 1,
         face_count: 1,
         wire_count: 1,

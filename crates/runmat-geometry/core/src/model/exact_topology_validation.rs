@@ -21,6 +21,7 @@ impl ExactBRepTopology {
             .saturating_add(self.bodies.len())
             .saturating_add(self.lumps.len())
             .saturating_add(self.solids.len())
+            .saturating_add(self.regions.len())
             .saturating_add(self.shells.len())
             .saturating_add(self.faces.len())
             .saturating_add(self.wires.len())
@@ -81,6 +82,7 @@ impl ExactBRepTopology {
         require_count("body", self.bodies.len(), model.body_count)?;
         require_count("lump", self.lumps.len(), model.lump_count)?;
         require_count("solid", self.solids.len(), model.solid_count)?;
+        require_count("region", self.regions.len(), model.region_count)?;
         require_count("shell", self.shells.len(), model.shell_count)?;
         require_count("face", self.faces.len(), model.face_count)?;
         require_count("wire", self.wires.len(), model.wire_count)?;
@@ -114,6 +116,11 @@ impl ExactBRepTopology {
             "solids",
             PersistentEntityKind::Solid,
             self.solids.iter().map(|value| &value.id),
+        )?;
+        let regions = collect_ids(
+            "regions",
+            PersistentEntityKind::Region,
+            self.regions.iter().map(|value| &value.id),
         )?;
         let shells = collect_ids(
             "shells",
@@ -214,6 +221,32 @@ impl ExactBRepTopology {
             return Err(invalid(
                 "solid ownership",
                 "every solid must have one lump owner",
+            ));
+        }
+        let mut region_solids = BTreeSet::new();
+        for region in &self.regions {
+            require_reference(
+                "region solid",
+                &region.solid_id,
+                PersistentEntityKind::Solid,
+                &solids,
+            )?;
+            require_same_scope(
+                "region solid",
+                &region.id,
+                std::iter::once(&region.solid_id),
+            )?;
+            if !region_solids.insert(region.solid_id.clone()) {
+                return Err(invalid(
+                    "region ownership",
+                    "a solid has multiple exact regions",
+                ));
+            }
+        }
+        if region_solids != solids {
+            return Err(invalid(
+                "region ownership",
+                "every solid must own exactly one exact region",
             ));
         }
         let mut claimed_shells = claimed_sheet_shells;
@@ -432,7 +465,7 @@ impl ExactBRepTopology {
                 ));
             }
         }
-        validate_interfaces(self, &faces)?;
+        validate_interfaces(self, &faces, &regions)?;
         let interface_faces = self
             .interfaces
             .iter()

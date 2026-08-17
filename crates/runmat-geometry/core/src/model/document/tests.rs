@@ -76,6 +76,7 @@ fn exact_document() -> GeometryDocument {
                 body_count: 1,
                 lump_count: 1,
                 solid_count: 1,
+                region_count: 1,
                 shell_count: 1,
                 face_count: 6,
                 wire_count: 6,

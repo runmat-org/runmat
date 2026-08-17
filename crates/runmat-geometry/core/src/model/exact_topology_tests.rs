@@ -86,9 +86,13 @@ pub(super) fn topology() -> ExactBRepTopology {
             solid_ids: vec![solid.clone()],
         }],
         solids: vec![ExactSolid {
-            id: solid,
+            id: solid.clone(),
             outer_shell_id: shell.clone(),
             void_shell_ids: Vec::new(),
+        }],
+        regions: vec![ExactRegion {
+            id: part_id(PersistentEntityKind::Region, "region-a"),
+            solid_id: solid,
         }],
         shells: vec![ExactShell {
             id: shell,
@@ -174,6 +178,7 @@ pub(super) fn model() -> ExactBRepModel {
         body_count: 1,
         lump_count: 1,
         solid_count: 1,
+        region_count: 1,
         shell_count: 1,
         face_count: 1,
         wire_count: 1,
@@ -203,9 +208,13 @@ fn add_second_interface_side(topology: &mut ExactBRepTopology) {
         solid_ids: vec![solid.clone()],
     });
     topology.solids.push(ExactSolid {
-        id: solid,
+        id: solid.clone(),
         outer_shell_id: shell.clone(),
         void_shell_ids: Vec::new(),
+    });
+    topology.regions.push(ExactRegion {
+        id: part_id(PersistentEntityKind::Region, "region-b"),
+        solid_id: solid,
     });
     topology.shells.push(ExactShell {
         id: shell,
@@ -319,9 +328,11 @@ fn sheet_bodies_own_shells_without_fake_solids() {
     sheet.bodies[0].sheet_shell_ids = vec![sheet.shells[0].id.clone()];
     sheet.lumps.clear();
     sheet.solids.clear();
+    sheet.regions.clear();
     let mut summary = model();
     summary.lump_count = 0;
     summary.solid_count = 0;
+    summary.region_count = 0;
     sheet.validate_against(&summary).unwrap();
 
     sheet.bodies[0].lump_ids = vec![id(PersistentEntityKind::Lump, "missing")];
@@ -360,8 +371,8 @@ fn shared_interfaces_require_opposite_oriented_region_uses() {
     add_second_interface_side(&mut topology);
     topology.interfaces.push(ExactSharedInterface {
         face_id: topology.faces[0].id.clone(),
-        side_a_region_id: id(PersistentEntityKind::Region, "region-a"),
-        side_b_region_id: id(PersistentEntityKind::Region, "region-b"),
+        side_a_region_id: topology.regions[0].id.clone(),
+        side_b_region_id: topology.regions[1].id.clone(),
         side_a_orientation: TopologicalOrientation::Forward,
         side_b_orientation: TopologicalOrientation::Reversed,
     });
@@ -369,6 +380,7 @@ fn shared_interfaces_require_opposite_oriented_region_uses() {
     summary.body_count = 2;
     summary.lump_count = 2;
     summary.solid_count = 2;
+    summary.region_count = 2;
     summary.shell_count = 2;
     summary.interface_count = 1;
     topology.validate_against(&summary).unwrap();
@@ -376,6 +388,42 @@ fn shared_interfaces_require_opposite_oriented_region_uses() {
     assert!(topology.validate_against(&summary).is_err());
     topology.interfaces[0].side_b_orientation = TopologicalOrientation::Reversed;
     topology.shells[1].face_uses[0].orientation = TopologicalOrientation::Forward;
+    assert!(topology.validate_against(&summary).is_err());
+}
+
+#[test]
+fn shared_interfaces_reject_unknown_regions() {
+    let mut topology = topology();
+    add_second_interface_side(&mut topology);
+    topology.interfaces.push(ExactSharedInterface {
+        face_id: topology.faces[0].id.clone(),
+        side_a_region_id: topology.regions[0].id.clone(),
+        side_b_region_id: part_id(PersistentEntityKind::Region, "unknown"),
+        side_a_orientation: TopologicalOrientation::Forward,
+        side_b_orientation: TopologicalOrientation::Reversed,
+    });
+    let mut summary = model();
+    summary.body_count = 2;
+    summary.lump_count = 2;
+    summary.solid_count = 2;
+    summary.region_count = 2;
+    summary.shell_count = 2;
+    summary.interface_count = 1;
+    assert!(topology.validate_against(&summary).is_err());
+}
+
+#[test]
+fn exact_regions_require_one_to_one_solid_ownership() {
+    let mut topology = topology();
+    add_second_interface_side(&mut topology);
+    let mut summary = model();
+    summary.body_count = 2;
+    summary.lump_count = 2;
+    summary.solid_count = 2;
+    summary.region_count = 2;
+    summary.shell_count = 2;
+
+    topology.regions[1].solid_id = topology.regions[0].solid_id.clone();
     assert!(topology.validate_against(&summary).is_err());
 }
 

@@ -71,6 +71,7 @@ pub struct ExactBRepModel {
     pub body_count: u64,
     pub lump_count: u64,
     pub solid_count: u64,
+    pub region_count: u64,
     pub shell_count: u64,
     pub face_count: u64,
     pub wire_count: u64,

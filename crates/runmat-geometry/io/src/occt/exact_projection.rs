@@ -13,6 +13,7 @@ use super::{
     exact_persistent_names::PersistentNameIndex,
     exact_projection_evaluators::project_evaluators,
     exact_projection_identity::*,
+    exact_projection_interfaces::project_regions_and_interfaces,
     exact_projection_occurrence::{BodyPartitions, OccurrenceIndex},
     ffi::bridge,
 };
@@ -45,6 +46,7 @@ pub(super) fn project_exact_contracts(
         bodies: Vec::new(),
         lumps: Vec::new(),
         solids: Vec::new(),
+        regions: Vec::new(),
         shells: Vec::new(),
         faces: Vec::new(),
         wires: Vec::new(),
@@ -323,6 +325,9 @@ pub(super) fn project_exact_contracts(
         representation_digest,
     )?;
     topology.bodies = body_projection.bodies;
+    let region_projection = project_regions_and_interfaces(&topology)?;
+    topology.regions = region_projection.regions;
+    topology.interfaces = region_projection.interfaces;
 
     let evaluators = project_evaluators(
         payload,
@@ -403,6 +408,7 @@ fn validation_model(
         body_count: topology.bodies.len() as u64,
         lump_count: topology.lumps.len() as u64,
         solid_count: topology.solids.len() as u64,
+        region_count: topology.regions.len() as u64,
         shell_count: topology.shells.len() as u64,
         face_count: topology.faces.len() as u64,
         wire_count: topology.wires.len() as u64,

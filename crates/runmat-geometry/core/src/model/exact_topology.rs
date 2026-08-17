@@ -28,6 +28,7 @@ pub struct ExactBRepTopology {
     pub bodies: Vec<ExactBody>,
     pub lumps: Vec<ExactLump>,
     pub solids: Vec<ExactSolid>,
+    pub regions: Vec<ExactRegion>,
     pub shells: Vec<ExactShell>,
     pub faces: Vec<ExactFace>,
     pub wires: Vec<ExactWire>,
@@ -85,6 +86,13 @@ pub struct ExactSolid {
     pub outer_shell_id: PersistentEntityId,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub void_shell_ids: Vec<PersistentEntityId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactRegion {
+    pub id: PersistentEntityId,
+    pub solid_id: PersistentEntityId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -22,6 +22,7 @@ const GAPPED_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/gapped_sheet
 const INVALID_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/invalid_cavity.brep");
 const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_solid_sheet.brep");
 const SHORT_EDGE_FACE: &[u8] = include_bytes!("../../../tests/fixtures/short_edge_face.brep");
+const SHARED_INTERFACE: &[u8] = include_bytes!("../../../tests/fixtures/shared_interface.brep");
 const SLIVER_FACE_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/sliver_face_sheet.brep");
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
 const XCAF_SHORT_EDGE_ASSEMBLY: &[u8] =
@@ -75,6 +76,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
     assert_eq!(imported.topology.instances.len(), 3);
     assert_eq!(imported.topology.bodies.len(), 2);
     assert_eq!(imported.topology.solids.len(), 2);
+    assert_eq!(imported.topology.regions.len(), 2);
     assert_eq!(imported.topology.faces.len(), 12);
     let body_assemblies = imported
         .topology
@@ -242,6 +244,55 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
             ..
         })
     ));
+}
+
+#[test]
+fn conformal_solids_share_one_oriented_interface_identity() {
+    let imported = import_exact_cad(
+        "shared_interface.brep",
+        SHARED_INTERFACE,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let reimported = import_exact_cad(
+        "renamed-interface.brep",
+        SHARED_INTERFACE,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+
+    assert_eq!(imported, reimported);
+    assert_eq!(imported.topology.solids.len(), 2);
+    assert_eq!(imported.topology.faces.len(), 11);
+    assert_eq!(imported.topology.interfaces.len(), 1);
+    let interface = &imported.topology.interfaces[0];
+    assert_eq!(
+        interface.side_a_region_id.kind,
+        runmat_geometry_core::PersistentEntityKind::Region
+    );
+    assert_eq!(
+        interface.side_b_region_id.kind,
+        runmat_geometry_core::PersistentEntityKind::Region
+    );
+    assert_ne!(interface.side_a_region_id, interface.side_b_region_id);
+    assert!(imported
+        .topology
+        .regions
+        .iter()
+        .any(|region| region.id == interface.side_a_region_id));
+    assert!(imported
+        .topology
+        .regions
+        .iter()
+        .any(|region| region.id == interface.side_b_region_id));
+    assert_ne!(interface.side_a_orientation, interface.side_b_orientation);
+    assert_eq!(imported.model.interface_count, 1);
+    assert_eq!(imported.model.region_count, 2);
+    assert_eq!(imported.model.contact_count, 0);
 }
 
 #[test]

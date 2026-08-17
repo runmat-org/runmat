@@ -5,6 +5,7 @@ use super::{ExactBRepTopology, GeometryContractError, PersistentEntityId, Persis
 pub(super) fn validate_interfaces(
     topology: &ExactBRepTopology,
     faces: &BTreeSet<PersistentEntityId>,
+    regions: &BTreeSet<PersistentEntityId>,
 ) -> Result<(), GeometryContractError> {
     let mut ordered = None;
     for interface in &topology.interfaces {
@@ -25,10 +26,11 @@ pub(super) fn validate_interfaces(
             faces,
         )?;
         for region in [&interface.side_a_region_id, &interface.side_b_region_id] {
-            require_kind(
+            require_reference(
                 "shared interface region",
                 region,
                 PersistentEntityKind::Region,
+                regions,
             )?;
         }
         if interface.side_a_region_id == interface.side_b_region_id
