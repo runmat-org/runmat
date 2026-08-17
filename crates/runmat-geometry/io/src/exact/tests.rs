@@ -136,6 +136,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert_eq!(first.topology.coedges.len(), 24);
     assert_eq!(first.topology.edges.len(), 12);
     assert_eq!(first.topology.vertices.len(), 8);
+    assert_canonical_connected_wire_traversals(&first.topology);
     assert_eq!(first.evaluators.curves.len(), 12);
     assert_eq!(first.evaluators.pcurves.len(), 24);
     assert_eq!(first.evaluators.surfaces.len(), 6);
@@ -263,6 +264,45 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         Err(GeometryImportError::Cancelled)
     ));
     assert!(cancelled.load(Ordering::Relaxed));
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+fn assert_canonical_connected_wire_traversals(topology: &ExactBRepTopology) {
+    let coedges = topology
+        .coedges
+        .iter()
+        .map(|coedge| (&coedge.id, coedge))
+        .collect::<BTreeMap<_, _>>();
+    let edges = topology
+        .edges
+        .iter()
+        .map(|edge| (&edge.id, edge))
+        .collect::<BTreeMap<_, _>>();
+    let mut observed_non_sorted_cycle = false;
+
+    for wire in &topology.wires {
+        assert_eq!(wire.coedge_ids.first(), wire.coedge_ids.iter().min());
+        observed_non_sorted_cycle |= wire.coedge_ids.windows(2).any(|pair| pair[0] > pair[1]);
+        for index in 0..wire.coedge_ids.len() {
+            let current = coedges[&wire.coedge_ids[index]];
+            let next = coedges[&wire.coedge_ids[(index + 1) % wire.coedge_ids.len()]];
+            let current_edge = edges[&current.edge_id];
+            let next_edge = edges[&next.edge_id];
+            let current_end = match current.orientation {
+                TopologicalOrientation::Forward => &current_edge.end_vertex_id,
+                TopologicalOrientation::Reversed => &current_edge.start_vertex_id,
+            };
+            let next_start = match next.orientation {
+                TopologicalOrientation::Forward => &next_edge.start_vertex_id,
+                TopologicalOrientation::Reversed => &next_edge.end_vertex_id,
+            };
+            assert_eq!(current_end, next_start);
+        }
+    }
+    assert!(
+        observed_non_sorted_cycle,
+        "fixture must prove cyclic incidence is not an identity sort"
+    );
 }
 
 #[test]

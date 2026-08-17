@@ -124,6 +124,8 @@ pub struct ExactFace {
 pub struct ExactWire {
     pub id: PersistentEntityId,
     pub orientation: TopologicalOrientation,
+    /// Face-local cyclic traversal, rotated to begin at its smallest persistent coedge identity.
+    /// This sequence is never globally sorted because adjacency is authoritative incidence.
     pub coedge_ids: Vec<PersistentEntityId>,
 }
 

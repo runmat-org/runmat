@@ -166,6 +166,36 @@ pub(super) fn require_ordered_refs(
     Ok(())
 }
 
+/// Validates an ordered cyclic traversal without sorting away its incidence. The smallest
+/// persistent identity is the deterministic start; direction remains the topology use direction.
+pub(super) fn require_canonical_cycle_refs(
+    field: &str,
+    ids: &[PersistentEntityId],
+    kind: PersistentEntityKind,
+    known: &BTreeSet<PersistentEntityId>,
+) -> Result<(), GeometryContractError> {
+    let Some(first) = ids.first() else {
+        return Err(invalid(field, "cyclic reference list must not be empty"));
+    };
+    let mut collected = BTreeSet::new();
+    for id in ids {
+        require_kind(field, id, kind)?;
+        if !known.contains(id) {
+            return Err(invalid(field, "cyclic reference names an unknown entity"));
+        }
+        if !collected.insert(id.clone()) {
+            return Err(invalid(field, "cyclic references must be unique"));
+        }
+        if id < first {
+            return Err(invalid(
+                field,
+                "cyclic traversal must start at its smallest persistent identity",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn require_reference(
     field: &str,
     id: &PersistentEntityId,
@@ -266,4 +296,47 @@ pub(super) fn validate_transform(transform: &[f64; 16]) -> Result<(), GeometryCo
 
 pub(super) fn invalid(field: &str, reason: impl Into<String>) -> GeometryContractError {
     GeometryContractError::invalid(field, reason)
+}
+
+#[cfg(test)]
+mod cycle_tests {
+    use super::*;
+
+    #[test]
+    fn cyclic_references_preserve_traversal_with_one_canonical_rotation() {
+        let a = id("a");
+        let b = id("b");
+        let c = id("c");
+        let known = BTreeSet::from([a.clone(), b.clone(), c.clone()]);
+
+        require_canonical_cycle_refs(
+            "cycle",
+            &[a.clone(), c.clone(), b.clone()],
+            PersistentEntityKind::Coedge,
+            &known,
+        )
+        .unwrap();
+        assert!(require_canonical_cycle_refs(
+            "cycle",
+            &[c, b.clone(), a.clone()],
+            PersistentEntityKind::Coedge,
+            &known,
+        )
+        .is_err());
+        assert!(require_canonical_cycle_refs(
+            "cycle",
+            &[a, b.clone(), b],
+            PersistentEntityKind::Coedge,
+            &known,
+        )
+        .is_err());
+    }
+
+    fn id(name: &str) -> PersistentEntityId {
+        PersistentEntityId {
+            kind: PersistentEntityKind::Coedge,
+            source_topology_id: name.into(),
+            assembly_path: vec!["part".into()],
+        }
+    }
 }

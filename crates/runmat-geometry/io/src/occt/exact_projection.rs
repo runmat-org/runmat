@@ -133,7 +133,7 @@ pub(super) fn project_exact_contracts(
             .iter()
             .map(|coedge| names.coedge_id(wire.shape_key, coedge.coedge_key, path))
             .collect::<Result<Vec<_>, _>>()?;
-        coedge_ids.sort();
+        canonicalize_cycle(&mut coedge_ids);
         topology.wires.push(ExactWire {
             id: names.shape_id(
                 PersistentEntityKind::Wire,
@@ -349,6 +349,18 @@ pub(super) fn project_exact_contracts(
         model,
         kernel_body_shapes: body_projection.kernel_shapes,
     })
+}
+
+fn canonicalize_cycle(ids: &mut [runmat_geometry_core::PersistentEntityId]) {
+    let Some(start) = ids
+        .iter()
+        .enumerate()
+        .min_by(|left, right| left.1.cmp(right.1))
+        .map(|(index, _)| index)
+    else {
+        return;
+    };
+    ids.rotate_left(start);
 }
 
 fn validate_projection_shape(

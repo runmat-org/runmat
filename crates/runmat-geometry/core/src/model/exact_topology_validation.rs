@@ -356,12 +356,11 @@ impl ExactBRepTopology {
         }
         let mut claimed_coedges = BTreeSet::new();
         for wire in &self.wires {
-            require_ordered_refs(
+            require_canonical_cycle_refs(
                 "wire coedges",
                 &wire.coedge_ids,
                 PersistentEntityKind::Coedge,
                 &coedges,
-                true,
             )?;
             require_same_scope("wire coedges", &wire.id, &wire.coedge_ids)?;
             claim_unique("coedge ownership", &wire.coedge_ids, &mut claimed_coedges)?;
