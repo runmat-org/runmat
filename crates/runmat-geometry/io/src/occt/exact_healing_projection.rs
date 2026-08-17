@@ -262,18 +262,26 @@ fn project_relations(
     let target_inventory = topology_entities(imported)
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let path = vec![ROOT_SCOPE.to_string()];
     let mut grouped = BTreeMap::<PersistentEntityId, Vec<PersistentEntityId>>::new();
     let mut deleted = Vec::new();
     let mut sources = BTreeSet::new();
     for relation in relations {
+        if relation.path_segments.is_empty() || relation.path_segments[0] != ROOT_SCOPE {
+            return Err(invalid(
+                "OCCT healing relation has a noncanonical occurrence path",
+            ));
+        }
         let kind = match relation.kind {
             bridge::OcctHealingEntityKind::Vertex => PersistentEntityKind::Vertex,
             bridge::OcctHealingEntityKind::Edge => PersistentEntityKind::Edge,
             bridge::OcctHealingEntityKind::Face => PersistentEntityKind::Face,
             _ => return Err(invalid("OCCT healing relation has an invalid entity kind")),
         };
-        let source = scoped_id(kind, &digest_name(&relation.source_digest)?, &path);
+        let source = scoped_id(
+            kind,
+            &digest_name(&relation.source_digest)?,
+            &relation.path_segments,
+        );
         if !sources.insert(source.clone()) {
             return Err(invalid(
                 "OCCT healing lineage contains a duplicate source identity",
@@ -283,7 +291,11 @@ fn project_relations(
             deleted.push(source);
             continue;
         }
-        let target = scoped_id(kind, &digest_name(&relation.target_digest)?, &path);
+        let target = scoped_id(
+            kind,
+            &digest_name(&relation.target_digest)?,
+            &relation.path_segments,
+        );
         if !target_inventory.contains(&target) {
             return Err(invalid("OCCT healing lineage targets absent topology"));
         }

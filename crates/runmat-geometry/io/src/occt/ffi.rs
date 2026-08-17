@@ -26,6 +26,7 @@ pub(crate) mod bridge {
     #[derive(Debug, Clone)]
     struct OcctHealingRelationPayload {
         kind: OcctHealingEntityKind,
+        path_segments: Vec<String>,
         source_digest: Vec<u8>,
         target_digest: Vec<u8>,
     }

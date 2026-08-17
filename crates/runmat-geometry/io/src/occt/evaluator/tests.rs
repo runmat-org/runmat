@@ -23,6 +23,8 @@ const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_s
 const SHORT_EDGE_FACE: &[u8] = include_bytes!("../../../tests/fixtures/short_edge_face.brep");
 const SLIVER_FACE_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/sliver_face_sheet.brep");
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
+const XCAF_SHORT_EDGE_ASSEMBLY: &[u8] =
+    include_bytes!("../../../tests/fixtures/xcaf_short_edge_assembly.step");
 
 struct Unlimited;
 
@@ -396,17 +398,16 @@ fn duplicate_consolidation_collapses_indistinguishable_compound_children() {
     .unwrap();
     assert!(unchanged.healing_report.is_none());
 
-    assert!(matches!(
-        import_exact_cad(
-            "two_box_assembly.step",
-            TWO_BOX_ASSEMBLY,
-            GeometryFormat::Step,
-            &options,
-            &GeometryImportContext::new(),
-        ),
-        Err(GeometryImportError::BackendUnavailable(reason))
-            if reason.contains("definition-aware XCAF mutation")
-    ));
+    let unchanged_assembly = import_exact_cad(
+        "two_box_assembly.step",
+        TWO_BOX_ASSEMBLY,
+        GeometryFormat::Step,
+        &options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert_eq!(unchanged_assembly.topology.instances.len(), 3);
+    assert!(unchanged_assembly.healing_report.is_none());
 
     let limited = ExactCadImportOptions {
         max_identity_work_bytes: 1,
@@ -622,17 +623,54 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
     assert_eq!(unchanged.topology.edges.len(), 5);
     assert!(unchanged.healing_report.is_none());
 
-    assert!(matches!(
-        import_exact_cad(
-            "two_box_assembly.step",
-            TWO_BOX_ASSEMBLY,
-            GeometryFormat::Step,
-            &options,
-            &context,
-        ),
-        Err(GeometryImportError::BackendUnavailable(reason))
-            if reason.contains("definition-aware XCAF mutation")
-    ));
+    let unchanged_assembly = import_exact_cad(
+        "two_box_assembly.step",
+        TWO_BOX_ASSEMBLY,
+        GeometryFormat::Step,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(unchanged_assembly.topology.instances.len(), 3);
+    assert!(unchanged_assembly.healing_report.is_none());
+
+    let original_xcaf = import_exact_cad(
+        "xcaf_short_edge_assembly.step",
+        XCAF_SHORT_EDGE_ASSEMBLY,
+        GeometryFormat::Step,
+        &ExactCadImportOptions::default(),
+        &context,
+    )
+    .unwrap();
+    assert_eq!(original_xcaf.topology.instances.len(), 3);
+    assert_eq!(original_xcaf.topology.edges.len(), 10);
+    let repaired_xcaf = import_exact_cad(
+        "xcaf_short_edge_assembly.step",
+        XCAF_SHORT_EDGE_ASSEMBLY,
+        GeometryFormat::Step,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(repaired_xcaf.topology.instances.len(), 3);
+    assert_eq!(repaired_xcaf.topology.edges.len(), 8);
+    let xcaf_report = repaired_xcaf.healing_report.as_ref().unwrap();
+    assert_eq!(
+        xcaf_report.operations[0].kind,
+        GeometryHealingOperationKind::SimplifyShortEdge
+    );
+    let affected_paths = xcaf_report.operations[0]
+        .affected_before
+        .iter()
+        .map(|entity| entity.assembly_path.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(affected_paths.len(), 2);
+    assert!(affected_paths.iter().all(|path| path[0] == "root"));
+    assert!(repaired_xcaf
+        .build_closure()
+        .unwrap()
+        .healing_bytes
+        .is_some());
 }
 
 fn persistent_names(imported: &crate::ImportedExactCad) -> Vec<String> {

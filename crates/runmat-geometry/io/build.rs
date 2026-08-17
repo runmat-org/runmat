@@ -39,6 +39,7 @@ fn build_occt_backend() {
         .file("src/occt/exact_identity.cc")
         .file("src/occt/exact_healing.cc")
         .file("src/occt/exact_small_topology.cc")
+        .file("src/occt/exact_xcaf_healing.cc")
         .file("src/occt/exact_nesting.cc")
         .file("src/occt/exact_topology.cc")
         .file("src/occt/exact_evaluator.cc")
@@ -93,6 +94,8 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/exact_healing.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_healing.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_small_topology.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_xcaf_healing.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_xcaf_healing.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_nesting.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_nesting.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");

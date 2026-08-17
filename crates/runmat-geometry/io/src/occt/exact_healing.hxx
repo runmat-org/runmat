@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace runmat_geometry_io {
@@ -21,6 +22,7 @@ struct ExactHealingMutation {
   std::array<double, 3> displacement_proposed{0.0, 0.0, 0.0};
   struct Relation {
     std::uint8_t kind = 0;
+    std::vector<std::string> path_segments;
     std::array<std::uint8_t, 32> source_digest{};
     std::array<std::uint8_t, 32> target_digest{};
   };

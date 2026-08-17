@@ -130,6 +130,7 @@ void append_relations(const TopoDS_Shape& before,
     const TopoDS_Shape& source = source_shapes(index);
     ExactHealingMutation::Relation relation;
     relation.kind = relation_kind;
+    relation.path_segments = {"root"};
     relation.source_digest =
         persistent_digest(source, options, mutation.identity_work_bytes);
     TopoDS_Shape target;
@@ -174,6 +175,7 @@ void append_context_relations(const TopoDS_Shape& before,
     const TopoDS_Shape& source = source_shapes(index);
     ExactHealingMutation::Relation relation;
     relation.kind = relation_kind;
+    relation.path_segments = {"root"};
     relation.source_digest =
         persistent_digest(source, options, mutation.identity_work_bytes);
     TopoDS_Shape replacement;
