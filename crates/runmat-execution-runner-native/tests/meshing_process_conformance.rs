@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -96,6 +97,37 @@ impl MeshingStageKernel for SlowKernel {
         invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
         std::thread::sleep(Duration::from_secs(5));
+        AdmissionKernel.execute(invocation)
+    }
+}
+
+#[derive(Default)]
+struct AdmissionThenCooperativeSlowKernel {
+    calls: AtomicUsize,
+    cancellation_observed: AtomicBool,
+}
+
+impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        if self.calls.fetch_add(1, Ordering::AcqRel) == 0 {
+            return AdmissionKernel.execute(invocation);
+        }
+        for work in 1..=100 {
+            std::thread::sleep(Duration::from_millis(10));
+            let checkpoint = MeshingStageCheckpoint {
+                completed_work: work,
+                estimated_work: 100,
+                search_work: work,
+                ..MeshingStageCheckpoint::default()
+            };
+            if let Err(error) = invocation.control.checkpoint(checkpoint) {
+                self.cancellation_observed.store(true, Ordering::Release);
+                return Err(error);
+            }
+        }
         AdmissionKernel.execute(invocation)
     }
 }
@@ -282,8 +314,9 @@ async fn remote_conformance() {
         )
         .build()
         .unwrap();
-    let mut bundle_bytes = Vec::new();
-    write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
+    let mut encoded_bundle = Vec::new();
+    write_bundle(&bundle, &mut encoded_bundle, ArchiveLimits::default()).unwrap();
+    let bundle_bytes = Arc::new(encoded_bundle);
 
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
@@ -305,6 +338,8 @@ async fn remote_conformance() {
     };
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([17; 32]).unwrap();
+    let kernel = Arc::new(AdmissionThenCooperativeSlowKernel::default());
+    let server_kernel = Arc::clone(&kernel);
     let server = run_remote_meshing_worker_quic(
         listener,
         "remote-meshing-run",
@@ -313,7 +348,7 @@ async fn remote_conformance() {
         [19; 16],
         run_key.clone(),
         FrameLimits::default(),
-        Arc::new(AdmissionKernel),
+        server_kernel,
         limits(),
     );
     let client = async {
@@ -345,7 +380,7 @@ async fn remote_conformance() {
                 resource_limit: worker_inventory(),
             },
             31,
-            bundle_bytes,
+            bundle_bytes.as_ref().clone(),
             "remote-meshing-run",
         )
         .unwrap();
@@ -395,6 +430,40 @@ async fn remote_conformance() {
             panic!("serial meshing reference did not externalize its result")
         };
         assert_eq!(outputs, success.outputs);
+
+        let cancel_scope =
+            runmat_execution::ExecutionScopeId::derive(&[b"remote-meshing-cancel-scope"]);
+        let cancel_pool = RemotePoolDriver::new_with_value_scope(
+            cancel_scope,
+            PoolSpec {
+                id: pool_id,
+                min_workers: 1,
+                max_workers: 1,
+                max_in_flight: 1,
+                resource_limit: worker_inventory(),
+            },
+            31,
+            bundle_bytes.as_ref().clone(),
+            "remote-meshing-run",
+        )
+        .unwrap();
+        cancel_pool.add_worker(channel.clone()).await.unwrap();
+        let cancelled = cancel_pool
+            .submit(
+                submission_for(cancel_scope, pool_id, &host, &request),
+                request,
+            )
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        cancel_pool
+            .cancel(runmat_execution::CancellationReason::User)
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), cancelled.wait())
+                .await
+                .expect("remote cancellation completion timeout")
+                .is_err()
+        );
         tokio::time::timeout(Duration::from_secs(5), channel.drain())
             .await
             .expect("remote meshing drain timeout")
@@ -402,6 +471,7 @@ async fn remote_conformance() {
     };
     let (server, ()) = tokio::join!(server, client);
     server.unwrap();
+    assert!(kernel.cancellation_observed.load(Ordering::Acquire));
 }
 
 #[derive(Default)]
