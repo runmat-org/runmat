@@ -571,9 +571,21 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         minimum_metric_edge_length: 0.01,
         maximum_metric_edge_length: 1.5,
     };
-    let derived =
-        derive_curve_geometry_metric(&topology, &evaluator, &UnlimitedControl, &request, quality)
-            .unwrap();
+    let surface_quality = runmat_meshing_core::SurfaceQualityTargets {
+        minimum_metric_angle_degrees: 20.0,
+        maximum_physical_aspect_ratio: 10.0,
+        maximum_chordal_deviation_m: 0.001,
+        maximum_normal_deviation_degrees: 5.0,
+    };
+    let derived = derive_curve_geometry_metric(
+        &topology,
+        &evaluator,
+        &UnlimitedControl,
+        &request,
+        quality,
+        surface_quality,
+    )
+    .unwrap();
 
     assert_eq!(derived.contributions.len(), 1);
     assert_eq!(
@@ -581,14 +593,79 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         runmat_meshing_core::MetricSourceKind::Curve
     );
     assert!(derived.contributions[0].metric.xx > 100.0);
-    let cancelled =
-        derive_curve_geometry_metric(&topology, &evaluator, &CancelledControl, &request, quality)
-            .unwrap_err();
+    let cancelled = derive_curve_geometry_metric(
+        &topology,
+        &evaluator,
+        &CancelledControl,
+        &request,
+        quality,
+        surface_quality,
+    )
+    .unwrap_err();
     assert_eq!(
         cancelled.kind,
         SharedCurveErrorKind::GeometryEvaluation(
             runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled
         )
+    );
+
+    let (document, mut topology, mut registry) = runmat_geometry_fixtures::exact_circle();
+    topology.faces[0].periodic_u = true;
+    registry.pcurves[0].implementation =
+        runmat_geometry_core::ExactPcurveImplementation::Portable {
+            definition: runmat_geometry_core::ExactPcurveDefinition::Line {
+                origin_uv: [0.0, 0.0],
+                direction_uv_per_parameter: [1.0, 0.0],
+                domain: runmat_geometry_core::ParameterRange {
+                    start: 0.0,
+                    end: TAU,
+                },
+            },
+        };
+    registry.surfaces[0].implementation =
+        runmat_geometry_core::ExactSurfaceImplementation::Portable {
+            definition: runmat_geometry_core::ExactSurfaceDefinition::Cylinder {
+                origin_m: [0.0, 0.0, 0.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+                axis_m_per_v: [0.0, 0.0, 1.0],
+                radius_m: 1.0,
+                domains: [
+                    runmat_geometry_core::ParameterRange {
+                        start: 0.0,
+                        end: TAU,
+                    },
+                    runmat_geometry_core::ParameterRange {
+                        start: -1.0,
+                        end: 1.0,
+                    },
+                ],
+            },
+        };
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let derived = derive_curve_geometry_metric(
+        &topology,
+        &evaluator,
+        &UnlimitedControl,
+        &request,
+        quality,
+        surface_quality,
+    )
+    .unwrap();
+    assert_eq!(
+        derived
+            .contributions
+            .iter()
+            .map(|contribution| contribution.source)
+            .collect::<Vec<_>>(),
+        vec![
+            runmat_meshing_core::MetricSourceKind::Curve,
+            runmat_meshing_core::MetricSourceKind::Face,
+        ]
     );
 }
 

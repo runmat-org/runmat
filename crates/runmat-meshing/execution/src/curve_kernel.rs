@@ -2,8 +2,8 @@ use std::f64::consts::PI;
 
 use runmat_execution::Digest;
 use runmat_geometry_core::{
-    ExactCurveEvaluator, ExactPcurveEvaluator, GeometryContractError, GeometryModel,
-    PortableExactEvaluator,
+    ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator, GeometryContractError,
+    GeometryModel, PortableExactEvaluator,
 };
 use runmat_meshing_core::{
     MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry, MeshingDiagnosticValue,
@@ -21,15 +21,21 @@ use crate::{
     PreparedExactGeometryObjects, PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
 
-pub trait ExactCurveEvaluation: ExactCurveEvaluator + ExactPcurveEvaluator {}
+pub trait ExactCurveGeometryEvaluation:
+    ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator
+{
+}
 
-impl<T> ExactCurveEvaluation for T where T: ExactCurveEvaluator + ExactPcurveEvaluator {}
+impl<T> ExactCurveGeometryEvaluation for T where
+    T: ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator
+{
+}
 
 pub trait ExactCurveEvaluatorProvider: Send + Sync {
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn ExactCurveEvaluation + 'a>, GeometryContractError>;
+    ) -> Result<Box<dyn ExactCurveGeometryEvaluation + 'a>, GeometryContractError>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -39,7 +45,7 @@ impl ExactCurveEvaluatorProvider for PortableCurveEvaluatorProvider {
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn ExactCurveEvaluation + 'a>, GeometryContractError> {
+    ) -> Result<Box<dyn ExactCurveGeometryEvaluation + 'a>, GeometryContractError> {
         let GeometryModel::ExactBRep { model } = &geometry.document.model else {
             return Err(GeometryContractError::invalid(
                 "curve stage geometry",
@@ -105,6 +111,7 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
             &control,
             &invocation.host.resolved_request.metric,
             invocation.host.resolved_request.quality.curve,
+            invocation.host.resolved_request.quality.surface,
         )
         .map_err(map_curve_error)?;
         let metric = ResolvedCurveMetricField::new(&geometry.topology, &metric_request)

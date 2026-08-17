@@ -1,10 +1,13 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, GeometryEvaluationControl, GeometryEvaluationError,
+    surface_principal_curvature, ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator,
+    ExactSurfaceEvaluator, GeometryEvaluationControl, GeometryEvaluationError, SurfaceDerivatives,
 };
 use runmat_meshing_core::{
     CurveQualityTargets, MetricContribution, MetricContributionScope, MetricFieldRequest,
-    MetricSourceKind, MetricTensor3,
+    MetricSourceKind, MetricTensor3, SurfaceQualityTargets,
 };
+
+use std::collections::BTreeMap;
 
 use super::{SharedCurveError, SharedCurveErrorKind};
 
@@ -15,18 +18,19 @@ const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
 /// geometry demand visible to curve, surface, and later volume metric consumers.
 pub fn derive_curve_geometry_metric(
     topology: &ExactBRepTopology,
-    evaluator: &(impl ExactCurveEvaluator + ?Sized),
+    evaluator: &(impl ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
     request: &MetricFieldRequest,
-    quality: CurveQualityTargets,
+    curve_quality: CurveQualityTargets,
+    surface_quality: SurfaceQualityTargets,
 ) -> Result<MetricFieldRequest, SharedCurveError> {
     let mut contributions = Vec::new();
+    let mut face_curvature = BTreeMap::new();
     for edge in &topology.edges {
         if edge.is_degenerate {
             continue;
         }
-        let range = evaluator
-            .parameter_range(&edge.curve_evaluator_id)
+        let range = ExactCurveEvaluator::parameter_range(evaluator, &edge.curve_evaluator_id)
             .map_err(|error| geometry_error(edge, error))?;
         let transform = topology.world_transform_for(&edge.id).map_err(|error| {
             SharedCurveError::invalid_request(
@@ -42,9 +46,13 @@ pub fn derive_curve_geometry_metric(
                 .map_err(|error| geometry_error(edge, error))?;
             let fraction = f64::from(sample) / f64::from(CURVATURE_SAMPLES_PER_EDGE - 1);
             let parameter = range.start + (range.end - range.start) * fraction;
-            let derivatives = evaluator
-                .derivatives(&edge.curve_evaluator_id, parameter, control)
-                .map_err(|error| geometry_error(edge, error))?;
+            let derivatives = ExactCurveEvaluator::derivatives(
+                evaluator,
+                &edge.curve_evaluator_id,
+                parameter,
+                control,
+            )
+            .map_err(|error| geometry_error(edge, error))?;
             let first = transform.transform_vector(derivatives.first_m);
             let second = transform.transform_vector(derivatives.second_m);
             let speed = norm(first);
@@ -60,11 +68,24 @@ pub fn derive_curve_geometry_metric(
                 .for_edge(&edge.id));
             }
             maximum_curvature = maximum_curvature.max(curvature);
+            sample_incident_faces(
+                topology,
+                edge,
+                evaluator,
+                control,
+                parameter,
+                &mut face_curvature,
+            )?;
         }
         if maximum_curvature == 0.0 {
             continue;
         }
-        let target_size_m = curvature_target_size(maximum_curvature, quality).ok_or_else(|| {
+        let target_size_m = curvature_target_size(
+            maximum_curvature,
+            curve_quality.maximum_chordal_deviation_m,
+            curve_quality.maximum_tangent_change_degrees,
+        )
+        .ok_or_else(|| {
             SharedCurveError::invalid_request(
                 "curve curvature metric",
                 "quality targets do not produce a finite positive curvature size",
@@ -82,6 +103,31 @@ pub fn derive_curve_geometry_metric(
             })?,
         });
     }
+    for (face_id, maximum_curvature) in face_curvature {
+        if maximum_curvature == 0.0 {
+            continue;
+        }
+        let target_size_m = curvature_target_size(
+            maximum_curvature,
+            surface_quality.maximum_chordal_deviation_m,
+            surface_quality.maximum_normal_deviation_degrees,
+        )
+        .ok_or_else(|| {
+            SharedCurveError::invalid_request(
+                "face-induced curve metric",
+                "surface quality targets do not produce a finite positive curvature size",
+            )
+        })?;
+        contributions.push(MetricContribution {
+            source: MetricSourceKind::Face,
+            scope: MetricContributionScope::Entity {
+                entity_id: face_id.clone(),
+            },
+            metric: MetricTensor3::isotropic_length_m(target_size_m).map_err(|error| {
+                SharedCurveError::invalid_request("face-induced curve metric", error.to_string())
+            })?,
+        });
+    }
     request
         .intersect_contributions(contributions)
         .map_err(|error| {
@@ -89,16 +135,69 @@ pub fn derive_curve_geometry_metric(
         })
 }
 
-fn curvature_target_size(curvature: f64, quality: CurveQualityTargets) -> Option<f64> {
+fn sample_incident_faces(
+    topology: &ExactBRepTopology,
+    edge: &runmat_geometry_core::ExactEdge,
+    evaluator: &(impl ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
+    control: &dyn GeometryEvaluationControl,
+    parameter: f64,
+    maximum_by_face: &mut BTreeMap<runmat_geometry_core::PersistentEntityId, f64>,
+) -> Result<(), SharedCurveError> {
+    for coedge in topology
+        .coedges
+        .iter()
+        .filter(|coedge| coedge.edge_id == edge.id)
+    {
+        let face = topology
+            .faces
+            .iter()
+            .find(|face| face.id == coedge.face_id)
+            .expect("admitted coedge face");
+        let uv =
+            ExactPcurveEvaluator::point(evaluator, &coedge.pcurve_evaluator_id, parameter, control)
+                .map_err(|error| geometry_error(edge, error))?;
+        let derivatives =
+            ExactSurfaceEvaluator::derivatives(evaluator, &face.surface_evaluator_id, uv, control)
+                .map_err(|error| geometry_error(edge, error))?;
+        let transform = topology.world_transform_for(&face.id).map_err(|error| {
+            SharedCurveError::invalid_request("face metric occurrence transform", error.to_string())
+                .for_edge(&edge.id)
+        })?;
+        let curvature = surface_principal_curvature(&SurfaceDerivatives {
+            point_m: transform.transform_point(derivatives.point_m),
+            du_m: transform.transform_vector(derivatives.du_m),
+            dv_m: transform.transform_vector(derivatives.dv_m),
+            duu_m: transform.transform_vector(derivatives.duu_m),
+            duv_m: transform.transform_vector(derivatives.duv_m),
+            dvv_m: transform.transform_vector(derivatives.dvv_m),
+        })
+        .map_err(|error| geometry_error(edge, error))?;
+        let maximum = curvature
+            .minimum_1_per_m
+            .abs()
+            .max(curvature.maximum_1_per_m.abs());
+        maximum_by_face
+            .entry(face.id.clone())
+            .and_modify(|current| *current = current.max(maximum))
+            .or_insert(maximum);
+    }
+    Ok(())
+}
+
+fn curvature_target_size(
+    curvature: f64,
+    maximum_deviation_m: f64,
+    maximum_angle_degrees: f64,
+) -> Option<f64> {
     let radius = curvature.recip();
-    let deviation = quality.maximum_chordal_deviation_m;
+    let deviation = maximum_deviation_m;
     let chord_squared = 8.0 * radius * deviation - 4.0 * deviation.powi(2);
     let chord = if deviation < radius && chord_squared > 0.0 {
         chord_squared.sqrt()
     } else {
         f64::INFINITY
     };
-    let tangent = quality.maximum_tangent_change_degrees.to_radians() / curvature;
+    let tangent = maximum_angle_degrees.to_radians() / curvature;
     let target = chord.min(tangent);
     (target.is_finite() && target > 0.0).then_some(target)
 }

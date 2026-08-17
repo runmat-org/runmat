@@ -38,7 +38,7 @@ pub use budget::{
 };
 pub use curve_join_kernel::ExactCurveJoinKernel;
 pub use curve_kernel::{
-    ExactCurveEvaluation, ExactCurveEvaluatorProvider, ExactCurveStageKernel,
+    ExactCurveEvaluatorProvider, ExactCurveGeometryEvaluation, ExactCurveStageKernel,
     PortableCurveEvaluatorProvider,
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};

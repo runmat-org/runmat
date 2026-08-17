@@ -103,6 +103,7 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel
             &control,
             &invocation.host.resolved_request.metric,
             invocation.host.resolved_request.quality.curve,
+            invocation.host.resolved_request.quality.surface,
         )
         .map_err(map_curve_error)?;
         let metric = ResolvedCurveMetricField::new(&geometry.topology, &metric_request)
