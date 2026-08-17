@@ -2,6 +2,7 @@
 #include "runmat-geometry-io/src/occt/occt_bridge.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
@@ -80,6 +81,18 @@ TopoDS_Edge edge(const ExactEvaluatorSession& session, std::uint64_t shape_key) 
   return TopoDS::Edge(shape);
 }
 
+TopoDS_Face face(const ExactEvaluatorSession& session, std::uint64_t shape_key) {
+  if (shape_key == 0 || shape_key > static_cast<std::uint64_t>(session.shapes.NbShapes())) {
+    throw std::runtime_error("OCCT exact face token is outside the B-rep shape table");
+  }
+  for (TopExp_Explorer faces(session.root, TopAbs_FACE); faces.More(); faces.Next()) {
+    if (static_cast<std::uint64_t>(session.shapes.Index(faces.Current())) == shape_key) {
+      return TopoDS::Face(faces.Current());
+    }
+  }
+  throw std::runtime_error("OCCT exact face token does not identify a face use");
+}
+
 void require_finite(double value, const char* role) {
   if (!std::isfinite(value)) {
     throw std::runtime_error(std::string("OCCT exact curve ") + role + " must be finite");
@@ -112,19 +125,10 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
     throw std::runtime_error("OCCT exact pcurve token is outside the B-rep topology");
   }
 
-  TopoDS_Face face;
-  for (TopExp_Explorer faces(session.root, TopAbs_FACE); faces.More(); faces.Next()) {
-    if (static_cast<std::uint64_t>(session.shapes.Index(faces.Current())) == face_key) {
-      face = TopoDS::Face(faces.Current());
-      break;
-    }
-  }
-  if (face.IsNull()) {
-    throw std::runtime_error("OCCT exact pcurve token does not identify a face use");
-  }
+  const TopoDS_Face face_use = face(session, face_key);
 
   TopoDS_Wire wire;
-  for (TopoDS_Iterator wires(face, Standard_False, Standard_True); wires.More(); wires.Next()) {
+  for (TopoDS_Iterator wires(face_use, Standard_False, Standard_True); wires.More(); wires.Next()) {
     if (wires.Value().ShapeType() == TopAbs_WIRE &&
         static_cast<std::uint64_t>(session.shapes.Index(wires.Value())) == wire_key) {
       wire = TopoDS::Wire(wires.Value());
@@ -135,7 +139,7 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
     throw std::runtime_error("OCCT exact pcurve wire is not owned by its face");
   }
 
-  BRepTools_WireExplorer edge_uses(wire, face);
+  BRepTools_WireExplorer edge_uses(wire, face_use);
   std::uint64_t position = 1;
   while (edge_uses.More() && position < coedge_position) {
     edge_uses.Next();
@@ -147,20 +151,20 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
   TopoDS_Edge edge_use = edge_uses.Current();
   if (seam_image >= 0) {
     TopoDS_Edge local_edge = edge_use;
-    if (face.Orientation() == TopAbs_REVERSED) {
+    if (face_use.Orientation() == TopAbs_REVERSED) {
       local_edge.Reverse();
     }
     const std::int8_t resolved_image =
         local_edge.Orientation() == TopAbs_REVERSED ? 1 : 0;
-    if (resolved_image != seam_image || !BRep_Tool::IsClosed(edge_use, face)) {
+    if (resolved_image != seam_image || !BRep_Tool::IsClosed(edge_use, face_use)) {
       throw std::runtime_error("OCCT exact pcurve seam image does not match its oriented use");
     }
-  } else if (BRep_Tool::IsClosed(edge_use, face)) {
+  } else if (BRep_Tool::IsClosed(edge_use, face_use)) {
     throw std::runtime_error("OCCT exact pcurve omitted a required seam image");
   }
 
   PcurveData result;
-  result.curve = BRep_Tool::CurveOnSurface(edge_use, face, result.start, result.end);
+  result.curve = BRep_Tool::CurveOnSurface(edge_use, face_use, result.start, result.end);
   if (result.curve.IsNull()) {
     throw std::runtime_error("OCCT exact pcurve is unavailable for its face use");
   }
@@ -362,6 +366,32 @@ OcctPcurveDerivativesPayload exact_pcurve_derivatives(
   result.second_u = second.X();
   result.second_v = second.Y();
   return result;
+}
+
+std::int8_t exact_trim_classify(std::uint64_t session_id,
+                                std::uint64_t face_key,
+                                double u,
+                                double v,
+                                double boundary_tolerance_uv) {
+  require_finite(u, "trim point U");
+  require_finite(v, "trim point V");
+  require_finite(boundary_tolerance_uv, "trim boundary tolerance");
+  if (boundary_tolerance_uv < 0.0) {
+    throw std::runtime_error("OCCT exact trim boundary tolerance must be non-negative");
+  }
+  const auto value = session(session_id);
+  const BRepClass_FaceClassifier classifier(
+      face(*value, face_key), gp_Pnt2d(u, v), boundary_tolerance_uv, Standard_True);
+  switch (classifier.State()) {
+    case TopAbs_IN:
+      return 1;
+    case TopAbs_ON:
+      return 0;
+    case TopAbs_OUT:
+      return -1;
+    default:
+      throw std::runtime_error("OCCT exact trim classification did not converge");
+  }
 }
 
 void close_exact_evaluator_session(std::uint64_t session_id) {

@@ -307,6 +307,14 @@ pub(crate) mod bridge {
             seam_image: i8,
         ) -> Result<OcctCurveRangePayload>;
 
+        fn exact_trim_classify(
+            session_id: u64,
+            face_key: u64,
+            u: f64,
+            v: f64,
+            boundary_tolerance_uv: f64,
+        ) -> Result<i8>;
+
         fn close_exact_evaluator_session(session_id: u64);
 
         fn start_cad_preview_session(

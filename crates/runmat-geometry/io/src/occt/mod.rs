@@ -21,6 +21,8 @@ pub(crate) mod evaluator;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod evaluator_pcurve;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_trim;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod exact_projection;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;

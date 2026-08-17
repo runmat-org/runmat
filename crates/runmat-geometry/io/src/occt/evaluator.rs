@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
     CurveDerivatives, CurveEvaluatorId, CurveProjection, ExactCurveEvaluator,
-    ExactCurveImplementation, ExactPcurveImplementation, GeometryEvaluationControl,
-    GeometryEvaluationError, GeometryEvaluationErrorKind, ParameterRange, PcurveEvaluatorId,
+    ExactCurveImplementation, ExactPcurveImplementation, ExactTrimClassifierImplementation,
+    GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
+    ParameterRange, PcurveEvaluatorId, TrimClassifierId,
 };
 
 use super::ffi;
@@ -17,6 +18,7 @@ pub struct OcctExactEvaluator {
     pub(super) session_id: u64,
     curve_keys: BTreeMap<CurveEvaluatorId, u64>,
     pub(super) pcurve_keys: BTreeMap<PcurveEvaluatorId, PcurveKey>,
+    pub(super) trim_keys: BTreeMap<TrimClassifierId, u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +93,35 @@ impl OcctExactEvaluator {
                 "OCCT pcurve evaluator inventory does not match exact topology",
             ));
         }
+        let mut trim_keys = BTreeMap::new();
+        for record in &imported.evaluators.trim_classifiers {
+            let ExactTrimClassifierImplementation::Kernel { reference } = &record.implementation
+            else {
+                return Err(inconsistent(
+                    "an OCCT import cannot contain a portable trim classifier",
+                ));
+            };
+            if reference.representation_digest != representation_digest {
+                return Err(inconsistent(
+                    "trim classifier does not bind the supplied OCCT representation",
+                ));
+            }
+            let face_key = parse_face_token(&reference.entity_token, "trim classifier")?;
+            if trim_keys.insert(record.id.clone(), face_key).is_some() {
+                return Err(inconsistent("duplicate OCCT trim classifier identity"));
+            }
+        }
+        let topology_trim_ids = imported
+            .topology
+            .faces
+            .iter()
+            .map(|face| &face.trim_classifier_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        if topology_trim_ids != trim_keys.keys().collect() {
+            return Err(inconsistent(
+                "OCCT trim classifier inventory does not match exact topology",
+            ));
+        }
         let session_id = ffi::bridge::start_exact_evaluator_session(
             &imported.representation,
             imported.meters_per_source_unit,
@@ -100,6 +131,7 @@ impl OcctExactEvaluator {
             session_id,
             curve_keys,
             pcurve_keys,
+            trim_keys,
         })
     }
 
@@ -316,6 +348,14 @@ fn parse_pcurve_token(token: &str) -> Result<PcurveKey, GeometryEvaluationError>
     Err(inconsistent(
         "OCCT pcurve evaluator has an invalid face-use token",
     ))
+}
+
+fn parse_face_token(token: &str, role: &str) -> Result<u64, GeometryEvaluationError> {
+    token
+        .strip_prefix("face:")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|key| *key != 0 && format!("face:{key:020}") == token)
+        .ok_or_else(|| inconsistent(format!("OCCT {role} has an invalid face token")))
 }
 
 fn normalized(value: [f64; 3]) -> Option<[f64; 3]> {

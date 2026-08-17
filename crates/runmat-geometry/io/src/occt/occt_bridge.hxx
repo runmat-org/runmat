@@ -67,6 +67,11 @@ OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
                                          std::uint64_t wire_key,
                                          std::uint64_t coedge_position,
                                          std::int8_t seam_image);
+std::int8_t exact_trim_classify(std::uint64_t session_id,
+                                std::uint64_t face_key,
+                                double u,
+                                double v,
+                                double boundary_tolerance_uv);
 void close_exact_evaluator_session(std::uint64_t session_id);
 
 } // namespace occt_backend

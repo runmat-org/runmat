@@ -2,7 +2,9 @@ use super::*;
 use crate::{
     import::GeometryImportContext, import_exact_cad, ExactCadImportOptions, GeometryFormat,
 };
-use runmat_geometry_core::{GeometryEvaluationError, UnitSystem};
+use runmat_geometry_core::{
+    GeometryEvaluationError, TrimClassifierId, TrimDomainLocation, UnitSystem,
+};
 use sha2::Digest as _;
 
 const BOX: &[u8] = include_bytes!("../../../tests/fixtures/box.brep");
@@ -159,6 +161,60 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         .unwrap_err()
         .kind,
         GeometryEvaluationErrorKind::Cancelled
+    );
+
+    let coedge = &imported.topology.coedges[0];
+    let face = imported
+        .topology
+        .faces
+        .iter()
+        .find(|face| face.id == coedge.face_id)
+        .unwrap();
+    assert_eq!(
+        runmat_geometry_core::ExactTrimClassifier::classify(
+            &evaluator,
+            &face.trim_classifier_id,
+            pcurve.point_uv,
+            1.0e-9,
+            &Unlimited,
+        )
+        .unwrap(),
+        TrimDomainLocation::OnBoundary
+    );
+    assert_eq!(
+        runmat_geometry_core::ExactTrimClassifier::classify(
+            &evaluator,
+            &face.trim_classifier_id,
+            [pcurve.point_uv[0] + 1.0e6, pcurve.point_uv[1] + 1.0e6],
+            1.0e-9,
+            &Unlimited,
+        )
+        .unwrap(),
+        TrimDomainLocation::Outside
+    );
+    assert_eq!(
+        runmat_geometry_core::ExactTrimClassifier::classify(
+            &evaluator,
+            &face.trim_classifier_id,
+            pcurve.point_uv,
+            1.0e-9,
+            &Cancelled,
+        )
+        .unwrap_err()
+        .kind,
+        GeometryEvaluationErrorKind::Cancelled
+    );
+    assert_eq!(
+        runmat_geometry_core::ExactTrimClassifier::classify(
+            &evaluator,
+            &TrimClassifierId::new("trim:unknown").unwrap(),
+            pcurve.point_uv,
+            1.0e-9,
+            &Unlimited,
+        )
+        .unwrap_err()
+        .kind,
+        GeometryEvaluationErrorKind::UnknownEvaluator
     );
 
     let millimeter_options = ExactCadImportOptions {
