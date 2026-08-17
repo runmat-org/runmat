@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-use runmat_execution::state::{PoolState, TaskState};
+use runmat_execution::state::PoolState;
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::{ProgramExecutionRequest, ProjectRevisionRecord};
@@ -18,6 +18,8 @@ use super::{RemoteAttempt, RemoteWorkerChannel};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 type CompletionResult = Result<AttemptSuccess, String>;
+
+mod completion;
 
 /// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
@@ -285,7 +287,10 @@ impl RemotePoolDriver {
                 DriverAction::Cancel(request) | DriverAction::Terminate(request) => {
                     self.cancel_attempt(request)
                 }
-                DriverAction::Checkpoint | DriverAction::GarbageCollectResults { .. } => {}
+                DriverAction::Checkpoint => {}
+                DriverAction::GarbageCollectResults { objects, .. } => {
+                    self.execution_objects.discard_results(&objects);
+                }
                 DriverAction::ResizePool { .. } => {
                     // Coarse allocation is owned by the Server/client adapter;
                     // workers are registered only after fenced routes exist.
@@ -384,96 +389,6 @@ impl RemotePoolDriver {
                 AttemptReport::Cancelled,
             ));
         });
-    }
-
-    fn apply_report(self: &Arc<Self>, report: BackendReport) {
-        let task_id = report.task_id;
-        let (actions, terminal) = {
-            let mut driver = self.driver.lock().expect("remote driver poisoned");
-            let actions = match driver.handle(DriverCommand::BackendReport(report.clone())) {
-                Ok(actions) => actions,
-                Err(_) => return,
-            };
-            let snapshot = driver.snapshot();
-            let terminal = snapshot.tasks.get(&task_id).and_then(|task| {
-                matches!(
-                    task.state,
-                    TaskState::Succeeded
-                        | TaskState::Failed
-                        | TaskState::Cancelled
-                        | TaskState::Indeterminate
-                )
-                .then_some(task.state)
-            });
-            (actions, terminal)
-        };
-        self.dispatch(actions);
-        if let Some(state) = terminal {
-            let outcome = match report.report {
-                AttemptReport::Succeeded { result } => Ok(result),
-                AttemptReport::Failed { message, .. } | AttemptReport::Lost { message } => {
-                    Err(message)
-                }
-                AttemptReport::Cancelled => Err("remote task was cancelled".into()),
-                AttemptReport::Started => Err(format!(
-                    "remote task reached terminal state {state:?} without a terminal report"
-                )),
-            };
-            if let Some(sender) = self
-                .completions
-                .lock()
-                .expect("remote completion registry poisoned")
-                .remove(&task_id)
-            {
-                let _ = sender.send(outcome);
-            }
-            self.programs
-                .lock()
-                .expect("remote program catalog poisoned")
-                .remove(&task_id);
-            self.progress
-                .lock()
-                .expect("remote progress registry poisoned")
-                .remove(&task_id);
-        }
-    }
-
-    fn resolve_non_success_terminals(&self) {
-        let terminal = self
-            .driver
-            .lock()
-            .expect("remote driver poisoned")
-            .snapshot()
-            .tasks
-            .iter()
-            .filter_map(|(task_id, task)| {
-                let message = match task.state {
-                    TaskState::Failed => "remote task failed",
-                    TaskState::Cancelled => "remote task was cancelled",
-                    TaskState::Indeterminate => "remote worker was lost",
-                    _ => return None,
-                };
-                Some((*task_id, message.to_string()))
-            })
-            .collect::<Vec<_>>();
-        let mut completions = self
-            .completions
-            .lock()
-            .expect("remote completion registry poisoned");
-        let mut programs = self
-            .programs
-            .lock()
-            .expect("remote program catalog poisoned");
-        for (task_id, message) in terminal {
-            if let Some(sender) = completions.remove(&task_id) {
-                let _ = sender.send(Err(message));
-                programs.remove(&task_id);
-            }
-            self.progress
-                .lock()
-                .expect("remote progress registry poisoned")
-                .remove(&task_id);
-        }
     }
 }
 

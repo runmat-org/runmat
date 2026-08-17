@@ -41,6 +41,9 @@ use runmat_execution_runner_native::{
     RemoteWorkerChannel, RemoteWorkerChannelConfig, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
+#[path = "meshing_process_conformance/remote_recovery.rs"]
+mod remote_recovery;
+
 struct AdmissionKernel;
 
 impl MeshingStageKernel for AdmissionKernel {
@@ -281,42 +284,11 @@ async fn parent() {
     assert!(!cancel_store_root.exists());
 
     remote_conformance().await;
+    remote_recovery::run().await;
 }
 
 async fn remote_conformance() {
-    let project_root = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(project_root.path().join("src")).unwrap();
-    std::fs::write(
-        project_root.path().join("runmat.toml"),
-        "[package]\nname = \"remote-meshing\"\n[sources]\nroots = [\"src\"]\n",
-    )
-    .unwrap();
-    let project = runmat_package::build_frozen_project(
-        &project_root.path().join("runmat.toml"),
-        BTreeSet::new(),
-    )
-    .unwrap();
-    let project_identity = project.revision();
-    let revision = ProgramRevision::new(
-        Digest::from_bytes(*project_identity.graph_digest.bytes()),
-        Digest::from_bytes(*project_identity.source_revision.bytes()),
-        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
-    )
-    .unwrap();
-    let (host, request) = fixture_for(revision.clone(), "remote-meshing-run");
-    let bundle = ExecutionBundleBuilder::native(&project, revision)
-        .unwrap()
-        .with_compiled_package_closure()
-        .with_materialized_program(
-            request.recipe.clone(),
-            ExecutableForm::MeshingWorkloadV2,
-            request.artifact.executable_bytes.clone(),
-        )
-        .build()
-        .unwrap();
-    let mut encoded_bundle = Vec::new();
-    write_bundle(&bundle, &mut encoded_bundle, ArchiveLimits::default()).unwrap();
-    let bundle_bytes = Arc::new(encoded_bundle);
+    let (host, request, bundle_bytes) = remote_fixture("remote-meshing-run");
 
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
@@ -503,6 +475,48 @@ async fn remote_conformance() {
     let (server, ()) = tokio::join!(server, client);
     server.unwrap();
     assert!(kernel.cancellation_observed.load(Ordering::Acquire));
+}
+
+fn remote_fixture(
+    authorization_scope: &str,
+) -> (
+    MeshingHostWorkloadV2,
+    runmat_execution_artifact::ProgramExecutionRequest,
+    Arc<Vec<u8>>,
+) {
+    let project_root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project_root.path().join("src")).unwrap();
+    std::fs::write(
+        project_root.path().join("runmat.toml"),
+        "[package]\nname = \"remote-meshing\"\n[sources]\nroots = [\"src\"]\n",
+    )
+    .unwrap();
+    let project = runmat_package::build_frozen_project(
+        &project_root.path().join("runmat.toml"),
+        BTreeSet::new(),
+    )
+    .unwrap();
+    let project_identity = project.revision();
+    let revision = ProgramRevision::new(
+        Digest::from_bytes(*project_identity.graph_digest.bytes()),
+        Digest::from_bytes(*project_identity.source_revision.bytes()),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+    )
+    .unwrap();
+    let (host, request) = fixture_for(revision.clone(), authorization_scope);
+    let bundle = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_compiled_package_closure()
+        .with_materialized_program(
+            request.recipe.clone(),
+            ExecutableForm::MeshingWorkloadV2,
+            request.artifact.executable_bytes.clone(),
+        )
+        .build()
+        .unwrap();
+    let mut encoded_bundle = Vec::new();
+    write_bundle(&bundle, &mut encoded_bundle, ArchiveLimits::default()).unwrap();
+    (host, request, Arc::new(encoded_bundle))
 }
 
 #[derive(Default)]

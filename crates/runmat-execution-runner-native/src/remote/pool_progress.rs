@@ -12,7 +12,9 @@ const MAX_BUFFERED_PROGRESS: usize = 256;
 
 #[derive(Default)]
 struct State {
-    last_sequence: u64,
+    active_attempt: Option<AttemptId>,
+    last_attempt_sequence: u64,
+    next_task_sequence: u64,
     queue: VecDeque<ProgramProgress>,
 }
 
@@ -59,14 +61,25 @@ impl RemoteProgressBuffer {
         attempt_id: AttemptId,
     ) -> NativeExecutionResult<()> {
         let mut state = self.0.lock().expect("remote task progress poisoned");
-        for event in channel.drain_progress(attempt_id) {
+        if state.active_attempt != Some(attempt_id) {
+            state.active_attempt = Some(attempt_id);
+            state.last_attempt_sequence = 0;
+        }
+        for mut event in channel.drain_progress(attempt_id) {
             event.validate().map_err(NativeExecutionError::Protocol)?;
-            if event.sequence <= state.last_sequence {
+            if event.sequence <= state.last_attempt_sequence {
                 return Err(NativeExecutionError::Protocol(
-                    "remote task progress sequence is not monotone".into(),
+                    "remote attempt progress sequence is not monotone".into(),
                 ));
             }
-            state.last_sequence = event.sequence;
+            state.last_attempt_sequence = event.sequence;
+            state.next_task_sequence =
+                state.next_task_sequence.checked_add(1).ok_or_else(|| {
+                    NativeExecutionError::Protocol(
+                        "remote task progress sequence overflowed".into(),
+                    )
+                })?;
+            event.sequence = state.next_task_sequence;
             if state.queue.len() == MAX_BUFFERED_PROGRESS {
                 state.queue.pop_front();
             }
