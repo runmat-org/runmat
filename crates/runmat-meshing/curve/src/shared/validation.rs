@@ -191,12 +191,22 @@ fn validate_metric_resolution(
         CurveMetricResolutionEvidence::Evaluated {
             active_sources,
             evaluation_count,
+            applied_contribution_count,
             minimum_tangent_target_size_m,
             maximum_tangent_target_size_m,
+            clipped_contribution_count,
+            rejected_contribution_count,
             ..
         } if !is_degenerate
             && !active_sources.is_empty()
+            && active_sources.first() == Some(&MetricSourceKind::Global)
             && *evaluation_count >= curve.nodes.len() as u64
+            && u64::from(*applied_contribution_count)
+                <= evaluation_count.saturating_mul(65_536)
+            && u64::from(*clipped_contribution_count)
+                <= evaluation_count.saturating_mul(65_536)
+            && u64::from(*rejected_contribution_count)
+                <= evaluation_count.saturating_mul(65_536)
             && minimum_tangent_target_size_m.is_finite()
             && *minimum_tangent_target_size_m > 0.0
             && maximum_tangent_target_size_m.is_finite()

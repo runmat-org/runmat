@@ -202,13 +202,30 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
         SharedCurveErrorKind::GeometricMismatch
     );
 
+    let mut false_count = mesh.clone();
+    let CurveMetricResolutionEvidence::Evaluated {
+        applied_contribution_count,
+        ..
+    } = &mut false_count.edges[0].metric_resolution
+    else {
+        panic!("ordinary edge must retain evaluated metric evidence")
+    };
+    *applied_contribution_count += 1;
+    assert_eq!(
+        validate(&false_count).unwrap_err().kind,
+        SharedCurveErrorKind::GeometricMismatch
+    );
+
     let mut false_source = mesh;
     let CurveMetricResolutionEvidence::Evaluated { active_sources, .. } =
         &mut false_source.edges[0].metric_resolution
     else {
         panic!("ordinary edge must retain evaluated metric evidence")
     };
-    *active_sources = vec![runmat_meshing_core::MetricSourceKind::Feature];
+    *active_sources = vec![
+        runmat_meshing_core::MetricSourceKind::Global,
+        runmat_meshing_core::MetricSourceKind::Feature,
+    ];
     assert_eq!(
         validate(&false_source).unwrap_err().kind,
         SharedCurveErrorKind::GeometricMismatch
@@ -393,6 +410,7 @@ fn singular_edge_preserves_pcurve_interval_as_one_collapsed_mesh_node() {
     fabricated_metric.edges[0].metric_resolution = CurveMetricResolutionEvidence::Evaluated {
         active_sources: vec![runmat_meshing_core::MetricSourceKind::Global],
         evaluation_count: 2,
+        applied_contribution_count: 0,
         minimum_tangent_target_size_m: 1.0,
         maximum_tangent_target_size_m: 1.0,
         clipped_contribution_count: 0,
@@ -429,6 +447,75 @@ fn declared_degenerate_edge_must_geometrically_collapse() {
     assert_eq!(error.field, "degenerate exact edge");
 }
 
+#[test]
+fn resolved_curve_metric_combines_all_incident_typed_sources() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact");
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let request = resolved_metric_request(&topology);
+    let metric = ResolvedCurveMetricField::new(&topology, &request).unwrap();
+    let edge = &topology.edges[0];
+    let evaluation = metric
+        .evaluate(CurveMetricQuery {
+            edge_id: &edge.id,
+            parameter: 0.0,
+            point_m: [1.0, 0.0, 0.0],
+            unit_tangent: [0.0, 1.0, 0.0],
+        })
+        .unwrap();
+    assert_eq!(evaluation.metric.xx, 5.0);
+    assert_eq!(evaluation.metric.yy, 5.0);
+    assert_eq!(evaluation.metric.zz, 5.0);
+    assert_eq!(evaluation.applied_contribution_count, 4);
+    assert_eq!(
+        evaluation.active_sources,
+        vec![
+            runmat_meshing_core::MetricSourceKind::Global,
+            runmat_meshing_core::MetricSourceKind::Region,
+            runmat_meshing_core::MetricSourceKind::Curve,
+            runmat_meshing_core::MetricSourceKind::Face,
+            runmat_meshing_core::MetricSourceKind::Feature,
+        ]
+    );
+
+    let mesh = discretize_shared_curves(
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &UnlimitedControl,
+        shared_options(),
+    )
+    .unwrap();
+    let CurveMetricResolutionEvidence::Evaluated {
+        active_sources,
+        applied_contribution_count,
+        ..
+    } = &mesh.edges[0].metric_resolution
+    else {
+        panic!("ordinary edge must retain evaluated metric evidence")
+    };
+    assert_eq!(active_sources, &evaluation.active_sources);
+    assert!(*applied_contribution_count > 4);
+
+    let mut unknown = request;
+    let runmat_meshing_core::MetricContributionScope::Entity { entity_id } =
+        &mut unknown.contributions[1].scope
+    else {
+        panic!("curve contribution must remain entity-scoped")
+    };
+    entity_id.source_topology_id = "unknown-edge".into();
+    assert_eq!(
+        ResolvedCurveMetricField::new(&topology, &unknown)
+            .unwrap_err()
+            .kind,
+        SharedCurveErrorKind::InvalidRequest
+    );
+}
+
 fn shared_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
@@ -442,6 +529,47 @@ fn shared_options() -> SharedCurveDiscretizationOptions {
         geometry_absolute_error_m: 1.0e-10,
         pcurve_absolute_error: 1.0e-10,
         arc_length_absolute_error_m: 1.0e-10,
+    }
+}
+
+fn resolved_metric_request(
+    topology: &runmat_geometry_core::ExactBRepTopology,
+) -> runmat_meshing_core::MetricFieldRequest {
+    let unit = runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap();
+    runmat_meshing_core::MetricFieldRequest {
+        combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: unit,
+        maximum_grading_ratio: 1.3,
+        contributions: vec![
+            runmat_meshing_core::MetricContribution {
+                source: runmat_meshing_core::MetricSourceKind::Region,
+                scope: runmat_meshing_core::MetricContributionScope::Region {
+                    region_id: topology.regions[0].id.clone(),
+                },
+                metric: unit,
+            },
+            runmat_meshing_core::MetricContribution {
+                source: runmat_meshing_core::MetricSourceKind::Curve,
+                scope: runmat_meshing_core::MetricContributionScope::Entity {
+                    entity_id: topology.edges[0].id.clone(),
+                },
+                metric: unit,
+            },
+            runmat_meshing_core::MetricContribution {
+                source: runmat_meshing_core::MetricSourceKind::Face,
+                scope: runmat_meshing_core::MetricContributionScope::Entity {
+                    entity_id: topology.faces[0].id.clone(),
+                },
+                metric: unit,
+            },
+            runmat_meshing_core::MetricContribution {
+                source: runmat_meshing_core::MetricSourceKind::Feature,
+                scope: runmat_meshing_core::MetricContributionScope::Entity {
+                    entity_id: topology.vertices[0].id.clone(),
+                },
+                metric: unit,
+            },
+        ],
     }
 }
 
@@ -579,6 +707,7 @@ fn circle_mesh(topology: &runmat_geometry_core::ExactBRepTopology) -> SharedCurv
             metric_resolution: CurveMetricResolutionEvidence::Evaluated {
                 active_sources: vec![runmat_meshing_core::MetricSourceKind::Global],
                 evaluation_count: 3,
+                applied_contribution_count: 0,
                 minimum_tangent_target_size_m: 1.0,
                 maximum_tangent_target_size_m: 1.0,
                 clipped_contribution_count: 0,

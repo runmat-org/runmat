@@ -20,8 +20,8 @@ pub use shared::{
     decode_shared_curve_mesh, discretize_shared_curves, encode_shared_curve_mesh,
     shared_curve_node_id, shared_degenerate_curve_node_id, validate_shared_curve_geometry,
     CurveMetricEvaluation, CurveMetricField, CurveMetricQuery, CurveMetricResolutionEvidence,
-    CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve, SharedCurveDiscretizationOptions,
-    SharedCurveError, SharedCurveErrorKind, SharedCurveFaceUse,
+    CurveResolutionEvidence, CurveResolutionPolicy, ResolvedCurveMetricField, SharedCurve,
+    SharedCurveDiscretizationOptions, SharedCurveError, SharedCurveErrorKind, SharedCurveFaceUse,
     SharedCurveGeometryValidationReport, SharedCurveMesh, SharedCurveNode, UniformCurveMetric,
     SHARED_CURVE_MESH_SCHEMA_VERSION,
 };

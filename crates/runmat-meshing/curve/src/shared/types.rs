@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SharedCurveError;
 
-pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 2;
+pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +80,8 @@ pub enum CurveMetricResolutionEvidence {
         /// Canonical union of metric sources active at every constructive sample.
         active_sources: Vec<MetricSourceKind>,
         evaluation_count: u64,
+        /// Evaluation-weighted count of applicable canonical request contributions.
+        applied_contribution_count: u32,
         minimum_tangent_target_size_m: f64,
         maximum_tangent_target_size_m: f64,
         /// Evaluation-weighted contribution counts reported by the metric authority.

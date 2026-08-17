@@ -25,6 +25,7 @@ pub struct CurveMetricQuery<'a> {
 pub struct CurveMetricEvaluation {
     pub metric: MetricTensor3,
     pub active_sources: Vec<MetricSourceKind>,
+    pub applied_contribution_count: u32,
     pub clipped_contribution_count: u32,
     pub rejected_contribution_count: u32,
 }
@@ -58,6 +59,7 @@ impl CurveMetricField for UniformCurveMetric {
         Ok(CurveMetricEvaluation {
             metric: self.metric,
             active_sources: vec![MetricSourceKind::Global],
+            applied_contribution_count: 0,
             clipped_contribution_count: 0,
             rejected_contribution_count: 0,
         })

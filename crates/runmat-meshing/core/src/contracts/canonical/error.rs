@@ -29,3 +29,12 @@ impl From<runmat_geometry_core::GeometryContractError> for MeshingContractError 
         }
     }
 }
+
+impl From<runmat_meshing_size::metric::MetricContractError> for MeshingContractError {
+    fn from(error: runmat_meshing_size::metric::MetricContractError) -> Self {
+        Self {
+            field: error.field,
+            reason: error.reason,
+        }
+    }
+}

@@ -24,6 +24,7 @@ pub(super) struct EvaluatedPoint {
     metric: MetricTensor3,
     source_mask: u16,
     target_size_m: f64,
+    applied_contribution_count: u32,
     clipped_contribution_count: u32,
     rejected_contribution_count: u32,
 }
@@ -204,6 +205,7 @@ impl<'a> EvaluationCache<'a> {
             metric: evaluation.metric,
             source_mask,
             target_size_m,
+            applied_contribution_count: evaluation.applied_contribution_count,
             clipped_contribution_count: evaluation.clipped_contribution_count,
             rejected_contribution_count: evaluation.rejected_contribution_count,
         };
@@ -228,6 +230,7 @@ impl<'a> EvaluationCache<'a> {
         let mut maximum_target_size_m: f64 = 0.0;
         let mut clipped_contribution_count = 0u32;
         let mut rejected_contribution_count = 0u32;
+        let mut applied_contribution_count = 0u32;
         for parameter_bits in &parameter_bits {
             let sample = self.samples.get(parameter_bits).ok_or_else(|| {
                 edge_error(
@@ -244,6 +247,8 @@ impl<'a> EvaluationCache<'a> {
                 clipped_contribution_count.saturating_add(sample.clipped_contribution_count);
             rejected_contribution_count =
                 rejected_contribution_count.saturating_add(sample.rejected_contribution_count);
+            applied_contribution_count =
+                applied_contribution_count.saturating_add(sample.applied_contribution_count);
         }
         Ok(CurveMetricResolutionEvidence::Evaluated {
             active_sources: (0..16)
@@ -251,6 +256,7 @@ impl<'a> EvaluationCache<'a> {
                 .map(|rank| self.source_by_rank[&rank])
                 .collect(),
             evaluation_count: parameter_bits.len() as u64,
+            applied_contribution_count,
             minimum_tangent_target_size_m: minimum_target_size_m,
             maximum_tangent_target_size_m: maximum_target_size_m,
             clipped_contribution_count,

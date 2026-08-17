@@ -31,6 +31,7 @@ pub(super) struct ValidationSampler<'a> {
     sources: BTreeMap<u8, MetricSourceKind>,
     minimum_target_size_m: f64,
     maximum_target_size_m: f64,
+    applied_count: u32,
     clipped_count: u32,
     rejected_count: u32,
 }
@@ -53,6 +54,7 @@ impl<'a> ValidationSampler<'a> {
             sources: BTreeMap::new(),
             minimum_target_size_m: f64::INFINITY,
             maximum_target_size_m: 0.0,
+            applied_count: 0,
             clipped_count: 0,
             rejected_count: 0,
         }
@@ -121,6 +123,9 @@ impl<'a> ValidationSampler<'a> {
         self.clipped_count = self
             .clipped_count
             .saturating_add(evaluation.clipped_contribution_count);
+        self.applied_count = self
+            .applied_count
+            .saturating_add(evaluation.applied_contribution_count);
         self.rejected_count = self
             .rejected_count
             .saturating_add(evaluation.rejected_contribution_count);
@@ -138,6 +143,7 @@ impl<'a> ValidationSampler<'a> {
         let CurveMetricResolutionEvidence::Evaluated {
             active_sources,
             evaluation_count,
+            applied_contribution_count,
             minimum_tangent_target_size_m,
             maximum_tangent_target_size_m,
             clipped_contribution_count,
@@ -152,6 +158,7 @@ impl<'a> ValidationSampler<'a> {
         };
         if *active_sources != sources
             || *evaluation_count != self.samples.len() as u64
+            || *applied_contribution_count != self.applied_count
             || (*minimum_tangent_target_size_m - self.minimum_target_size_m).abs() > 1.0e-12
             || (*maximum_tangent_target_size_m - self.maximum_target_size_m).abs() > 1.0e-12
             || *clipped_contribution_count != self.clipped_count
