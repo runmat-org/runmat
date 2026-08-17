@@ -209,7 +209,6 @@ pub fn import_exact_cad(
         .validate()
         .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
     if options.analysis.healing.sew
-        || options.analysis.healing.consolidate_duplicates
         || options.analysis.healing.repair_tolerance_scale_gaps
         || options
             .analysis
@@ -217,7 +216,7 @@ pub fn import_exact_cad(
             .simplify_short_edges_and_sliver_faces
     {
         return Err(GeometryImportError::InvalidOptions(
-            "this OCCT adapter currently supports only explicit orientation repair".into(),
+            "this OCCT adapter currently supports only explicit orientation repair and duplicate consolidation".into(),
         ));
     }
     if options.analysis.revision.revision == 0

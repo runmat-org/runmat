@@ -979,7 +979,7 @@ OcctExactShapePayload import_exact_cad_bytes(
   BRepTools::Clean(document.shape);
   check_cancelled(options);
 
-  if (options.heal_sew || options.heal_duplicates || options.heal_gaps ||
+  if (options.heal_sew || options.heal_gaps ||
       options.heal_short_edges_and_sliver_faces) {
     throw std::runtime_error(
         "requested OCCT exact healing operation is not yet supported by this kernel adapter");
@@ -988,7 +988,10 @@ OcctExactShapePayload import_exact_cad_bytes(
   std::array<std::uint8_t, 32> original_geometry_digest{};
   bool original_kernel_valid = false;
   std::uint64_t healing_identity_work_bytes = 0;
-  if (options.heal_orientation) {
+  bool duplicates_consolidated = false;
+  bool post_duplicate_kernel_valid = false;
+  bool orientation_repaired = false;
+  if (options.heal_orientation || options.heal_duplicates) {
     const std::string original_representation = serialize_exact_shape(document.shape, options);
     if (static_cast<std::uint64_t>(original_representation.size()) >
         options.max_exact_representation_bytes) {
@@ -997,9 +1000,29 @@ OcctExactShapePayload import_exact_cad_bytes(
     original_geometry_digest = geometry_digest(original_representation);
     const BRepCheck_Analyzer original_analyzer(document.shape, Standard_True);
     original_kernel_valid = original_analyzer.IsValid();
-    ExactOrientationRepair repair = repair_exact_orientation(document.shape, options);
-    document.shape = repair.shape;
-    healing_identity_work_bytes = repair.identity_work_bytes;
+    if (options.heal_duplicates) {
+      if (document.has_xcaf) {
+        throw std::runtime_error(
+            "OCCT duplicate consolidation requires definition-aware XCAF mutation");
+      }
+      ExactHealingMutation consolidation = consolidate_exact_duplicates(
+          document.shape, options, healing_identity_work_bytes);
+      document.shape = consolidation.shape;
+      healing_identity_work_bytes = consolidation.identity_work_bytes;
+      duplicates_consolidated = consolidation.changed;
+      const BRepCheck_Analyzer duplicate_analyzer(document.shape, Standard_True);
+      post_duplicate_kernel_valid = duplicate_analyzer.IsValid();
+    }
+    if (options.heal_orientation) {
+      const std::array<std::uint8_t, 32> before_orientation =
+          geometry_digest(serialize_exact_shape(document.shape, options));
+      ExactHealingMutation repair = repair_exact_orientation(
+          document.shape, options, healing_identity_work_bytes);
+      document.shape = repair.shape;
+      healing_identity_work_bytes = repair.identity_work_bytes;
+      orientation_repaired =
+          before_orientation != geometry_digest(serialize_exact_shape(document.shape, options));
+    }
     BRepTools::Clean(document.shape);
     check_cancelled(options);
   }
@@ -1015,9 +1038,10 @@ OcctExactShapePayload import_exact_cad_bytes(
   result.kernel_abi = std::string("occt/") + OCC_VERSION_COMPLETE + "/brep-v3";
   result.original_kernel_valid = original_kernel_valid;
   result.healing_identity_work_bytes = healing_identity_work_bytes;
-  result.orientation_repaired = options.heal_orientation &&
-                                original_geometry_digest != geometry_digest(representation);
-  if (result.orientation_repaired) {
+  result.orientation_repaired = orientation_repaired;
+  result.duplicates_consolidated = duplicates_consolidated;
+  result.post_duplicate_kernel_valid = post_duplicate_kernel_valid;
+  if (result.orientation_repaired || result.duplicates_consolidated) {
     for (const std::uint8_t byte : original_geometry_digest) {
       result.original_geometry_digest.push_back(byte);
     }

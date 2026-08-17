@@ -126,8 +126,10 @@ pub(crate) fn import_exact_cad_shape(
         mass_properties.as_ref(),
     )?;
     let orientation_repaired = payload.orientation_repaired;
+    let duplicates_consolidated = payload.duplicates_consolidated;
     let original_geometry_digest = payload.original_geometry_digest.clone();
     let original_kernel_valid = payload.original_kernel_valid;
+    let post_duplicate_kernel_valid = payload.post_duplicate_kernel_valid;
     let mut imported = ImportedExactCad {
         source_digest: GeometryDigest::from_bytes(Sha256::digest(bytes).into()),
         source_format: match format {
@@ -162,10 +164,13 @@ pub(crate) fn import_exact_cad_shape(
             &import_validation::ImportEvaluationControl::new(context, options),
         )
         .map_err(import_validation::map_validation_error)?;
-    if orientation_repaired {
-        let report = exact_healing_projection::orientation_report(
+    if orientation_repaired || duplicates_consolidated {
+        let report = exact_healing_projection::healing_report(
             &original_geometry_digest,
             original_kernel_valid,
+            post_duplicate_kernel_valid,
+            duplicates_consolidated,
+            orientation_repaired,
             &imported,
         )?;
         imported.analysis.revision = report.revision_map.target_revision.clone();
@@ -276,6 +281,8 @@ fn exact_bridge_error(
             "persistent identity serialization exceeded {} bytes of work",
             options.max_identity_work_bytes
         ))
+    } else if message.contains("requires definition-aware XCAF mutation") {
+        GeometryImportError::BackendUnavailable(message)
     } else if message.contains("OCCT exact outer shell")
         || message.contains("OCCT exact void shell")
         || message.contains("OCCT exact solid shell has no nesting witness")

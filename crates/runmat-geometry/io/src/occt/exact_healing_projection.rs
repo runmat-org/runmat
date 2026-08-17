@@ -10,9 +10,12 @@ use sha2::{Digest, Sha256};
 
 use crate::{exact::ImportedExactCad, import::GeometryImportError};
 
-pub(super) fn orientation_report(
+pub(super) fn healing_report(
     original_digest: &[u8],
     original_kernel_valid: bool,
+    post_duplicate_kernel_valid: bool,
+    duplicates_consolidated: bool,
+    orientation_repaired: bool,
     imported: &ImportedExactCad,
 ) -> Result<GeometryHealingReport, GeometryImportError> {
     let original_topology_digest = parse_digest(original_digest)?;
@@ -27,7 +30,6 @@ pub(super) fn orientation_report(
     target_revision.parent_document_digest = Some(original_topology_digest);
 
     let all_entities = topology_entities(imported);
-    let affected_entities = orientation_entities(imported);
     let revision_map = GeometryRevisionMap {
         schema_version: GEOMETRY_REVISION_MAP_SCHEMA_VERSION,
         source_geometry_digest: original_topology_digest,
@@ -45,9 +47,9 @@ pub(super) fn orientation_report(
     let original_validity = TopologyValidity {
         kernel_valid: original_kernel_valid,
         incidence_consistent: true,
-        orientation_consistent: false,
+        orientation_consistent: !orientation_repaired,
         shells_closed: true,
-        nesting_consistent: false,
+        nesting_consistent: !orientation_repaired,
     };
     let healed_validity = TopologyValidity {
         kernel_valid: true,
@@ -68,6 +70,43 @@ pub(super) fn orientation_report(
         requested_deviation_m: imported.analysis.requested_deviation_m,
         maximum_healing_displacement_m: imported.analysis.maximum_healing_displacement_m,
     };
+    let mut operations = Vec::new();
+    let mut prior_validity = original_validity;
+    if duplicates_consolidated {
+        let duplicate_validity = TopologyValidity {
+            kernel_valid: post_duplicate_kernel_valid,
+            incidence_consistent: true,
+            orientation_consistent: !orientation_repaired,
+            shells_closed: true,
+            nesting_consistent: !orientation_repaired,
+        };
+        let affected = duplicate_entities(imported);
+        operations.push(GeometryHealingOperation {
+            sequence: operations.len() as u64,
+            kind: GeometryHealingOperationKind::ConsolidateDuplicate,
+            affected_before: affected.clone(),
+            affected_after: affected,
+            maximum_displacement_m: 0.0,
+            reason: "OCCT consolidated indistinguishable duplicate compound children into one semantic entity without moving geometry".into(),
+            before_validity: prior_validity,
+            after_validity: duplicate_validity,
+        });
+        prior_validity = duplicate_validity;
+    }
+    if orientation_repaired {
+        let affected = orientation_entities(imported);
+        operations.push(GeometryHealingOperation {
+            sequence: operations.len() as u64,
+            kind: GeometryHealingOperationKind::RepairOrientation,
+            affected_before: affected.clone(),
+            affected_after: affected,
+            maximum_displacement_m: 0.0,
+            reason: "OCCT repaired solid, shell, and face use orientation without moving geometry"
+                .into(),
+            before_validity: prior_validity,
+            after_validity: healed_validity,
+        });
+    }
     let report = GeometryHealingReport {
         schema_version: GEOMETRY_HEALING_REPORT_SCHEMA_VERSION,
         original_topology_digest,
@@ -77,17 +116,7 @@ pub(super) fn orientation_report(
         revision_map,
         original_validity,
         healed_validity,
-        operations: vec![GeometryHealingOperation {
-            sequence: 0,
-            kind: GeometryHealingOperationKind::RepairOrientation,
-            affected_before: affected_entities.clone(),
-            affected_after: affected_entities,
-            maximum_displacement_m: 0.0,
-            reason: "OCCT repaired solid, shell, and face use orientation without moving geometry"
-                .into(),
-            before_validity: original_validity,
-            after_validity: healed_validity,
-        }],
+        operations,
     };
     report.validate().map_err(contract_failure)?;
     Ok(report)
@@ -137,6 +166,25 @@ fn orientation_entities(imported: &ImportedExactCad) -> Vec<PersistentEntityId> 
                 .map(|value| value.id.clone()),
         )
         .chain(imported.topology.faces.iter().map(|value| value.id.clone()))
+        .collect::<Vec<_>>();
+    entities.sort();
+    entities
+}
+
+fn duplicate_entities(imported: &ImportedExactCad) -> Vec<PersistentEntityId> {
+    let topology = &imported.topology;
+    let mut entities = topology
+        .bodies
+        .iter()
+        .map(|value| value.id.clone())
+        .chain(topology.lumps.iter().map(|value| value.id.clone()))
+        .chain(topology.solids.iter().map(|value| value.id.clone()))
+        .chain(topology.shells.iter().map(|value| value.id.clone()))
+        .chain(topology.faces.iter().map(|value| value.id.clone()))
+        .chain(topology.wires.iter().map(|value| value.id.clone()))
+        .chain(topology.coedges.iter().map(|value| value.id.clone()))
+        .chain(topology.edges.iter().map(|value| value.id.clone()))
+        .chain(topology.vertices.iter().map(|value| value.id.clone()))
         .collect::<Vec<_>>();
     entities.sort();
     entities

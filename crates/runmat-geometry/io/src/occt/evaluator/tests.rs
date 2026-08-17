@@ -4,8 +4,9 @@ use crate::{
     import_exact_cad, ExactCadImportOptions, GeometryFormat,
 };
 use runmat_geometry_core::{
-    GeometryEvaluationError, GeometryEvaluationErrorKind, MassPropertiesEvaluatorId,
-    SurfaceEvaluatorId, TrimClassifierId, TrimDomainLocation, UnitSystem,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, GeometryHealingOperationKind,
+    MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId, TrimDomainLocation,
+    UnitSystem,
 };
 use sha2::Digest as _;
 
@@ -333,6 +334,91 @@ fn persistent_entity_names_reject_ambiguous_coincident_topology() {
         error,
         GeometryImportError::InvalidGeometry(reason)
             if reason.contains("ambiguous coincident persistent names")
+    ));
+}
+
+#[test]
+fn duplicate_consolidation_collapses_indistinguishable_compound_children() {
+    let mut options = ExactCadImportOptions::default();
+    options.analysis.healing.consolidate_duplicates = true;
+    let imported = import_exact_cad(
+        "coincident_solids.brep",
+        COINCIDENT_SOLIDS,
+        GeometryFormat::Brep,
+        &options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let renamed = import_exact_cad(
+        "renamed-coincident-solids.brep",
+        COINCIDENT_SOLIDS,
+        GeometryFormat::Brep,
+        &options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert_eq!(imported, renamed);
+    assert_eq!(imported.topology.bodies.len(), 1);
+    assert_eq!(imported.topology.lumps.len(), 1);
+    assert_eq!(imported.topology.solids.len(), 1);
+    let report = imported.healing_report.as_ref().unwrap();
+    assert_eq!(report.operations.len(), 1);
+    assert_eq!(
+        report.operations[0].kind,
+        GeometryHealingOperationKind::ConsolidateDuplicate
+    );
+    assert_eq!(report.operations[0].maximum_displacement_m, 0.0);
+    assert!(report.original_validity.is_valid());
+    assert!(report.healed_validity.is_valid());
+    assert_eq!(imported.analysis_options().revision.revision, 2);
+    assert!(imported.build_closure().unwrap().healing_bytes.is_some());
+
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+        &evaluator,
+        &imported.topology.bodies[0].mass_properties_evaluator_id,
+        &Unlimited,
+    )
+    .unwrap();
+    assert_eq!(mass.volume_m3, 6.0);
+    assert_eq!(mass.centroid_m, [0.5, 1.0, 1.5]);
+
+    let unchanged = import_exact_cad(
+        "box.brep",
+        BOX,
+        GeometryFormat::Brep,
+        &options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert!(unchanged.healing_report.is_none());
+
+    assert!(matches!(
+        import_exact_cad(
+            "two_box_assembly.step",
+            TWO_BOX_ASSEMBLY,
+            GeometryFormat::Step,
+            &options,
+            &GeometryImportContext::new(),
+        ),
+        Err(GeometryImportError::BackendUnavailable(reason))
+            if reason.contains("definition-aware XCAF mutation")
+    ));
+
+    let limited = ExactCadImportOptions {
+        max_identity_work_bytes: 1,
+        ..options
+    };
+    assert!(matches!(
+        import_exact_cad(
+            "coincident_solids.brep",
+            COINCIDENT_SOLIDS,
+            GeometryFormat::Brep,
+            &limited,
+            &GeometryImportContext::new(),
+        ),
+        Err(GeometryImportError::ExactValidationBudgetExceeded(reason))
+            if reason.contains("persistent identity serialization")
     ));
 }
 
