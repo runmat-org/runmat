@@ -133,7 +133,7 @@ pub(super) fn topology() -> ExactBRepTopology {
         }],
         vertices: vec![ExactVertex {
             id: vertex,
-            point_m: [0.0, 0.0, 0.0],
+            point_m: [1.0, 0.0, 0.0],
             tolerance_m: 1.0e-8,
         }],
         interfaces: Vec::new(),

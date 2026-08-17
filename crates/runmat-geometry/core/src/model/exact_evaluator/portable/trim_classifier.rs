@@ -10,7 +10,7 @@ use super::pcurve::evaluate_pcurve;
 use super::projection::{
     charge_seed_allocation, project_parametric, uniform_seeds, ParametricDerivatives,
 };
-use super::{invalid_result, kernel_owned, PortableExactEvaluator};
+use super::{find_by_id, invalid_result, kernel_owned, PortableExactEvaluator};
 
 const WINDING_ABSOLUTE_ERROR_RAD: f64 = 1.0e-10;
 const MAX_PCURVE_PROJECTION_SEEDS: usize = 1_000_000;
@@ -198,16 +198,4 @@ fn orientation_sign(orientation: TopologicalOrientation) -> f64 {
         TopologicalOrientation::Forward => 1.0,
         TopologicalOrientation::Reversed => -1.0,
     }
-}
-
-fn find_by_id<'a, T>(
-    values: &'a [T],
-    id: &PersistentEntityId,
-    key: impl Fn(&T) -> &PersistentEntityId,
-    kind: &str,
-) -> Result<&'a T, GeometryEvaluationError> {
-    values
-        .binary_search_by(|value| key(value).cmp(id))
-        .map(|index| &values[index])
-        .map_err(|_| invalid_result(format!("admitted {kind} index is incomplete")))
 }

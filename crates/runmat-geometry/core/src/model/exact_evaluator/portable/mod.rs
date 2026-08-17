@@ -1,3 +1,4 @@
+mod consistency;
 mod curve;
 mod integration;
 mod mass_properties;
@@ -11,7 +12,7 @@ mod surface_spline;
 mod trim_classifier;
 mod vector;
 
-use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError};
+use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError, PersistentEntityId};
 use super::{
     CurveEvaluatorId, ExactCurveEvaluatorRecord, ExactEvaluatorRegistry, ExactMassPropertiesRecord,
     ExactPcurveEvaluatorRecord, ExactSurfaceEvaluatorRecord, ExactTrimClassifierRecord,
@@ -114,6 +115,20 @@ fn outside_domain(reason: impl Into<String>) -> GeometryEvaluationError {
     GeometryEvaluationError::new(GeometryEvaluationErrorKind::ParameterOutsideDomain, reason)
 }
 
+fn find_by_id<'a, T>(
+    values: &'a [T],
+    id: &PersistentEntityId,
+    key: impl Fn(&T) -> &PersistentEntityId,
+    kind: &str,
+) -> Result<&'a T, GeometryEvaluationError> {
+    values
+        .binary_search_by(|value| key(value).cmp(id))
+        .map(|index| &values[index])
+        .map_err(|_| invalid_result(format!("admitted {kind} index is incomplete")))
+}
+
+#[cfg(test)]
+mod consistency_tests;
 #[cfg(test)]
 mod surface_tests;
 #[cfg(test)]
