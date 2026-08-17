@@ -40,6 +40,14 @@ pub fn derive_curve_geometry_metric(
             .for_edge(&edge.id)
         })?;
         let mut maximum_curvature = 0.0_f64;
+        let mut minimum_witness_chord = f64::INFINITY;
+        let mut previous_point = None;
+        let mut is_feature = topology
+            .coedges
+            .iter()
+            .filter(|coedge| coedge.edge_id == edge.id)
+            .count()
+            != 2;
         for sample in 0..CURVATURE_SAMPLES_PER_EDGE {
             control
                 .consume_iterations(1)
@@ -55,6 +63,14 @@ pub fn derive_curve_geometry_metric(
             .map_err(|error| geometry_error(edge, error))?;
             let first = transform.transform_vector(derivatives.first_m);
             let second = transform.transform_vector(derivatives.second_m);
+            let point = transform.transform_point(derivatives.point_m);
+            if let Some(previous) = previous_point {
+                let chord = distance(previous, point);
+                if chord > 0.0 {
+                    minimum_witness_chord = minimum_witness_chord.min(chord);
+                }
+            }
+            previous_point = Some(point);
             let speed = norm(first);
             let curvature = norm(cross(first, second)) / speed.powi(3);
             if !curvature.is_finite() || speed <= 0.0 {
@@ -68,7 +84,7 @@ pub fn derive_curve_geometry_metric(
                 .for_edge(&edge.id));
             }
             maximum_curvature = maximum_curvature.max(curvature);
-            sample_incident_faces(
+            let normals = sample_incident_faces(
                 topology,
                 edge,
                 evaluator,
@@ -76,32 +92,54 @@ pub fn derive_curve_geometry_metric(
                 parameter,
                 &mut face_curvature,
             )?;
+            is_feature |= normals.iter().enumerate().any(|(index, left)| {
+                normals[index + 1..].iter().any(|right| {
+                    normal_angle_degrees(*left, *right)
+                        > surface_quality.maximum_normal_deviation_degrees
+                })
+            });
         }
-        if maximum_curvature == 0.0 {
-            continue;
-        }
-        let target_size_m = curvature_target_size(
-            maximum_curvature,
-            curve_quality.maximum_chordal_deviation_m,
-            curve_quality.maximum_tangent_change_degrees,
-        )
-        .ok_or_else(|| {
-            SharedCurveError::invalid_request(
-                "curve curvature metric",
-                "quality targets do not produce a finite positive curvature size",
+        if maximum_curvature > 0.0 {
+            let target_size_m = curvature_target_size(
+                maximum_curvature,
+                curve_quality.maximum_chordal_deviation_m,
+                curve_quality.maximum_tangent_change_degrees,
             )
-            .for_edge(&edge.id)
-        })?;
-        contributions.push(MetricContribution {
-            source: MetricSourceKind::Curve,
-            scope: MetricContributionScope::Entity {
-                entity_id: edge.id.clone(),
-            },
-            metric: MetricTensor3::isotropic_length_m(target_size_m).map_err(|error| {
-                SharedCurveError::invalid_request("curve curvature metric", error.to_string())
-                    .for_edge(&edge.id)
-            })?,
-        });
+            .ok_or_else(|| {
+                SharedCurveError::invalid_request(
+                    "curve curvature metric",
+                    "quality targets do not produce a finite positive curvature size",
+                )
+                .for_edge(&edge.id)
+            })?;
+            contributions.push(MetricContribution {
+                source: MetricSourceKind::Curve,
+                scope: MetricContributionScope::Entity {
+                    entity_id: edge.id.clone(),
+                },
+                metric: MetricTensor3::isotropic_length_m(target_size_m).map_err(|error| {
+                    SharedCurveError::invalid_request("curve curvature metric", error.to_string())
+                        .for_edge(&edge.id)
+                })?,
+            });
+        }
+        if is_feature && minimum_witness_chord.is_finite() {
+            contributions.push(MetricContribution {
+                source: MetricSourceKind::Feature,
+                scope: MetricContributionScope::Entity {
+                    entity_id: edge.id.clone(),
+                },
+                metric: MetricTensor3::isotropic_length_m(minimum_witness_chord).map_err(
+                    |error| {
+                        SharedCurveError::invalid_request(
+                            "exact edge feature metric",
+                            error.to_string(),
+                        )
+                        .for_edge(&edge.id)
+                    },
+                )?,
+            });
+        }
     }
     for (face_id, maximum_curvature) in face_curvature {
         if maximum_curvature == 0.0 {
@@ -142,7 +180,8 @@ fn sample_incident_faces(
     control: &dyn GeometryEvaluationControl,
     parameter: f64,
     maximum_by_face: &mut BTreeMap<runmat_geometry_core::PersistentEntityId, f64>,
-) -> Result<(), SharedCurveError> {
+) -> Result<Vec<[f64; 3]>, SharedCurveError> {
+    let mut normals = Vec::new();
     for coedge in topology
         .coedges
         .iter()
@@ -180,8 +219,24 @@ fn sample_incident_faces(
             .entry(face.id.clone())
             .and_modify(|current| *current = current.max(maximum))
             .or_insert(maximum);
+        normals.push(
+            normalize(cross(
+                transform.transform_vector(derivatives.du_m),
+                transform.transform_vector(derivatives.dv_m),
+            ))
+            .ok_or_else(|| {
+                SharedCurveError::new(
+                    SharedCurveErrorKind::GeometryEvaluation(
+                        runmat_geometry_core::GeometryEvaluationErrorKind::InvalidResult,
+                    ),
+                    "face-induced curve metric normal",
+                    "transformed surface derivatives do not define a finite normal",
+                )
+                .for_edge(&edge.id)
+            })?,
+        );
     }
-    Ok(())
+    Ok(normals)
 }
 
 fn curvature_target_size(
@@ -228,4 +283,24 @@ fn norm(value: [f64; 3]) -> f64 {
         .map(|component| component * component)
         .sum::<f64>()
         .sqrt()
+}
+
+fn normalize(value: [f64; 3]) -> Option<[f64; 3]> {
+    let length = norm(value);
+    (length.is_finite() && length > 0.0).then(|| value.map(|component| component / length))
+}
+
+fn normal_angle_degrees(left: [f64; 3], right: [f64; 3]) -> f64 {
+    let dot = left
+        .into_iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum::<f64>()
+        .abs()
+        .clamp(0.0, 1.0);
+    dot.acos().to_degrees()
+}
+
+fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    norm([left[0] - right[0], left[1] - right[1], left[2] - right[2]])
 }

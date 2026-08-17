@@ -587,10 +587,14 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
     )
     .unwrap();
 
-    assert_eq!(derived.contributions.len(), 1);
+    assert_eq!(derived.contributions.len(), 2);
     assert_eq!(
         derived.contributions[0].source,
         runmat_meshing_core::MetricSourceKind::Curve
+    );
+    assert_eq!(
+        derived.contributions[1].source,
+        runmat_meshing_core::MetricSourceKind::Feature
     );
     assert!(derived.contributions[0].metric.xx > 100.0);
     let cancelled = derive_curve_geometry_metric(
@@ -665,6 +669,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         vec![
             runmat_meshing_core::MetricSourceKind::Curve,
             runmat_meshing_core::MetricSourceKind::Face,
+            runmat_meshing_core::MetricSourceKind::Feature,
         ]
     );
 }
