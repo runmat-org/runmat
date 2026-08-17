@@ -26,7 +26,7 @@ pub struct MeshingStageInvocation<'a, 'control> {
 ///
 /// The execution bridge supplies only validated contracts and artifact closures. Concrete kernels
 /// remain responsible for constructive geometry work and independent stage validation.
-pub trait MeshingStageKernel {
+pub trait MeshingStageKernel: Send + Sync {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
@@ -86,15 +86,19 @@ impl MeshingSerialExecutionError {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn execute_serial_stage<S: CacheImport + CacheExport>(
+pub fn execute_serial_stage<S, K>(
     request: &ProgramExecutionRequest,
     store: &mut S,
-    kernel: &impl MeshingStageKernel,
+    kernel: &K,
     cancellation: &dyn MeshingCancellationSignal,
     progress: &mut dyn MeshingProgressSink,
     chunk_policy: MeshingChunkPolicyV2,
     inventory_limits: ObjectInventoryLimits,
-) -> Result<CompletedMeshingStage, MeshingSerialExecutionError> {
+) -> Result<CompletedMeshingStage, MeshingSerialExecutionError>
+where
+    S: CacheImport + CacheExport,
+    K: MeshingStageKernel + ?Sized,
+{
     let host = MeshingHostWorkloadV2::from_program_request(request)?;
     let roots = input_roots(request)?;
     let limits = effective_limits(&host, inventory_limits)?;

@@ -10,6 +10,7 @@ use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeObjectStore,
+    ProgramProgress,
 };
 
 static NEXT_PROGRAM_SCOPE: AtomicU64 = AtomicU64::new(1);
@@ -77,5 +78,9 @@ pub struct NativeProgramTask {
 impl NativeProgramTask {
     pub fn try_result(&self) -> Option<Result<AttemptSuccess, String>> {
         self.completion.try_value()
+    }
+
+    pub fn drain_progress(&self) -> Vec<ProgramProgress> {
+        self.completion.drain_progress()
     }
 }

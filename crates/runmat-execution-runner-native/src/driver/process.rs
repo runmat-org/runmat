@@ -9,7 +9,8 @@ use tokio::io::BufReader;
 
 use super::{LocalDriver, TaskCompletion, TransferResult, NATIVE_OBJECT_STORE_ROOT_ENV};
 use crate::protocol::{
-    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    StoredProgram, WorkerProcessMessage, WorkerRequest, WorkerResponse,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 
 pub(super) fn execute_attempt(
@@ -74,24 +75,40 @@ async fn run_process(
     write_payload(&mut writer, &payload, limits)
         .await
         .map_err(|error| error.to_string())?;
-    let payload = loop {
-        tokio::select! {
+    let mut last_progress_sequence = 0;
+    let response = loop {
+        let payload = tokio::select! {
             response = read_payload(&mut reader, limits) => {
-                break response.map_err(|error| {
+                response.map_err(|error| {
                     let stderr = stderr.text();
                     if stderr.is_empty() { error.to_string() } else { format!("{error}; worker stderr: {stderr}") }
-                })?;
+                })?
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
                 if completion.cancelled.load(Ordering::Acquire) {
                     let _ = child.terminate_tree().await;
                     return Err("execution was cancelled".into());
                 }
+                continue;
             }
+        };
+        if let Ok(message) = serde_json::from_slice::<WorkerProcessMessage>(&payload) {
+            match message {
+                WorkerProcessMessage::Progress { progress } => {
+                    progress.validate()?;
+                    if progress.sequence <= last_progress_sequence {
+                        return Err("native worker progress is not strictly monotone".into());
+                    }
+                    last_progress_sequence = progress.sequence;
+                    completion.record_progress(progress);
+                }
+                WorkerProcessMessage::Completed { response } => break response,
+            }
+        } else {
+            break serde_json::from_slice::<WorkerResponse>(&payload)
+                .map_err(|error| error.to_string())?;
         }
     };
-    let response: WorkerResponse =
-        serde_json::from_slice(&payload).map_err(|error| error.to_string())?;
     let _ = child.wait().await;
     response
         .validate_against(&request)

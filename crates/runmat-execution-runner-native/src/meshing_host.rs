@@ -1,17 +1,26 @@
 //! Meshing-capable native worker seam; scheduling remains in the generic execution driver.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
-use runmat_meshing_core::{MeshingCancellationSignal, MeshingChunkPolicyV2, NeverCancelled};
+use runmat_meshing_core::{
+    CanonicalMeshingContract, MeshingCancellationSignal, MeshingChunkPolicyV2, MeshingProgressV2,
+    NeverCancelled,
+};
 use runmat_meshing_execution::{
     execute_serial_stage, MeshingHostResponseV2, MeshingHostWorkloadV2, MeshingProgressSink,
-    MeshingStageKernel, NoopMeshingProgress,
+    MeshingStageKernel,
 };
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
 
+use crate::protocol::{ProgramProgress, WorkerProcessMessage, NATIVE_WORKER_MESSAGE_SCHEMA_V1};
 use crate::{NativeExecutionError, NativeExecutionResult, NativeObjectStore};
+
+const MESHING_PROGRESS_MEDIA_TYPE: &str = "application/vnd.runmat.meshing-progress+cbor";
+const MESHING_PROGRESS_VALUE_SCHEMA: &str = "runmat.meshing.progress.v2";
+const PROGRESS_CHANNEL_CAPACITY: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeMeshingHostLimits {
@@ -58,7 +67,7 @@ pub fn execute_meshing_program_request<
 >(
     request: &ProgramExecutionRequest,
     store: &mut S,
-    kernel: &impl MeshingStageKernel,
+    kernel: &dyn MeshingStageKernel,
     cancellation: &dyn MeshingCancellationSignal,
     progress: &mut dyn MeshingProgressSink,
     limits: NativeMeshingHostLimits,
@@ -97,7 +106,7 @@ pub fn execute_meshing_program_request<
 }
 
 pub async fn run_meshing_worker_stdio(
-    kernel: &impl MeshingStageKernel,
+    kernel: Arc<dyn MeshingStageKernel>,
     object_store_root: &Path,
     limits: NativeMeshingHostLimits,
 ) -> NativeExecutionResult<()> {
@@ -109,20 +118,104 @@ pub async fn run_meshing_worker_stdio(
     let payload = read_payload(&mut reader, frame_limits).await?;
     let request: ProgramExecutionRequest = serde_json::from_slice(&payload)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let mut store = NativeObjectStore::open(object_store_root, limits.inventory.max_object_bytes)
+    let store = NativeObjectStore::open(object_store_root, limits.inventory.max_object_bytes)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let mut progress = NoopMeshingProgress;
-    let response = execute_meshing_program_request(
-        &request,
-        &mut store,
-        kernel,
-        &NeverCancelled,
-        &mut progress,
-        limits,
-    );
-    let payload = serde_json::to_vec(&response)
+    let (progress_sender, mut progress_receiver) =
+        tokio::sync::mpsc::channel(PROGRESS_CHANNEL_CAPACITY);
+    let progress_error = Arc::new(Mutex::new(None));
+    let sink_error = Arc::clone(&progress_error);
+    let mut execution = tokio::task::spawn_blocking(move || {
+        let mut store = store;
+        let mut progress = ChannelProgress {
+            sender: progress_sender,
+            error: sink_error,
+        };
+        execute_meshing_program_request(
+            &request,
+            &mut store,
+            kernel.as_ref(),
+            &NeverCancelled,
+            &mut progress,
+            limits,
+        )
+    });
+    let response = loop {
+        tokio::select! {
+            progress = progress_receiver.recv() => {
+                if let Some(progress) = progress {
+                    write_message(
+                        &mut writer,
+                        &WorkerProcessMessage::Progress { progress },
+                        frame_limits,
+                    ).await?;
+                }
+            }
+            response = &mut execution => {
+                while let Ok(progress) = progress_receiver.try_recv() {
+                    write_message(
+                        &mut writer,
+                        &WorkerProcessMessage::Progress { progress },
+                        frame_limits,
+                    ).await?;
+                }
+                break response
+                    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+            }
+        }
+    };
+    if let Some(error) = progress_error
+        .lock()
+        .expect("meshing progress error poisoned")
+        .take()
+    {
+        return Err(NativeExecutionError::Protocol(error));
+    }
+    write_message(
+        &mut writer,
+        &WorkerProcessMessage::Completed { response },
+        frame_limits,
+    )
+    .await?;
+    Ok(())
+}
+
+struct ChannelProgress {
+    sender: tokio::sync::mpsc::Sender<ProgramProgress>,
+    error: Arc<Mutex<Option<String>>>,
+}
+
+impl MeshingProgressSink for ChannelProgress {
+    fn record(&mut self, progress: &MeshingProgressV2) {
+        let encoded = progress
+            .canonical_encode()
+            .map_err(|error| error.to_string());
+        let message = encoded.and_then(|payload| {
+            let progress = ProgramProgress {
+                schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V1,
+                sequence: progress.sequence,
+                media_type: MESHING_PROGRESS_MEDIA_TYPE.into(),
+                value_schema: MESHING_PROGRESS_VALUE_SCHEMA.into(),
+                payload,
+            };
+            progress.validate()?;
+            self.sender
+                .blocking_send(progress)
+                .map_err(|_| "native progress receiver closed".to_string())
+        });
+        if let Err(error) = message {
+            *self.error.lock().expect("meshing progress error poisoned") = Some(error);
+        }
+    }
+}
+
+async fn write_message(
+    writer: &mut (impl tokio::io::AsyncWrite + Unpin),
+    message: &WorkerProcessMessage,
+    limits: FrameLimits,
+) -> NativeExecutionResult<()> {
+    let payload = serde_json::to_vec(message)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    write_payload(&mut writer, &payload, frame_limits).await?;
+    write_payload(writer, &payload, limits).await?;
     Ok(())
 }
 

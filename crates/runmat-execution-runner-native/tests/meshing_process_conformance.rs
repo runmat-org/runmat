@@ -11,10 +11,10 @@ use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicyV2, CanonicalMeshingContract, GeometryRevisionRef,
     GeometryTolerancePolicy, MeshElementOrderV2, MeshingCapabilityRequirementV2,
     MeshingChunkMediaTypeV2, MeshingChunkPolicyV2, MeshingChunkStreamV2, MeshingFailure,
-    MeshingPartitionDescriptorV2, MeshingPartitionKindV2, MeshingQualityTargetsV2,
-    MeshingRequestV2, MeshingResourceBudgetV2, MeshingStageIdentityV2, MeshingStageV2,
-    MeshingWorkloadRequestV2, MetricCombinationRule, MetricFieldRequestV2, MetricTensor3,
-    NeverCancelled, StableDigest, SurfaceQualityTargetsV2, VolumeQualityTargetsV2,
+    MeshingPartitionDescriptorV2, MeshingPartitionKindV2, MeshingProgressV2,
+    MeshingQualityTargetsV2, MeshingRequestV2, MeshingResourceBudgetV2, MeshingStageIdentityV2,
+    MeshingStageV2, MeshingWorkloadRequestV2, MetricCombinationRule, MetricFieldRequestV2,
+    MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargetsV2, VolumeQualityTargetsV2,
     MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
     MESHING_WORKLOAD_SCHEMA_VERSION,
 };
@@ -95,11 +95,11 @@ fn main() {
         let root = std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV)
             .expect("child object-store root from native driver");
         if mode == "--child" {
-            run_child(&AdmissionKernel, Path::new(&root));
+            run_child(AdmissionKernel, Path::new(&root));
             return;
         }
         if mode == "--slow-child" {
-            run_child(&SlowKernel, Path::new(&root));
+            run_child(SlowKernel, Path::new(&root));
             return;
         }
     }
@@ -110,12 +110,16 @@ fn main() {
         .block_on(parent());
 }
 
-fn run_child(kernel: &impl MeshingStageKernel, root: &Path) {
+fn run_child(kernel: impl MeshingStageKernel + 'static, root: &Path) {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(run_meshing_worker_stdio(kernel, root, limits()))
+        .block_on(run_meshing_worker_stdio(
+            std::sync::Arc::new(kernel),
+            root,
+            limits(),
+        ))
         .unwrap();
 }
 
@@ -135,6 +139,22 @@ async fn parent() {
     })
     .await
     .unwrap();
+    let progress = task.drain_progress();
+    assert!(progress.len() >= 3);
+    let decoded_progress = progress
+        .iter()
+        .map(|progress| {
+            assert_eq!(
+                progress.media_type,
+                "application/vnd.runmat.meshing-progress+cbor"
+            );
+            MeshingProgressV2::canonical_decode(&progress.payload).unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(decoded_progress
+        .windows(2)
+        .all(|pair| pair[0].sequence < pair[1].sequence));
+    assert_eq!(decoded_progress.last().unwrap().completed_work, 1);
     let outputs = success.outputs;
     let result_objects = success.result_objects;
     assert!(serde_json::to_vec(&outputs).unwrap().len() < 4096);
@@ -186,7 +206,21 @@ async fn parent() {
             submission(&cancel_session, &cancel_host, &cancel_request),
         )
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let live_progress = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let progress = cancel_task.drain_progress();
+            if !progress.is_empty() {
+                break progress;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(live_progress
+        .iter()
+        .all(|progress| MeshingProgressV2::canonical_decode(&progress.payload).is_ok()));
+    assert!(cancel_task.try_result().is_none());
     cancel_session.cancel(runmat_execution::CancellationReason::User);
     let cancelled = tokio::time::timeout(Duration::from_secs(5), async {
         loop {

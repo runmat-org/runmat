@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -26,11 +26,13 @@ use crate::{
 };
 
 pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
+const MAX_BUFFERED_PROGRESS: usize = 256;
 
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
 pub(crate) struct TaskCompletion {
     value: Mutex<Option<TransferResult>>,
+    progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
     cancelled: AtomicBool,
 }
 
@@ -38,6 +40,7 @@ impl TaskCompletion {
     fn new() -> Self {
         Self {
             value: Mutex::new(None),
+            progress: Mutex::new(VecDeque::new()),
             cancelled: AtomicBool::new(false),
         }
     }
@@ -48,6 +51,22 @@ impl TaskCompletion {
 
     pub(crate) fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
+        let mut buffered = self.progress.lock().expect("task progress poisoned");
+        if buffered.len() == MAX_BUFFERED_PROGRESS {
+            buffered.pop_front();
+        }
+        buffered.push_back(progress);
+    }
+
+    pub(crate) fn drain_progress(&self) -> Vec<crate::protocol::ProgramProgress> {
+        self.progress
+            .lock()
+            .expect("task progress poisoned")
+            .drain(..)
+            .collect()
     }
 
     fn complete(&self, value: TransferResult) {
