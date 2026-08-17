@@ -152,7 +152,11 @@ where
         result_kind,
         partition_identity.canonical_digest()?,
         output.invariant_summary_digest,
-        host.workload.input_manifest_digests.clone(),
+        host.workload
+            .inputs
+            .iter()
+            .map(|input| input.digest)
+            .collect(),
         MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )?;

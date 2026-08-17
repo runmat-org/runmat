@@ -14,9 +14,9 @@ use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind}
 use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::TaskSubmission;
 use runmat_meshing_core::{
-    CanonicalMeshingContract, ElementOrder, MeshingCapabilityRequirement, MeshingPartitionIdentity,
-    MeshingRequest, MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, StableDigest,
-    MESHING_IDENTITY_SCHEMA_VERSION,
+    CanonicalMeshingContract, ElementOrder, MeshingCapabilityRequirement, MeshingInputKind,
+    MeshingPartitionIdentity, MeshingRequest, MeshingStageIdentity, MeshingStageKind,
+    MeshingWorkloadRequest, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -26,6 +26,7 @@ use crate::{
 
 pub const MESHING_EXECUTION_CALLABLE_OWNER: &str = "runmat.meshing.v2";
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
+const EXACT_GEOMETRY_SCHEMA: &str = "runmat.geometry.exact-manifest.v2";
 const MAX_REVIEWED_ATTEMPTS: u16 = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -135,7 +136,7 @@ fn validate_identity_binding(
     if workload.stage != stage_identity.stage
         || workload.stage_identity_digest != stage_identity.canonical_digest()?
         || stage_identity.resolved_request_digest != resolved_request.canonical_digest()?
-        || workload.input_manifest_digests != stage_identity.prerequisite_artifact_digests
+        || workload.inputs != stage_identity.prerequisites
     {
         return Err(MeshingExecutionError::Invalid(
             "workload, stage identity, resolved request, and prerequisites do not converge".into(),
@@ -149,19 +150,29 @@ pub(crate) fn validate_inputs(
     roots: &[ValueRef],
     access: &MeshingArtifactAccess,
 ) -> MeshingExecutionResult<()> {
-    if roots.len() != workload.input_manifest_digests.len() {
+    if roots.len() != workload.inputs.len() {
         return Err(MeshingExecutionError::Invalid(
-            "externalized input root count differs from workload manifests".into(),
+            "externalized input root count differs from workload inputs".into(),
         ));
     }
-    for (root, digest) in roots.iter().zip(&workload.input_manifest_digests) {
+    for (root, input) in roots.iter().zip(&workload.inputs) {
         ValuePayload::Object(Box::new(root.clone())).validate(ValueLimits::default())?;
-        if root.logical_digest.bytes() != digest.bytes()
+        let expected_shape = match input.kind {
+            MeshingInputKind::StageArtifact => {
+                root.kind == ValueRefKind::ResultObject
+                    && root.media_type == MESHING_STAGE_MANIFEST_MEDIA_TYPE
+                    && root.value_schema == STAGE_MANIFEST_SCHEMA
+            }
+            MeshingInputKind::ExactGeometry => {
+                root.kind == ValueRefKind::DriverObject
+                    && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
+                    && root.value_schema == EXACT_GEOMETRY_SCHEMA
+            }
+        };
+        if root.logical_digest.bytes() != input.digest.bytes()
             || root.id != access.value_id(root.logical_digest)
             || root.encoded_length == 0
-            || root.kind != ValueRefKind::ResultObject
-            || root.media_type != MESHING_STAGE_MANIFEST_MEDIA_TYPE
-            || root.value_schema != STAGE_MANIFEST_SCHEMA
+            || !expected_shape
             || root.authorization_scope != access.authorization_scope
             || root.encryption_context != access.encryption_context
         {

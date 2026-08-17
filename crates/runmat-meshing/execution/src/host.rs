@@ -62,8 +62,7 @@ impl MeshingHostWorkload {
             || self.workload.stage_identity_digest != self.stage_identity.canonical_digest()?
             || self.stage_identity.resolved_request_digest
                 != self.resolved_request.canonical_digest()?
-            || self.workload.input_manifest_digests
-                != self.stage_identity.prerequisite_artifact_digests
+            || self.workload.inputs != self.stage_identity.prerequisites
         {
             return Err(MeshingExecutionError::Invalid(
                 "meshing host workload identity does not converge".into(),

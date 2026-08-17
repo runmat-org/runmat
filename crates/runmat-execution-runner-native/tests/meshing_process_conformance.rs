@@ -640,7 +640,7 @@ fn fixture_for(
         metric_policy_digest: request.metric.canonical_digest().unwrap(),
         algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
         deterministic_seed: request.deterministic_seed,
-        prerequisite_artifact_digests: Vec::new(),
+        prerequisites: Vec::new(),
         capability_cohort: Some("native-cohort-v1".into()),
     };
     let workload = MeshingWorkloadRequest {
@@ -653,7 +653,7 @@ fn fixture_for(
             partition_count: 1,
             entity_range: None,
         },
-        input_manifest_digests: Vec::new(),
+        inputs: Vec::new(),
         required_capabilities: vec![
             MeshingCapabilityRequirement::HostWorkload {
                 abi: "host-v2".into(),

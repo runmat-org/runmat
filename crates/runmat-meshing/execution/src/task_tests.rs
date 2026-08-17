@@ -10,12 +10,12 @@ use runmat_execution_runner::driver::{DriverAction, DriverCommand, DriverConfig}
 use runmat_execution_runner::{Driver, PoolSpec, WorkerSpec};
 use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, ElementOrder,
-    GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
-    MeshingPartitionDescriptor, MeshingPartitionKind, MeshingQualityTargets, MeshingRequest,
-    MeshingResourceBudget, MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest,
-    MetricCombinationRule, MetricFieldRequest, MetricTensor3, StableDigest, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
-    MESHING_WORKLOAD_SCHEMA_VERSION,
+    GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement, MeshingInputKind,
+    MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind, MeshingQualityTargets,
+    MeshingRequest, MeshingResourceBudget, MeshingStageIdentity, MeshingStageKind,
+    MeshingWorkloadRequest, MetricCombinationRule, MetricFieldRequest, MetricTensor3, StableDigest,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
+    MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -121,6 +121,31 @@ fn mismatched_request_input_or_authority_fails_closed() {
         &fixture.identity,
         &fixture.request,
         &[wrong_input],
+        BTreeSet::new(),
+        &fixture.context,
+        MeshingTaskEffectPolicy::UnknownEffect,
+    )
+    .is_err());
+}
+
+#[test]
+fn exact_geometry_inputs_use_the_authoritative_geometry_object_shape() {
+    let mut fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
+    fixture.identity.prerequisites[0].kind = MeshingInputKind::ExactGeometry;
+    fixture.workload.inputs = fixture.identity.prerequisites.clone();
+    fixture.workload.stage_identity_digest = fixture.identity.canonical_digest().unwrap();
+    fixture.input.kind = ValueRefKind::DriverObject;
+    fixture.input.media_type = runmat_geometry_core::EXACT_BREP_MEDIA_TYPE.into();
+    fixture.input.value_schema = "runmat.geometry.exact-manifest.v2".into();
+
+    fixture.submit(MeshingTaskEffectPolicy::UnknownEffect);
+
+    fixture.input.kind = ValueRefKind::ResultObject;
+    assert!(build_task_submission(
+        &fixture.workload,
+        &fixture.identity,
+        &fixture.request,
+        std::slice::from_ref(&fixture.input),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -291,7 +316,7 @@ impl Fixture {
             metric_policy_digest: request.metric.canonical_digest().unwrap(),
             algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
             deterministic_seed: request.deterministic_seed,
-            prerequisite_artifact_digests: vec![input_digest],
+            prerequisites: vec![stage_input(input_digest)],
             capability_cohort: Some(cohort.clone()),
         };
         let workload = MeshingWorkloadRequest {
@@ -304,7 +329,7 @@ impl Fixture {
                 partition_count: 1,
                 entity_range: None,
             },
-            input_manifest_digests: vec![input_digest],
+            inputs: vec![stage_input(input_digest)],
             required_capabilities: vec![
                 MeshingCapabilityRequirement::HostWorkload {
                     abi: "host-v2".into(),
@@ -439,4 +464,11 @@ fn algorithm(stage: MeshingStageKind, request: &MeshingRequest) -> &str {
 
 fn stable(seed: u8) -> StableDigest {
     StableDigest::from_bytes([seed; 32])
+}
+
+fn stage_input(digest: StableDigest) -> MeshingInputRef {
+    MeshingInputRef {
+        kind: MeshingInputKind::StageArtifact,
+        digest,
+    }
 }

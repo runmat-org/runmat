@@ -36,9 +36,10 @@ pub use failure::{
     MeshingFailureCategory, MeshingOperation, MeshingStageKind, MESHING_FAILURE_SCHEMA_VERSION,
 };
 pub use identity::{
-    CanonicalEntityRange, GeometryRevisionRef, MeshingJoinIdentity, MeshingPartitionDescriptor,
-    MeshingPartitionIdentity, MeshingPartitionKind, MeshingPartitionResultRef,
-    MeshingStageIdentity, MeshingStageResultIdentity, MeshingValidationIdentity, StableDigest,
+    CanonicalEntityRange, GeometryRevisionRef, MeshingInputKind, MeshingInputRef,
+    MeshingJoinIdentity, MeshingPartitionDescriptor, MeshingPartitionIdentity,
+    MeshingPartitionKind, MeshingPartitionResultRef, MeshingStageIdentity,
+    MeshingStageResultIdentity, MeshingValidationIdentity, StableDigest,
     MESHING_IDENTITY_SCHEMA_VERSION,
 };
 pub use manifest::{

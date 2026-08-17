@@ -21,12 +21,13 @@ use runmat_meshing_core::{
     CancellationPolicy, CanonicalMeshingContract, ElementOrder, GeometryRevisionRef,
     GeometryTolerancePolicy, MeshingCancellationSignal, MeshingCapabilityRequirement,
     MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingFailure,
-    MeshingFailureCategory, MeshingManifestDisposition, MeshingPartitionDescriptor,
-    MeshingPartitionKind, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
-    MeshingStageIdentity, MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest,
-    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
-    SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
+    MeshingFailureCategory, MeshingInputKind, MeshingInputRef, MeshingManifestDisposition,
+    MeshingPartitionDescriptor, MeshingPartitionKind, MeshingQualityTargets, MeshingRequest,
+    MeshingResourceBudget, MeshingStageIdentity, MeshingStageKind, MeshingStageResultKind,
+    MeshingWorkloadRequest, MetricCombinationRule, MetricFieldRequest, MetricTensor3,
+    NeverCancelled, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
+    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
 use super::{
@@ -544,7 +545,7 @@ impl Fixture {
             metric_policy_digest: request.metric.canonical_digest().unwrap(),
             algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
             deterministic_seed: request.deterministic_seed,
-            prerequisite_artifact_digests: vec![root_digest],
+            prerequisites: vec![stage_input(root_digest)],
             capability_cohort: Some("native-cohort-v1".into()),
         };
         let workload = MeshingWorkloadRequest {
@@ -557,7 +558,7 @@ impl Fixture {
                 partition_count: 1,
                 entity_range: None,
             },
-            input_manifest_digests: vec![root_digest],
+            inputs: vec![stage_input(root_digest)],
             required_capabilities: vec![
                 MeshingCapabilityRequirement::HostWorkload {
                     abi: "host-v2".into(),
@@ -738,4 +739,11 @@ fn revision() -> ProgramRevision {
 
 fn stable(seed: u8) -> StableDigest {
     StableDigest::from_bytes([seed; 32])
+}
+
+fn stage_input(digest: StableDigest) -> MeshingInputRef {
+    MeshingInputRef {
+        kind: MeshingInputKind::StageArtifact,
+        digest,
+    }
 }

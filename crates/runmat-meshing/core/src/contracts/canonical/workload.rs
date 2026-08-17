@@ -9,13 +9,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    identity::validate_digest_list, validate_token, ElementOrder, MeshingContractError,
-    MeshingFailure, MeshingPartitionDescriptor, MeshingStageKind, StableDigest,
+    identity::validate_inputs, validate_token, ElementOrder, MeshingContractError, MeshingFailure,
+    MeshingInputRef, MeshingPartitionDescriptor, MeshingStageKind, StableDigest,
 };
 
 pub const MESHING_WORKLOAD_SCHEMA_VERSION: u16 = 2;
 pub const MESHING_PROGRESS_SCHEMA_VERSION: u16 = 2;
-const MAX_INPUT_MANIFESTS: usize = 64;
 const MAX_CAPABILITIES: usize = 16;
 const MAX_PROGRESS_COUNTS: usize = 256;
 
@@ -52,7 +51,7 @@ pub struct MeshingWorkloadRequest {
     pub stage: MeshingStageKind,
     pub stage_identity_digest: StableDigest,
     pub partition: MeshingPartitionDescriptor,
-    pub input_manifest_digests: Vec<StableDigest>,
+    pub inputs: Vec<MeshingInputRef>,
     pub required_capabilities: Vec<MeshingCapabilityRequirement>,
 }
 
@@ -79,17 +78,10 @@ impl MeshingWorkloadRequest {
                 "entity batching is limited to independently composable sizing, curve, and surface work",
             ));
         }
-        validate_digest_list(
-            "workload input manifests",
-            &self.input_manifest_digests,
-            MAX_INPUT_MANIFESTS,
-            true,
-        )?;
-        if self.stage != MeshingStageKind::GeometryAdmission
-            && self.input_manifest_digests.is_empty()
-        {
+        validate_inputs(&self.inputs)?;
+        if self.stage != MeshingStageKind::GeometryAdmission && self.inputs.is_empty() {
             return Err(MeshingContractError::invalid(
-                "workload input manifests",
+                "workload inputs",
                 "every stage after geometry admission requires an artifact dependency",
             ));
         }

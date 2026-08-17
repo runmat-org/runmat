@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{validate_token, MeshingContractError};
 
 pub const MESHING_IDENTITY_SCHEMA_VERSION: u16 = 2;
-const MAX_PREREQUISITE_DIGESTS: usize = 64;
+const MAX_MESHING_INPUTS: usize = 64;
 const MAX_JOIN_PARTITIONS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -44,6 +44,26 @@ pub struct GeometryRevisionRef {
     pub source_digest: StableDigest,
     pub geometry_revision: u64,
     pub persistent_mapping_version: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshingInputKind {
+    ExactGeometry,
+    StageArtifact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeshingInputRef {
+    pub kind: MeshingInputKind,
+    pub digest: StableDigest,
+}
+
+impl MeshingInputRef {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
+        self.digest.validate_nonzero("meshing input digest")
+    }
 }
 
 impl GeometryRevisionRef {
@@ -135,7 +155,7 @@ pub struct MeshingStageIdentity {
     pub metric_policy_digest: StableDigest,
     pub algorithm_set_digest: StableDigest,
     pub deterministic_seed: u64,
-    pub prerequisite_artifact_digests: Vec<StableDigest>,
+    pub prerequisites: Vec<MeshingInputRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capability_cohort: Option<String>,
 }
@@ -157,17 +177,33 @@ impl MeshingStageIdentity {
         ] {
             digest.validate_nonzero(field)?;
         }
-        validate_digest_list(
-            "prerequisite artifact digests",
-            &self.prerequisite_artifact_digests,
-            MAX_PREREQUISITE_DIGESTS,
-            true,
-        )?;
+        validate_inputs(&self.prerequisites)?;
         if let Some(cohort) = &self.capability_cohort {
             validate_token("capability cohort", cohort, 128)?;
         }
         Ok(())
     }
+}
+
+pub(super) fn validate_inputs(inputs: &[MeshingInputRef]) -> Result<(), MeshingContractError> {
+    let digests_are_unique = inputs.iter().enumerate().all(|(index, input)| {
+        inputs[index + 1..]
+            .iter()
+            .all(|other| input.digest != other.digest)
+    });
+    if inputs.len() > MAX_MESHING_INPUTS
+        || !inputs.windows(2).all(|pair| pair[0] < pair[1])
+        || !digests_are_unique
+    {
+        return Err(MeshingContractError::invalid(
+            "meshing input references",
+            "must be bounded, unique, and canonically ordered",
+        ));
+    }
+    for input in inputs {
+        input.validate()?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

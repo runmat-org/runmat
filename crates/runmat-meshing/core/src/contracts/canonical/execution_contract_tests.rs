@@ -6,6 +6,13 @@ fn digest(byte: u8) -> StableDigest {
     StableDigest::from_bytes([byte; 32])
 }
 
+fn stage_input(byte: u8) -> MeshingInputRef {
+    MeshingInputRef {
+        kind: MeshingInputKind::StageArtifact,
+        digest: digest(byte),
+    }
+}
+
 fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
     PersistentEntityId {
         kind,
@@ -41,7 +48,7 @@ pub(super) fn stage_identity() -> MeshingStageIdentity {
         metric_policy_digest: digest(4),
         algorithm_set_digest: digest(5),
         deterministic_seed: 17,
-        prerequisite_artifact_digests: vec![digest(6), digest(7)],
+        prerequisites: vec![stage_input(6), stage_input(7)],
         capability_cohort: Some("native-exact-cad-v1".into()),
     }
 }
@@ -52,7 +59,7 @@ pub(super) fn workload() -> MeshingWorkloadRequest {
         stage: MeshingStageKind::SurfaceMesh,
         stage_identity_digest: digest(8),
         partition: batch_partition(),
-        input_manifest_digests: vec![digest(9)],
+        inputs: vec![stage_input(9)],
         required_capabilities: vec![
             MeshingCapabilityRequirement::HostWorkload {
                 abi: "meshing-host-v2".into(),
@@ -163,10 +170,34 @@ fn identities_reject_completion_order_and_physical_host_fields() {
     assert!(serde_json::from_value::<MeshingStageIdentity>(value).is_err());
 
     let mut invalid = stage_identity();
-    invalid.prerequisite_artifact_digests.swap(0, 1);
+    invalid.prerequisites.swap(0, 1);
     assert_eq!(
         invalid.validate().unwrap_err().field,
-        "prerequisite artifact digests"
+        "meshing input references"
+    );
+}
+
+#[test]
+fn input_kind_is_authoritative_and_duplicate_roots_are_rejected() {
+    let stage_artifact = stage_input(6);
+    let exact_geometry = MeshingInputRef {
+        kind: MeshingInputKind::ExactGeometry,
+        digest: stage_artifact.digest,
+    };
+    let mut artifact_identity = stage_identity();
+    artifact_identity.prerequisites = vec![stage_artifact.clone()];
+    let mut geometry_identity = artifact_identity.clone();
+    geometry_identity.prerequisites = vec![exact_geometry.clone()];
+    assert_ne!(
+        artifact_identity.canonical_digest().unwrap(),
+        geometry_identity.canonical_digest().unwrap()
+    );
+
+    let mut identity = stage_identity();
+    identity.prerequisites = vec![exact_geometry, stage_artifact];
+    assert_eq!(
+        identity.validate().unwrap_err().field,
+        "meshing input references"
     );
 }
 
