@@ -20,6 +20,20 @@ fn exact_analysis_options_are_validated_before_kernel_dispatch() {
             if reason.contains("requested_deviation_m")
     ));
 
+    let mut unsupported_healing = ExactCadImportOptions::default();
+    unsupported_healing.analysis.healing.sew = true;
+    assert!(matches!(
+        import_exact_cad(
+            "shape.brep",
+            b"not dispatched",
+            GeometryFormat::Brep,
+            &unsupported_healing,
+            &GeometryImportContext::new(),
+        ),
+        Err(GeometryImportError::InvalidOptions(reason))
+            if reason.contains("only explicit orientation repair")
+    ));
+
     let mut invalid_revision = ExactCadImportOptions::default();
     invalid_revision.analysis.revision.revision = 0;
     assert!(matches!(
@@ -155,7 +169,11 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     )
     .unwrap();
     assert_eq!(millimeter_shape.representation, first.representation);
-    assert_eq!(millimeter_shape.topology.vertices[0].point_m[0], 0.0);
+    assert!(millimeter_shape
+        .topology
+        .vertices
+        .iter()
+        .any(|vertex| vertex.point_m == [0.0, 0.0, 0.0]));
     assert!(millimeter_shape
         .topology
         .vertices
@@ -221,6 +239,104 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         Err(GeometryImportError::Cancelled)
     ));
     assert!(cancelled.load(Ordering::Relaxed));
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+fn occt_orientation_repair_is_explicit_and_preserves_persistent_names() {
+    let mut reversed = BOX.to_vec();
+    let terminal_orientation = reversed
+        .windows(8)
+        .rposition(|window| window == b"\n+1 0 *\n")
+        .expect("box fixture has a terminal solid orientation");
+    reversed[terminal_orientation + 1] = b'-';
+
+    let context = GeometryImportContext::new();
+    assert!(import_exact_cad(
+        "reversed-box.brep",
+        &reversed,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &context,
+    )
+    .is_err());
+
+    let mut options = ExactCadImportOptions::default();
+    options.analysis.healing.repair_orientation = true;
+    let healed = import_exact_cad(
+        "reversed-box.brep",
+        &reversed,
+        GeometryFormat::Brep,
+        &options,
+        &context,
+    )
+    .unwrap();
+    let canonical = import_exact_cad(
+        "box.brep",
+        BOX,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &context,
+    )
+    .unwrap();
+    assert_eq!(healed.topology, canonical.topology);
+    let report = healed
+        .healing_report
+        .as_ref()
+        .expect("changed topology carries healing evidence");
+    report.validate().unwrap();
+    assert_eq!(report.operations.len(), 1);
+    assert_eq!(
+        report.operations[0].kind,
+        runmat_geometry_core::GeometryHealingOperationKind::RepairOrientation
+    );
+    assert_eq!(report.operations[0].maximum_displacement_m, 0.0);
+    assert!(!report.original_validity.orientation_consistent);
+    assert!(report.healed_validity.is_valid());
+    assert_eq!(report.revision_map.source_revision.revision, 1);
+    assert_eq!(report.revision_map.target_revision.revision, 2);
+    assert_eq!(healed.analysis_options().revision.revision, 2);
+    let closure = healed.build_closure().unwrap();
+    assert!(closure.healing_bytes.is_some());
+    assert_eq!(
+        closure.manifest.healing_report.as_ref().unwrap().digest,
+        runmat_geometry_core::GeometryDigest::from_bytes(
+            sha2::Sha256::digest(closure.healing_bytes.as_ref().unwrap()).into()
+        )
+    );
+
+    let unchanged =
+        import_exact_cad("box.brep", BOX, GeometryFormat::Brep, &options, &context).unwrap();
+    assert!(unchanged.healing_report.is_none());
+    assert_eq!(unchanged.analysis_options().revision.revision, 1);
+
+    let mut identity_limited = options.clone();
+    identity_limited.max_identity_work_bytes = 1;
+    assert!(matches!(
+        import_exact_cad(
+            "reversed-box.brep",
+            &reversed,
+            GeometryFormat::Brep,
+            &identity_limited,
+            &context,
+        ),
+        Err(GeometryImportError::ExactValidationBudgetExceeded(reason))
+            if reason.contains("persistent identity serialization")
+    ));
+
+    let mut exhausted_revision = options;
+    exhausted_revision.analysis.revision.revision = u64::MAX;
+    assert!(matches!(
+        import_exact_cad(
+            "reversed-box.brep",
+            &reversed,
+            GeometryFormat::Brep,
+            &exhausted_revision,
+            &context,
+        ),
+        Err(GeometryImportError::InvalidOptions(reason))
+            if reason.contains("cannot advance")
+    ));
 }
 
 #[test]

@@ -29,6 +29,8 @@ mod evaluator_surface;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod evaluator_trim;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_healing_projection;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod exact_persistent_names;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod exact_projection;

@@ -1,5 +1,6 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "runmat-geometry-io/src/occt/exact_assembly.hxx"
+#include "runmat-geometry-io/src/occt/exact_healing.hxx"
 
 #include <BRep_Builder.hxx>
 #include <BRepAdaptor_Curve.hxx>
@@ -64,6 +65,7 @@
 #include <gp_Vec.hxx>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -88,6 +90,18 @@ std::string str_from_rust(rust::Str value) {
 
 std::string bytes_to_string(rust::Slice<const std::uint8_t> bytes) {
   return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+std::array<std::uint8_t, 32> geometry_digest(const std::string& bytes) {
+  rust::Vec<std::uint8_t> digest = occt_geometry_digest(
+      rust::Slice<const std::uint8_t>(
+          reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()));
+  if (digest.size() != 32) {
+    throw std::runtime_error("OCCT geometry digest has an invalid length");
+  }
+  std::array<std::uint8_t, 32> result;
+  std::copy(digest.begin(), digest.end(), result.begin());
+  return result;
 }
 
 std::string format_name(OcctCadFormat format) {
@@ -965,6 +979,31 @@ OcctExactShapePayload import_exact_cad_bytes(
   BRepTools::Clean(document.shape);
   check_cancelled(options);
 
+  if (options.heal_sew || options.heal_duplicates || options.heal_gaps ||
+      options.heal_short_edges_and_sliver_faces) {
+    throw std::runtime_error(
+        "requested OCCT exact healing operation is not yet supported by this kernel adapter");
+  }
+
+  std::array<std::uint8_t, 32> original_geometry_digest{};
+  bool original_kernel_valid = false;
+  std::uint64_t healing_identity_work_bytes = 0;
+  if (options.heal_orientation) {
+    const std::string original_representation = serialize_exact_shape(document.shape, options);
+    if (static_cast<std::uint64_t>(original_representation.size()) >
+        options.max_exact_representation_bytes) {
+      throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+    }
+    original_geometry_digest = geometry_digest(original_representation);
+    const BRepCheck_Analyzer original_analyzer(document.shape, Standard_True);
+    original_kernel_valid = original_analyzer.IsValid();
+    ExactOrientationRepair repair = repair_exact_orientation(document.shape, options);
+    document.shape = repair.shape;
+    healing_identity_work_bytes = repair.identity_work_bytes;
+    BRepTools::Clean(document.shape);
+    check_cancelled(options);
+  }
+
   const std::string representation = serialize_exact_shape(document.shape, options);
   if (static_cast<std::uint64_t>(representation.size()) >
       options.max_exact_representation_bytes) {
@@ -974,6 +1013,15 @@ OcctExactShapePayload import_exact_cad_bytes(
   OcctExactShapePayload result;
   result.kernel_version = OCC_VERSION_COMPLETE;
   result.kernel_abi = std::string("occt/") + OCC_VERSION_COMPLETE + "/brep-v3";
+  result.original_kernel_valid = original_kernel_valid;
+  result.healing_identity_work_bytes = healing_identity_work_bytes;
+  result.orientation_repaired = options.heal_orientation &&
+                                original_geometry_digest != geometry_digest(representation);
+  if (result.orientation_repaired) {
+    for (const std::uint8_t byte : original_geometry_digest) {
+      result.original_geometry_digest.push_back(byte);
+    }
+  }
   result.representation.reserve(representation.size());
   for (const unsigned char byte : representation) {
     result.representation.push_back(static_cast<std::uint8_t>(byte));

@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
     build_exact_geometry_closure, EncodedExactGeometryClosure, ExactBRepModel, ExactBRepTopology,
-    ExactEvaluatorRegistry, GeometryDigest, GeometryDocument, GeometryHealingPolicy, GeometryModel,
-    GeometryRevisionIdentity, GeometrySourceFormat, GeometrySourceIdentity,
-    GeometryTolerancePolicy, UnitSystem, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
+    ExactEvaluatorRegistry, GeometryDigest, GeometryDocument, GeometryHealingPolicy,
+    GeometryHealingReport, GeometryModel, GeometryRevisionIdentity, GeometrySourceFormat,
+    GeometrySourceIdentity, GeometryTolerancePolicy, UnitSystem, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -31,6 +31,8 @@ pub struct ImportedExactCad {
     /// Exact evaluator bindings into `representation`; no display samples are admitted.
     pub evaluators: ExactEvaluatorRegistry,
     pub model: ExactBRepModel,
+    /// Present only when the kernel changed authoritative topology under the admitted policy.
+    pub healing_report: Option<GeometryHealingReport>,
     /// Analysis identity and mutation policy admitted before the kernel import. Keeping this on
     /// the imported object prevents closure construction from claiming a different tolerance or
     /// healing policy than the one under which topology was produced.
@@ -88,7 +90,7 @@ impl ImportedExactCad {
             &self.topology,
             &self.evaluators,
             Some(&self.representation),
-            None,
+            self.healing_report.as_ref(),
         )
     }
 }
@@ -206,6 +208,18 @@ pub fn import_exact_cad(
         .healing
         .validate()
         .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
+    if options.analysis.healing.sew
+        || options.analysis.healing.consolidate_duplicates
+        || options.analysis.healing.repair_tolerance_scale_gaps
+        || options
+            .analysis
+            .healing
+            .simplify_short_edges_and_sliver_faces
+    {
+        return Err(GeometryImportError::InvalidOptions(
+            "this OCCT adapter currently supports only explicit orientation repair".into(),
+        ));
+    }
     if options.analysis.revision.revision == 0
         || options.analysis.revision.persistent_mapping_version == 0
     {

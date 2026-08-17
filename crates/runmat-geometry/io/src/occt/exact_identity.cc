@@ -3,6 +3,7 @@
 
 #include <BRepTools.hxx>
 #include <Message_ProgressIndicator.hxx>
+#include <TopAbs_Orientation.hxx>
 #include <TopoDS_Shape.hxx>
 
 #include <sstream>
@@ -43,7 +44,8 @@ void ExactIdentityContext::append(rust::Vec<std::uint8_t>& destination,
   }
   std::ostringstream stream;
   CancelProgress progress(options);
-  BRepTools::Write(shape, stream, progress.Start());
+  const TopoDS_Shape canonical = shape.Oriented(TopAbs_FORWARD);
+  BRepTools::Write(canonical, stream, progress.Start());
   if (options.cancel_token_id != 0 && occt_import_cancelled(options.cancel_token_id)) {
     throw std::runtime_error("OCCT CAD import cancelled");
   }

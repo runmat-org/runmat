@@ -231,7 +231,7 @@ void append_exact_occurrences(OcctExactShapePayload& result,
                               const OcctImportOptions& options) {
   BRepTools_ShapeSet shape_set(Standard_False);
   shape_set.Add(root_shape);
-  ExactIdentityContext identity_context;
+  ExactIdentityContext identity_context(result.healing_identity_work_bytes);
 
   OcctExactOccurrencePayload root;
   root.occurrence_index = 1;

@@ -1,7 +1,7 @@
 use super::{
-    exact_projection, ffi, import_validation, topology_from_raw, OcctCadFormat,
-    OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart, OcctCadTopology, OcctRawAssemblyNode,
-    OcctRawFaceEvaluationSample, OcctRawFaceSemantic, OcctRawTopology,
+    exact_healing_projection, exact_projection, ffi, import_validation, topology_from_raw,
+    OcctCadFormat, OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart, OcctCadTopology,
+    OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic, OcctRawTopology,
 };
 use crate::exact::{ExactCadImportOptions, ImportedExactCad};
 use crate::import::{
@@ -125,7 +125,10 @@ pub(crate) fn import_exact_cad_shape(
         meters_per_source_unit,
         mass_properties.as_ref(),
     )?;
-    let imported = ImportedExactCad {
+    let orientation_repaired = payload.orientation_repaired;
+    let original_geometry_digest = payload.original_geometry_digest.clone();
+    let original_kernel_valid = payload.original_kernel_valid;
+    let mut imported = ImportedExactCad {
         source_digest: GeometryDigest::from_bytes(Sha256::digest(bytes).into()),
         source_format: match format {
             OcctCadFormat::Step => GeometrySourceFormat::Step,
@@ -139,6 +142,7 @@ pub(crate) fn import_exact_cad_shape(
         topology: projection.topology,
         evaluators: projection.evaluators,
         model: projection.model,
+        healing_report: None,
         analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
     };
@@ -158,6 +162,19 @@ pub(crate) fn import_exact_cad_shape(
             &import_validation::ImportEvaluationControl::new(context, options),
         )
         .map_err(import_validation::map_validation_error)?;
+    if orientation_repaired {
+        let report = exact_healing_projection::orientation_report(
+            &original_geometry_digest,
+            original_kernel_valid,
+            &imported,
+        )?;
+        imported.analysis.revision = report.revision_map.target_revision.clone();
+        imported.healing_report = Some(report);
+    } else if !original_geometry_digest.is_empty() {
+        return Err(GeometryImportError::InvalidGeometry(
+            "OCCT returned original geometry identity without a healing operation".into(),
+        ));
+    }
     Ok(imported)
 }
 
@@ -359,6 +376,11 @@ fn ffi_import_options(
         max_exact_representation_bytes: u64::MAX,
         max_exact_entities: u64::MAX,
         max_exact_identity_bytes: u64::MAX,
+        heal_sew: false,
+        heal_orientation: false,
+        heal_duplicates: false,
+        heal_gaps: false,
+        heal_short_edges_and_sliver_faces: false,
         cancel_token_id,
     }
 }
@@ -376,6 +398,14 @@ fn ffi_exact_import_options(
         max_exact_representation_bytes: options.max_representation_bytes,
         max_exact_entities: options.max_entities,
         max_exact_identity_bytes: options.max_identity_work_bytes,
+        heal_sew: options.analysis.healing.sew,
+        heal_orientation: options.analysis.healing.repair_orientation,
+        heal_duplicates: options.analysis.healing.consolidate_duplicates,
+        heal_gaps: options.analysis.healing.repair_tolerance_scale_gaps,
+        heal_short_edges_and_sliver_faces: options
+            .analysis
+            .healing
+            .simplify_short_edges_and_sliver_faces,
         cancel_token_id,
     }
 }

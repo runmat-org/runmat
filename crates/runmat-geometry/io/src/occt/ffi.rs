@@ -25,6 +25,11 @@ pub(crate) mod bridge {
         max_exact_representation_bytes: u64,
         max_exact_entities: u64,
         max_exact_identity_bytes: u64,
+        heal_sew: bool,
+        heal_orientation: bool,
+        heal_duplicates: bool,
+        heal_gaps: bool,
+        heal_short_edges_and_sliver_faces: bool,
         cancel_token_id: u64,
     }
 
@@ -100,6 +105,10 @@ pub(crate) mod bridge {
         edge_count: u64,
         vertex_count: u64,
         kernel_valid: bool,
+        original_geometry_digest: Vec<u8>,
+        orientation_repaired: bool,
+        original_kernel_valid: bool,
+        healing_identity_work_bytes: u64,
         has_volume_properties: bool,
         volume: f64,
         surface_area: f64,
@@ -461,6 +470,7 @@ pub(crate) mod bridge {
     extern "Rust" {
         fn occt_import_cancelled(cancel_token_id: u64) -> bool;
         fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8>;
+        fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8>;
     }
 }
 
@@ -518,6 +528,10 @@ fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8> {
     sha2::Digest::update(&mut hasher, b"runmat.occt-persistent-shape-name\0");
     sha2::Digest::update(&mut hasher, bytes);
     sha2::Digest::finalize(hasher).to_vec()
+}
+
+fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8> {
+    sha2::Sha256::digest(bytes).to_vec()
 }
 
 fn cancel_tokens() -> &'static Mutex<BTreeMap<u64, Arc<AtomicBool>>> {

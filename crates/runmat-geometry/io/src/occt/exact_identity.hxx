@@ -15,6 +15,9 @@ struct OcctImportOptions;
 
 class ExactIdentityContext {
 public:
+  explicit ExactIdentityContext(std::uint64_t initial_byte_work = 0)
+      : serialized_byte_work_(initial_byte_work) {}
+
   void append(rust::Vec<std::uint8_t>& destination,
               const TopoDS_Shape& shape,
               std::uint64_t shape_key,
