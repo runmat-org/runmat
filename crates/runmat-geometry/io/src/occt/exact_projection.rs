@@ -1,24 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
-    BodyMassProperties, CurveEvaluatorId, ExactAssembly, ExactBRepModel, ExactBRepTopology,
-    ExactBody, ExactCoedge, ExactCurveEvaluatorRecord, ExactCurveImplementation, ExactEdge,
-    ExactEvaluatorRegistry, ExactFace, ExactGeometryCapabilities, ExactLump,
-    ExactMassPropertiesImplementation, ExactMassPropertiesRecord, ExactPcurveEvaluatorRecord,
-    ExactPcurveImplementation, ExactShell, ExactSolid, ExactSurfaceEvaluatorRecord,
-    ExactSurfaceImplementation, ExactTrimClassifierImplementation, ExactTrimClassifierRecord,
-    ExactVertex, ExactWire, GeometryDigest, GeometryObjectRef, MassPropertiesEvaluatorId,
-    OrientedEntityUse, PcurveEvaluatorId, PersistentEntityId, PersistentEntityKind,
-    SurfaceEvaluatorId, TopologicalOrientation, TrimClassifierId, EXACT_BREP_MEDIA_TYPE,
-    EXACT_BREP_TOPOLOGY_SCHEMA_VERSION, EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION,
-    GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
+    BodyMassProperties, ExactAssembly, ExactBRepModel, ExactBRepTopology, ExactBody, ExactCoedge,
+    ExactCurveEvaluatorRecord, ExactCurveImplementation, ExactEdge, ExactEvaluatorRegistry,
+    ExactFace, ExactGeometryCapabilities, ExactLump, ExactMassPropertiesImplementation,
+    ExactMassPropertiesRecord, ExactPcurveEvaluatorRecord, ExactPcurveImplementation, ExactShell,
+    ExactSolid, ExactSurfaceEvaluatorRecord, ExactSurfaceImplementation,
+    ExactTrimClassifierImplementation, ExactTrimClassifierRecord, ExactVertex, ExactWire,
+    GeometryDigest, GeometryObjectRef, MassPropertiesEvaluatorId, OrientedEntityUse,
+    PersistentEntityKind, EXACT_BREP_MEDIA_TYPE, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
+    EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
-use super::ffi::bridge;
+use super::{exact_projection_identity::*, ffi::bridge};
 use crate::{exact::exact_representation_digest, import::GeometryImportError};
-
-const ROOT_SCOPE: &str = "root";
 
 pub(super) fn project_exact_contracts(
     payload: &bridge::OcctExactShapePayload,
@@ -30,7 +26,6 @@ pub(super) fn project_exact_contracts(
 
     let root_assembly_id = fixed_id(PersistentEntityKind::Assembly, "assembly:root");
     let body_id = fixed_id(PersistentEntityKind::Body, "body:root");
-    let lump_id = fixed_id(PersistentEntityKind::Lump, "lump:root");
     let mass_id = MassPropertiesEvaluatorId::new("mass:body:root")
         .map_err(|error| invalid_contract("mass-properties identity", error))?;
 
@@ -198,12 +193,19 @@ pub(super) fn project_exact_contracts(
         .sort_by(|left, right| left.id.cmp(&right.id));
 
     let is_sheet_body = topology.solids.is_empty();
-    let mut solid_ids = topology
-        .solids
+    topology.lumps = payload
+        .lumps
         .iter()
-        .map(|solid| solid.id.clone())
-        .collect::<Vec<_>>();
-    solid_ids.sort();
+        .map(|lump| ExactLump {
+            id: exact_lump_id(lump),
+            solid_ids: lump
+                .solid_keys
+                .iter()
+                .map(|key| shape_id(PersistentEntityKind::Solid, *key))
+                .collect(),
+        })
+        .collect();
+    topology.lumps.sort_by(|left, right| left.id.cmp(&right.id));
     let mut sheet_shell_ids = if is_sheet_body {
         topology
             .shells
@@ -214,18 +216,10 @@ pub(super) fn project_exact_contracts(
         Vec::new()
     };
     sheet_shell_ids.sort();
-    if !is_sheet_body {
-        topology.lumps.push(ExactLump {
-            id: lump_id.clone(),
-            solid_ids,
-        });
-    }
     topology.bodies.push(ExactBody {
         id: body_id,
         mass_properties_evaluator_id: mass_id.clone(),
-        lump_ids: (!is_sheet_body)
-            .then_some(vec![lump_id])
-            .unwrap_or_default(),
+        lump_ids: topology.lumps.iter().map(|lump| lump.id.clone()).collect(),
         is_sheet_body,
         sheet_shell_ids,
     });
@@ -393,55 +387,6 @@ fn validation_model(
         vertex_count: topology.vertices.len() as u64,
         interface_count: topology.interfaces.len() as u64,
         contact_count: topology.contacts.len() as u64,
-    }
-}
-
-fn fixed_id(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.into(),
-        assembly_path: vec![ROOT_SCOPE.into()],
-    }
-}
-
-fn shape_id(kind: PersistentEntityKind, key: u64) -> PersistentEntityId {
-    fixed_id(kind, &format!("brep-shape:{key:020}"))
-}
-
-fn optional_shape_id(kind: PersistentEntityKind, key: u64) -> Option<PersistentEntityId> {
-    (key != 0).then(|| shape_id(kind, key))
-}
-
-fn coedge_id(wire_key: u64, position: u64) -> PersistentEntityId {
-    fixed_id(
-        PersistentEntityKind::Coedge,
-        &format!("brep-wire:{wire_key:020}:coedge:{position:020}"),
-    )
-}
-
-fn curve_id(key: u64) -> CurveEvaluatorId {
-    CurveEvaluatorId(format!("curve:brep-shape:{key:020}"))
-}
-
-fn pcurve_id(wire_key: u64, position: u64) -> PcurveEvaluatorId {
-    PcurveEvaluatorId(format!(
-        "pcurve:brep-wire:{wire_key:020}:coedge:{position:020}"
-    ))
-}
-
-fn surface_id(key: u64) -> SurfaceEvaluatorId {
-    SurfaceEvaluatorId(format!("surface:brep-shape:{key:020}"))
-}
-
-fn trim_id(key: u64) -> TrimClassifierId {
-    TrimClassifierId(format!("trim:brep-shape:{key:020}"))
-}
-
-const fn orientation(reversed: bool) -> TopologicalOrientation {
-    if reversed {
-        TopologicalOrientation::Reversed
-    } else {
-        TopologicalOrientation::Forward
     }
 }
 

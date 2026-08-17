@@ -16,6 +16,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Iterator.hxx>
+#include <TopoDS_CompSolid.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
@@ -253,6 +254,49 @@ void append_exact_topology(OcctExactShapePayload& result,
   }
   std::sort(result.solids.begin(), result.solids.end(),
             [](const auto& left, const auto& right) { return left.shape_key < right.shape_key; });
+
+  std::set<std::uint64_t> claimed_solids;
+  std::set<std::uint64_t> compsolid_keys;
+  for (TopExp_Explorer explorer(root, TopAbs_COMPSOLID); explorer.More(); explorer.Next()) {
+    check_cancelled(options);
+    const TopoDS_CompSolid compsolid = TopoDS::CompSolid(explorer.Current());
+    OcctExactLumpPayload payload;
+    payload.shape_key = shape_key(shape_set, compsolid, "compsolid");
+    payload.from_compsolid = true;
+    if (!compsolid_keys.insert(payload.shape_key).second) {
+      continue;
+    }
+    for (TopExp_Explorer solids(compsolid, TopAbs_SOLID); solids.More(); solids.Next()) {
+      const std::uint64_t solid_key = shape_key(shape_set, solids.Current(), "compsolid solid");
+      if (!claimed_solids.insert(solid_key).second) {
+        throw std::runtime_error("OCCT exact solid belongs to multiple compsolids");
+      }
+      payload.solid_keys.push_back(solid_key);
+    }
+    std::sort(payload.solid_keys.begin(), payload.solid_keys.end());
+    if (payload.solid_keys.empty()) {
+      throw std::runtime_error("OCCT exact compsolid contains no solids");
+    }
+    result.lumps.push_back(payload);
+  }
+  for (const auto& solid : result.solids) {
+    if (claimed_solids.insert(solid.shape_key).second) {
+      OcctExactLumpPayload payload;
+      payload.shape_key = solid.shape_key;
+      payload.from_compsolid = false;
+      payload.solid_keys.push_back(solid.shape_key);
+      result.lumps.push_back(payload);
+    }
+  }
+  std::sort(result.lumps.begin(), result.lumps.end(), [](const auto& left, const auto& right) {
+    if (left.from_compsolid != right.from_compsolid) {
+      return left.from_compsolid < right.from_compsolid;
+    }
+    return left.shape_key < right.shape_key;
+  });
+  if (claimed_solids.size() != result.solids.size()) {
+    throw std::runtime_error("OCCT exact lump extraction did not cover every solid");
+  }
 }
 
 } // namespace occt_backend

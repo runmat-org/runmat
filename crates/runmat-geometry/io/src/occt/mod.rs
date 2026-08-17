@@ -31,6 +31,8 @@ mod evaluator_trim;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod exact_projection;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_projection_identity;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod import_validation;

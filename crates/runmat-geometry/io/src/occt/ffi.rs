@@ -117,6 +117,7 @@ pub(crate) mod bridge {
         coedges: Vec<OcctExactCoedgePayload>,
         shells: Vec<OcctExactShellPayload>,
         solids: Vec<OcctExactSolidPayload>,
+        lumps: Vec<OcctExactLumpPayload>,
     }
 
     #[derive(Debug, Clone)]
@@ -181,6 +182,13 @@ pub(crate) mod bridge {
         shape_key: u64,
         outer_shell_key: u64,
         void_shell_keys: Vec<u64>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactLumpPayload {
+        shape_key: u64,
+        from_compsolid: bool,
+        solid_keys: Vec<u64>,
     }
 
     #[derive(Debug, Clone, Copy)]
