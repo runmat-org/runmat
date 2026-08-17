@@ -172,6 +172,27 @@ fn portable_geometry_and_topology_flags_cannot_disagree() {
         .validate_against(&curve_mismatch, &model())
         .is_err());
 
+    let mut degenerate_mismatch = topology();
+    degenerate_mismatch.edges[0].is_degenerate = true;
+    let error = registry()
+        .validate_against(&degenerate_mismatch, &model())
+        .unwrap_err();
+    assert_eq!(error.field, "edge degeneracy");
+
+    let mut constant_curve = registry();
+    constant_curve.curves[0].implementation = ExactCurveImplementation::Portable {
+        definition: ExactCurveDefinition::Degenerate {
+            point_m: [1.0, 0.0, 0.0],
+            domain: range(0.0, std::f64::consts::TAU),
+        },
+    };
+    let mut nondegenerate_topology = topology();
+    nondegenerate_topology.edges[0].is_periodic = false;
+    let error = constant_curve
+        .validate_against(&nondegenerate_topology, &model())
+        .unwrap_err();
+    assert_eq!(error.field, "edge degeneracy");
+
     let mut surface_mismatch = topology();
     surface_mismatch.faces[0].periodic_u = true;
     assert!(registry()

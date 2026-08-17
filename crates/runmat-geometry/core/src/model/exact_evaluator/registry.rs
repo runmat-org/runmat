@@ -7,7 +7,7 @@ use super::{
 use crate::GeometryContractError;
 use std::collections::BTreeSet;
 
-pub const EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION: u16 = 2;
+pub const EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +38,14 @@ pub enum ExactCurveImplementation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExactCurveDefinition {
+    /// A topologically meaningful parameter interval that collapses to one 3D point.
+    ///
+    /// Degenerate B-Rep edges use this definition while their face-use pcurves retain
+    /// the nonzero parameter traversal needed to describe a singular trim.
+    Degenerate {
+        point_m: [f64; 3],
+        domain: ParameterRange,
+    },
     Line {
         origin_m: [f64; 3],
         direction_m_per_parameter: [f64; 3],

@@ -446,6 +446,14 @@ impl ExactBRepTopology {
                     "nondegenerate edges require both endpoint uses",
                 ));
             }
+            if edge.is_degenerate
+                && (edge.start_vertex_id.is_none() || edge.start_vertex_id != edge.end_vertex_id)
+            {
+                return Err(invalid(
+                    "degenerate edge endpoints",
+                    "degenerate edges require the same topological vertex at both endpoints",
+                ));
+            }
             if edge.is_periodic && !edge.is_closed {
                 return Err(invalid(
                     "periodic edge",

@@ -15,6 +15,10 @@ pub(super) fn validate_curve(
 ) -> Result<(), GeometryContractError> {
     match implementation {
         ExactCurveImplementation::Portable { definition } => match definition {
+            ExactCurveDefinition::Degenerate { point_m, domain } => {
+                finite_vector("degenerate curve point", point_m)?;
+                validate_range("degenerate curve domain", domain)
+            }
             ExactCurveDefinition::Line {
                 origin_m,
                 direction_m_per_parameter,
@@ -221,9 +225,19 @@ pub(super) fn curve_is_periodic(implementation: &ExactCurveImplementation) -> Op
     match implementation {
         ExactCurveImplementation::Portable { definition } => Some(match definition {
             ExactCurveDefinition::Circle { .. } | ExactCurveDefinition::Ellipse { .. } => true,
-            ExactCurveDefinition::Line { .. } => false,
+            ExactCurveDefinition::Degenerate { .. } | ExactCurveDefinition::Line { .. } => false,
             ExactCurveDefinition::Nurbs { definition } => definition.periodic,
         }),
+        ExactCurveImplementation::Kernel { .. } => None,
+    }
+}
+
+pub(super) fn curve_is_degenerate(implementation: &ExactCurveImplementation) -> Option<bool> {
+    match implementation {
+        ExactCurveImplementation::Portable { definition } => Some(matches!(
+            definition,
+            ExactCurveDefinition::Degenerate { .. }
+        )),
         ExactCurveImplementation::Kernel { .. } => None,
     }
 }
@@ -249,7 +263,8 @@ pub(super) fn surface_periodicity(
 pub(super) fn curve_domain(implementation: &ExactCurveImplementation) -> Option<ParameterRange> {
     match implementation {
         ExactCurveImplementation::Portable { definition } => Some(match definition {
-            ExactCurveDefinition::Line { domain, .. }
+            ExactCurveDefinition::Degenerate { domain, .. }
+            | ExactCurveDefinition::Line { domain, .. }
             | ExactCurveDefinition::Circle { domain, .. }
             | ExactCurveDefinition::Ellipse { domain, .. } => *domain,
             ExactCurveDefinition::Nurbs { definition } => definition.domain,

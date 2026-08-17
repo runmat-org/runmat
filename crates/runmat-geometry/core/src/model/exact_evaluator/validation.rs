@@ -3,10 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError};
 use super::{
     definition_validation::{
-        curve_domain, curve_dynamic_value_count, curve_is_periodic, pcurve_domain,
-        pcurve_dynamic_value_count, surface_dynamic_value_count, surface_periodicity,
-        validate_curve, validate_mass_properties, validate_pcurve, validate_surface,
-        validate_token, validate_trim_classifier,
+        curve_domain, curve_dynamic_value_count, curve_is_degenerate, curve_is_periodic,
+        pcurve_domain, pcurve_dynamic_value_count, surface_dynamic_value_count,
+        surface_periodicity, validate_curve, validate_mass_properties, validate_pcurve,
+        validate_surface, validate_token, validate_trim_classifier,
     },
     CurveEvaluatorId, ExactEvaluatorRegistry, ExactMassPropertiesImplementation,
     MassPropertiesEvaluatorId, PcurveEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
@@ -191,6 +191,14 @@ fn validate_topology_claims(
         if curve_is_periodic(implementation).is_some_and(|periodic| periodic != edge.is_periodic) {
             return Err(invalid(
                 "edge periodicity",
+                "topology must agree with the portable curve definition",
+            ));
+        }
+        if curve_is_degenerate(implementation)
+            .is_some_and(|degenerate| degenerate != edge.is_degenerate)
+        {
+            return Err(invalid(
+                "edge degeneracy",
                 "topology must agree with the portable curve definition",
             ));
         }

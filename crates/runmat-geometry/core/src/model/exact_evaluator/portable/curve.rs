@@ -88,6 +88,10 @@ impl ExactCurveEvaluator for PortableExactEvaluator<'_> {
         require_positive_error(absolute_error_m)?;
         control.checkpoint()?;
         match definition {
+            ExactCurveDefinition::Degenerate { .. } => {
+                control.consume_iterations(1)?;
+                Ok(0.0)
+            }
             ExactCurveDefinition::Line {
                 direction_m_per_parameter,
                 ..
@@ -123,6 +127,21 @@ impl ExactCurveEvaluator for PortableExactEvaluator<'_> {
         }
         require_positive_error(absolute_error_m)?;
         let range = definition_range(definition);
+        if let ExactCurveDefinition::Degenerate { point_m: point, .. } = definition {
+            control.checkpoint()?;
+            control.consume_search_work(1)?;
+            let distance_m = distance(point, &point_m);
+            if !distance_m.is_finite() {
+                return Err(invalid_result(
+                    "degenerate curve projection produced an invalid distance",
+                ));
+            }
+            return Ok(CurveProjection {
+                parameter: range.start,
+                point_m: *point,
+                distance_m,
+            });
+        }
         if let ExactCurveDefinition::Line {
             origin_m,
             direction_m_per_parameter,
@@ -181,6 +200,11 @@ fn evaluate_curve(
     control.checkpoint()?;
     control.consume_iterations(1)?;
     let result = match definition {
+        ExactCurveDefinition::Degenerate { point_m, .. } => CurveDerivatives {
+            point_m: *point_m,
+            first_m: [0.0; 3],
+            second_m: [0.0; 3],
+        },
         ExactCurveDefinition::Line {
             origin_m,
             direction_m_per_parameter,
@@ -293,7 +317,8 @@ pub(super) fn trigonometric_curve<const N: usize>(
 
 fn definition_range(definition: &ExactCurveDefinition) -> ParameterRange {
     match definition {
-        ExactCurveDefinition::Line { domain, .. }
+        ExactCurveDefinition::Degenerate { domain, .. }
+        | ExactCurveDefinition::Line { domain, .. }
         | ExactCurveDefinition::Circle { domain, .. }
         | ExactCurveDefinition::Ellipse { domain, .. } => *domain,
         ExactCurveDefinition::Nurbs { definition } => definition.domain,

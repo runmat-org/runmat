@@ -113,6 +113,45 @@ pub fn exact_circle() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorReg
     (document(exact_model()), topology, evaluators())
 }
 
+/// A spherical singular trim whose 3D edge collapses to the north-pole vertex while its
+/// pcurve traverses the complete periodic U interval.
+pub fn exact_singular_edge() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorRegistry) {
+    let (document, mut topology, mut evaluators) = exact_circle();
+    let domain = parameter(0.0, std::f64::consts::TAU);
+    topology.faces[0].periodic_u = true;
+    topology.faces[0].has_singularity = true;
+    topology.edges[0].is_periodic = false;
+    topology.edges[0].is_degenerate = true;
+    topology.vertices[0].point_m = [0.0, 0.0, 1.0];
+    evaluators.curves[0].implementation = ExactCurveImplementation::Portable {
+        definition: ExactCurveDefinition::Degenerate {
+            point_m: [0.0, 0.0, 1.0],
+            domain,
+        },
+    };
+    evaluators.pcurves[0].implementation = ExactPcurveImplementation::Portable {
+        definition: ExactPcurveDefinition::Line {
+            origin_uv: [0.0, std::f64::consts::FRAC_PI_2],
+            direction_uv_per_parameter: [1.0, 0.0],
+            domain,
+        },
+    };
+    evaluators.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
+        definition: ExactSurfaceDefinition::Sphere {
+            center_m: [0.0, 0.0, 0.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+            z_axis: [0.0, 0.0, 1.0],
+            radius_m: 1.0,
+            domains: [
+                domain,
+                parameter(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
+            ],
+        },
+    };
+    (document, topology, evaluators)
+}
+
 /// A closed outward-oriented tetrahedron with authoritative faceted topology.
 pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
     let shell_id = id(PersistentEntityKind::Shell, "faceted:shell:0");
@@ -358,6 +397,26 @@ fn document(model: ExactBRepModel) -> GeometryDocument {
 mod tests {
     use super::*;
 
+    struct UnlimitedEvaluation;
+
+    impl GeometryEvaluationControl for UnlimitedEvaluation {
+        fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+
+        fn consume_iterations(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+
+        fn consume_search_work(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+
+        fn consume_allocation_bytes(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn exact_circle_is_a_complete_authoritative_fixture() {
         let (document, topology, evaluators) = exact_circle();
@@ -367,5 +426,54 @@ mod tests {
         };
         topology.validate_against(model).unwrap();
         evaluators.validate_against(&topology, model).unwrap();
+    }
+
+    #[test]
+    fn exact_singular_edge_is_a_complete_authoritative_fixture() {
+        let (document, topology, evaluators) = exact_singular_edge();
+        document.validate().unwrap();
+        let GeometryModel::ExactBRep { model } = &document.model else {
+            panic!("singular-edge fixture must remain exact")
+        };
+        topology.validate_against(model).unwrap();
+        evaluators.validate_against(&topology, model).unwrap();
+        let evaluator = PortableExactEvaluator::new(&evaluators, &topology, model).unwrap();
+        evaluator
+            .validate_incidence_consistency(1.0e-8, &UnlimitedEvaluation)
+            .unwrap();
+        let curve_id = &topology.edges[0].curve_evaluator_id;
+        let domain = ExactCurveEvaluator::parameter_range(&evaluator, curve_id).unwrap();
+        let control = UnlimitedEvaluation;
+        let derivatives =
+            ExactCurveEvaluator::derivatives(&evaluator, curve_id, 1.25, &control).unwrap();
+        assert_eq!(derivatives.point_m, [0.0, 0.0, 1.0]);
+        assert_eq!(derivatives.first_m, [0.0; 3]);
+        assert_eq!(derivatives.second_m, [0.0; 3]);
+        assert_eq!(
+            evaluator
+                .arc_length_m(curve_id, domain, 1.0e-12, &control)
+                .unwrap(),
+            0.0
+        );
+        let projection = evaluator
+            .inverse_project(curve_id, [0.0, 3.0, 1.0], 1.0e-12, &control)
+            .unwrap();
+        assert_eq!(projection.parameter, domain.start);
+        assert_eq!(projection.point_m, [0.0, 0.0, 1.0]);
+        assert_eq!(projection.distance_m, 3.0);
+        assert_eq!(
+            evaluator
+                .unit_tangent(curve_id, 1.25, &control)
+                .unwrap_err()
+                .kind,
+            GeometryEvaluationErrorKind::InvalidResult
+        );
+        assert_eq!(
+            evaluator
+                .curvature_1_per_m(curve_id, 1.25, &control)
+                .unwrap_err()
+                .kind,
+            GeometryEvaluationErrorKind::InvalidResult
+        );
     }
 }

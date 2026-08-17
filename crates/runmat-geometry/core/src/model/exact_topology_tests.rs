@@ -366,6 +366,30 @@ fn dangling_kind_confused_and_wrong_face_incidence_fail() {
 }
 
 #[test]
+fn degenerate_edges_require_one_explicit_collapsed_vertex() {
+    let mut degenerate = topology();
+    degenerate.edges[0].is_degenerate = true;
+    degenerate.edges[0].is_periodic = false;
+    degenerate.validate_against(&model()).unwrap();
+
+    degenerate.edges[0].end_vertex_id = None;
+    let error = degenerate.validate_against(&model()).unwrap_err();
+    assert_eq!(error.field, "degenerate edge endpoints");
+
+    let mut other_vertex = degenerate.vertices[0].clone();
+    other_vertex.id.source_topology_id = "other".into();
+    degenerate.edges[0].end_vertex_id = Some(other_vertex.id.clone());
+    degenerate.vertices.push(other_vertex);
+    degenerate
+        .vertices
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    let mut two_vertex_model = model();
+    two_vertex_model.vertex_count = 2;
+    let error = degenerate.validate_against(&two_vertex_model).unwrap_err();
+    assert_eq!(error.field, "degenerate edge endpoints");
+}
+
+#[test]
 fn shared_interfaces_require_opposite_oriented_region_uses() {
     let mut topology = topology();
     add_second_interface_side(&mut topology);
