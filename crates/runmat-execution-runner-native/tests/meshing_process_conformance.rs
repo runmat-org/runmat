@@ -19,8 +19,8 @@ use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{
-    AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, ElementOrder,
-    GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
+    AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets,
+    ElementOrder, GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
     MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingFailure,
     MeshingInputKind, MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind,
     MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
@@ -861,6 +861,12 @@ fn request() -> MeshingRequest {
             contributions: Vec::new(),
         },
         quality: MeshingQualityTargets {
+            curve: CurveQualityTargets {
+                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_tangent_change_degrees: 5.0,
+                minimum_metric_edge_length: 0.1,
+                maximum_metric_edge_length: 1.5,
+            },
             surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,

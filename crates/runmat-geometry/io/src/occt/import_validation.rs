@@ -55,7 +55,11 @@ impl GeometryEvaluationControl for ImportEvaluationControl<'_> {
 pub(super) fn map_validation_error(error: GeometryEvaluationError) -> GeometryImportError {
     match error.kind {
         GeometryEvaluationErrorKind::Cancelled => GeometryImportError::Cancelled,
-        GeometryEvaluationErrorKind::BudgetExceeded => {
+        GeometryEvaluationErrorKind::BudgetExceeded
+        | GeometryEvaluationErrorKind::TimeBudgetExceeded
+        | GeometryEvaluationErrorKind::AllocationBudgetExceeded
+        | GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
+        | GeometryEvaluationErrorKind::IterationBudgetExceeded => {
             GeometryImportError::ExactValidationBudgetExceeded(error.reason)
         }
         _ => GeometryImportError::InvalidGeometry(error.to_string()),

@@ -26,15 +26,16 @@ use runmat_meshing_core::{
     MeshingFailure, MeshingFailureCategory, MeshingInputKind, MeshingInputRef,
     MeshingManifestDisposition, MeshingPartitionDescriptor, MeshingPartitionKind,
     MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
-    MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest, MetricCombinationRule,
-    MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
-    MESHING_WORKLOAD_SCHEMA_VERSION,
+    MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest, MeshingWorkloadResult,
+    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
+    MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
 use super::{
-    execute_serial_stage, MeshingProgressSink, MeshingSerialExecutionError, MeshingStageCheckpoint,
-    MeshingStageControl, MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,
+    execute_serial_stage, ExactCurveStageKernel, MeshingProgressSink, MeshingSerialExecutionError,
+    MeshingStageCheckpoint, MeshingStageControl, MeshingStageInvocation, MeshingStageKernel,
+    ValidatedMeshingStageOutput,
 };
 
 #[derive(Default)]
@@ -230,6 +231,50 @@ fn serial_stage_imports_and_revalidates_authoritative_exact_geometry() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+}
+
+#[test]
+fn serial_curve_partition_executes_and_publishes_the_authoritative_batch() {
+    let mut fixture = Fixture::with_exact_curve_partition();
+    let completed = execute_serial_stage(
+        &fixture.program,
+        &mut fixture.store,
+        &ExactCurveStageKernel::default(),
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(65_536),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let manifest = &completed.publication().stage_objects().manifest;
+    assert_eq!(
+        completed.workload_result(),
+        &MeshingWorkloadResult::Validated {
+            stage_manifest_digest: StableDigest::from_bytes(
+                *completed
+                    .publication()
+                    .root_output()
+                    .logical_digest()
+                    .unwrap()
+                    .bytes()
+            ),
+        }
+    );
+    assert_eq!(manifest.result_kind, MeshingStageResultKind::Partition);
+    assert_eq!(manifest.chunks.len(), 1);
+    assert_eq!(
+        manifest.chunks[0].media_type,
+        MeshingChunkMediaType::CurvePartitions
+    );
+    assert_eq!(
+        manifest.chunks[0].schema_version,
+        runmat_meshing_curve::SHARED_CURVE_BATCH_SCHEMA_VERSION
+    );
+    completed
+        .publication()
+        .stage_objects()
+        .revalidate(ObjectInventoryLimits::default())
+        .unwrap();
 }
 
 #[test]
@@ -528,7 +573,15 @@ fn exact_geometry_control_projects_cancellation_and_hard_counters() {
     assert_eq!(geometry.usage().allocation_bytes, 4);
     assert_eq!(
         geometry.consume_iterations(1).unwrap_err().kind,
-        GeometryEvaluationErrorKind::BudgetExceeded
+        GeometryEvaluationErrorKind::IterationBudgetExceeded
+    );
+    assert_eq!(
+        geometry.consume_search_work(1).unwrap_err().kind,
+        GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
+    );
+    assert_eq!(
+        geometry.consume_allocation_bytes(1).unwrap_err().kind,
+        GeometryEvaluationErrorKind::AllocationBudgetExceeded
     );
 
     let mut cancelled_progress = Progress::default();
@@ -692,11 +745,31 @@ impl Fixture {
     }
 
     fn with_exact_geometry() -> Self {
+        Self::with_exact_geometry_stage(MeshingStageKind::SurfaceMesh)
+    }
+
+    fn with_exact_curve_partition() -> Self {
+        Self::with_exact_geometry_stage(MeshingStageKind::CurveMesh)
+    }
+
+    fn with_exact_geometry_stage(stage: MeshingStageKind) -> Self {
         let access = MeshingArtifactAccess {
             authorization_scope: "serial-exact-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-exact-geometry-context"),
         };
         let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
+        let partition = if stage == MeshingStageKind::CurveMesh {
+            runmat_meshing_curve::curve_partition_descriptors(&topology, 32)
+                .unwrap()
+                .remove(0)
+        } else {
+            MeshingPartitionDescriptor {
+                kind: MeshingPartitionKind::WholeStage,
+                partition_index: 0,
+                partition_count: 1,
+                entity_range: None,
+            }
+        };
         let objects = prepare_exact_geometry_objects(
             document,
             topology,
@@ -716,6 +789,12 @@ impl Fixture {
         }
         let mut request = request();
         request.tolerance = document.tolerance;
+        if stage == MeshingStageKind::CurveMesh {
+            request.quality.curve.maximum_chordal_deviation_m = 0.05;
+            request.quality.curve.maximum_tangent_change_degrees = 20.0;
+            request.resources.maximum_search_work = 10_000;
+            request.resources.maximum_iterations = 10_000;
+        }
         let root_digest = StableDigest::from_bytes(*input.root_input().logical_digest.bytes());
         let exact_input = MeshingInputRef {
             kind: MeshingInputKind::ExactGeometry,
@@ -726,7 +805,7 @@ impl Fixture {
         };
         let identity = MeshingStageIdentity {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-            stage: MeshingStageKind::SurfaceMesh,
+            stage,
             geometry: GeometryRevisionRef {
                 source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
                 geometry_revision: document.revision.revision,
@@ -742,14 +821,9 @@ impl Fixture {
         };
         let workload = MeshingWorkloadRequest {
             schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
-            stage: MeshingStageKind::SurfaceMesh,
+            stage,
             stage_identity_digest: identity.canonical_digest().unwrap(),
-            partition: MeshingPartitionDescriptor {
-                kind: MeshingPartitionKind::WholeStage,
-                partition_index: 0,
-                partition_count: 1,
-                entity_range: None,
-            },
+            partition,
             inputs: vec![exact_input],
             required_capabilities: vec![
                 MeshingCapabilityRequirement::HostWorkload {
@@ -759,7 +833,11 @@ impl Fixture {
                     abi: model.kernel_abi.clone(),
                 },
                 MeshingCapabilityRequirement::MeshingAlgorithm {
-                    version: "surface/v2".into(),
+                    version: if stage == MeshingStageKind::CurveMesh {
+                        request.algorithms.curve.clone()
+                    } else {
+                        request.algorithms.surface.clone()
+                    },
                 },
                 MeshingCapabilityRequirement::ElementOrder {
                     order: ElementOrder::Tet4,

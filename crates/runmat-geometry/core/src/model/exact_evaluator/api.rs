@@ -113,6 +113,10 @@ impl BodyMassProperties {
 pub enum GeometryEvaluationErrorKind {
     Cancelled,
     BudgetExceeded,
+    TimeBudgetExceeded,
+    AllocationBudgetExceeded,
+    SearchWorkBudgetExceeded,
+    IterationBudgetExceeded,
     UnknownEvaluator,
     ParameterOutsideDomain,
     ProjectionDidNotConverge,

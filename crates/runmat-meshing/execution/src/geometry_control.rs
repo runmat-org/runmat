@@ -64,6 +64,7 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
         count: u64,
         maximum: u64,
         name: &str,
+        kind: GeometryEvaluationErrorKind,
     ) -> Result<(), GeometryEvaluationError> {
         counter
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -72,7 +73,7 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
             .map(|_| ())
             .map_err(|_| {
                 GeometryEvaluationError::new(
-                    GeometryEvaluationErrorKind::BudgetExceeded,
+                    kind,
                     format!("exact geometry {name} exceeds the execution resource budget"),
                 )
             })
@@ -98,7 +99,7 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
             || elapsed_millis(*previous, now) > self.maximum_checkpoint_latency_ms
         {
             return Err(GeometryEvaluationError::new(
-                GeometryEvaluationErrorKind::BudgetExceeded,
+                GeometryEvaluationErrorKind::TimeBudgetExceeded,
                 "exact geometry evaluation exceeded its execution time envelope",
             ));
         }
@@ -112,6 +113,7 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
             count,
             self.maximum_iterations,
             "iterations",
+            GeometryEvaluationErrorKind::IterationBudgetExceeded,
         )
     }
 
@@ -121,6 +123,7 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
             count,
             self.maximum_search_work,
             "search work",
+            GeometryEvaluationErrorKind::SearchWorkBudgetExceeded,
         )
     }
 
@@ -130,6 +133,7 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
             count,
             self.maximum_allocation_bytes,
             "allocation",
+            GeometryEvaluationErrorKind::AllocationBudgetExceeded,
         )
     }
 }
