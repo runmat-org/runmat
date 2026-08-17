@@ -8,7 +8,7 @@ impl WgpuProvider {
         len: Option<usize>,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry(handle)?.integer_type.is_some()
+        if self.get_entry(handle)?.integer_type().is_some()
             || runmat_accelerate_api::handle_is_logical(handle)
         {
             bail!("fft_dim: nonfloating handles require the runtime typed fallback");
@@ -26,7 +26,7 @@ impl WgpuProvider {
         len: Option<usize>,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry(handle)?.integer_type.is_some()
+        if self.get_entry(handle)?.integer_type().is_some()
             || runmat_accelerate_api::handle_is_logical(handle)
         {
             bail!("ifft_dim: nonfloating handles require the runtime typed fallback");

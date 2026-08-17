@@ -39,7 +39,7 @@ impl WgpuProvider {
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
-        if raw_matrix.integer_type.is_some() {
+        if raw_matrix.integer_type().is_some() {
             ensure!(
                 raw_matrix.shape.len() == 2,
                 "scatter_column: only 2D tensors supported"
@@ -52,7 +52,7 @@ impl WgpuProvider {
             );
             let raw_values = self.get_entry_raw(values)?;
             ensure!(
-                raw_values.integer_type == raw_matrix.integer_type,
+                raw_values.integer_type() == raw_matrix.integer_type(),
                 "scatter_column: integer storage mismatch"
             );
             ensure!(
@@ -580,7 +580,7 @@ impl WgpuProvider {
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
-        if raw_matrix.integer_type.is_some() {
+        if raw_matrix.integer_type().is_some() {
             ensure!(
                 raw_matrix.shape.len() == 2,
                 "scatter_row: only 2D tensors supported"
@@ -590,7 +590,7 @@ impl WgpuProvider {
             ensure!(row_index < rows, "scatter_row: row index out of bounds");
             let raw_values = self.get_entry_raw(values)?;
             ensure!(
-                raw_values.integer_type == raw_matrix.integer_type,
+                raw_values.integer_type() == raw_matrix.integer_type(),
                 "scatter_row: integer storage mismatch"
             );
             ensure!(
@@ -733,7 +733,7 @@ impl WgpuProvider {
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(source)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
         let lane_factor = linear_storage_lane_factor(integer_type, entry.storage);
@@ -904,12 +904,12 @@ impl WgpuProvider {
         );
         let target_entry = self.get_entry_raw(target)?;
         let values_entry = self.get_entry_raw(values)?;
-        let integer_type = target_entry.integer_type;
+        let integer_type = target_entry.integer_type();
         ensure!(
-            integer_type == values_entry.integer_type,
+            integer_type == values_entry.integer_type(),
             "scatter_linear: integer storage mismatch target={:?} values={:?}",
             integer_type,
-            values_entry.integer_type
+            values_entry.integer_type()
         );
         ensure!(
             target_entry.storage == values_entry.storage,

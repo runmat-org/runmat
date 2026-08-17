@@ -73,13 +73,30 @@ pub(super) struct BufferEntry {
     pub(super) len: usize,
     pub(super) shape: Vec<usize>,
     pub(super) storage: GpuTensorStorage,
+    /// Physical numeric element type stored in the buffer. This is the single
+    /// authority for floating precision and native integer class.
+    pub(super) element_type: runmat_accelerate_api::NumericElementType,
+    /// Floating shader ABI selected for this provider. Integer kernels use
+    /// this only when they produce or consume a floating result.
     pub(super) precision: NumericPrecision,
-    /// Exact integer payloads use a word-packed ABI and must never be passed
-    /// to the floating-point kernel paths.
-    pub(super) integer_type: Option<runmat_accelerate_api::IntegerElementType>,
     pub(super) allocated_bytes: u64,
     pub(super) usage: BufferUsageClass,
     pub(super) last_submission_id: Option<u32>,
+}
+
+impl BufferEntry {
+    pub(super) const fn integer_type(&self) -> Option<runmat_accelerate_api::IntegerElementType> {
+        self.element_type.integer_type()
+    }
+}
+
+pub(super) struct NumericBufferRegistration {
+    pub(super) shape: Vec<usize>,
+    pub(super) len: usize,
+    pub(super) physical_element_type: runmat_accelerate_api::NumericElementType,
+    pub(super) storage: GpuTensorStorage,
+    pub(super) allocated_bytes: u64,
+    pub(super) usage: BufferUsageClass,
 }
 
 #[derive(Clone, Copy)]

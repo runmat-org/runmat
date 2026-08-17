@@ -322,7 +322,7 @@ impl WgpuProvider {
             runmat_accelerate_api::GpuTensorStorage::Real => 1usize,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => 2usize,
         };
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(storage_factor, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,
@@ -907,7 +907,7 @@ impl WgpuProvider {
         ensure!(!order.is_empty(), "permute: order must not be empty");
         let logical_rank = order.len();
         let entry = self.get_entry(handle)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,
@@ -1163,7 +1163,7 @@ impl WgpuProvider {
         shifts: &[isize],
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,
@@ -1672,7 +1672,7 @@ impl WgpuProvider {
         }
 
         let entry = self.get_entry(handle)?;
-        let integer_type = entry.integer_type;
+        let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
             | runmat_accelerate_api::IntegerElementType::U64 => 2,

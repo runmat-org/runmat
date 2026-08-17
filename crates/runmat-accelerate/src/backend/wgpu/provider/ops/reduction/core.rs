@@ -532,7 +532,7 @@ impl WgpuProvider {
         dim: usize,
         op: crate::backend::wgpu::types::DimReduceExtrema,
     ) -> Result<ReduceDimResult> {
-        if self.get_entry_raw(a)?.integer_type.is_some() {
+        if self.get_entry_raw(a)?.integer_type().is_some() {
             return self.integer_reduce_extrema_dim_exec(
                 matches!(op, crate::backend::wgpu::types::DimReduceExtrema::Min),
                 dim,

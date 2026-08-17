@@ -38,10 +38,10 @@ impl WgpuProvider {
         let entry_a = self.get_entry_raw(a)?;
         let entry_b = self.get_entry_raw(b)?;
         let integer_type = entry_a
-            .integer_type
+            .integer_type()
             .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
         ensure!(
-            entry_b.integer_type == Some(integer_type),
+            entry_b.integer_type() == Some(integer_type),
             "{operation_name}: integer operands must have the same class"
         );
         ensure!(
@@ -645,8 +645,8 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry_raw(a)?.integer_type.is_some()
-            || self.get_entry_raw(b)?.integer_type.is_some()
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
         {
             return self.integer_comparison_exec(0, "elem_eq", a, b);
         }
@@ -680,8 +680,8 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry_raw(a)?.integer_type.is_some()
-            || self.get_entry_raw(b)?.integer_type.is_some()
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
         {
             return self.integer_comparison_exec(1, "elem_ne", a, b);
         }
@@ -714,8 +714,8 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry_raw(a)?.integer_type.is_some()
-            || self.get_entry_raw(b)?.integer_type.is_some()
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
         {
             return self.integer_comparison_exec(2, "elem_lt", a, b);
         }
@@ -749,8 +749,8 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry_raw(a)?.integer_type.is_some()
-            || self.get_entry_raw(b)?.integer_type.is_some()
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
         {
             return self.integer_comparison_exec(3, "elem_le", a, b);
         }
@@ -784,8 +784,8 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry_raw(a)?.integer_type.is_some()
-            || self.get_entry_raw(b)?.integer_type.is_some()
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
         {
             return self.integer_comparison_exec(4, "elem_gt", a, b);
         }
@@ -819,8 +819,8 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if self.get_entry_raw(a)?.integer_type.is_some()
-            || self.get_entry_raw(b)?.integer_type.is_some()
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
         {
             return self.integer_comparison_exec(5, "elem_ge", a, b);
         }
@@ -1208,8 +1208,8 @@ impl WgpuProvider {
         if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
             return Err(anyhow!("binary ops disabled via RUNMAT_DISABLE_BINARY"));
         }
-        if self.get_entry_raw(a)?.integer_type.is_some()
-            || self.get_entry_raw(b)?.integer_type.is_some()
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
         {
             return match op {
                 crate::backend::wgpu::types::BinaryOpCode::Add => {

@@ -5,7 +5,7 @@ use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, IntegerElementType, ProviderPrecision,
+    GpuTensorHandle, GpuTensorStorage, IntegerElementType, NumericElementType, ProviderPrecision,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_time::Instant;
@@ -17,7 +17,7 @@ use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use super::backend_shared::NEXT_SUBMISSION_ID;
-use super::backend_types::{BufferEntry, WgpuProvider};
+use super::backend_types::{BufferEntry, NumericBufferRegistration, WgpuProvider};
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
@@ -130,6 +130,36 @@ impl WgpuProvider {
         storage: GpuTensorStorage,
         usage: BufferUsageClass,
     ) -> GpuTensorHandle {
+        let element_type = match self.precision {
+            NumericPrecision::F32 => NumericElementType::F32,
+            NumericPrecision::F64 => NumericElementType::F64,
+        };
+        self.register_numeric_buffer(
+            buffer,
+            NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type: element_type,
+                storage,
+                allocated_bytes: (len as u64).saturating_mul(element_type.element_size() as u64),
+                usage,
+            },
+        )
+    }
+
+    pub(super) fn register_numeric_buffer(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        registration: NumericBufferRegistration,
+    ) -> GpuTensorHandle {
+        let NumericBufferRegistration {
+            shape,
+            len,
+            physical_element_type: element_type,
+            storage,
+            allocated_bytes,
+            usage,
+        } = registration;
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -138,9 +168,13 @@ impl WgpuProvider {
             len,
             shape: shape.clone(),
             storage,
-            precision: self.precision,
-            integer_type: None,
-            allocated_bytes: (len as u64).saturating_mul(self.element_size as u64),
+            element_type,
+            precision: match element_type.precision() {
+                Some(ProviderPrecision::F32) => NumericPrecision::F32,
+                Some(ProviderPrecision::F64) => NumericPrecision::F64,
+                None => self.precision,
+            },
+            allocated_bytes,
             usage,
             last_submission_id: None,
         };
@@ -148,7 +182,14 @@ impl WgpuProvider {
             .lock()
             .expect("buffer mutex poisoned")
             .insert(id, entry);
-        log::trace!("wgpu register id={} len={} shape={:?}", id, len, &shape);
+        log::trace!(
+            "wgpu register id={} len={} shape={:?} element_type={:?} storage={:?}",
+            id,
+            len,
+            &shape,
+            element_type,
+            storage
+        );
         let handle = GpuTensorHandle {
             shape,
             device_id: self.runtime_device_id,
@@ -156,13 +197,17 @@ impl WgpuProvider {
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
         runmat_accelerate_api::set_handle_storage(&handle, storage);
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            match self.precision {
-                NumericPrecision::F32 => ProviderPrecision::F32,
-                NumericPrecision::F64 => ProviderPrecision::F64,
-            },
-        );
+        runmat_accelerate_api::set_handle_class_name(&handle, element_type.class_name());
+        if let Some(precision) = element_type.precision() {
+            runmat_accelerate_api::set_handle_precision(&handle, precision);
+        } else {
+            runmat_accelerate_api::clear_handle_precision(&handle);
+        }
+        if let Some(integer_type) = element_type.integer_type() {
+            runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
+        } else {
+            runmat_accelerate_api::clear_handle_integer_type(&handle);
+        }
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
     }
@@ -175,34 +220,17 @@ impl WgpuProvider {
         element_type: IntegerElementType,
         allocated_bytes: u64,
     ) -> GpuTensorHandle {
-        let id = self
-            .next_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let entry = BufferEntry {
+        self.register_numeric_buffer(
             buffer,
-            len,
-            shape: shape.clone(),
-            storage: GpuTensorStorage::Real,
-            precision: self.precision,
-            integer_type: Some(element_type),
-            allocated_bytes,
-            usage: BufferUsageClass::Generic,
-            last_submission_id: None,
-        };
-        self.buffers
-            .lock()
-            .expect("buffer mutex poisoned")
-            .insert(id, entry);
-        let handle = GpuTensorHandle {
-            shape,
-            device_id: self.runtime_device_id,
-            buffer_id: id,
-        };
-        runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
-        runmat_accelerate_api::clear_handle_transpose(&handle);
-        handle
+            NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type: element_type.into(),
+                storage: GpuTensorStorage::Real,
+                allocated_bytes,
+                usage: BufferUsageClass::Generic,
+            },
+        )
     }
 
     pub(super) fn remember_matmul_sources(
@@ -391,10 +419,17 @@ impl WgpuProvider {
     }
     pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         let entry = self.get_entry_raw(handle)?;
-        if let Some(element_type) = entry.integer_type {
+        if let Some(element_type) = entry.integer_type() {
             return Err(anyhow!(
                 "native {:?} gpuArray buffers require an integer provider kernel; floating-point dispatch is not permitted",
                 element_type
+            ));
+        }
+        if entry.precision != self.precision {
+            return Err(anyhow!(
+                "native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
+                entry.element_type,
+                self.precision
             ));
         }
         Ok(entry)
@@ -416,8 +451,8 @@ impl WgpuProvider {
                 len: entry.len,
                 shape: entry.shape.clone(),
                 storage: entry.storage,
+                element_type: entry.element_type,
                 precision: entry.precision,
-                integer_type: entry.integer_type,
                 allocated_bytes: entry.allocated_bytes,
                 usage: entry.usage,
                 last_submission_id: entry.last_submission_id,

@@ -1,7 +1,8 @@
 use super::*;
 use runmat_accelerate_api::{
     HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned, HostIntegerTensorView,
-    IntegerElementType,
+    HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView,
+    IntegerElementType, NumericElementType,
 };
 
 fn integer_words(data: HostIntegerDataView<'_>) -> Vec<u32> {
@@ -27,6 +28,130 @@ fn integer_words(data: HostIntegerDataView<'_>) -> Vec<u32> {
             .iter()
             .flat_map(|&value| [value as u32, (value >> 32) as u32])
             .collect(),
+    }
+}
+
+fn integer_view_from_numeric(data: HostNumericDataView<'_>) -> Result<HostIntegerDataView<'_>> {
+    Ok(match data {
+        HostNumericDataView::I8(values) => HostIntegerDataView::I8(values),
+        HostNumericDataView::I16(values) => HostIntegerDataView::I16(values),
+        HostNumericDataView::I32(values) => HostIntegerDataView::I32(values),
+        HostNumericDataView::I64(values) => HostIntegerDataView::I64(values),
+        HostNumericDataView::U8(values) => HostIntegerDataView::U8(values),
+        HostNumericDataView::U16(values) => HostIntegerDataView::U16(values),
+        HostNumericDataView::U32(values) => HostIntegerDataView::U32(values),
+        HostNumericDataView::U64(values) => HostIntegerDataView::U64(values),
+        HostNumericDataView::F64(_) | HostNumericDataView::F32(_) => {
+            return Err(anyhow!(
+                "integer word packing requested for floating storage"
+            ));
+        }
+    })
+}
+
+fn numeric_data_from_bytes(
+    element_type: NumericElementType,
+    bytes: &[u8],
+    len: usize,
+) -> Result<HostNumericDataOwned> {
+    let expected_bytes = match element_type.integer_type() {
+        Some(IntegerElementType::I64 | IntegerElementType::U64) => len
+            .checked_mul(2)
+            .and_then(|words| words.checked_mul(std::mem::size_of::<u32>())),
+        Some(_) => len.checked_mul(std::mem::size_of::<u32>()),
+        None => len.checked_mul(element_type.element_size()),
+    }
+    .ok_or_else(|| anyhow!("numeric download byte length overflow"))?;
+    ensure!(
+        bytes.len() == expected_bytes,
+        "numeric download byte count mismatch: got {}, expected {} for {:?}",
+        bytes.len(),
+        expected_bytes,
+        element_type
+    );
+    Ok(match element_type {
+        NumericElementType::F64 => HostNumericDataOwned::F64(cast_slice(bytes).to_vec()),
+        NumericElementType::F32 => HostNumericDataOwned::F32(cast_slice(bytes).to_vec()),
+        NumericElementType::I8
+        | NumericElementType::I16
+        | NumericElementType::I32
+        | NumericElementType::I64
+        | NumericElementType::U8
+        | NumericElementType::U16
+        | NumericElementType::U32
+        | NumericElementType::U64 => {
+            let integer_type = element_type
+                .integer_type()
+                .expect("integer numeric element type");
+            match integer_data_from_words(integer_type, cast_slice(bytes), len)? {
+                HostIntegerDataOwned::I8(values) => HostNumericDataOwned::I8(values),
+                HostIntegerDataOwned::I16(values) => HostNumericDataOwned::I16(values),
+                HostIntegerDataOwned::I32(values) => HostNumericDataOwned::I32(values),
+                HostIntegerDataOwned::I64(values) => HostNumericDataOwned::I64(values),
+                HostIntegerDataOwned::U8(values) => HostNumericDataOwned::U8(values),
+                HostIntegerDataOwned::U16(values) => HostNumericDataOwned::U16(values),
+                HostIntegerDataOwned::U32(values) => HostNumericDataOwned::U32(values),
+                HostIntegerDataOwned::U64(values) => HostNumericDataOwned::U64(values),
+            }
+        }
+    })
+}
+
+fn transpose_numeric_values<T: Copy>(
+    values: &mut Vec<T>,
+    lane_factor: usize,
+    base_rows: usize,
+    base_cols: usize,
+) {
+    let mut transposed = values.clone();
+    for col in 0..base_cols {
+        for row in 0..base_rows {
+            let src_idx = (row + col * base_rows) * lane_factor;
+            let dst_idx = (col + row * base_cols) * lane_factor;
+            transposed[dst_idx..dst_idx + lane_factor]
+                .copy_from_slice(&values[src_idx..src_idx + lane_factor]);
+        }
+    }
+    *values = transposed;
+}
+
+fn transpose_numeric_data(
+    data: &mut HostNumericDataOwned,
+    lane_factor: usize,
+    base_rows: usize,
+    base_cols: usize,
+) {
+    match data {
+        HostNumericDataOwned::F64(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::F32(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::I8(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::I16(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::I32(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::I64(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::U8(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::U16(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::U32(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
+        HostNumericDataOwned::U64(values) => {
+            transpose_numeric_values(values, lane_factor, base_rows, base_cols)
+        }
     }
 }
 
@@ -88,10 +213,7 @@ impl WgpuProvider {
         linear_index: usize,
     ) -> Result<f64> {
         let entry = self.get_entry(handle)?;
-        let elem_size = match entry.precision {
-            NumericPrecision::F64 => std::mem::size_of::<f64>() as u64,
-            NumericPrecision::F32 => std::mem::size_of::<f32>() as u64,
-        };
+        let elem_size = entry.element_type.element_size() as u64;
         let total_bytes = (linear_index as u64)
             .checked_mul(elem_size)
             .ok_or_else(|| anyhow!("read_scalar: index overflow"))?;
@@ -186,24 +308,70 @@ impl WgpuProvider {
         &self,
         host: &HostIntegerTensorView,
     ) -> Result<GpuTensorHandle> {
+        let data = match host.data {
+            HostIntegerDataView::I8(values) => HostNumericDataView::I8(values),
+            HostIntegerDataView::I16(values) => HostNumericDataView::I16(values),
+            HostIntegerDataView::I32(values) => HostNumericDataView::I32(values),
+            HostIntegerDataView::I64(values) => HostNumericDataView::I64(values),
+            HostIntegerDataView::U8(values) => HostNumericDataView::U8(values),
+            HostIntegerDataView::U16(values) => HostNumericDataView::U16(values),
+            HostIntegerDataView::U32(values) => HostNumericDataView::U32(values),
+            HostIntegerDataView::U64(values) => HostNumericDataView::U64(values),
+        };
+        self.upload_numeric_exec(&HostNumericTensorView {
+            data,
+            shape: host.shape,
+            storage: GpuTensorStorage::Real,
+        })
+    }
+
+    pub(crate) fn upload_numeric_exec(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> Result<GpuTensorHandle> {
+        host.validate()?;
+        let element_type = host.element_type();
         let len = host.data.len();
-        let words = integer_words(host.data);
-        let bytes = (words.len() as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+        let integer_words = if element_type.integer_type().is_some() {
+            Some(integer_words(integer_view_from_numeric(host.data)?))
+        } else {
+            None
+        };
+        let bytes = integer_words.as_ref().map_or_else(
+            || (len as u64).saturating_mul(element_type.element_size() as u64),
+            |words| (words.len() as u64).saturating_mul(std::mem::size_of::<u32>() as u64),
+        );
         if bytes > self.adapter_limits.max_buffer_size {
             return Err(gpu_per_buffer_limit_error(
-                "integer upload",
+                "numeric upload",
                 bytes,
                 self.adapter_limits.max_buffer_size,
             ));
         }
-        let buffer = if words.is_empty() {
-            self.create_storage_buffer(0, "runmat-integer-upload-empty")
+        let buffer = if len == 0 {
+            self.create_storage_buffer(0, "runmat-numeric-upload-empty")
         } else {
+            let contents = match host.data {
+                HostNumericDataView::F64(values) => cast_slice(values),
+                HostNumericDataView::F32(values) => cast_slice(values),
+                HostNumericDataView::I8(_)
+                | HostNumericDataView::I16(_)
+                | HostNumericDataView::I32(_)
+                | HostNumericDataView::I64(_)
+                | HostNumericDataView::U8(_)
+                | HostNumericDataView::U16(_)
+                | HostNumericDataView::U32(_)
+                | HostNumericDataView::U64(_) => cast_slice(
+                    integer_words
+                        .as_ref()
+                        .expect("integer numeric upload words"),
+                ),
+            };
             Arc::new(
                 self.device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-integer-upload-buffer"),
-                        contents: cast_slice(&words),
+                        label: Some("runmat-numeric-upload-buffer"),
+                        contents,
                         usage: wgpu::BufferUsages::STORAGE
                             | wgpu::BufferUsages::COPY_DST
                             | wgpu::BufferUsages::COPY_SRC,
@@ -211,12 +379,16 @@ impl WgpuProvider {
             )
         };
         self.telemetry.record_upload_bytes(bytes);
-        Ok(self.register_integer_buffer(
+        Ok(self.register_numeric_buffer(
             buffer,
-            host.shape.to_vec(),
-            len,
-            host.data.element_type(),
-            bytes,
+            NumericBufferRegistration {
+                shape: host.shape.to_vec(),
+                len,
+                physical_element_type: element_type,
+                storage: host.storage,
+                allocated_bytes: bytes,
+                usage: crate::backend::wgpu::residency::BufferUsageClass::Generic,
+            },
         ))
     }
 
@@ -224,50 +396,90 @@ impl WgpuProvider {
         &self,
         handle: &GpuTensorHandle,
     ) -> Result<HostIntegerTensorOwned> {
-        let entry = self.get_entry_raw(handle)?;
-        let element_type = entry
-            .integer_type
-            .ok_or_else(|| anyhow!("integer download requested for non-integer gpuArray buffer"))?;
-        if entry.len == 0 {
-            return Ok(HostIntegerTensorOwned {
-                data: integer_data_from_words(element_type, &[], 0)?,
-                shape: handle.shape.clone(),
-            });
-        }
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-integer-download-staging"),
-            size: entry.allocated_bytes,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-integer-download-encoder"),
-            });
-        encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, entry.allocated_bytes);
-        self.submit(encoder);
-        let slice = staging.slice(..);
-        let (tx, rx) = oneshot::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        #[cfg(not(target_arch = "wasm32"))]
-        self.device.poll(wgpu::Maintain::Wait);
-        let map_result = rx
-            .await
-            .map_err(|_| anyhow!("integer download map_async callback dropped"))?;
-        map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let bytes = slice.get_mapped_range();
-        let words: &[u32] = cast_slice(&bytes);
-        let data = integer_data_from_words(element_type, words, entry.len)?;
-        drop(bytes);
-        staging.unmap();
-        self.telemetry.record_download_bytes(entry.allocated_bytes);
+        let numeric = self.download_numeric_exec(handle).await?;
+        ensure!(
+            numeric.storage == GpuTensorStorage::Real,
+            "legacy integer download cannot represent complex integer storage"
+        );
+        let data = match numeric.data {
+            HostNumericDataOwned::I8(values) => HostIntegerDataOwned::I8(values),
+            HostNumericDataOwned::I16(values) => HostIntegerDataOwned::I16(values),
+            HostNumericDataOwned::I32(values) => HostIntegerDataOwned::I32(values),
+            HostNumericDataOwned::I64(values) => HostIntegerDataOwned::I64(values),
+            HostNumericDataOwned::U8(values) => HostIntegerDataOwned::U8(values),
+            HostNumericDataOwned::U16(values) => HostIntegerDataOwned::U16(values),
+            HostNumericDataOwned::U32(values) => HostIntegerDataOwned::U32(values),
+            HostNumericDataOwned::U64(values) => HostIntegerDataOwned::U64(values),
+            HostNumericDataOwned::F64(_) | HostNumericDataOwned::F32(_) => {
+                return Err(anyhow!(
+                    "integer download requested for non-integer gpuArray buffer"
+                ));
+            }
+        };
         Ok(HostIntegerTensorOwned {
             data,
-            shape: handle.shape.clone(),
+            shape: numeric.shape,
         })
+    }
+
+    pub(crate) async fn download_numeric_exec(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Result<HostNumericTensorOwned> {
+        let entry = self.get_entry_raw(handle)?;
+        let bytes = if entry.allocated_bytes == 0 {
+            Vec::new()
+        } else {
+            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-numeric-download-staging"),
+                size: entry.allocated_bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-numeric-download-encoder"),
+                });
+            encoder.copy_buffer_to_buffer(
+                entry.buffer.as_ref(),
+                0,
+                &staging,
+                0,
+                entry.allocated_bytes,
+            );
+            self.submit(encoder);
+            self.map_readback_bytes(staging, entry.allocated_bytes, "numeric download")
+                .await?
+        };
+        let mut data = numeric_data_from_bytes(entry.element_type, &bytes, entry.len)?;
+        let lane_factor = match entry.storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let mut shape = handle.shape.clone();
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
+            let logical_len = data.len() / lane_factor;
+            ensure!(
+                data.len() % lane_factor == 0
+                    && info.base_rows.checked_mul(info.base_cols) == Some(logical_len),
+                "numeric download: transpose metadata mismatch for buffer {}",
+                handle.buffer_id
+            );
+            if shape.len() == 2 {
+                transpose_numeric_data(&mut data, lane_factor, info.base_rows, info.base_cols);
+                shape[0] = info.base_cols;
+                shape[1] = info.base_rows;
+            }
+        }
+        self.telemetry.record_download_bytes(entry.allocated_bytes);
+        let owned = HostNumericTensorOwned {
+            data,
+            shape,
+            storage: entry.storage,
+        };
+        owned.validate()?;
+        Ok(owned)
     }
 
     pub(crate) async fn download_exec(&self, handle: &GpuTensorHandle) -> Result<HostTensorOwned> {
@@ -283,7 +495,12 @@ impl WgpuProvider {
                 handle.buffer_id,
                 &handle.shape
             );
-            self.get_entry(handle)?
+            let entry = self.get_entry_raw(handle)?;
+            ensure!(
+                entry.integer_type().is_none(),
+                "legacy floating download cannot represent native integer storage"
+            );
+            entry
         };
         if let Some(last) = entry.last_submission_id {
             log::trace!(
@@ -312,7 +529,7 @@ impl WgpuProvider {
             });
         }
 
-        let size_bytes = (entry.len * self.element_size) as u64;
+        let size_bytes = entry.allocated_bytes;
         let finish_readback = |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
             let slice = staging.slice(..);
             let data = slice.get_mapped_range();
@@ -450,8 +667,11 @@ impl WgpuProvider {
                 self.bind_group_cache.invalidate_buffer(buffer_ptr);
                 let strong_count = Arc::strong_count(&entry.buffer);
                 if poolable_by_size && strong_count == 1 {
-                    self.buffer_residency
-                        .release(entry.usage, entry.len, entry.buffer.clone());
+                    self.buffer_residency.release(
+                        entry.usage,
+                        entry.allocated_bytes,
+                        entry.buffer.clone(),
+                    );
                 } else {
                     log::trace!(
                         "buffer_residency: not pooling buffer id={} len={} bytes={} strong_count={} poolable_by_size={}",
@@ -490,5 +710,121 @@ impl WgpuProvider {
             memory_bytes,
             backend: Some(backend),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use runmat_accelerate_api::{AccelProvider, ProviderPrecision};
+
+    fn provider_for_test() -> Option<&'static WgpuProvider> {
+        match crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => Some(provider),
+            Err(error) if error.to_string() == "wgpu: no compatible adapter found" => None,
+            Err(error) => panic!("register wgpu provider failed: {error:?}"),
+        }
+    }
+
+    fn numeric_cases() -> Vec<HostNumericDataOwned> {
+        vec![
+            HostNumericDataOwned::F64(vec![1.25, -2.5, f64::INFINITY, -0.0]),
+            HostNumericDataOwned::F32(vec![1.25, -2.5, f32::INFINITY, -0.0]),
+            HostNumericDataOwned::I8(vec![i8::MIN, -1, 0, i8::MAX]),
+            HostNumericDataOwned::I16(vec![i16::MIN, -1, 0, i16::MAX]),
+            HostNumericDataOwned::I32(vec![i32::MIN, -1, 0, i32::MAX]),
+            HostNumericDataOwned::I64(vec![i64::MIN, -(1_i64 << 53) - 1, 0, i64::MAX]),
+            HostNumericDataOwned::U8(vec![0, 1, 127, u8::MAX]),
+            HostNumericDataOwned::U16(vec![0, 1, 32768, u16::MAX]),
+            HostNumericDataOwned::U32(vec![0, 1, 1_u32 << 31, u32::MAX]),
+            HostNumericDataOwned::U64(vec![0, (1_u64 << 53) + 1, 1_u64 << 63, u64::MAX]),
+        ]
+    }
+
+    #[test]
+    fn shared_numeric_transfer_round_trips_every_class_and_layout_exactly() {
+        let Some(provider) = provider_for_test() else {
+            return;
+        };
+        for storage in [GpuTensorStorage::Real, GpuTensorStorage::ComplexInterleaved] {
+            for data in numeric_cases() {
+                let shape = match storage {
+                    GpuTensorStorage::Real => vec![2, 2],
+                    GpuTensorStorage::ComplexInterleaved => vec![1, 2],
+                };
+                let expected = HostNumericTensorOwned {
+                    data,
+                    shape,
+                    storage,
+                };
+                expected.validate().expect("valid numeric transfer case");
+                let handle = provider
+                    .upload_numeric(&expected.as_view())
+                    .expect("shared WGPU numeric upload");
+                let element_type = expected.data.element_type();
+                assert_eq!(
+                    provider
+                        .get_entry_raw(&handle)
+                        .expect("registered WGPU numeric buffer")
+                        .element_type,
+                    element_type
+                );
+                assert_eq!(runmat_accelerate_api::handle_storage(&handle), storage);
+                assert_eq!(
+                    runmat_accelerate_api::handle_class_name(&handle).as_deref(),
+                    Some(element_type.class_name())
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&handle),
+                    element_type.integer_type()
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(&handle),
+                    element_type.precision()
+                );
+                let actual = block_on(provider.download_numeric(&handle))
+                    .expect("shared WGPU numeric download");
+                assert_eq!(actual, expected);
+                provider.free(&handle).expect("free numeric test buffer");
+            }
+        }
+    }
+
+    #[test]
+    fn shared_numeric_transfer_preserves_native_single_on_f64_provider() {
+        let Some(provider) = provider_for_test() else {
+            return;
+        };
+        let expected = HostNumericTensorOwned {
+            data: HostNumericDataOwned::F32(vec![f32::MIN_POSITIVE, -13.25, f32::MAX]),
+            shape: vec![1, 3],
+            storage: GpuTensorStorage::Real,
+        };
+        let handle = provider
+            .upload_numeric(&expected.as_view())
+            .expect("native single WGPU upload");
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&handle),
+            Some(ProviderPrecision::F32)
+        );
+        let entry = provider
+            .get_entry_raw(&handle)
+            .expect("native single buffer entry");
+        assert_eq!(entry.element_type, NumericElementType::F32);
+        assert_eq!(entry.allocated_bytes, 3 * std::mem::size_of::<f32>() as u64);
+        assert_eq!(
+            block_on(provider.download_numeric(&handle)).expect("native single WGPU download"),
+            expected
+        );
+        let legacy = block_on(provider.download(&handle)).expect("legacy single projection");
+        assert_eq!(
+            legacy.data,
+            vec![f32::MIN_POSITIVE as f64, -13.25, f32::MAX as f64]
+        );
+        assert_eq!(legacy.shape, vec![1, 3]);
+        provider.free(&handle).expect("free native single buffer");
     }
 }
