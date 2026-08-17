@@ -13,29 +13,25 @@ use super::{
     SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
-const MAX_CURVE_PARTITIONS: usize = 4096;
+// One exact-geometry prerequisite plus this many partition roots fits the canonical 64-input join.
+const MAX_CURVE_PARTITIONS: usize = 63;
 
 pub fn curve_partition_descriptors(
     topology: &ExactBRepTopology,
-    maximum_edges_per_partition: u32,
+    preferred_edges_per_partition: u32,
 ) -> Result<Vec<MeshingPartitionDescriptor>, SharedCurveError> {
-    if maximum_edges_per_partition == 0 || topology.edges.is_empty() {
+    if preferred_edges_per_partition == 0 || topology.edges.is_empty() {
         return Err(SharedCurveError::invalid_request(
             "curve partition policy",
             "maximum edges and exact edge inventory must be nonzero",
         ));
     }
-    let maximum = maximum_edges_per_partition as usize;
-    let partition_count = topology.edges.len().div_ceil(maximum);
-    if partition_count > MAX_CURVE_PARTITIONS {
-        return Err(SharedCurveError::invalid_request(
-            "curve partition count",
-            "deterministic edge batches exceed the hard partition bound",
-        ));
-    }
+    let minimum_batch_size = topology.edges.len().div_ceil(MAX_CURVE_PARTITIONS);
+    let batch_size = (preferred_edges_per_partition as usize).max(minimum_batch_size);
+    let partition_count = topology.edges.len().div_ceil(batch_size);
     Ok(topology
         .edges
-        .chunks(maximum)
+        .chunks(batch_size)
         .enumerate()
         .map(|(index, edges)| MeshingPartitionDescriptor {
             kind: MeshingPartitionKind::CanonicalEntityBatch,

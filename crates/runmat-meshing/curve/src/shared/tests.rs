@@ -620,10 +620,19 @@ fn canonical_edge_batches_join_independently_of_layout_and_completion_order() {
 }
 
 #[test]
-fn curve_partition_policy_enforces_hard_bounds() {
+fn curve_partition_policy_automatically_bounds_join_fan_in() {
     let (_, topology, _) = runmat_geometry_fixtures::exact_circle();
     assert!(curve_partition_descriptors(&topology, 0).is_err());
-    assert!(curve_partition_descriptors(&repeated_circle_topology(&topology, 4_097), 1).is_err());
+    let descriptors =
+        curve_partition_descriptors(&repeated_circle_topology(&topology, 4_097), 1).unwrap();
+    assert_eq!(descriptors.len(), 63);
+    assert_eq!(
+        descriptors
+            .iter()
+            .map(|descriptor| descriptor.entity_range.as_ref().unwrap().entity_count)
+            .sum::<u64>(),
+        4_097
+    );
 }
 
 fn shared_options() -> SharedCurveDiscretizationOptions {

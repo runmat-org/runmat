@@ -52,6 +52,15 @@ pub fn verify_stage_manifest_closure(
     result_identity: &MeshingStageResultIdentity,
     chunks: &[EncodedMeshingChunk],
 ) -> Result<(), MeshingContractError> {
+    decode_stage_manifest_streams(manifest, result_identity, chunks).map(|_| ())
+}
+
+/// Reconstructs typed logical streams only after independently verifying the complete closure.
+pub fn decode_stage_manifest_streams(
+    manifest: &MeshingStageManifest,
+    result_identity: &MeshingStageResultIdentity,
+    chunks: &[EncodedMeshingChunk],
+) -> Result<Vec<MeshingChunkStream>, MeshingContractError> {
     manifest.validate()?;
     result_identity.validate()?;
     if manifest.stage != result_identity.stage
@@ -117,5 +126,5 @@ pub fn verify_stage_manifest_closure(
             "decoded logical content or encoded totals do not match the result identity",
         ));
     }
-    Ok(())
+    Ok(streams)
 }

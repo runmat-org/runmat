@@ -79,7 +79,7 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
         invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
         if invocation.host.workload.stage != MeshingStageKind::CurveMesh {
-            return Err(failure(
+            return Err(curve_failure(
                 MeshingFailureCategory::InternalInvariantViolation,
                 None,
                 "use the exact curve kernel only for curve-mesh stages",
@@ -91,7 +91,7 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
             .evaluator_provider
             .evaluator(geometry)
             .map_err(|error| {
-                failure(
+                curve_failure(
                     MeshingFailureCategory::InvalidGeometry,
                     None,
                     "regenerate an evaluator-complete exact geometry closure",
@@ -104,14 +104,14 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
         )
         .map_err(map_curve_error)?;
         if invocation.host.resolved_request.resources.maximum_nodes < 2 {
-            return Err(failure(
+            return Err(curve_failure(
                 MeshingFailureCategory::NodeBudgetExceeded,
                 None,
                 "increase the node budget to at least two nodes per ordinary exact edge",
                 "curve node budget is below the constructive minimum",
             ));
         }
-        let options = options(invocation.host);
+        let options = curve_options(invocation.host);
         let control = invocation.control.geometry_evaluation_control();
         let batch = discretize_shared_curve_partition(
             &geometry.topology,
@@ -135,7 +135,7 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
                 count.checked_add(edge.nodes.len() as u64)
             })
             .ok_or_else(|| {
-                failure(
+                curve_failure(
                     MeshingFailureCategory::NodeBudgetExceeded,
                     None,
                     "increase the node budget or relax curve quality targets",
@@ -176,7 +176,7 @@ fn exact_geometry(
 ) -> Result<&PreparedExactGeometryObjects, Box<MeshingFailure>> {
     match inputs {
         [PreparedMeshingInput::ExactGeometry(input)] => Ok(input.geometry_objects()),
-        _ => Err(failure(
+        _ => Err(curve_failure(
             MeshingFailureCategory::InternalInvariantViolation,
             None,
             "submit exactly one admitted exact geometry closure to the curve stage",
@@ -185,7 +185,7 @@ fn exact_geometry(
     }
 }
 
-fn options(host: &crate::MeshingHostWorkload) -> SharedCurveDiscretizationOptions {
+pub(super) fn curve_options(host: &crate::MeshingHostWorkload) -> SharedCurveDiscretizationOptions {
     let request = &host.resolved_request;
     let curve = request.quality.curve;
     let numerical_error_m = request
@@ -217,7 +217,7 @@ fn validation_digest(encoded: &[u8]) -> StableDigest {
     StableDigest::from_bytes(*Digest::sha256(&bytes).bytes())
 }
 
-fn map_curve_error(error: SharedCurveError) -> Box<MeshingFailure> {
+pub(super) fn map_curve_error(error: SharedCurveError) -> Box<MeshingFailure> {
     let category = match error.kind {
         SharedCurveErrorKind::GeometryEvaluation(
             runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled,
@@ -244,7 +244,7 @@ fn map_curve_error(error: SharedCurveError) -> Box<MeshingFailure> {
         | SharedCurveErrorKind::GeometricMismatch => MeshingFailureCategory::InvalidGeometry,
         SharedCurveErrorKind::GeometryEvaluation(_) => MeshingFailureCategory::NumericalFailure,
     };
-    failure(
+    curve_failure(
         category,
         error.edge_id,
         "repair the named geometry or relax the resolved curve constraints",
@@ -252,7 +252,7 @@ fn map_curve_error(error: SharedCurveError) -> Box<MeshingFailure> {
     )
 }
 
-fn failure(
+pub(super) fn curve_failure(
     category: MeshingFailureCategory,
     edge_id: Option<runmat_geometry_core::PersistentEntityId>,
     remediation: &str,

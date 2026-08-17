@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{validate_token, MeshingContractError};
 
-pub const MESHING_IDENTITY_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_IDENTITY_SCHEMA_VERSION: u16 = 3;
 const MAX_MESHING_INPUTS: usize = 64;
 const MAX_JOIN_PARTITIONS: usize = 4096;
 
@@ -107,6 +107,7 @@ impl CanonicalEntityRange {
 #[serde(rename_all = "snake_case")]
 pub enum MeshingPartitionKind {
     WholeStage,
+    DeterministicJoin,
     CanonicalEntityBatch,
     DisconnectedComponent,
 }
@@ -131,6 +132,7 @@ impl MeshingPartitionDescriptor {
         }
         match (&self.kind, &self.entity_range) {
             (MeshingPartitionKind::WholeStage, None)
+            | (MeshingPartitionKind::DeterministicJoin, None)
                 if self.partition_index == 0 && self.partition_count == 1 => {}
             (MeshingPartitionKind::CanonicalEntityBatch, Some(range))
             | (MeshingPartitionKind::DisconnectedComponent, Some(range)) => range.validate()?,

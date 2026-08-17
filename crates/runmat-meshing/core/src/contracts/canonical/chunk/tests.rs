@@ -68,6 +68,14 @@ fn logical_identity_is_independent_of_deterministic_chunk_policy() {
     );
     verify_stage_manifest_closure(&fine_manifest, &fine_identity, &fine.chunks).unwrap();
     verify_stage_manifest_closure(&coarse_manifest, &coarse_identity, &coarse.chunks).unwrap();
+    assert_eq!(
+        decode_stage_manifest_streams(&fine_manifest, &fine_identity, &fine.chunks).unwrap(),
+        streams()
+    );
+    assert_eq!(
+        decode_stage_manifest_streams(&coarse_manifest, &coarse_identity, &coarse.chunks).unwrap(),
+        streams()
+    );
 }
 
 #[test]

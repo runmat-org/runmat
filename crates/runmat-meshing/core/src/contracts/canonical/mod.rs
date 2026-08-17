@@ -21,8 +21,9 @@ pub use artifact_types::{
 };
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};
 pub use chunk::{
-    build_chunked_stage_payload, build_closed_stage_manifest, verify_stage_manifest_closure,
-    EncodedMeshingChunk, MeshingChunkPolicy, MeshingChunkStream, MeshingChunkedPayload,
+    build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
+    verify_stage_manifest_closure, EncodedMeshingChunk, MeshingChunkPolicy, MeshingChunkStream,
+    MeshingChunkedPayload,
 };
 pub use codec::{CanonicalMeshingContract, MeshingCanonicalLimits};
 pub use error::MeshingContractError;

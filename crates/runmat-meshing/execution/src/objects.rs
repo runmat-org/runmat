@@ -40,6 +40,32 @@ impl PreparedMeshingStageObjects {
     }
 
     pub fn revalidate(&self, limits: ObjectInventoryLimits) -> MeshingExecutionResult<()> {
+        let chunks = self.encoded_chunks()?;
+        let rebuilt = prepare_stage_objects(
+            self.result_identity.clone(),
+            self.manifest.clone(),
+            chunks,
+            limits,
+        )?;
+        if rebuilt != *self {
+            return Err(MeshingExecutionError::Identity(
+                "prepared meshing object set is not its canonical closure",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn decoded_streams(
+        &self,
+    ) -> MeshingExecutionResult<Vec<runmat_meshing_core::MeshingChunkStream>> {
+        Ok(runmat_meshing_core::decode_stage_manifest_streams(
+            &self.manifest,
+            &self.result_identity,
+            &self.encoded_chunks()?,
+        )?)
+    }
+
+    fn encoded_chunks(&self) -> MeshingExecutionResult<Vec<EncodedMeshingChunk>> {
         let mut chunks = Vec::with_capacity(self.manifest.chunks.len());
         for descriptor in &self.manifest.chunks {
             let digest = execution_digest(descriptor.digest);
@@ -53,18 +79,7 @@ impl PreparedMeshingStageObjects {
                 bytes: object.bytes.clone(),
             });
         }
-        let rebuilt = prepare_stage_objects(
-            self.result_identity.clone(),
-            self.manifest.clone(),
-            chunks,
-            limits,
-        )?;
-        if rebuilt != *self {
-            return Err(MeshingExecutionError::Identity(
-                "prepared meshing object set is not its canonical closure",
-            ));
-        }
-        Ok(())
+        Ok(chunks)
     }
 }
 

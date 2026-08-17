@@ -11,7 +11,9 @@ use sha2::{Digest as _, Sha256};
 
 use super::{MeshingChunkDescriptor, MeshingChunkMediaType, MeshingContractError, StableDigest};
 
-pub use closure::{build_closed_stage_manifest, verify_stage_manifest_closure};
+pub use closure::{
+    build_closed_stage_manifest, decode_stage_manifest_streams, verify_stage_manifest_closure,
+};
 
 const MAX_CHUNKS: usize = 65_536;
 pub(super) const MAX_RECORDS_PER_CHUNK: usize = 1_000_000;

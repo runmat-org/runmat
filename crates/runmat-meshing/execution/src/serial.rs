@@ -218,19 +218,23 @@ where
     };
     let result_kind = match host.workload.partition.kind {
         MeshingPartitionKind::WholeStage => MeshingStageResultKind::WholeStage,
+        MeshingPartitionKind::DeterministicJoin => MeshingStageResultKind::DeterministicJoin,
         MeshingPartitionKind::CanonicalEntityBatch
         | MeshingPartitionKind::DisconnectedComponent => MeshingStageResultKind::Partition,
     };
+    let mut prerequisite_manifest_digests = host
+        .workload
+        .inputs
+        .iter()
+        .map(|input| input.digest)
+        .collect::<Vec<_>>();
+    prerequisite_manifest_digests.sort_unstable();
     let (result_identity, manifest) = build_closed_stage_manifest(
         host.workload.stage,
         result_kind,
         partition_identity.canonical_digest()?,
         output.invariant_summary_digest,
-        host.workload
-            .inputs
-            .iter()
-            .map(|input| input.digest)
-            .collect(),
+        prerequisite_manifest_digests,
         MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )?;
@@ -268,7 +272,10 @@ fn validate_stage_streams(
             )
         }
         MeshingStageKind::Sizing => matches!(media, MeshingChunkMediaType::MetricField),
-        MeshingStageKind::CurveMesh => matches!(media, MeshingChunkMediaType::CurvePartitions),
+        MeshingStageKind::CurveMesh => matches!(
+            media,
+            MeshingChunkMediaType::CurvePartitions | MeshingChunkMediaType::CurveMesh
+        ),
         MeshingStageKind::SurfaceMesh => {
             matches!(media, MeshingChunkMediaType::SurfacePartitions)
         }

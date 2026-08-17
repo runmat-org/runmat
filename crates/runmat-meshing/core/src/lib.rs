@@ -16,10 +16,10 @@ pub use contracts::artifact::{
 pub use contracts::backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshTriangle};
 pub use contracts::canonical::{
-    build_chunked_stage_payload, build_closed_stage_manifest, verify_stage_manifest_closure,
-    AlgorithmVersionSet, BoundaryFaceRole, BoundaryTriangleOrder, CacheAdmissionDecision,
-    CancellationPolicy, CanonicalEntityRange, CanonicalMeshingContract, ContactPair,
-    CurveQualityTargets, ElementOrder, EncodedMeshingChunk, ErrorDistribution,
+    build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
+    verify_stage_manifest_closure, AlgorithmVersionSet, BoundaryFaceRole, BoundaryTriangleOrder,
+    CacheAdmissionDecision, CancellationPolicy, CanonicalEntityRange, CanonicalMeshingContract,
+    ContactPair, CurveQualityTargets, ElementOrder, EncodedMeshingChunk, ErrorDistribution,
     FieldTopologyLocation, FieldTopologyMap, GeometricWitness, GeometryRevisionRef,
     GeometryTolerancePolicy, InvariantEvidence, MaterialInterface, MeshNeighbor, MeshRegion,
     MeshingCancellationSignal, MeshingCanonicalLimits, MeshingCapabilityRequirement,

@@ -78,6 +78,17 @@ impl MeshingWorkloadRequest {
                 "entity batching is limited to independently composable sizing, curve, and surface work",
             ));
         }
+        if self.partition.kind == super::MeshingPartitionKind::DeterministicJoin
+            && !matches!(
+                self.stage,
+                MeshingStageKind::CurveMesh | MeshingStageKind::SurfaceMesh
+            )
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing workload partition",
+                "deterministic joins are limited to independently partitioned curve and surface work",
+            ));
+        }
         validate_inputs(&self.inputs)?;
         if self.stage != MeshingStageKind::GeometryAdmission && self.inputs.is_empty() {
             return Err(MeshingContractError::invalid(

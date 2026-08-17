@@ -3,10 +3,11 @@ use std::future::Future;
 use std::task::{Context, Poll, Waker};
 
 use crate::{
-    build_task_submission, prepare_exact_geometry_input, prepare_exact_geometry_objects,
-    prepare_faceted_geometry_input, prepare_faceted_geometry_objects, prepare_result_publication,
-    prepare_stage_objects, MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse,
-    MeshingHostWorkload, MeshingTaskEffectPolicy,
+    build_task_submission, import_exact_geometry_input, prepare_exact_geometry_input,
+    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, prepare_result_publication, prepare_stage_objects,
+    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
+    MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
@@ -33,9 +34,9 @@ use runmat_meshing_core::{
 };
 
 use super::{
-    execute_serial_stage, ExactCurveStageKernel, MeshingProgressSink, MeshingSerialExecutionError,
-    MeshingStageCheckpoint, MeshingStageControl, MeshingStageInvocation, MeshingStageKernel,
-    ValidatedMeshingStageOutput,
+    execute_serial_stage, ExactCurveJoinKernel, ExactCurveStageKernel, MeshingProgressSink,
+    MeshingSerialExecutionError, MeshingStageCheckpoint, MeshingStageControl,
+    MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,
 };
 
 #[derive(Default)]
@@ -275,6 +276,99 @@ fn serial_curve_partition_executes_and_publishes_the_authoritative_batch() {
         .stage_objects()
         .revalidate(ObjectInventoryLimits::default())
         .unwrap();
+}
+
+#[test]
+fn serial_curve_join_reloads_partitions_and_publishes_the_global_curve_mesh() {
+    let mut fixture = Fixture::with_exact_curve_partition();
+    let exact_root = root(&fixture.program.arguments[0]);
+    let partition = execute_serial_stage(
+        &fixture.program,
+        &mut fixture.store,
+        &ExactCurveStageKernel::default(),
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(65_536),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let partition_root = root(partition.publication().root_output());
+    let exact_input = fixture.host.workload.inputs[0].clone();
+    let partition_input = MeshingInputRef {
+        kind: MeshingInputKind::StageArtifact,
+        digest: StableDigest::from_bytes(*partition_root.logical_digest.bytes()),
+    };
+    let request = fixture.host.resolved_request.clone();
+    let identity = MeshingStageIdentity {
+        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
+        stage: MeshingStageKind::CurveMesh,
+        geometry: fixture.host.stage_identity.geometry.clone(),
+        resolved_request_digest: request.canonical_digest().unwrap(),
+        tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
+        metric_policy_digest: request.metric.canonical_digest().unwrap(),
+        algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
+        deterministic_seed: request.deterministic_seed,
+        prerequisites: vec![exact_input.clone(), partition_input.clone()],
+        capability_cohort: fixture.host.stage_identity.capability_cohort.clone(),
+    };
+    let workload = MeshingWorkloadRequest {
+        schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
+        stage: MeshingStageKind::CurveMesh,
+        stage_identity_digest: identity.canonical_digest().unwrap(),
+        partition: MeshingPartitionDescriptor {
+            kind: MeshingPartitionKind::DeterministicJoin,
+            partition_index: 0,
+            partition_count: 1,
+            entity_range: None,
+        },
+        inputs: vec![exact_input, partition_input],
+        required_capabilities: fixture.host.workload.required_capabilities.clone(),
+    };
+    let host = MeshingHostWorkload::new(
+        workload,
+        identity,
+        request,
+        fixture.host.artifact_access.clone(),
+        fixture.host.geometry_document.clone(),
+    )
+    .unwrap();
+    let program = host
+        .program_request(revision(), &[exact_root.clone(), partition_root.clone()])
+        .unwrap();
+    let joined = execute_serial_stage(
+        &program,
+        &mut fixture.store,
+        &ExactCurveJoinKernel::default(),
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(65_536),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let stage_objects = joined.publication().stage_objects();
+    assert_eq!(
+        stage_objects.result_identity.result_kind,
+        MeshingStageResultKind::DeterministicJoin
+    );
+    let streams = stage_objects.decoded_streams().unwrap();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0].media_type, MeshingChunkMediaType::CurveMesh);
+    assert_eq!(streams[0].records.len(), 1);
+
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        host.geometry_document.clone().unwrap(),
+        &exact_root,
+        host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let mesh = runmat_meshing_curve::decode_shared_curve_mesh(
+        &streams[0].records[0],
+        &exact.geometry_objects().topology,
+    )
+    .unwrap();
+    assert_eq!(mesh.edges.len(), 1);
 }
 
 #[test]

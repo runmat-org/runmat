@@ -4,6 +4,7 @@
 //! immutable closure onto execution artifact objects and, in later modules, execution workloads.
 
 mod budget;
+mod curve_join_kernel;
 mod curve_kernel;
 mod error;
 mod faceted_geometry_objects;
@@ -35,6 +36,7 @@ mod tests;
 pub use budget::{
     MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl, NoopMeshingProgress,
 };
+pub use curve_join_kernel::ExactCurveJoinKernel;
 pub use curve_kernel::{
     ExactCurveEvaluation, ExactCurveEvaluatorProvider, ExactCurveStageKernel,
     PortableCurveEvaluatorProvider,
