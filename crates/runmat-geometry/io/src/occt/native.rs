@@ -7,7 +7,8 @@ use crate::exact::{ExactCadImportOptions, ImportedExactCad};
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
-use runmat_geometry_core::{BodyMassProperties, UnitSystem};
+use runmat_geometry_core::{BodyMassProperties, GeometryDigest, GeometrySourceFormat, UnitSystem};
+use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
@@ -119,17 +120,25 @@ pub(crate) fn import_exact_cad_shape(
             ],
         }
     });
-    let (topology, evaluators) = exact_projection::project_exact_contracts(
+    let (topology, evaluators, model) = exact_projection::project_exact_contracts(
         &payload,
         meters_per_source_unit,
         mass_properties.as_ref(),
     )?;
     let imported = ImportedExactCad {
+        source_digest: GeometryDigest::from_bytes(Sha256::digest(bytes).into()),
+        source_format: match format {
+            OcctCadFormat::Step => GeometrySourceFormat::Step,
+            OcctCadFormat::Iges => GeometrySourceFormat::Iges,
+            OcctCadFormat::Brep => GeometrySourceFormat::Brep,
+        },
+        source_units: options.source_units,
         kernel_version: payload.kernel_version,
         meters_per_source_unit,
         representation: payload.representation,
         topology,
         evaluators,
+        model,
     };
     let tolerance_m = imported
         .topology

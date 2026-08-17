@@ -25,6 +25,40 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     )
     .unwrap();
     assert_eq!(first, second);
+    let closure_options = ExactCadClosureOptions {
+        revision: GeometryRevisionIdentity {
+            revision: 1,
+            persistent_mapping_version: 1,
+            parent_document_digest: None,
+        },
+        absolute_tolerance_floor_m: 1.0e-12,
+        model_relative_tolerance: 1.0e-12,
+        requested_deviation_m: 1.0e-4,
+        maximum_healing_displacement_m: 1.0e-6,
+        healing: GeometryHealingPolicy {
+            algorithm_version: "occt-healing/1".into(),
+            sew: false,
+            repair_orientation: false,
+            consolidate_duplicates: false,
+            repair_tolerance_scale_gaps: false,
+            simplify_short_edges_and_sliver_faces: false,
+        },
+    };
+    let closure = first.build_closure(&closure_options).unwrap();
+    let renamed_closure = second.build_closure(&closure_options).unwrap();
+    assert_eq!(closure, renamed_closure);
+    assert_eq!(closure.document.source.content_digest, first.source_digest);
+    assert_eq!(closure.document.source.format, GeometrySourceFormat::Brep);
+    assert_eq!(closure.document.source.source_units, UnitSystem::Meter);
+    assert_eq!(
+        closure
+            .manifest
+            .kernel_representation
+            .as_ref()
+            .unwrap()
+            .digest,
+        GeometryDigest::from_bytes(first.representation_digest())
+    );
     assert_eq!(first.topology.assemblies.len(), 1);
     assert_eq!(first.topology.bodies.len(), 1);
     assert_eq!(first.topology.lumps.len(), 1);

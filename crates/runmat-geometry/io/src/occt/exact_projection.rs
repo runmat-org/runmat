@@ -24,7 +24,7 @@ pub(super) fn project_exact_contracts(
     payload: &bridge::OcctExactShapePayload,
     meters_per_source_unit: f64,
     solid_mass_properties: Option<&BodyMassProperties>,
-) -> Result<(ExactBRepTopology, ExactEvaluatorRegistry), GeometryImportError> {
+) -> Result<(ExactBRepTopology, ExactEvaluatorRegistry, ExactBRepModel), GeometryImportError> {
     let representation_digest = exact_representation_digest(&payload.representation);
     validate_projection_shape(payload)?;
 
@@ -313,7 +313,7 @@ pub(super) fn project_exact_contracts(
     topology
         .validate_solid_shell_boundaries()
         .map_err(|error| invalid_contract("projected solid shell boundaries", error))?;
-    Ok((topology, evaluators))
+    Ok((topology, evaluators, model))
 }
 
 fn validate_projection_shape(
