@@ -10,9 +10,7 @@ pub mod sniff;
 
 mod occt;
 
-pub use exact::{
-    import_exact_cad, ExactCadImportOptions, ExactCadKernelShape, ExactCadTopologyInventory,
-};
+pub use exact::{import_exact_cad, ExactCadImportOptions, ImportedExactCad};
 pub use import::{
     import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
     GeometryImportContext, GeometryImportOptions,

@@ -1,9 +1,9 @@
 use super::{
-    ffi, topology_from_raw, OcctCadFormat, OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart,
-    OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic,
-    OcctRawTopology,
+    exact_projection, ffi, topology_from_raw, OcctCadFormat, OcctCadPreviewSessionChunk,
+    OcctCadPreviewSessionStart, OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceEvaluationSample,
+    OcctRawFaceSemantic, OcctRawTopology,
 };
-use crate::exact::{ExactCadImportOptions, ExactCadKernelShape, ExactCadTopologyInventory};
+use crate::exact::{ExactCadImportOptions, ImportedExactCad};
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
@@ -47,7 +47,7 @@ pub(crate) fn import_exact_cad_shape(
     format: OcctCadFormat,
     options: &ExactCadImportOptions,
     context: &GeometryImportContext,
-) -> Result<ExactCadKernelShape, GeometryImportError> {
+) -> Result<ImportedExactCad, GeometryImportError> {
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let meters_per_source_unit = meters_per_unit(options.source_units)?;
@@ -119,21 +119,16 @@ pub(crate) fn import_exact_cad_shape(
             ],
         }
     });
-    Ok(ExactCadKernelShape {
+    let (topology, evaluators) = exact_projection::project_exact_contracts(
+        &payload,
+        meters_per_source_unit,
+        mass_properties.as_ref(),
+    )?;
+    Ok(ImportedExactCad {
         kernel_version: payload.kernel_version,
-        kernel_abi: payload.kernel_abi,
         representation: payload.representation,
-        topology: ExactCadTopologyInventory {
-            compound_count: payload.compound_count,
-            compsolid_count: payload.compsolid_count,
-            solid_count: payload.solid_count,
-            shell_count: payload.shell_count,
-            face_count: payload.face_count,
-            wire_count: payload.wire_count,
-            edge_count: payload.edge_count,
-            vertex_count: payload.vertex_count,
-        },
-        mass_properties,
+        topology,
+        evaluators,
     })
 }
 

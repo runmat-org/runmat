@@ -1,7 +1,7 @@
 //! Exact CAD import boundary. This path returns kernel B-rep bytes and kernel-derived evidence;
 //! it never exposes or consumes display tessellation.
 
-use runmat_geometry_core::{BodyMassProperties, UnitSystem};
+use runmat_geometry_core::{ExactBRepTopology, ExactEvaluatorRegistry, UnitSystem};
 
 use crate::{
     import::{GeometryImportContext, GeometryImportError},
@@ -9,27 +9,15 @@ use crate::{
     GeometryFormat,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ExactCadTopologyInventory {
-    pub compound_count: u64,
-    pub compsolid_count: u64,
-    pub solid_count: u64,
-    pub shell_count: u64,
-    pub face_count: u64,
-    pub wire_count: u64,
-    pub edge_count: u64,
-    pub vertex_count: u64,
-}
-
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExactCadKernelShape {
+pub struct ImportedExactCad {
     pub kernel_version: String,
-    pub kernel_abi: String,
     /// Canonical OCCT B-rep with all derived polygonal caches removed.
     pub representation: Vec<u8>,
-    pub topology: ExactCadTopologyInventory,
-    /// Present for solid-bearing shapes. Sheet-only geometry has no volume properties.
-    pub mass_properties: Option<BodyMassProperties>,
+    /// Authoritative topology extracted directly from the kernel B-rep.
+    pub topology: ExactBRepTopology,
+    /// Exact evaluator bindings into `representation`; no display samples are admitted.
+    pub evaluators: ExactEvaluatorRegistry,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +45,7 @@ pub fn import_exact_cad(
     format: GeometryFormat,
     options: &ExactCadImportOptions,
     context: &GeometryImportContext,
-) -> Result<ExactCadKernelShape, GeometryImportError> {
+) -> Result<ImportedExactCad, GeometryImportError> {
     context.check_cancelled()?;
     if bytes.is_empty() {
         return Err(GeometryImportError::ParseFailed(

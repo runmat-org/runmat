@@ -54,6 +54,7 @@ fn build_occt_backend() {
     let mut build = cxx_build::bridge("src/occt/ffi.rs");
     build
         .file("src/occt/occt_bridge.cc")
+        .file("src/occt/exact_topology.cc")
         .include(&occt_include)
         .std("c++17")
         .flag_if_supported("-Wno-deprecated-declarations")
@@ -71,6 +72,8 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/ffi.rs");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.hxx");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_topology.cc");
 }
 
 #[cfg(not(feature = "occt-native"))]

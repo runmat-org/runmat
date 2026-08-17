@@ -17,6 +17,8 @@ use runmat_geometry_core::{
 use std::collections::BTreeMap;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod exact_projection;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod native;
@@ -172,7 +174,7 @@ pub(crate) fn import_exact_cad_shape(
     format: OcctCadFormat,
     options: &crate::exact::ExactCadImportOptions,
     context: &GeometryImportContext,
-) -> Result<crate::exact::ExactCadKernelShape, GeometryImportError> {
+) -> Result<crate::exact::ImportedExactCad, GeometryImportError> {
     native::import_exact_cad_shape(path, bytes, format, options, context)
 }
 
@@ -183,7 +185,7 @@ pub(crate) fn import_exact_cad_shape(
     format: OcctCadFormat,
     options: &crate::exact::ExactCadImportOptions,
     context: &GeometryImportContext,
-) -> Result<crate::exact::ExactCadKernelShape, GeometryImportError> {
+) -> Result<crate::exact::ImportedExactCad, GeometryImportError> {
     let _ = (path, bytes, format, options, context);
     Err(GeometryImportError::BackendUnavailable(
         "exact CAD import requires a native OCCT host".into(),

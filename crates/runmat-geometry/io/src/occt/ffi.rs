@@ -110,6 +110,77 @@ pub(crate) mod bridge {
         inertia_xy: f64,
         inertia_xz: f64,
         inertia_yz: f64,
+        vertices: Vec<OcctExactVertexPayload>,
+        edges: Vec<OcctExactEdgePayload>,
+        faces: Vec<OcctExactFacePayload>,
+        wires: Vec<OcctExactWirePayload>,
+        coedges: Vec<OcctExactCoedgePayload>,
+        shells: Vec<OcctExactShellPayload>,
+        solids: Vec<OcctExactSolidPayload>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactVertexPayload {
+        shape_key: u64,
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        tolerance: f64,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactEdgePayload {
+        shape_key: u64,
+        start_vertex_key: u64,
+        end_vertex_key: u64,
+        closed: bool,
+        periodic: bool,
+        degenerate: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactFacePayload {
+        shape_key: u64,
+        reversed: bool,
+        outer_wire_key: u64,
+        inner_wire_keys: Vec<u64>,
+        periodic_u: bool,
+        periodic_v: bool,
+        singular: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactWirePayload {
+        shape_key: u64,
+        face_key: u64,
+        reversed: bool,
+        coedge_keys: Vec<u64>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactCoedgePayload {
+        coedge_key: u64,
+        face_key: u64,
+        wire_key: u64,
+        edge_key: u64,
+        reversed: bool,
+        has_pcurve: bool,
+        seam_image: i8,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactShellPayload {
+        shape_key: u64,
+        reversed: bool,
+        face_keys: Vec<u64>,
+        face_reversed: Vec<bool>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactSolidPayload {
+        shape_key: u64,
+        outer_shell_key: u64,
+        void_shell_keys: Vec<u64>,
     }
 
     #[derive(Debug, Clone)]

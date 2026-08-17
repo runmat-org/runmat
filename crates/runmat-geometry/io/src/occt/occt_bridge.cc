@@ -1,13 +1,19 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
+#include "runmat-geometry-io/src/occt/exact_topology.hxx"
 
 #include <BRep_Builder.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepClass3d.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
+#include <BRepTools_ShapeSet.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <Geom2d_Curve.hxx>
 #include <IGESControl_Reader.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
@@ -37,6 +43,12 @@
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <TopoDS_Wire.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <XCAFApp_Application.hxx>
@@ -995,6 +1007,16 @@ OcctExactShapePayload import_exact_cad_bytes(
     if (*inventory.second > options.max_exact_entities) {
       throw std::runtime_error("OCCT exact topology exceeded its entity budget");
     }
+  }
+
+  append_exact_topology(result, document.shape, options);
+  if (result.vertices.size() != result.vertex_count ||
+      result.edges.size() != result.edge_count ||
+      result.faces.size() != result.face_count ||
+      result.wires.size() != result.wire_count ||
+      result.shells.size() != result.shell_count ||
+      result.solids.size() != result.solid_count) {
+    throw std::runtime_error("OCCT exact topology extraction did not cover its entity inventory");
   }
 
   BRepCheck_Analyzer analyzer(document.shape, Standard_True);

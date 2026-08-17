@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+use runmat_geometry_core::ExactMassPropertiesImplementation;
 
 const BOX: &[u8] = include_bytes!("../../tests/fixtures/box.brep");
 
@@ -23,18 +25,37 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     )
     .unwrap();
     assert_eq!(first, second);
-    assert_eq!(first.topology.solid_count, 1);
-    assert_eq!(first.topology.shell_count, 1);
-    assert_eq!(first.topology.face_count, 6);
-    assert_eq!(first.topology.wire_count, 6);
-    assert_eq!(first.topology.edge_count, 12);
-    assert_eq!(first.topology.vertex_count, 8);
-    assert!(first.kernel_abi.starts_with("occt/"));
+    assert_eq!(first.topology.assemblies.len(), 1);
+    assert_eq!(first.topology.bodies.len(), 1);
+    assert_eq!(first.topology.lumps.len(), 1);
+    assert_eq!(first.topology.solids.len(), 1);
+    assert_eq!(first.topology.shells.len(), 1);
+    assert_eq!(first.topology.faces.len(), 6);
+    assert_eq!(first.topology.wires.len(), 6);
+    assert_eq!(first.topology.coedges.len(), 24);
+    assert_eq!(first.topology.edges.len(), 12);
+    assert_eq!(first.topology.vertices.len(), 8);
+    assert_eq!(first.evaluators.curves.len(), 12);
+    assert_eq!(first.evaluators.pcurves.len(), 24);
+    assert_eq!(first.evaluators.surfaces.len(), 6);
+    assert_eq!(first.evaluators.trim_classifiers.len(), 6);
+    assert_eq!(first.evaluators.mass_properties.len(), 1);
+    assert!(first
+        .evaluators
+        .kernel_representation_digest()
+        .unwrap()
+        .is_some());
+    assert!(first.evaluators.kernel_abi.starts_with("occt/"));
     assert!(first
         .representation
         .windows(16)
         .any(|window| window == b"Triangulations 0"));
-    let mass = first.mass_properties.unwrap();
+    let ExactMassPropertiesImplementation::KernelValidated {
+        properties: mass, ..
+    } = first.evaluators.mass_properties[0].implementation
+    else {
+        panic!("solid import must contain kernel-validated mass properties");
+    };
     assert!((mass.volume_m3 - 6.0).abs() < 1.0e-12);
     assert!((mass.surface_area_m2 - 22.0).abs() < 1.0e-12);
     assert_eq!(mass.centroid_m, [0.5, 1.0, 1.5]);
@@ -50,7 +71,20 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     )
     .unwrap();
     assert_eq!(millimeter_shape.representation, first.representation);
-    let millimeter_mass = millimeter_shape.mass_properties.unwrap();
+    assert_eq!(millimeter_shape.topology.vertices[0].point_m[0], 0.0);
+    assert!(millimeter_shape
+        .topology
+        .vertices
+        .iter()
+        .flat_map(|vertex| vertex.point_m)
+        .all(|coordinate| coordinate <= 0.003));
+    let ExactMassPropertiesImplementation::KernelValidated {
+        properties: millimeter_mass,
+        ..
+    } = millimeter_shape.evaluators.mass_properties[0].implementation
+    else {
+        panic!("solid import must contain kernel-validated mass properties");
+    };
     assert!((millimeter_mass.volume_m3 - 6.0e-9).abs() < 1.0e-20);
     assert_eq!(millimeter_mass.centroid_m, [0.0005, 0.001, 0.0015]);
 
