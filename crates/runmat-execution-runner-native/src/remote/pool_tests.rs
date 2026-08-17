@@ -38,6 +38,87 @@ struct FakeWorker {
     bundle: Arc<Vec<u8>>,
 }
 
+struct ResultObjectWorker {
+    spec: WorkerSpec,
+    bundle: Arc<Vec<u8>>,
+    reference: runmat_execution::value::ValueRef,
+    bytes: Arc<Vec<u8>>,
+    corrupt_download: bool,
+}
+
+#[async_trait]
+impl RemoteWorkerChannel for ResultObjectWorker {
+    fn node_identity(&self) -> &str {
+        "node-result-object"
+    }
+
+    fn worker(&self) -> &WorkerSpec {
+        &self.spec
+    }
+
+    async fn install_bundle(
+        &self,
+        bundle_digest: Digest,
+        bundle: &[u8],
+    ) -> NativeExecutionResult<RemoteBundleReceipt> {
+        Ok(bundle_receipt(bundle_digest, bundle))
+    }
+
+    async fn activate_bundle(
+        &self,
+        bundle_digest: Digest,
+    ) -> NativeExecutionResult<RemoteBundleReceipt> {
+        Ok(bundle_receipt(bundle_digest, &self.bundle))
+    }
+
+    async fn transfer_value(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+        encoded: &[u8],
+    ) -> NativeExecutionResult<super::RemoteValueReceipt> {
+        Ok(super::RemoteValueReceipt {
+            value_id: reference.id,
+            encoded_bytes: encoded.len() as u64,
+        })
+    }
+
+    async fn execute(&self, _attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
+        Ok(AttemptReport::Succeeded {
+            result: AttemptSuccess {
+                outputs: vec![ValuePayload::Object(Box::new(self.reference.clone()))],
+                result_objects: vec![self.reference.clone()],
+            },
+        })
+    }
+
+    async fn download_object(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+    ) -> NativeExecutionResult<Vec<u8>> {
+        if reference != self.reference {
+            return Err(crate::NativeExecutionError::Protocol(
+                "unexpected result object reference".into(),
+            ));
+        }
+        if self.corrupt_download {
+            Ok(b"substituted result bytes".to_vec())
+        } else {
+            Ok(self.bytes.as_ref().clone())
+        }
+    }
+
+    async fn cancel(
+        &self,
+        _request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
+
+    async fn drain(&self) -> NativeExecutionResult<()> {
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl RemoteWorkerChannel for FakeWorker {
     fn node_identity(&self) -> &str {
@@ -189,6 +270,113 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
         .tasks
         .values()
         .all(|task| { task.state == runmat_execution::state::TaskState::Succeeded }));
+}
+
+#[tokio::test]
+async fn remote_pool_downloads_and_verifies_externalized_objects_before_success() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-object-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-object-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new_with_value_scope(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        8,
+        bundle.as_ref().clone(),
+        "run-result-object",
+    )
+    .unwrap();
+    let bytes = Arc::new(b"canonical externalized result".to_vec());
+    let reference = object_reference("run-result-object", &bytes);
+    pool.add_worker(Arc::new(ResultObjectWorker {
+        spec: WorkerSpec {
+            id: WorkerId::derive(&[b"result-object-worker"]),
+            pool_id,
+            resources: inventory(1_000),
+        },
+        bundle,
+        reference: reference.clone(),
+        bytes: Arc::clone(&bytes),
+        corrupt_download: false,
+    }))
+    .await
+    .unwrap();
+    let (result_program, artifact_id) = program().await;
+    let success = pool
+        .submit(
+            submission(
+                scope_id,
+                pool_id,
+                TaskId::derive(&[b"result-object-task"]),
+                artifact_id,
+            ),
+            result_program,
+        )
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    assert_eq!(success.result_objects, vec![reference.clone()]);
+    assert_eq!(
+        pool.execution_object(&reference).unwrap().unwrap().as_ref(),
+        bytes.as_slice()
+    );
+
+    let mut substituted = reference;
+    substituted.logical_digest = Digest::sha256(b"substituted");
+    assert!(pool.execution_object(&substituted).is_err());
+
+    let corrupt_scope = ExecutionScopeId::derive(&[b"remote-corrupt-object-scope"]);
+    let corrupt_pool_id = PoolId::derive(&[b"remote-corrupt-object-pool"]);
+    let corrupt_bundle = Arc::new(executable_bundle().await.2);
+    let corrupt_pool = RemotePoolDriver::new_with_value_scope(
+        corrupt_scope,
+        PoolSpec {
+            id: corrupt_pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        9,
+        corrupt_bundle.as_ref().clone(),
+        "run-result-object",
+    )
+    .unwrap();
+    corrupt_pool
+        .add_worker(Arc::new(ResultObjectWorker {
+            spec: WorkerSpec {
+                id: WorkerId::derive(&[b"corrupt-result-object-worker"]),
+                pool_id: corrupt_pool_id,
+                resources: inventory(1_000),
+            },
+            bundle: corrupt_bundle,
+            reference: substituted.clone(),
+            bytes,
+            corrupt_download: true,
+        }))
+        .await
+        .unwrap();
+    let (program, artifact_id) = program().await;
+    assert!(corrupt_pool
+        .submit(
+            submission(
+                corrupt_scope,
+                corrupt_pool_id,
+                TaskId::derive(&[b"corrupt-result-object-task"]),
+                artifact_id,
+            ),
+            program,
+        )
+        .unwrap()
+        .wait()
+        .await
+        .is_err());
 }
 
 #[tokio::test]
@@ -424,6 +612,25 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
             channel.install_bundle(digest, &bundle).await.unwrap(),
             expected_receipt
         );
+        let object_bytes = vec![0x5a; 600 * 1024];
+        let object_reference = object_reference("run-quic-worker", &object_bytes);
+        let receipt = channel
+            .transfer_object(object_reference.clone(), &object_bytes)
+            .await
+            .unwrap();
+        assert!(receipt.complete);
+        assert_eq!(receipt.next_offset, object_bytes.len() as u64);
+        assert_eq!(
+            channel
+                .transfer_object(object_reference.clone(), &object_bytes)
+                .await
+                .unwrap(),
+            receipt
+        );
+        assert_eq!(
+            channel.download_object(object_reference,).await.unwrap(),
+            object_bytes
+        );
         assert_eq!(
             channel
                 .transfer_value(value_reference.clone(), &encoded_value)
@@ -473,6 +680,21 @@ fn request() -> ResourceRequest {
         max_relay_bytes: 1024 * 1024,
         accelerators: Vec::new(),
         required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+    }
+}
+
+fn object_reference(authorization_scope: &str, bytes: &[u8]) -> runmat_execution::value::ValueRef {
+    runmat_execution::value::ValueRef {
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        id: runmat_execution::identity::ValueId::derive(&[b"remote-execution-object", bytes]),
+        logical_digest: Digest::sha256(bytes),
+        encoded_length: bytes.len() as u64,
+        media_type: "application/vnd.runmat.test-object".into(),
+        value_schema: "runmat.test-object.v1".into(),
+        encryption_context: Digest::sha256(b"remote-object-context"),
+        kind: runmat_execution::value::ValueRefKind::ResultObject,
+        authorization_scope: authorization_scope.into(),
+        resident_fence: None,
     }
 }
 

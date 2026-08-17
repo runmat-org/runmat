@@ -8,6 +8,9 @@ fn resumed_transfer_is_contiguous_bounded_and_digest_verified() {
     assert!(state.accept(5, 2).is_err());
     state.accept(6, bytes.len() - 6).unwrap();
     assert!(state.is_complete());
+    let resumed = ResumeState::resume(bytes.len() as u64, 6).unwrap();
+    assert_eq!(resumed.next_offset(), 6);
+    assert!(ResumeState::resume(bytes.len() as u64, bytes.len() as u64 + 1).is_err());
     verify_ciphertext(
         &OpaqueObject {
             ciphertext_digest:

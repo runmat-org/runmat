@@ -9,18 +9,24 @@ use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayConnection};
+use runmat_execution_transport_native::transfer::ObjectChunk;
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use uuid::Uuid;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V1,
+    REMOTE_WORKER_PROTOCOL_V2,
 };
 use super::route::{QuicFrameRoute, RemoteFrameRoute};
-use super::{RemoteAttempt, RemoteBundleReceipt, RemoteValueReceipt, RemoteWorkerChannel};
+use super::{
+    RemoteAttempt, RemoteBundleReceipt, RemoteObjectReceipt, RemoteValueReceipt,
+    RemoteWorkerChannel,
+};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_OBJECT_CHUNK_BYTES: usize = 256 * 1024;
+type PendingReply = (FrameKind, oneshot::Sender<RemoteWorkerReply>);
 
 pub struct QuicRemoteWorkerChannel {
     node_identity: String,
@@ -29,7 +35,7 @@ pub struct QuicRemoteWorkerChannel {
     limits: FrameLimits,
     route: Arc<dyn RemoteFrameRoute>,
     sender: AsyncMutex<EncryptedFrameSession>,
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<RemoteWorkerReply>>>>,
+    pending: Arc<Mutex<HashMap<String, PendingReply>>>,
 }
 
 pub struct RemoteWorkerChannelConfig {
@@ -103,14 +109,17 @@ impl QuicRemoteWorkerChannel {
                 };
                 let reply: RemoteWorkerReply =
                     match serde_json::from_slice::<RemoteWorkerReply>(&plaintext) {
-                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V1 => reply,
+                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V2 => reply,
                         _ => break,
                     };
-                if let Some(sender) = pending
+                if let Some((expected_kind, sender)) = pending
                     .lock()
                     .expect("remote reply registry poisoned")
                     .remove(&reply.correlation_id)
                 {
+                    if frame.kind != expected_kind {
+                        break;
+                    }
                     let _ = sender.send(reply);
                 }
             }
@@ -124,11 +133,12 @@ impl QuicRemoteWorkerChannel {
 
     async fn request(
         &self,
+        kind: FrameKind,
         command: RemoteWorkerCommand,
     ) -> NativeExecutionResult<RemoteWorkerOutcome> {
         let correlation_id = Uuid::new_v4().to_string();
         let request = RemoteWorkerRequest {
-            schema_version: REMOTE_WORKER_PROTOCOL_V1,
+            schema_version: REMOTE_WORKER_PROTOCOL_V2,
             correlation_id: correlation_id.clone(),
             driver_fence: self.driver_fence,
             command,
@@ -137,13 +147,13 @@ impl QuicRemoteWorkerChannel {
         self.pending
             .lock()
             .expect("remote reply registry poisoned")
-            .insert(correlation_id.clone(), sender);
+            .insert(correlation_id.clone(), (kind, sender));
         let plaintext = serde_json::to_vec(&request).map_err(protocol)?;
         let frame = self
             .sender
             .lock()
             .await
-            .seal(FrameKind::Control, &plaintext, self.limits)
+            .seal(kind, &plaintext, self.limits)
             .map_err(protocol)?;
         if let Err(error) = self.route.send(frame).await {
             self.pending
@@ -181,10 +191,13 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
         bundle: &[u8],
     ) -> NativeExecutionResult<RemoteBundleReceipt> {
         match self
-            .request(RemoteWorkerCommand::InstallBundle {
-                bundle_digest,
-                bundle: bundle.to_vec(),
-            })
+            .request(
+                FrameKind::Control,
+                RemoteWorkerCommand::InstallBundle {
+                    bundle_digest,
+                    bundle: bundle.to_vec(),
+                },
+            )
             .await?
         {
             RemoteWorkerOutcome::BundleStored { receipt } => Ok(receipt),
@@ -194,9 +207,12 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
         match self
-            .request(RemoteWorkerCommand::Execute {
-                attempt: Box::new(attempt),
-            })
+            .request(
+                FrameKind::Control,
+                RemoteWorkerCommand::Execute {
+                    attempt: Box::new(attempt),
+                },
+            )
             .await?
         {
             RemoteWorkerOutcome::Attempt { report } => Ok(report),
@@ -209,7 +225,10 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
         bundle_digest: Digest,
     ) -> NativeExecutionResult<RemoteBundleReceipt> {
         match self
-            .request(RemoteWorkerCommand::ActivateBundle { bundle_digest })
+            .request(
+                FrameKind::Control,
+                RemoteWorkerCommand::ActivateBundle { bundle_digest },
+            )
             .await?
         {
             RemoteWorkerOutcome::BundleStored { receipt } => Ok(receipt),
@@ -223,14 +242,129 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
         encoded: &[u8],
     ) -> NativeExecutionResult<RemoteValueReceipt> {
         match self
-            .request(RemoteWorkerCommand::PutValue {
-                reference,
-                encoded: encoded.to_vec(),
-            })
+            .request(
+                FrameKind::Control,
+                RemoteWorkerCommand::PutValue {
+                    reference,
+                    encoded: encoded.to_vec(),
+                },
+            )
             .await?
         {
             RemoteWorkerOutcome::ValueStored { receipt } => Ok(receipt),
             _ => Err(protocol("remote worker returned the wrong value reply")),
+        }
+    }
+
+    async fn transfer_object(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+        encoded: &[u8],
+    ) -> NativeExecutionResult<RemoteObjectReceipt> {
+        validate_object(&reference, encoded)?;
+        let mut receipt = match self
+            .request(
+                FrameKind::Artifact,
+                RemoteWorkerCommand::ProbeObject {
+                    reference: reference.clone(),
+                },
+            )
+            .await?
+        {
+            RemoteWorkerOutcome::ObjectPosition { receipt } => receipt,
+            _ => {
+                return Err(protocol(
+                    "remote worker returned the wrong object probe reply",
+                ))
+            }
+        };
+        if receipt.value_id != reference.id || receipt.next_offset > reference.encoded_length {
+            return Err(protocol(
+                "remote worker returned an invalid object position",
+            ));
+        }
+        while !receipt.complete {
+            let offset = usize::try_from(receipt.next_offset)
+                .map_err(|_| protocol("remote object offset does not fit this host"))?;
+            let end = offset
+                .saturating_add(MAX_OBJECT_CHUNK_BYTES)
+                .min(encoded.len());
+            if end == offset {
+                return Err(protocol("remote worker object transfer made no progress"));
+            }
+            receipt = match self
+                .request(
+                    FrameKind::Artifact,
+                    RemoteWorkerCommand::PutObjectChunk {
+                        reference: reference.clone(),
+                        chunk: ObjectChunk {
+                            offset: receipt.next_offset,
+                            bytes: encoded[offset..end].to_vec(),
+                        },
+                    },
+                )
+                .await?
+            {
+                RemoteWorkerOutcome::ObjectPosition { receipt } => receipt,
+                _ => {
+                    return Err(protocol(
+                        "remote worker returned the wrong object chunk reply",
+                    ))
+                }
+            };
+            if receipt.value_id != reference.id || receipt.next_offset != end as u64 {
+                return Err(protocol(
+                    "remote worker acknowledged a different object chunk",
+                ));
+            }
+        }
+        Ok(receipt)
+    }
+
+    async fn download_object(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+    ) -> NativeExecutionResult<Vec<u8>> {
+        let capacity = usize::try_from(reference.encoded_length)
+            .map_err(|_| protocol("remote object length does not fit this host"))?;
+        let mut encoded = Vec::with_capacity(capacity);
+        loop {
+            let (chunk, complete) = match self
+                .request(
+                    FrameKind::Artifact,
+                    RemoteWorkerCommand::GetObjectChunk {
+                        reference: reference.clone(),
+                        offset: encoded.len() as u64,
+                        maximum_bytes: MAX_OBJECT_CHUNK_BYTES as u32,
+                    },
+                )
+                .await?
+            {
+                RemoteWorkerOutcome::ObjectChunk { chunk, complete } => (chunk, complete),
+                _ => {
+                    return Err(protocol(
+                        "remote worker returned the wrong object download reply",
+                    ))
+                }
+            };
+            if chunk.offset != encoded.len() as u64
+                || chunk.bytes.is_empty() && !complete
+                || chunk.bytes.len() > MAX_OBJECT_CHUNK_BYTES
+            {
+                return Err(protocol(
+                    "remote worker returned a non-contiguous object chunk",
+                ));
+            }
+            encoded.extend_from_slice(&chunk.bytes);
+            if encoded.len() > capacity {
+                return Err(protocol(
+                    "remote worker exceeded the declared object length",
+                ));
+            }
+            if complete {
+                validate_object(&reference, &encoded)?;
+                return Ok(encoded);
+            }
         }
     }
 
@@ -248,7 +382,7 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
 
 impl QuicRemoteWorkerChannel {
     async fn ack(&self, command: RemoteWorkerCommand) -> NativeExecutionResult<()> {
-        match self.request(command).await? {
+        match self.request(FrameKind::Control, command).await? {
             RemoteWorkerOutcome::Acknowledged => Ok(()),
             _ => Err(protocol("remote worker returned the wrong acknowledgement")),
         }
@@ -257,4 +391,21 @@ impl QuicRemoteWorkerChannel {
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
+}
+
+fn validate_object(
+    reference: &runmat_execution::value::ValueRef,
+    encoded: &[u8],
+) -> NativeExecutionResult<()> {
+    use runmat_execution::value::{ValueLimits, ValuePayload};
+
+    ValuePayload::Object(Box::new(reference.clone()))
+        .validate(ValueLimits::default())
+        .map_err(protocol)?;
+    if encoded.len() as u64 != reference.encoded_length
+        || runmat_execution::Digest::sha256(encoded) != reference.logical_digest
+    {
+        return Err(protocol("remote object bytes differ from their reference"));
+    }
+    Ok(())
 }

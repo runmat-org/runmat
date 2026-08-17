@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::state::{PoolState, TaskState};
@@ -17,8 +17,6 @@ use super::{RemoteAttempt, RemoteWorkerChannel};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 type CompletionResult = Result<AttemptSuccess, String>;
-type ValueObject = (runmat_execution::value::ValueRef, Arc<[u8]>);
-type ValueObjectCatalog = HashMap<runmat_execution::identity::ValueId, ValueObject>;
 
 pub struct RemoteTaskCompletion {
     receiver: oneshot::Receiver<CompletionResult>,
@@ -45,13 +43,8 @@ pub struct RemotePoolDriver {
     channels: RwLock<HashMap<runmat_execution::identity::WorkerId, Arc<dyn RemoteWorkerChannel>>>,
     installed_nodes: AsyncMutex<BTreeSet<String>>,
     value_scope: String,
-    objects: Mutex<ValueObjectCatalog>,
-    transferred: AsyncMutex<
-        HashSet<(
-            runmat_execution::identity::WorkerId,
-            runmat_execution::identity::ValueId,
-        )>,
-    >,
+    values: super::pool_values::RemoteValueCatalog,
+    execution_objects: super::pool_objects::RemoteObjectCatalog,
     programs: Mutex<HashMap<TaskId, ProgramExecutionRequest>>,
     completions: Mutex<HashMap<TaskId, oneshot::Sender<CompletionResult>>>,
 }
@@ -101,8 +94,8 @@ impl RemotePoolDriver {
             channels: RwLock::new(HashMap::new()),
             installed_nodes: AsyncMutex::new(BTreeSet::new()),
             value_scope: value_scope.into(),
-            objects: Mutex::new(HashMap::new()),
-            transferred: AsyncMutex::new(HashSet::new()),
+            values: super::pool_values::RemoteValueCatalog::default(),
+            execution_objects: super::pool_objects::RemoteObjectCatalog::default(),
             programs: Mutex::new(HashMap::new()),
             completions: Mutex::new(HashMap::new()),
         }))
@@ -113,19 +106,25 @@ impl RemotePoolDriver {
         reference: runmat_execution::value::ValueRef,
         encoded: impl Into<Arc<[u8]>>,
     ) -> NativeExecutionResult<()> {
+        self.values
+            .register(reference, encoded.into(), &self.value_scope)
+    }
+
+    pub fn register_execution_object(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+        encoded: impl Into<Arc<[u8]>>,
+    ) -> NativeExecutionResult<()> {
         let encoded = encoded.into();
-        super::value_transfer::decode_value(&reference, &encoded, &self.value_scope)?;
-        let mut objects = self.objects.lock().expect("remote value catalog poisoned");
-        if let Some((existing_reference, existing_bytes)) = objects.get(&reference.id) {
-            if existing_reference == &reference && existing_bytes.as_ref() == encoded.as_ref() {
-                return Ok(());
-            }
-            return Err(NativeExecutionError::Protocol(
-                "remote value object id was reused for different content".into(),
-            ));
-        }
-        objects.insert(reference.id, (reference, encoded));
-        Ok(())
+        self.execution_objects
+            .register(reference, encoded, &self.value_scope)
+    }
+
+    pub fn execution_object(
+        &self,
+        reference: &runmat_execution::value::ValueRef,
+    ) -> NativeExecutionResult<Option<Arc<[u8]>>> {
+        self.execution_objects.get(reference)
     }
 
     pub async fn add_worker(
@@ -314,8 +313,17 @@ impl RemotePoolDriver {
                 (Some(channel), Some(mut program)) => {
                     program.arguments = request.task.inputs.clone();
                     let transfer = this
-                        .transfer_values(channel.as_ref(), request.worker_id, &program.arguments)
+                        .values
+                        .transfer(channel.as_ref(), request.worker_id, &program.arguments)
                         .await;
+                    let transfer = match transfer {
+                        Ok(()) => {
+                            this.execution_objects
+                                .transfer_all(channel.as_ref(), request.worker_id)
+                                .await
+                        }
+                        Err(error) => Err(error),
+                    };
                     match transfer {
                         Err(error) => AttemptReport::Failed {
                             kind: AttemptFailureKind::Rejected,
@@ -328,6 +336,23 @@ impl RemotePoolDriver {
                             })
                             .await
                         {
+                            Ok(AttemptReport::Succeeded { result }) => {
+                                match this
+                                    .execution_objects
+                                    .receive_results(
+                                        channel.as_ref(),
+                                        &result.result_objects,
+                                        &this.value_scope,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => AttemptReport::Succeeded { result },
+                                    Err(error) => AttemptReport::Failed {
+                                        kind: AttemptFailureKind::Rejected,
+                                        message: error.to_string(),
+                                    },
+                                }
+                            }
                             Ok(report) => report,
                             Err(error) => AttemptReport::Lost {
                                 message: error.to_string(),
@@ -342,46 +367,6 @@ impl RemotePoolDriver {
             };
             this.apply_report(BackendReport::for_request(&request, report));
         });
-    }
-
-    async fn transfer_values(
-        &self,
-        channel: &dyn RemoteWorkerChannel,
-        worker_id: runmat_execution::identity::WorkerId,
-        values: &[runmat_execution::value::ValuePayload],
-    ) -> NativeExecutionResult<()> {
-        let references = super::value_transfer::collect_references(values);
-        for reference in references {
-            let key = (worker_id, reference.id);
-            if self.transferred.lock().await.contains(&key) {
-                continue;
-            }
-            let (stored_reference, encoded) = self
-                .objects
-                .lock()
-                .expect("remote value catalog poisoned")
-                .get(&reference.id)
-                .cloned()
-                .ok_or_else(|| {
-                    NativeExecutionError::Protocol(format!(
-                        "remote value object {} is not registered",
-                        reference.id
-                    ))
-                })?;
-            if stored_reference != reference {
-                return Err(NativeExecutionError::Protocol(
-                    "remote value reference differs from its registered object".into(),
-                ));
-            }
-            let receipt = channel.transfer_value(reference.clone(), &encoded).await?;
-            if receipt.value_id != reference.id || receipt.encoded_bytes != encoded.len() as u64 {
-                return Err(NativeExecutionError::Protocol(
-                    "remote worker acknowledged a different value object".into(),
-                ));
-            }
-            self.transferred.lock().await.insert(key);
-        }
-        Ok(())
     }
 
     fn cancel_attempt(self: &Arc<Self>, request: AttemptRequest) {

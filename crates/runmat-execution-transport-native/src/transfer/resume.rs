@@ -35,6 +35,15 @@ impl ResumeState {
         self.next_offset
     }
 
+    pub fn resume(total_bytes: u64, next_offset: u64) -> TransportResult<Self> {
+        let mut state = Self::new(total_bytes)?;
+        state.accept(
+            0,
+            usize::try_from(next_offset).map_err(|_| TransportError::Overflow)?,
+        )?;
+        Ok(state)
+    }
+
     pub fn is_complete(&self) -> bool {
         self.next_offset == self.total_bytes
     }

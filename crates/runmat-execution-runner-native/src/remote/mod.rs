@@ -3,10 +3,13 @@ mod channel;
 mod config;
 mod crypto;
 mod driver;
+mod object_transfer;
 mod pool;
 mod pool_execution;
+mod pool_objects;
 mod pool_reconcile;
 mod pool_resources;
+mod pool_values;
 mod protocol;
 mod quic_channel;
 mod relay_channel;
@@ -16,7 +19,10 @@ mod worker_bundle;
 mod worker_env;
 mod worker_server;
 
-pub use channel::{RemoteAttempt, RemoteBundleReceipt, RemoteValueReceipt, RemoteWorkerChannel};
+pub use channel::{
+    RemoteAttempt, RemoteBundleReceipt, RemoteObjectReceipt, RemoteValueReceipt,
+    RemoteWorkerChannel,
+};
 pub use driver::run_remote_driver_from_env;
 pub use pool::{RemotePoolDriver, RemoteTaskCompletion};
 pub use quic_channel::{QuicRemoteWorkerChannel, RemoteWorkerChannelConfig};

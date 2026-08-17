@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V1,
+    REMOTE_WORKER_PROTOCOL_V2,
 };
 use super::route::{QuicFrameRoute, RelayFrameRoute, RemoteFrameRoute};
 use super::RemoteAttempt;
@@ -23,6 +23,7 @@ struct WorkerState {
     bundle_digest: Option<runmat_execution::Digest>,
     attempts: HashMap<AttemptId, tokio::task::JoinHandle<()>>,
     values: HashMap<runmat_execution::identity::ValueId, runmat_execution::value::ValuePayload>,
+    objects: super::object_transfer::RemoteObjectCache,
     draining: bool,
     bundle_cache: Option<std::path::PathBuf>,
 }
@@ -150,6 +151,7 @@ async fn run_worker_loop(
         bundle_digest: None,
         attempts: HashMap::new(),
         values: HashMap::new(),
+        objects: super::object_transfer::RemoteObjectCache::default(),
         draining: false,
         bundle_cache,
     }));
@@ -167,18 +169,26 @@ async fn run_worker_loop(
             frame = connection.receive() => frame?,
             _ = notified => continue,
         };
-        if frame.kind != FrameKind::Control {
-            return Err(protocol("remote worker received a non-control command"));
+        if !matches!(frame.kind, FrameKind::Control | FrameKind::Artifact) {
+            return Err(protocol(
+                "remote worker received an unsupported command frame",
+            ));
         }
         let plaintext = receiver.open(&frame, limits).map_err(protocol)?;
         let request: RemoteWorkerRequest = serde_json::from_slice(&plaintext).map_err(protocol)?;
-        if request.schema_version != REMOTE_WORKER_PROTOCOL_V1
+        if command_frame_kind(&request.command) != frame.kind {
+            return Err(protocol(
+                "remote worker command used the wrong encrypted frame kind",
+            ));
+        }
+        if request.schema_version != REMOTE_WORKER_PROTOCOL_V2
             || request.driver_fence != driver_fence
         {
-            reply(
+            reply_kind(
                 connection.as_ref(),
                 &sender,
                 limits,
+                frame.kind,
                 rejected(
                     request.correlation_id,
                     "stale or unsupported driver authority",
@@ -210,7 +220,7 @@ async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V1,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -239,7 +249,7 @@ async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V1,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -278,7 +288,7 @@ async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V1,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -361,7 +371,7 @@ async fn run_worker_loop(
                         &sender,
                         limits,
                         RemoteWorkerReply {
-                            schema_version: REMOTE_WORKER_PROTOCOL_V1,
+                            schema_version: REMOTE_WORKER_PROTOCOL_V2,
                             correlation_id,
                             outcome: RemoteWorkerOutcome::Attempt { report },
                         },
@@ -405,6 +415,25 @@ async fn run_worker_loop(
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     return Ok(());
                 }
+            }
+            command => {
+                let outcome = super::object_transfer::handle_command(
+                    &mut state.lock().await.objects,
+                    command,
+                    &run_identity,
+                );
+                reply_kind(
+                    connection.as_ref(),
+                    &sender,
+                    limits,
+                    FrameKind::Artifact,
+                    RemoteWorkerReply {
+                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
+                        correlation_id: request.correlation_id,
+                        outcome,
+                    },
+                )
+                .await?;
             }
         }
     }
@@ -450,18 +479,37 @@ async fn reply(
     limits: FrameLimits,
     reply: RemoteWorkerReply,
 ) -> NativeExecutionResult<()> {
+    reply_kind(connection, sender, limits, FrameKind::Control, reply).await
+}
+
+async fn reply_kind(
+    connection: &dyn RemoteFrameRoute,
+    sender: &Mutex<EncryptedFrameSession>,
+    limits: FrameLimits,
+    kind: FrameKind,
+    reply: RemoteWorkerReply,
+) -> NativeExecutionResult<()> {
     let plaintext = serde_json::to_vec(&reply).map_err(protocol)?;
     let frame = sender
         .lock()
         .await
-        .seal(FrameKind::Control, &plaintext, limits)
+        .seal(kind, &plaintext, limits)
         .map_err(protocol)?;
     connection.send(frame).await
 }
 
+fn command_frame_kind(command: &RemoteWorkerCommand) -> FrameKind {
+    match command {
+        RemoteWorkerCommand::ProbeObject { .. }
+        | RemoteWorkerCommand::PutObjectChunk { .. }
+        | RemoteWorkerCommand::GetObjectChunk { .. } => FrameKind::Artifact,
+        _ => FrameKind::Control,
+    }
+}
+
 fn acknowledged(correlation_id: String) -> RemoteWorkerReply {
     RemoteWorkerReply {
-        schema_version: REMOTE_WORKER_PROTOCOL_V1,
+        schema_version: REMOTE_WORKER_PROTOCOL_V2,
         correlation_id,
         outcome: RemoteWorkerOutcome::Acknowledged,
     }
@@ -469,7 +517,7 @@ fn acknowledged(correlation_id: String) -> RemoteWorkerReply {
 
 fn rejected(correlation_id: String, message: impl Into<String>) -> RemoteWorkerReply {
     RemoteWorkerReply {
-        schema_version: REMOTE_WORKER_PROTOCOL_V1,
+        schema_version: REMOTE_WORKER_PROTOCOL_V2,
         correlation_id,
         outcome: RemoteWorkerOutcome::Rejected {
             message: message.into(),

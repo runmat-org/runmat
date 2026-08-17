@@ -7,8 +7,8 @@ use runmat_execution_transport_native::overlay::WebSocketRelayConnection;
 
 use super::route::RelayFrameRoute;
 use super::{
-    QuicRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt, RemoteValueReceipt,
-    RemoteWorkerChannel, RemoteWorkerChannelConfig,
+    QuicRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt, RemoteObjectReceipt,
+    RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig,
 };
 use crate::NativeExecutionResult;
 
@@ -73,6 +73,21 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         encoded: &[u8],
     ) -> NativeExecutionResult<RemoteValueReceipt> {
         self.protocol.transfer_value(reference, encoded).await
+    }
+
+    async fn transfer_object(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+        encoded: &[u8],
+    ) -> NativeExecutionResult<RemoteObjectReceipt> {
+        self.protocol.transfer_object(reference, encoded).await
+    }
+
+    async fn download_object(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+    ) -> NativeExecutionResult<Vec<u8>> {
+        self.protocol.download_object(reference).await
     }
 
     async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()> {
