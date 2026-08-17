@@ -5,7 +5,7 @@ fn range(start: f64, end: f64) -> ParameterRangeV2 {
     ParameterRangeV2 { start, end }
 }
 
-fn registry() -> ExactEvaluatorRegistryV2 {
+pub(super) fn registry() -> ExactEvaluatorRegistryV2 {
     ExactEvaluatorRegistryV2 {
         schema_version: EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION,
         kernel_abi: "occt-v1".into(),

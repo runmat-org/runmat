@@ -17,7 +17,11 @@ pub(super) fn validate_range(
     field: &str,
     range: &ParameterRangeV2,
 ) -> Result<(), GeometryContractError> {
-    if !range.start.is_finite() || !range.end.is_finite() || range.start >= range.end {
+    if !range.start.is_finite()
+        || !range.end.is_finite()
+        || range.start >= range.end
+        || !(range.end - range.start).is_finite()
+    {
         return Err(invalid(
             field,
             "parameter range must be finite and increasing",

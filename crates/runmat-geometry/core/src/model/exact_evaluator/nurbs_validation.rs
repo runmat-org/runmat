@@ -136,12 +136,12 @@ fn validate_knot_axis(
         let maximum = if run_start == 0 || run_end == knots.len() {
             degree + 1
         } else {
-            degree
+            degree.saturating_sub(1)
         };
         if run_end - run_start > maximum {
             return Err(invalid(
                 field,
-                "knot multiplicity exceeds the admitted continuous B-rep evaluator bound",
+                "interior knot multiplicity must preserve at least C1 continuity; split lower-continuity geometry into topological entities",
             ));
         }
         run_start = run_end;
