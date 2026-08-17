@@ -49,6 +49,7 @@ members = [
     "crates/runmat-node-agent",
     "crates/runmat-process-host",
     "crates/runmat-static-analysis",
+    "crates/runmat-canonical-codec",
     "crates/runmat-geometry/core",
     "crates/runmat-geometry/io",
     "crates/runmat-geometry/ops",
@@ -147,6 +148,7 @@ runmat-execution-runner-native = { version = "=0.6.1", path = "crates/runmat-exe
 runmat-execution-transport-native = { version = "=0.6.1", path = "crates/runmat-execution-transport-native" }
 runmat-process-host = { version = "=0.6.1", path = "crates/runmat-process-host" }
 runmat-static-analysis = { version = "=0.6.1", path = "crates/runmat-static-analysis" }
+runmat-canonical-codec = { version = "=0.6.1", path = "crates/runmat-canonical-codec" }
 runmat-server-client = { version = "=0.6.1", path = "crates/runmat-server-client" }
 runmat-accelerate = { version = "=0.6.1", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.6.1", path = "crates/runmat-accelerate-api" }

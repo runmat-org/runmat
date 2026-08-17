@@ -2,13 +2,12 @@ use minicbor::data::Type;
 use minicbor::{Decoder, Encoder};
 use serde_json::{Map, Number, Value};
 
-use super::{decoding_error, encoding_error, MeshingCanonicalLimits};
-use crate::contracts::canonical::MeshingContractError;
+use crate::{decoding_error, encoding_error, CanonicalCodecError, CanonicalLimits};
 
-pub(super) fn encode_value(
+pub(crate) fn encode_value(
     encoder: &mut Encoder<&mut Vec<u8>>,
     value: &Value,
-) -> Result<(), MeshingContractError> {
+) -> Result<(), CanonicalCodecError> {
     match value {
         Value::Null => encoder.null().map(|_| ()).map_err(encoding_error),
         Value::Bool(value) => encoder.bool(*value).map(|_| ()).map_err(encoding_error),
@@ -34,13 +33,13 @@ pub(super) fn encode_value(
     }
 }
 
-pub(super) fn decode_value(
+pub(crate) fn decode_value(
     decoder: &mut Decoder<'_>,
-    limits: MeshingCanonicalLimits,
+    limits: CanonicalLimits,
     depth: usize,
-) -> Result<Value, MeshingContractError> {
+) -> Result<Value, CanonicalCodecError> {
     if depth > limits.maximum_nesting_depth {
-        return Err(MeshingContractError::invalid(
+        return Err(CanonicalCodecError::invalid(
             "canonical decoding",
             "nesting depth exceeds the contract limit",
         ));
@@ -62,7 +61,7 @@ pub(super) fn decode_value(
         Type::F16 | Type::F32 | Type::F64 => {
             let value = decoder.f64().map_err(decoding_error)?;
             Number::from_f64(value).map(Value::Number).ok_or_else(|| {
-                MeshingContractError::invalid(
+                CanonicalCodecError::invalid(
                     "canonical decoding",
                     "non-finite floating point values are forbidden",
                 )
@@ -71,7 +70,7 @@ pub(super) fn decode_value(
         Type::String => decode_string(decoder, limits).map(Value::String),
         Type::Array => decode_array(decoder, limits, depth),
         Type::Map => decode_object(decoder, limits, depth),
-        other => Err(MeshingContractError::invalid(
+        other => Err(CanonicalCodecError::invalid(
             "canonical decoding",
             format!("unsupported CBOR type {other}"),
         )),
@@ -81,21 +80,21 @@ pub(super) fn decode_value(
 fn encode_number(
     encoder: &mut Encoder<&mut Vec<u8>>,
     value: &Number,
-) -> Result<(), MeshingContractError> {
+) -> Result<(), CanonicalCodecError> {
     if let Some(value) = value.as_i64() {
         encoder.i64(value).map(|_| ()).map_err(encoding_error)
     } else if let Some(value) = value.as_u64() {
         encoder.u64(value).map(|_| ()).map_err(encoding_error)
     } else if let Some(value) = value.as_f64() {
         if !value.is_finite() {
-            return Err(MeshingContractError::invalid(
+            return Err(CanonicalCodecError::invalid(
                 "canonical encoding",
                 "non-finite floating point values are forbidden",
             ));
         }
         encoder.f64(value).map(|_| ()).map_err(encoding_error)
     } else {
-        Err(MeshingContractError::invalid(
+        Err(CanonicalCodecError::invalid(
             "canonical encoding",
             "unsupported JSON number",
         ))
@@ -104,11 +103,11 @@ fn encode_number(
 
 fn decode_string(
     decoder: &mut Decoder<'_>,
-    limits: MeshingCanonicalLimits,
-) -> Result<String, MeshingContractError> {
+    limits: CanonicalLimits,
+) -> Result<String, CanonicalCodecError> {
     let value = decoder.str().map_err(decoding_error)?;
     if value.len() > limits.maximum_string_bytes {
-        return Err(MeshingContractError::invalid(
+        return Err(CanonicalCodecError::invalid(
             "canonical decoding",
             "string exceeds the contract limit",
         ));
@@ -118,9 +117,9 @@ fn decode_string(
 
 fn decode_array(
     decoder: &mut Decoder<'_>,
-    limits: MeshingCanonicalLimits,
+    limits: CanonicalLimits,
     depth: usize,
-) -> Result<Value, MeshingContractError> {
+) -> Result<Value, CanonicalCodecError> {
     let length = bounded_length(
         decoder.array().map_err(decoding_error)?,
         limits.maximum_collection_items,
@@ -135,9 +134,9 @@ fn decode_array(
 
 fn decode_object(
     decoder: &mut Decoder<'_>,
-    limits: MeshingCanonicalLimits,
+    limits: CanonicalLimits,
     depth: usize,
-) -> Result<Value, MeshingContractError> {
+) -> Result<Value, CanonicalCodecError> {
     let length = bounded_length(
         decoder.map().map_err(decoding_error)?,
         limits.maximum_collection_items,
@@ -151,7 +150,7 @@ fn decode_object(
             .as_ref()
             .is_some_and(|previous| previous.as_bytes() >= key.as_bytes())
         {
-            return Err(MeshingContractError::invalid(
+            return Err(CanonicalCodecError::invalid(
                 "canonical decoding",
                 "map keys must be unique and ordered by UTF-8 bytes",
             ));
@@ -167,15 +166,15 @@ fn bounded_length(
     length: Option<u64>,
     maximum: usize,
     field: &str,
-) -> Result<usize, MeshingContractError> {
+) -> Result<usize, CanonicalCodecError> {
     let length = length.ok_or_else(|| {
-        MeshingContractError::invalid("canonical decoding", "indefinite collections are forbidden")
+        CanonicalCodecError::invalid("canonical decoding", "indefinite collections are forbidden")
     })?;
     let length = usize::try_from(length).map_err(|_| {
-        MeshingContractError::invalid("canonical decoding", format!("{field} length overflows"))
+        CanonicalCodecError::invalid("canonical decoding", format!("{field} length overflows"))
     })?;
     if length > maximum {
-        return Err(MeshingContractError::invalid(
+        return Err(CanonicalCodecError::invalid(
             "canonical decoding",
             format!("{field} exceeds the collection limit"),
         ));

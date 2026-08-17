@@ -6,11 +6,11 @@
 //! encodings. Type domains are embedded in the bytes, so equal-shaped contracts cannot collide.
 
 mod contracts;
-mod value;
 
 #[cfg(test)]
 mod tests;
 
+use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -24,6 +24,17 @@ pub struct MeshingCanonicalLimits {
     pub maximum_collection_items: usize,
     pub maximum_string_bytes: usize,
     pub maximum_nesting_depth: usize,
+}
+
+impl From<MeshingCanonicalLimits> for CanonicalLimits {
+    fn from(value: MeshingCanonicalLimits) -> Self {
+        Self::new(
+            value.maximum_encoded_bytes,
+            value.maximum_collection_items,
+            value.maximum_string_bytes,
+            value.maximum_nesting_depth,
+        )
+    }
 }
 
 impl MeshingCanonicalLimits {
@@ -75,24 +86,8 @@ fn encode_contract<T: Serialize>(
     contract: &T,
     limits: MeshingCanonicalLimits,
 ) -> Result<Vec<u8>, MeshingContractError> {
-    validate_domain(domain)?;
-    let value = serde_json::to_value(contract)
-        .map_err(|error| MeshingContractError::invalid("canonical encoding", error.to_string()))?;
-    let mut encoded = Vec::with_capacity(1024);
-    encoded.extend_from_slice(CODEC_PREFIX);
-    let mut encoder = minicbor::Encoder::new(&mut encoded);
-    encoder
-        .array(2)
-        .and_then(|encoder| encoder.str(domain))
-        .map_err(encoding_error)?;
-    value::encode_value(&mut encoder, &value)?;
-    if encoded.len() > limits.maximum_encoded_bytes {
-        return Err(MeshingContractError::invalid(
-            "canonical encoding",
-            "encoded contract exceeds its byte limit",
-        ));
-    }
-    Ok(encoded)
+    runmat_canonical_codec::encode_contract(CODEC_PREFIX, domain, contract, limits.into())
+        .map_err(map_codec_error)
 }
 
 fn decode_contract<T: DeserializeOwned>(
@@ -100,89 +95,10 @@ fn decode_contract<T: DeserializeOwned>(
     bytes: &[u8],
     limits: MeshingCanonicalLimits,
 ) -> Result<T, MeshingContractError> {
-    validate_domain(domain)?;
-    if bytes.len() > limits.maximum_encoded_bytes {
-        return Err(MeshingContractError::invalid(
-            "canonical decoding",
-            "encoded contract exceeds its byte limit",
-        ));
-    }
-    let payload = bytes.strip_prefix(CODEC_PREFIX).ok_or_else(|| {
-        MeshingContractError::invalid("canonical decoding", "codec domain prefix is missing")
-    })?;
-    let mut decoder = minicbor::Decoder::new(payload);
-    require_array_length(decoder.array(), 2, "canonical envelope")?;
-    let actual_domain = decoder.str().map_err(decoding_error)?;
-    if actual_domain != domain {
-        return Err(MeshingContractError::invalid(
-            "canonical decoding domain",
-            format!("expected {domain}, received {actual_domain}"),
-        ));
-    }
-    let value = value::decode_value(&mut decoder, limits, 0)?;
-    if decoder.position() != payload.len() {
-        return Err(MeshingContractError::invalid(
-            "canonical decoding",
-            "trailing data is forbidden",
-        ));
-    }
-    let canonical = encode_value_envelope(domain, &value)?;
-    if canonical.as_slice() != bytes {
-        return Err(MeshingContractError::invalid(
-            "canonical decoding",
-            "input is not in canonical form",
-        ));
-    }
-    serde_json::from_value(value)
-        .map_err(|error| MeshingContractError::invalid("canonical decoding", error.to_string()))
+    runmat_canonical_codec::decode_contract(CODEC_PREFIX, domain, bytes, limits.into())
+        .map_err(map_codec_error)
 }
 
-fn encode_value_envelope(
-    domain: &str,
-    value: &serde_json::Value,
-) -> Result<Vec<u8>, MeshingContractError> {
-    let mut encoded = CODEC_PREFIX.to_vec();
-    let mut encoder = minicbor::Encoder::new(&mut encoded);
-    encoder
-        .array(2)
-        .and_then(|encoder| encoder.str(domain))
-        .map_err(encoding_error)?;
-    value::encode_value(&mut encoder, value)?;
-    Ok(encoded)
-}
-
-fn validate_domain(domain: &str) -> Result<(), MeshingContractError> {
-    if domain.is_empty()
-        || domain.len() > 128
-        || !domain.is_ascii()
-        || domain.chars().any(char::is_whitespace)
-    {
-        return Err(MeshingContractError::invalid(
-            "canonical domain",
-            "must be 1..=128 non-whitespace ASCII bytes",
-        ));
-    }
-    Ok(())
-}
-
-fn require_array_length(
-    length: Result<Option<u64>, minicbor::decode::Error>,
-    expected: u64,
-    field: &str,
-) -> Result<(), MeshingContractError> {
-    if length.map_err(decoding_error)? != Some(expected) {
-        return Err(MeshingContractError::invalid(
-            field,
-            format!("expected a definite array of length {expected}"),
-        ));
-    }
-    Ok(())
-}
-
-pub(super) fn encoding_error<E: std::fmt::Display>(error: E) -> MeshingContractError {
-    MeshingContractError::invalid("canonical encoding", error.to_string())
-}
-
-pub(super) fn decoding_error<E: std::fmt::Display>(error: E) -> MeshingContractError {
-    MeshingContractError::invalid("canonical decoding", error.to_string())
+fn map_codec_error(error: CanonicalCodecError) -> MeshingContractError {
+    MeshingContractError::invalid(error.field, error.reason)
 }

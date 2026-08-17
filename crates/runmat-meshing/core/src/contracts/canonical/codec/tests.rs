@@ -95,7 +95,7 @@ fn decoder_rejects_noncanonical_maps_trailing_bytes_and_oversized_inputs() {
         .unwrap();
     for (key, value) in entries {
         encoder.str(key).unwrap();
-        super::value::encode_value(&mut encoder, value).unwrap();
+        runmat_canonical_codec::encode_json_value(&mut encoder, value).unwrap();
     }
     assert_eq!(
         MeshingStageIdentity::canonical_decode(&reordered)

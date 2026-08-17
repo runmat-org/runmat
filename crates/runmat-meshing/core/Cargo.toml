@@ -10,6 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 minicbor = { workspace = true }
+runmat-canonical-codec = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
