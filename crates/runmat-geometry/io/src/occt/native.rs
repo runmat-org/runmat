@@ -139,6 +139,7 @@ pub(crate) fn import_exact_cad_shape(
         topology: projection.topology,
         evaluators: projection.evaluators,
         model: projection.model,
+        analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
     };
     let tolerance_m = imported

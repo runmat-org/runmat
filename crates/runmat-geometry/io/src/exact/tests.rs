@@ -5,6 +5,37 @@ use runmat_geometry_core::{ExactMassPropertiesImplementation, TopologicalOrienta
 const BOX: &[u8] = include_bytes!("../../tests/fixtures/box.brep");
 
 #[test]
+fn exact_analysis_options_are_validated_before_kernel_dispatch() {
+    let mut invalid_tolerance = ExactCadImportOptions::default();
+    invalid_tolerance.analysis.requested_deviation_m = 0.0;
+    assert!(matches!(
+        import_exact_cad(
+            "shape.brep",
+            b"not dispatched",
+            GeometryFormat::Brep,
+            &invalid_tolerance,
+            &GeometryImportContext::new(),
+        ),
+        Err(GeometryImportError::InvalidOptions(reason))
+            if reason.contains("requested_deviation_m")
+    ));
+
+    let mut invalid_revision = ExactCadImportOptions::default();
+    invalid_revision.analysis.revision.revision = 0;
+    assert!(matches!(
+        import_exact_cad(
+            "shape.brep",
+            b"not dispatched",
+            GeometryFormat::Brep,
+            &invalid_revision,
+            &GeometryImportContext::new(),
+        ),
+        Err(GeometryImportError::InvalidOptions(reason))
+            if reason.contains("revision")
+    ));
+}
+
+#[test]
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     use std::sync::{
@@ -25,28 +56,16 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     )
     .unwrap();
     assert_eq!(first, second);
-    let closure_options = ExactCadClosureOptions {
-        revision: GeometryRevisionIdentity {
-            revision: 1,
-            persistent_mapping_version: 1,
-            parent_document_digest: None,
-        },
-        absolute_tolerance_floor_m: 1.0e-12,
-        model_relative_tolerance: 1.0e-12,
-        requested_deviation_m: 1.0e-4,
-        maximum_healing_displacement_m: 1.0e-6,
-        healing: GeometryHealingPolicy {
-            algorithm_version: "occt-healing/1".into(),
-            sew: false,
-            repair_orientation: false,
-            consolidate_duplicates: false,
-            repair_tolerance_scale_gaps: false,
-            simplify_short_edges_and_sliver_faces: false,
-        },
-    };
-    let closure = first.build_closure(&closure_options).unwrap();
-    let renamed_closure = second.build_closure(&closure_options).unwrap();
+    let closure = first.build_closure().unwrap();
+    let renamed_closure = second.build_closure().unwrap();
     assert_eq!(closure, renamed_closure);
+    assert_eq!(first.analysis_options(), &options.analysis);
+    assert_eq!(closure.document.revision, options.analysis.revision);
+    assert_eq!(closure.document.healing, options.analysis.healing);
+    assert_eq!(
+        closure.document.tolerance.maximum_healing_displacement_m,
+        options.analysis.maximum_healing_displacement_m
+    );
     assert_eq!(closure.document.source.content_digest, first.source_digest);
     assert_eq!(closure.document.source.format, GeometrySourceFormat::Brep);
     assert_eq!(closure.document.source.source_units, UnitSystem::Meter);
@@ -125,7 +144,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         };
     assert!(misoriented.validate_solid_shell_boundaries().is_err());
 
-    let mut millimeter_options = options;
+    let mut millimeter_options = options.clone();
     millimeter_options.source_units = UnitSystem::Millimeter;
     let millimeter_shape = import_exact_cad(
         "box.brep",
@@ -153,7 +172,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert!((millimeter_mass.volume_m3 - 6.0e-9).abs() < 1.0e-20);
     assert_eq!(millimeter_mass.centroid_m, [0.0005, 0.001, 0.0015]);
 
-    let mut byte_limited = options;
+    let mut byte_limited = options.clone();
     byte_limited.max_representation_bytes = 1;
     assert!(matches!(
         import_exact_cad(
@@ -165,7 +184,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         ),
         Err(GeometryImportError::ExactRepresentationCapacityExceeded { limit: 1 })
     ));
-    let mut entity_limited = options;
+    let mut entity_limited = options.clone();
     entity_limited.max_entities = 5;
     assert!(matches!(
         import_exact_cad(

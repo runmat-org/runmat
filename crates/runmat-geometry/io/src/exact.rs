@@ -31,6 +31,10 @@ pub struct ImportedExactCad {
     /// Exact evaluator bindings into `representation`; no display samples are admitted.
     pub evaluators: ExactEvaluatorRegistry,
     pub model: ExactBRepModel,
+    /// Analysis identity and mutation policy admitted before the kernel import. Keeping this on
+    /// the imported object prevents closure construction from claiming a different tolerance or
+    /// healing policy than the one under which topology was produced.
+    pub(crate) analysis: ExactCadAnalysisOptions,
     /// Kernel-private shape handles for body evaluators. Semantic identity remains exclusively in
     /// the topology; these ordinals never enter serialized geometry contracts.
     pub(crate) kernel_body_shapes:
@@ -38,13 +42,16 @@ pub struct ImportedExactCad {
 }
 
 impl ImportedExactCad {
+    pub fn analysis_options(&self) -> &ExactCadAnalysisOptions {
+        &self.analysis
+    }
+
     pub fn representation_digest(&self) -> [u8; 32] {
         exact_representation_digest(&self.representation)
     }
 
     pub fn build_closure(
         &self,
-        options: &ExactCadClosureOptions,
     ) -> Result<EncodedExactGeometryClosure, runmat_geometry_core::GeometryContractError> {
         let tolerance = GeometryTolerancePolicy {
             source_tolerance_m: self
@@ -53,10 +60,10 @@ impl ImportedExactCad {
                 .iter()
                 .map(|vertex| vertex.tolerance_m)
                 .fold(0.0_f64, f64::max),
-            absolute_floor_m: options.absolute_tolerance_floor_m,
-            model_relative_term: options.model_relative_tolerance,
-            requested_deviation_m: options.requested_deviation_m,
-            maximum_healing_displacement_m: options.maximum_healing_displacement_m,
+            absolute_floor_m: self.analysis.absolute_tolerance_floor_m,
+            model_relative_term: self.analysis.model_relative_tolerance,
+            requested_deviation_m: self.analysis.requested_deviation_m,
+            maximum_healing_displacement_m: self.analysis.maximum_healing_displacement_m,
         };
         let document = GeometryDocument {
             schema_version: GEOMETRY_DOCUMENT_SCHEMA_VERSION,
@@ -68,9 +75,9 @@ impl ImportedExactCad {
                 source_units: self.source_units,
                 meters_per_source_unit: self.meters_per_source_unit,
             },
-            revision: options.revision.clone(),
+            revision: self.analysis.revision.clone(),
             tolerance,
-            healing: options.healing.clone(),
+            healing: self.analysis.healing.clone(),
             model: GeometryModel::ExactBRep {
                 model: self.model.clone(),
             },
@@ -87,7 +94,7 @@ impl ImportedExactCad {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExactCadClosureOptions {
+pub struct ExactCadAnalysisOptions {
     pub revision: GeometryRevisionIdentity,
     pub absolute_tolerance_floor_m: f64,
     pub model_relative_tolerance: f64,
@@ -96,13 +103,40 @@ pub struct ExactCadClosureOptions {
     pub healing: GeometryHealingPolicy,
 }
 
+impl Default for ExactCadAnalysisOptions {
+    fn default() -> Self {
+        Self {
+            revision: GeometryRevisionIdentity {
+                revision: 1,
+                persistent_mapping_version: 1,
+                parent_document_digest: None,
+            },
+            absolute_tolerance_floor_m: 1.0e-12,
+            model_relative_tolerance: 1.0e-12,
+            requested_deviation_m: 1.0e-4,
+            maximum_healing_displacement_m: 1.0e-6,
+            healing: GeometryHealingPolicy {
+                algorithm_version: "occt-healing/1".into(),
+                sew: false,
+                repair_orientation: false,
+                consolidate_duplicates: false,
+                repair_tolerance_scale_gaps: false,
+                simplify_short_edges_and_sliver_faces: false,
+            },
+        }
+    }
+}
+
 pub(crate) fn exact_representation_digest(representation: &[u8]) -> [u8; 32] {
     Sha256::digest(representation).into()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExactCadImportOptions {
     pub source_units: UnitSystem,
+    /// Geometry identity, tolerance, and healing authority for this import. These settings are
+    /// inseparable from the exact topology produced by the kernel.
+    pub analysis: ExactCadAnalysisOptions,
     /// Hard aggregate bound for the kernel representation and unique assembly-definition
     /// identity evidence before either crosses the FFI boundary.
     pub max_representation_bytes: u64,
@@ -121,6 +155,7 @@ impl Default for ExactCadImportOptions {
     fn default() -> Self {
         Self {
             source_units: UnitSystem::Meter,
+            analysis: ExactCadAnalysisOptions::default(),
             max_representation_bytes: 512 * 1024 * 1024,
             max_entities: 10_000_000,
             max_identity_work_bytes: 2 * 1024 * 1024 * 1024,
@@ -154,6 +189,28 @@ pub fn import_exact_cad(
         return Err(GeometryImportError::InvalidOptions(
             "exact representation, entity, identity-work, and validation budgets must be nonzero"
                 .into(),
+        ));
+    }
+    let tolerance = GeometryTolerancePolicy {
+        source_tolerance_m: 0.0,
+        absolute_floor_m: options.analysis.absolute_tolerance_floor_m,
+        model_relative_term: options.analysis.model_relative_tolerance,
+        requested_deviation_m: options.analysis.requested_deviation_m,
+        maximum_healing_displacement_m: options.analysis.maximum_healing_displacement_m,
+    };
+    tolerance
+        .validate()
+        .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
+    options
+        .analysis
+        .healing
+        .validate()
+        .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
+    if options.analysis.revision.revision == 0
+        || options.analysis.revision.persistent_mapping_version == 0
+    {
+        return Err(GeometryImportError::InvalidOptions(
+            "exact geometry revision and persistent mapping version must be nonzero".into(),
         ));
     }
     let format = OcctCadFormat::from_geometry_format(format)

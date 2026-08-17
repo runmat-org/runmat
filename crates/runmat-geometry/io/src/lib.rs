@@ -11,7 +11,7 @@ pub mod sniff;
 mod occt;
 
 pub use exact::{
-    import_exact_cad, ExactCadClosureOptions, ExactCadImportOptions, ImportedExactCad,
+    import_exact_cad, ExactCadAnalysisOptions, ExactCadImportOptions, ImportedExactCad,
 };
 pub use import::{
     import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
