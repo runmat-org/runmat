@@ -44,6 +44,8 @@ use runmat_execution_runner_native::{
     RemoteWorkerChannel, RemoteWorkerChannelConfig, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
+#[path = "meshing_process_conformance/curve_pipeline.rs"]
+mod curve_pipeline;
 #[path = "meshing_process_conformance/exact_input.rs"]
 mod exact_input;
 #[path = "meshing_process_conformance/faceted_input.rs"]
@@ -173,6 +175,9 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        if invocation.host.workload.stage == MeshingStageKind::CurveMesh {
+            return curve_pipeline::CurvePipelineKernel.execute(invocation);
+        }
         if !invocation.inputs.is_empty() {
             return ExactInputKernel.execute(invocation);
         }
@@ -215,6 +220,10 @@ fn main() {
         }
         if mode == "--faceted-child" {
             run_child(FacetedInputKernel, Path::new(&root));
+            return;
+        }
+        if mode == "--curve-child" {
+            run_child(curve_pipeline::CurvePipelineKernel, Path::new(&root));
             return;
         }
     }
@@ -312,6 +321,7 @@ async fn parent() {
 
     exact_input::native_conformance().await;
     faceted_input::native_conformance().await;
+    curve_pipeline::native_conformance().await;
 
     let cancellation_directory = tempfile::tempdir().unwrap();
     let (cancel_host, cancel_request) = fixture();
@@ -360,7 +370,7 @@ async fn parent() {
 }
 
 async fn remote_conformance() {
-    let (host, request, exact, bundle_bytes) = remote_fixture("remote-meshing-run");
+    let (host, request, exact, curve, bundle_bytes) = remote_fixture("remote-meshing-run");
 
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
@@ -520,6 +530,8 @@ async fn remote_conformance() {
         )
         .unwrap();
 
+        curve_pipeline::remote_conformance(&pool, scope_id, pool_id, &curve).await;
+
         let mut exact_serial_store = TestStore::default();
         for object in &exact.input.geometry_objects().objects {
             exact_serial_store
@@ -615,6 +627,7 @@ fn remote_fixture(
     MeshingHostWorkload,
     runmat_execution_artifact::ProgramExecutionRequest,
     exact_input::ExactFixture,
+    curve_pipeline::CurveFixture,
     Arc<Vec<u8>>,
 ) {
     let project_root = tempfile::tempdir().unwrap();
@@ -638,6 +651,7 @@ fn remote_fixture(
     .unwrap();
     let (host, request) = fixture_for(revision.clone(), authorization_scope);
     let exact = exact_input::fixture(revision.clone(), authorization_scope);
+    let curve = curve_pipeline::fixture(revision.clone(), authorization_scope);
     let mut materializations = vec![
         (
             request.recipe.clone(),
@@ -646,6 +660,14 @@ fn remote_fixture(
         (
             exact.request.recipe.clone(),
             exact.request.artifact.executable_bytes.clone(),
+        ),
+        (
+            curve.partition_request.recipe.clone(),
+            curve.partition_request.artifact.executable_bytes.clone(),
+        ),
+        (
+            curve.join_request.recipe.clone(),
+            curve.join_request.artifact.executable_bytes.clone(),
         ),
     ];
     materializations.sort_by_key(|(recipe, _)| recipe.id().unwrap());
@@ -662,7 +684,7 @@ fn remote_fixture(
     let bundle = builder.build().unwrap();
     let mut encoded_bundle = Vec::new();
     write_bundle(&bundle, &mut encoded_bundle, ArchiveLimits::default()).unwrap();
-    (host, request, exact, Arc::new(encoded_bundle))
+    (host, request, exact, curve, Arc::new(encoded_bundle))
 }
 
 #[derive(Default)]
@@ -758,6 +780,7 @@ fn worker_capabilities() -> BTreeSet<Capability> {
         Capability::Custom("runmat.meshing.host:host-v2".into()),
         Capability::Custom("runmat.meshing.exact-cad:occt-v1".into()),
         Capability::Custom("runmat.meshing.algorithm:geometry/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:curve/v2".into()),
         Capability::Custom("runmat.meshing.algorithm:surface/v2".into()),
         Capability::Custom("runmat.meshing.element-order:tet4".into()),
         Capability::Custom("runmat.meshing.cohort:native-cohort-v1".into()),
@@ -916,7 +939,7 @@ fn revision() -> ProgramRevision {
 fn limits() -> NativeMeshingHostLimits {
     NativeMeshingHostLimits {
         chunk_policy: MeshingChunkPolicy {
-            maximum_chunk_bytes: 1024,
+            maximum_chunk_bytes: 1_000_000,
             maximum_records_per_chunk: 10,
             maximum_total_encoded_bytes: 1_000_000,
         },
