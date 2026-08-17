@@ -2,9 +2,13 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -140,6 +144,76 @@ pub const TRIPULS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &TRIPULS_ERRORS,
 };
 
+const TRIPULS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tripuls-integer-sample-times",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tripuls with native typed-integer sample times is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TripulsIntegerSampleTimesExtension"),
+};
+const TRIPULS_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tripuls-integer-controls",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tripuls with native typed-integer width or skew is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TripulsIntegerControlsExtension"),
+};
+const TRIPULS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tripuls-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interactive tripuls gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TripulsGpuInputExtension"),
+};
+pub const TRIPULS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    TRIPULS_INTEGER_DATA_EXTENSION,
+    TRIPULS_INTEGER_CONTROL_EXTENSION,
+    TRIPULS_GPU_INPUT_EXTENSION,
+];
+const TRIPULS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "T",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented sample-time domain is single or double. RunMat mode admits typed integers only when every value is exactly representable at the binary64 pulse boundary.",
+    }];
+const TRIPULS_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "W",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed width is a mode-gated scalar and must convert exactly before positive-range validation.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "S",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed skew is a mode-gated scalar and must convert exactly before validation in the closed interval from -1 through 1.",
+    },
+];
+pub const TRIPULS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = tripuls(integer_T, ...)",
+        inputs: &TRIPULS_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Compatibility and exactness checks occur before provider access; admitted integer samples produce a same-shaped double waveform.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = tripuls(T, integer_W, integer_S?)",
+        inputs: &TRIPULS_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Width and skew cross checked scalar binary64 boundaries; output shape, class, and residency follow the supported sample-time path.",
+    },
+];
+
 fn tripuls_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     tripuls_error_with_message(error.message, error)
 }
@@ -208,11 +282,28 @@ pub(crate) fn tripuls_scalar(t: f64, width: f64, skew: f64) -> f64 {
 
 pub(crate) fn tripuls_tensor(tensor: Tensor, width: f64, skew: f64) -> Result<Tensor, String> {
     let shape = tensor.shape.clone();
-    let data = tensor::tensor_into_values_f64(tensor)
-        .into_iter()
-        .map(|value| tripuls_scalar(value, width, skew))
-        .collect::<Vec<_>>();
-    Tensor::new(data, shape).map_err(|err| err.to_string())
+    match tensor
+        .into_numeric_storage()
+        .map_err(|err| err.to_string())?
+    {
+        NumericStorage::F32(values) => Tensor::from_f32(
+            values
+                .into_iter()
+                .map(|value| tripuls_scalar(f64::from(value), width, skew) as f32)
+                .collect(),
+            shape,
+        )
+        .map_err(|err| err.to_string()),
+        storage => Tensor::new(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|value| tripuls_scalar(value, width, skew))
+                .collect(),
+            shape,
+        )
+        .map_err(|err| err.to_string()),
+    }
 }
 
 pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
@@ -238,9 +329,37 @@ pub(crate) fn validate_skew(skew: f64) -> Result<f64, String> {
     keywords = "tripuls,triangular pulse,pulse train,signal processing,skew",
     type_resolver(numeric_unary_shape_type),
     descriptor(crate::builtins::math::signal::tripuls::TRIPULS_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::tripuls::TRIPULS_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::tripuls::TRIPULS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::tripuls"
 )]
 async fn tripuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRIPULS_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &t,
+        &TRIPULS_INTEGER_DATA_EXTENSION,
+        BUILTIN_NAME,
+        "sample times",
+    )
+    .await?;
+    for value in &rest {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &TRIPULS_INTEGER_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+            "width or skew",
+        )
+        .await?;
+    }
     let (width, skew) = parse_options(&rest).await?;
     match t {
         Value::GpuTensor(handle) => tripuls_gpu(handle, width, skew).await,
@@ -294,9 +413,19 @@ async fn tripuls_gpu(handle: GpuTensorHandle, width: f64, skew: f64) -> BuiltinR
         .map_err(|source| {
             tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "gpu gather failed", source)
         })?;
-    tripuls_tensor(tensor, width, skew)
-        .map(tensor_into_value)
-        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INTERNAL, err))
+    let result = tripuls_tensor(tensor, width, skew)
+        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INTERNAL, err))?;
+    let restored =
+        gpu_helpers::restore_class_preserving_value(&handle, Value::Tensor(result), BUILTIN_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(&handle)
+        && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(tripuls_error_with_detail(
+            &TRIPULS_ERROR_INTERNAL,
+            "provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(restored)
 }
 
 fn tripuls_real(value: Value, width: f64, skew: f64) -> BuiltinResult<Value> {
@@ -340,11 +469,99 @@ mod tests {
 
     #[test]
     fn tripuls_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
         let out =
             expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("tripuls"));
         assert_eq!(out.shape, vec![1, 3]);
         assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn tripuls_preserves_documented_single_output_class() {
+        let input = Tensor::from_f32(vec![-0.5, 0.0, 0.5], vec![1, 3]).expect("single input");
+        let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("tripuls"));
+        assert_eq!(
+            out.into_numeric_storage().expect("single output"),
+            NumericStorage::F32(vec![0.0, 1.0, 0.0])
+        );
+    }
+
+    #[test]
+    fn tripuls_integer_roles_are_independently_compatibility_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
+        let data_error = call(Value::Tensor(input), vec![Value::Num(2.0)])
+            .expect_err("typed sample times are an extension");
+        assert_eq!(
+            data_error.identifier(),
+            TRIPULS_INTEGER_DATA_EXTENSION.error_identifier
+        );
+
+        let control =
+            Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).expect("typed width");
+        let control_error = call(Value::Num(0.0), vec![Value::Tensor(control)])
+            .expect_err("typed width is an extension");
+        assert_eq!(
+            control_error.identifier(),
+            TRIPULS_INTEGER_CONTROL_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn tripuls_automatic_residency_is_transparent_and_explicit_residency_is_gated() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![-0.5, 0.0, 0.5], vec![1, 3]).expect("input");
+            let automatic = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            let _matlab_mode = crate::compatibility::push_runmat_extensions_enabled(false);
+            let output =
+                call(Value::GpuTensor(automatic), Vec::new()).expect("automatic resident input");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected automatic resident output");
+            };
+            assert!(!runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                test_support::gather(output)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![0.0, 1.0, 0.0]
+            );
+
+            let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let error = call(Value::GpuTensor(explicit), Vec::new())
+                .expect_err("MATLAB mode rejects explicit interactive gpuArray input");
+            assert_eq!(
+                error.identifier(),
+                TRIPULS_GPU_INPUT_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    fn tripuls_runmat_gpu_extension_preserves_explicit_provenance() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![-0.5, 0.0, 0.5], vec![1, 3]).expect("input");
+            let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let _runmat_mode = crate::compatibility::push_runmat_extensions_enabled(true);
+            let output = call(Value::GpuTensor(explicit), Vec::new())
+                .expect("RunMat mode accepts explicit gpuArray input");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected explicit resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                test_support::gather(output)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![0.0, 1.0, 0.0]
+            );
+        });
     }
 
     #[test]

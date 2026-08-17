@@ -176,7 +176,7 @@ pub const STEPINFO_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] Every typed positional role is independently admitted and checked before gathering. Metrics are returned as double-valued structure fields because step-response analysis is a floating computation domain.",
+        notes: "Every typed positional role is independently admitted and checked before gathering. Metrics are returned as double-valued structure fields because step-response analysis is a floating computation domain.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "info = stepinfo(..., thresholdName, integer_threshold)",
@@ -186,7 +186,7 @@ pub const STEPINFO_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "[integer-audit-open] Typed thresholds are separately mode-gated and exactly converted before range validation; automatic residency remains transparent after admission.",
+        notes: "Typed thresholds are separately mode-gated and exactly converted before range validation; automatic residency remains transparent after admission.",
     },
 ];
 

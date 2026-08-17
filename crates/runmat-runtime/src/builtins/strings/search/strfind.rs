@@ -198,7 +198,7 @@ const STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "strfind-typed-force-cell-output",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description: "strfind with a typed-integer ForceCellOutput value is an evidence-open RunMat extension",
+        description: "strfind with a typed-integer ForceCellOutput value is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:StrfindTypedForceCellOutputExtension"),
     };
 
@@ -230,7 +230,7 @@ const STRFIND_INTEGER_FORCE_CELL_OUTPUT_INPUTS: [BuiltinIntegerInputCapability; 
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "[integer-audit-open] the compatibility target explicitly documents false, true, 0, and 1 but does not enumerate typed integer storage classes. RunMat mode accepts every exact scalar integer class; MATLAB-compatible mode retains only logical and double zero/one.",
+        notes: "The compatibility target explicitly documents false, true, 0, and 1 but does not enumerate typed integer storage classes. RunMat mode accepts every exact scalar integer class; MATLAB-compatible mode retains only logical and double zero/one.",
     }];
 
 pub const STRFIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -239,10 +239,10 @@ pub const STRFIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
         inputs: &STRFIND_INTEGER_FORCE_CELL_OUTPUT_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Predicate,
         output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "[integer-audit-open] The typed integer flag controls only whether double index vectors are wrapped in cells. Typed storage acceptance remains conservatively mode-gated because the public page lists numeric literals but no storage classes.",
+        notes: "The typed integer flag controls only whether double index vectors are wrapped in cells. Typed storage acceptance is mode-gated because the public page lists numeric literals but no storage classes; values other than zero and one remain a separately gated convenience.",
     }];
 
 fn strfind_error_with_message(
@@ -444,8 +444,7 @@ fn evaluate_strfind(
 
 fn find_indices(text: &str, pattern: &str) -> Vec<usize> {
     if pattern.is_empty() {
-        let len = text.chars().count();
-        return (0..=len).map(|pos| pos + 1).collect();
+        return Vec::new();
     }
 
     let text_chars: Vec<char> = text.chars().collect();
@@ -714,7 +713,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strfind_empty_pattern_returns_boundaries() {
+    fn strfind_empty_pattern_returns_empty_indices() {
         let result = run_strfind(
             Value::String("abc".into()),
             Value::String("".into()),
@@ -723,8 +722,8 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 4]);
-                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(tensor.shape, vec![1, 0]);
+                assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

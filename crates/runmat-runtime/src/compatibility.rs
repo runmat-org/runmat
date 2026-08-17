@@ -142,6 +142,33 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_release_label_is_centralized_in_documentation() {
+        let docs_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+        let canonical_policy = docs_root.join("development/backwards-compat.md");
+        let mut pending = vec![docs_root];
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(&directory).expect("read documentation directory") {
+                let path = entry.expect("read documentation entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("md" | "json")
+                ) && path != canonical_policy
+                {
+                    let contents = std::fs::read_to_string(&path).expect("read documentation file");
+                    assert!(
+                        !contents.contains(MATLAB_COMPATIBILITY_RELEASE),
+                        "the compatibility release label must be documented only in {}: {}",
+                        canonical_policy.display(),
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn scoped_extension_policy_restores_previous_state() {
         let original = runmat_extensions_enabled();
         {
@@ -1398,6 +1425,14 @@ mod tests {
             ("ss", "ss-explicit-gpu-input"),
             ("ss", "ss-integer-matrix-input"),
             ("ss", "ss-integer-sample-time"),
+            ("trapz", "trapz-integer-data"),
+            ("trapz", "trapz-integer-spacing"),
+            ("triplot", "triplot-gpu-input"),
+            ("triplot", "triplot-integer-connectivity"),
+            ("triplot", "triplot-integer-coordinates"),
+            ("tripuls", "tripuls-gpu-input"),
+            ("tripuls", "tripuls-integer-controls"),
+            ("tripuls", "tripuls-integer-sample-times"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),

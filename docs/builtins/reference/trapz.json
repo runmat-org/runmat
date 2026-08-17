@@ -29,12 +29,14 @@
   "tested": {
     "unit": "builtins::math::reduction::trapz::tests"
   },
-  "description": "`trapz(Y)` approximates integrals of sampled data using trapezoidal segments. By default integration runs along the first non-singleton dimension, with MATLAB-compatible explicit-dimension forms supported.",
+  "description": "`trapz(Y)` approximates integrals of single- or double-precision sampled data using trapezoidal segments. By default integration runs along the first non-singleton dimension, with MATLAB-compatible explicit-dimension forms supported. Typed-integer sample data and spacing are available in RunMat mode when every value can enter the binary64 integration domain exactly.",
   "behaviors": [
     "`trapz(Y)` assumes unit spacing between adjacent samples.",
     "`trapz(X, Y)` accepts a scalar spacing, a vector of coordinates whose length matches the working dimension, or an array `X` with the same size as `Y`.",
     "`trapz(..., dim)` selects the working dimension explicitly. Dimensions larger than `ndims(Y)` behave like singleton axes, so the result is zero along those slices.",
     "Logical inputs are promoted to double precision before integration. Complex-valued `Y` inputs are integrated component-wise and preserve their complex output type.",
+    "Single-precision sample data produces single-precision output; typed-integer sample data is a RunMat extension and produces double output.",
+    "Native typed-integer `Y` and `X` roles are independently compatibility-gated and require exact binary64 conversion. Native typed-integer `dim` is an ordinary exact structural selector.",
     "When the selected dimension has length 0 or 1, `trapz` returns zeros because there are no intervals to integrate."
   ],
   "examples": [

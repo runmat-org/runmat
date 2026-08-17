@@ -15,10 +15,13 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, LogicalArray, NumericStorage, ResolveContext, Tensor, Type,
-    Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, LogicalArray,
+    NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -172,6 +175,45 @@ pub const TRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &TRIL_ERRORS,
 };
 
+const TRIL_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented matrix inputs and preserve their class when the upper triangle is replaced by typed zero.",
+    }];
+const TRIL_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The diagonal selector is an integer-valued scalar. Native integer storage is decoded exactly and must fit the runtime index range.",
+    }];
+pub const TRIL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = tril(integer_A)",
+        inputs: &TRIL_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host masking works directly on native storage. Resident integer input uses exact owner-aware fallback when the provider's floating kernel is not applicable.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = tril(A, integer_k)",
+        inputs: &TRIL_INTEGER_OFFSET_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The offset is classified and range-checked before masking; automatic residency gathers transparently when needed.",
+    },
+];
+
 fn tril_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     tril_error_with_message(error.message, error)
 }
@@ -195,6 +237,7 @@ fn tril_error_with_message(
     accel = "custom",
     type_resolver(preserve_matrix_type),
     descriptor(crate::builtins::array::shape::tril::TRIL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::tril::TRIL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::tril"
 )]
 async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -230,12 +273,7 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
                 .map_err(|e| tril_error_with_message(e, &TRIL_ERROR_INTERNAL))?;
             Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
-        Value::CharArray(chars) => {
-            let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-            let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
-            Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
-        }
+        Value::CharArray(chars) => Ok(Value::CharArray(tril_char_array(chars, offset)?)),
         Value::GpuTensor(handle) => Ok(tril_gpu(handle, offset).await?),
         Value::String(_) | Value::StringArray(_) => Err(tril_error_with_message(
             "tril: string arrays are not supported",
@@ -374,6 +412,17 @@ fn tril_logical_array(
     offset: isize,
 ) -> crate::BuiltinResult<LogicalArray> {
     apply_tril_inplace(&mut array.data, &array.shape, offset, 0u8)?;
+    Ok(array)
+}
+
+fn tril_char_array(mut array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
+    for row in 0..array.rows {
+        for col in 0..array.cols {
+            if (row as i128) < col as i128 - offset as i128 {
+                array.data[row * array.cols + col] = '\0';
+            }
+        }
+    }
     Ok(array)
 }
 
@@ -687,6 +736,18 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tril_character_matrix_preserves_class_and_row_major_layout() {
+        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix");
+        let value = tril_builtin(Value::CharArray(chars), Vec::new()).expect("tril char");
+        let Value::CharArray(result) = value else {
+            panic!("expected character result");
+        };
+        assert_eq!(result.rows, 2);
+        assert_eq!(result.cols, 2);
+        assert_eq!(result.data, vec!['a', '\0', 'c', 'd']);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

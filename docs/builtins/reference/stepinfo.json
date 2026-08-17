@@ -29,7 +29,7 @@
     "unit": "builtins::control::stepinfo::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`stepinfo(sys)` simulates a supported SISO transfer-function model and summarizes its response, while `stepinfo(y,t,yfinal)` analyzes supplied samples. The result is a structure of double-valued timing, extrema, and percentage metrics. Public documentation does not publish a native-integer storage table for sampled response, time, steady-state, or threshold roles, so RunMat treats those typed forms as conservative evidence-open extensions and admits them only when every value crosses the binary64 metric boundary exactly.",
+  "description": "`stepinfo(sys)` simulates a supported SISO transfer-function model and summarizes its response, while `stepinfo(y,t,yfinal)` analyzes supplied samples. The result is a structure of double-valued timing, extrema, and percentage metrics. Typed-integer sampled response, time, steady-state, and threshold values are available in RunMat mode when every value crosses the binary64 metric boundary exactly.",
   "behaviors": [
     "Supports `stepinfo(sys)` for SISO `tf` models supported by `step`.",
     "Supports sampled forms `stepinfo(y)`, `stepinfo(y, t)`, and `stepinfo(y, t, yfinal)`.",

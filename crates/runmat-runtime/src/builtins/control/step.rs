@@ -186,7 +186,7 @@ pub const STEP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "[integer-audit-open] Compatibility admission and exactness checks occur before provider access. Automatic residency may gather through the exact owner; the host simulator and time/output arrays use the model's binary64 computation domain.",
+        notes: "Compatibility admission and exactness checks occur before provider access. Automatic residency may gather through the exact owner; the host simulator and time/output arrays use the model's binary64 computation domain.",
     }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::step")]

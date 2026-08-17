@@ -28,7 +28,7 @@
     "unit": "builtins::control::step::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`step(sys, ...)` plots or returns the sampled unit-step response of a supported SISO transfer-function model. With no time argument RunMat chooses a suitable grid; a scalar sets the final time and a vector supplies exact sample times. Public documentation describes these numeric roles without enumerating native integer storage classes, so typed-integer time values are conservatively exposed only in RunMat mode. Admitted integers must be exactly representable in binary64 before entering the floating control-system simulation.",
+  "description": "`step(sys, ...)` plots or returns the sampled unit-step response of a supported SISO transfer-function model. With no time argument RunMat chooses a suitable grid; a scalar sets the final time and a vector supplies exact sample times. Typed-integer time values are available in RunMat mode and must be exactly representable in binary64 before entering the floating control-system simulation.",
   "behaviors": [
     "Supports SISO `tf` objects with real coefficients.",
     "Returns the response `y` as a column vector for single-output calls.",
@@ -39,7 +39,7 @@
     "Accepts a positive finite scalar final time.",
     "Accepts a finite, nonnegative, nondecreasing explicit time vector.",
     "Discrete-time models use the stored `Ts` sample time.",
-    "Native typed-integer `t` and `tFinal` are evidence-open RunMat extensions. Compatibility admission and exact-representability checks happen before provider access, and wide integers that would round as double are rejected.",
+    "Native typed-integer `t` and `tFinal` are RunMat extensions. Compatibility admission and exact-representability checks happen before provider access, and wide integers that would round as double are rejected.",
     "Response values and returned time coordinates are double because transfer-function simulation is an explicit floating computation domain; integer time input does not imply an integer output class."
   ],
   "examples": [
