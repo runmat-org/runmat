@@ -6,9 +6,13 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, CharArray, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, NumericScalar, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
@@ -19,7 +23,8 @@ use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::io::repl_fs::compat::session_pref_text;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_TIMEOUT_SECONDS: f64 = 2147.483647;
 const USER_AGENT: &str = "RunMat websave/0.0";
 
 const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -99,6 +104,51 @@ simple_descriptor!(
     "filename = websave(filename, url)",
     &INPUTS_TWO
 );
+const WEBSAVE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "websave-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "passing explicit gpuArray values to host-only websave is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WebsaveExplicitGpuInputExtension"),
+};
+pub const WEBSAVE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [WEBSAVE_EXPLICIT_GPU_EXTENSION];
+const WEBSAVE_QUERY_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "QueryValue",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer scalars and vectors are rendered directly from authoritative storage, including full-width signed and unsigned values.",
+    }];
+const WEBSAVE_TIMEOUT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "options.Timeout",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A positive integer timeout is bounded before conversion to the host HTTP duration.",
+    }];
+pub const WEBSAVE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "filename = websave(filename, url, query_name, integer_query_value, ...)",
+        inputs: &WEBSAVE_QUERY_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default comma-separated query encoding preserves every integer element exactly; the returned filename remains text.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "filename = websave(filename, url, ..., options) with integer options.Timeout",
+        inputs: &WEBSAVE_TIMEOUT_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The bounded timeout crosses the host duration boundary; explicit gpuArray arguments are separately gated before provider access while automatic residency gathers transparently.",
+    },
+];
 const SENDMAIL_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "to",
@@ -289,9 +339,20 @@ fn percent_decode(text: &str) -> BuiltinResult<String> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::http::compat::WEBSAVE_DESCRIPTOR),
+    extensions(crate::builtins::io::http::compat::WEBSAVE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::http::compat::WEBSAVE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn websave_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WEBSAVE_EXPLICIT_GPU_EXTENSION,
+            "websave",
+        )?;
+    }
     let args = gather_args("websave", &args).await?;
     if args.len() < 2 {
         return Err(compat_error(
@@ -348,10 +409,12 @@ fn parse_websave_rest(
     }
     while idx < args.len() {
         let name = scalar_text(&args[idx], "websave", "name")?;
-        let value = scalar_text(&args[idx + 1], "websave", "value")?;
+        let value = &args[idx + 1];
         match name.to_ascii_lowercase().as_str() {
-            "timeout" => *timeout = Duration::from_secs_f64(parse_positive_seconds(&value)?),
-            "useragent" => *user_agent = value,
+            "timeout" => {
+                *timeout = duration_from_seconds(numeric_seconds(value, "websave Timeout")?)
+            }
+            "useragent" => *user_agent = scalar_text(value, "websave", "UserAgent")?,
             "headerfields" => {
                 return Err(compat_error(
                     "websave",
@@ -359,6 +422,7 @@ fn parse_websave_rest(
                 ));
             }
             _ => {
+                let value = query_value_to_string(value, &name)?;
                 url.query_pairs_mut().append_pair(&name, &value);
             }
         }
@@ -374,7 +438,7 @@ fn apply_websave_options(
     user_agent: &mut String,
 ) -> BuiltinResult<()> {
     if let Some(value) = options.fields.get("Timeout") {
-        *timeout = Duration::from_secs_f64(numeric_seconds(value, "websave Timeout")?);
+        *timeout = duration_from_seconds(numeric_seconds(value, "websave Timeout")?);
     }
     if let Some(value) = options.fields.get("UserAgent") {
         let ua = scalar_text(value, "websave", "UserAgent")?;
@@ -390,8 +454,27 @@ fn apply_websave_options(
 
 fn numeric_seconds(value: &Value, label: &str) -> BuiltinResult<f64> {
     match value {
-        Value::Num(v) if v.is_finite() && *v > 0.0 => Ok(*v),
-        Value::Int(v) if v.to_i64() > 0 => Ok(v.to_f64()),
+        Value::Num(v) if *v > 0.0 && (!v.is_finite() || *v <= MAX_TIMEOUT_SECONDS) => Ok(*v),
+        Value::Int(v) if v.to_i64() > 0 && v.to_f64() <= MAX_TIMEOUT_SECONDS => Ok(v.to_f64()),
+        Value::Tensor(tensor) if tensor.len() == 1 => {
+            let value = tensor
+                .numeric_value_at(0)
+                .expect("timeout tensor index must exist");
+            let seconds = format_numeric_scalar(value).parse::<f64>().map_err(|_| {
+                compat_error(
+                    "websave",
+                    format!("websave: {label} must be a positive numeric scalar"),
+                )
+            })?;
+            if seconds > 0.0 && (!seconds.is_finite() || seconds <= MAX_TIMEOUT_SECONDS) {
+                Ok(seconds)
+            } else {
+                Err(compat_error(
+                    "websave",
+                    format!("websave: {label} is outside the supported timeout range"),
+                ))
+            }
+        }
         Value::String(text) => parse_positive_seconds(text),
         Value::CharArray(array) if array.rows == 1 => {
             parse_positive_seconds(&array.data.iter().collect::<String>())
@@ -410,13 +493,77 @@ fn parse_positive_seconds(text: &str) -> BuiltinResult<f64> {
             "websave: Timeout must be a positive finite scalar",
         )
     })?;
-    if seconds.is_finite() && seconds > 0.0 {
+    if seconds > 0.0 && (!seconds.is_finite() || seconds <= MAX_TIMEOUT_SECONDS) {
         Ok(seconds)
     } else {
         Err(compat_error(
             "websave",
             "websave: Timeout must be a positive finite scalar",
         ))
+    }
+}
+
+fn duration_from_seconds(seconds: f64) -> Duration {
+    Duration::from_secs_f64(if seconds.is_infinite() {
+        MAX_TIMEOUT_SECONDS
+    } else {
+        seconds
+    })
+}
+
+fn query_value_to_string(value: &Value, name: &str) -> BuiltinResult<String> {
+    match value {
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            scalar_text(value, "websave", name)
+        }
+        Value::Num(value) => Ok(value.to_string()),
+        Value::Int(value) => Ok(value.decimal_string()),
+        Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
+        Value::Tensor(tensor)
+            if tensor.shape.len() <= 2 && (tensor.rows() == 1 || tensor.cols() == 1) =>
+        {
+            Ok((0..tensor.len())
+                .map(|index| {
+                    format_numeric_scalar(
+                        tensor
+                            .numeric_value_at(index)
+                            .expect("query tensor index must exist"),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(","))
+        }
+        Value::LogicalArray(array)
+            if array.shape.len() <= 2
+                && (array.shape.first().copied().unwrap_or(1) == 1
+                    || array.shape.get(1).copied().unwrap_or(1) == 1) =>
+        {
+            Ok(array
+                .data
+                .iter()
+                .map(|value| if *value != 0 { "true" } else { "false" })
+                .collect::<Vec<_>>()
+                .join(","))
+        }
+        _ => Err(compat_error(
+            "websave",
+            format!("websave: query value '{name}' must be text or a numeric, logical, or datetime scalar or vector"),
+        )),
+    }
+}
+
+fn format_numeric_scalar(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => value.to_string(),
+        NumericScalar::F32(value) => value.to_string(),
+        NumericScalar::I8(value) => value.to_string(),
+        NumericScalar::I16(value) => value.to_string(),
+        NumericScalar::I32(value) => value.to_string(),
+        NumericScalar::I64(value) => value.to_string(),
+        NumericScalar::U8(value) => value.to_string(),
+        NumericScalar::U16(value) => value.to_string(),
+        NumericScalar::U32(value) => value.to_string(),
+        NumericScalar::U64(value) => value.to_string(),
     }
 }
 
@@ -743,6 +890,21 @@ mod tests {
         assert_eq!(headers, vec![("XRunMat".to_string(), "yes".to_string())]);
         assert_eq!(timeout, Duration::from_secs(7));
         assert_eq!(user_agent, "agent");
+    }
+
+    #[test]
+    fn websave_query_values_preserve_exact_integer_vectors() {
+        let value = Value::Tensor(
+            runmat_builtins::Tensor::new_integer(
+                runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("integer query vector"),
+        );
+        assert_eq!(
+            query_value_to_string(&value, "id").expect("query encoding"),
+            "9007199254740993,18446744073709551615"
+        );
     }
 
     #[test]

@@ -8,13 +8,13 @@
     "headers",
     "rest client"
   ],
-  "summary": "Create HTTP options structs for `webread` and `webwrite` with MATLAB-compatible defaults.",
+  "summary": "Create options for HTTP requests.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "weboptions operates on CPU data structures and gathers gpuArray inputs automatically."
+    "notes": "Options are host metadata. Automatically resident values may gather transparently, while explicit gpuArray input is available only as a named RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -37,12 +37,14 @@
       "builtins::io::http::weboptions::tests::webwrite_uses_weboptions_auto_request_method"
     ]
   },
-  "description": "`weboptions` builds MATLAB-style option structs controlling timeout, headers, content type, authentication, and request-method behavior for `webread` and `webwrite`.",
+  "description": "`weboptions` creates a host options structure for `webread`, `websave`, and `webwrite`.",
   "behaviors": [
-    "Returns a struct with canonical field names: `ContentType`, `Timeout`, `HeaderFields`, `UserAgent`, `Username`, `Password`, `RequestMethod`, `MediaType`, and `QueryParameters`.",
-    "Defaults mirror MATLAB: `ContentType=\"auto\"`, `Timeout=60`, `UserAgent=\"\"` (RunMat substitutes a default agent when this is empty), `RequestMethod=\"auto\"`, `MediaType=\"auto\"`, and empty structs for `HeaderFields` and `QueryParameters`.",
-    "Name-value arguments are case-insensitive. Values are validated to ensure MATLAB-compatible types (text scalars for string options, positive scalars for `Timeout`, structs or two-column cell arrays for `HeaderFields` and `QueryParameters`).",
-    "Passing an existing options struct as the first argument clones it before applying additional overrides, matching MATLAB's update pattern `opts = weboptions(opts, \"Timeout\", 5)`.",
+    "The implemented fields are `CharacterEncoding`, `UserAgent`, `Timeout`, `Username`, `Password`, `KeyName`, `KeyValue`, `ContentType`, `ContentReader`, `MediaType`, `RequestMethod`, `ArrayFormat`, `HeaderFields`, `CertificateFilename`, and the RunMat-only `QueryParameters` field.",
+    "The default timeout is 5 seconds. `Timeout` accepts a positive numeric scalar up to 2147.483647 seconds or `Inf`; native integer scalars are read exactly.",
+    "`KeyValue` accepts a text, numeric, or logical scalar and preserves a native integer scalar exactly.",
+    "Name-value arguments are case-insensitive. Implemented text properties require text scalars, and `HeaderFields` accepts a struct or two-column cell array.",
+    "Passing an existing structure as the first argument and the `QueryParameters` property are independently gated RunMat extensions.",
+    "`CharacterEncoding`, `ContentReader`, `ArrayFormat`, and `CertificateFilename` are represented in the returned structure but are not yet fully applied by every HTTP operation.",
     "Unknown option names raise descriptive errors."
   ],
   "examples": [
@@ -70,7 +72,7 @@
   "faqs": [
     {
       "question": "Which option names are supported in RunMat?",
-      "answer": "`weboptions` implements the options consumed by `webread` and `webwrite`: `ContentType`, `Timeout`, `HeaderFields`, `UserAgent`, `Username`, `Password`, `RequestMethod`, `MediaType`, and `QueryParameters`. Unknown names raise a MATLAB-style error."
+      "answer": "RunMat recognizes `CharacterEncoding`, `UserAgent`, `Timeout`, `Username`, `Password`, `KeyName`, `KeyValue`, `ContentType`, `ContentReader`, `MediaType`, `RequestMethod`, `ArrayFormat`, `HeaderFields`, `CertificateFilename`, and the RunMat-only `QueryParameters` property. Unknown names raise an error."
     },
     {
       "question": "What does `RequestMethod=\"auto\"` mean?",
@@ -82,11 +84,11 @@
     },
     {
       "question": "Can I pass query parameters through the options struct?",
-      "answer": "Yes. Supply a struct or two-column cell array in the `QueryParameters` option. Values may include numbers, logicals, or text scalars, and they are percent-encoded when the request is built."
+      "answer": "In RunMat mode, supply a struct or two-column cell array in the `QueryParameters` option. This convenience is outside the compatibility target and is rejected in MATLAB-compatible mode."
     },
     {
       "question": "Do I need to manage GPU residency for options?",
-      "answer": "No. `weboptions` gathers any GPU-resident values automatically and always returns a host struct. HTTP builtins ignore GPU residency for metadata."
+      "answer": "No manual gather is needed for values that became resident automatically. Explicit gpuArray option values are a named RunMat extension and are rejected in MATLAB-compatible mode. The returned options structure is host-resident."
     },
     {
       "question": "Does `weboptions` mutate the input struct?",
@@ -119,8 +121,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/http/weboptions.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/weboptions.rs"
   },
-  "gpu_residency": "No. `weboptions` gathers any GPU-resident values automatically and always returns a host struct. HTTP builtins ignore GPU residency for metadata.",
+  "gpu_residency": "The result is a host structure. Automatically resident inputs can gather transparently; explicit gpuArray input requires RunMat mode.",
   "gpu_behavior": [
-    "`weboptions` operates entirely on CPU metadata. It gathers any `gpuArray` inputs back to host memory before validation, because HTTP requests execute on the CPU regardless of the selected acceleration provider. No GPU provider hooks are required for this function."
+    "`weboptions` operates on host metadata. Automatic residency does not change source-language behavior, while an explicit gpuArray argument crosses the `weboptions-explicit-gpu-input` extension gate before provider access."
   ]
 }

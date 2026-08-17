@@ -16,6 +16,16 @@ const HEIGHT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCap
 }];
 pub const HEIGHT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "n = height(integer_A)", inputs: &HEIGHT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All integer classes share the array row-count contract; resident inputs are answered from handle shape without gather." }];
+const WIDTH_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "T",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes:
+        "Only array shape metadata is observed; numeric elements are not materialized or converted.",
+}];
+pub const WIDTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "n = width(integer_T)", inputs: &WIDTH_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All eight integer classes follow the documented array column-count contract; resident inputs are answered from handle shape without gather." }];
 pub const ISCATEGORICAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
         kind: BuiltinIntegerAuditKind::NotApplicable,
@@ -70,9 +80,13 @@ pub(crate) async fn height_builtin(value: Value) -> BuiltinResult<Value> {
     summary = "Return the number of variables in a table.",
     keywords = "width,table,variables",
     descriptor(crate::builtins::table::WIDTH_DESCRIPTOR),
+    integer_capabilities(crate::builtins::table::builtins::predicates::WIDTH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn width_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Value::GpuTensor(handle) = &value {
+        return Ok(Value::Num(handle.shape.get(1).copied().unwrap_or(1) as f64));
+    }
     let host = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;
@@ -210,6 +224,41 @@ mod tests {
             assert_eq!(
                 block_on(isordinal_builtin(value)).unwrap(),
                 Value::Bool(false)
+            );
+        });
+    }
+
+    #[test]
+    fn width_reads_integer_shape_without_numeric_materialization() {
+        for storage in [
+            IntegerStorage::I8(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I32(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::I64(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U16(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U32(vec![1, 2, 3, 4, 5, 6]),
+            IntegerStorage::U64(vec![1, 2, 3, 4, 5, u64::MAX]),
+        ] {
+            let tensor = Tensor::new_integer(storage, vec![2, 3]).expect("integer tensor");
+            assert_eq!(
+                block_on(width_builtin(Value::Tensor(tensor))).unwrap(),
+                Value::Num(3.0)
+            );
+        }
+    }
+
+    #[test]
+    fn width_answers_resident_integer_from_handle_shape() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3, u64::MAX]), vec![2, 2])
+                    .expect("integer tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer");
+            assert_eq!(
+                block_on(width_builtin(Value::GpuTensor(handle))).unwrap(),
+                Value::Num(2.0)
             );
         });
     }

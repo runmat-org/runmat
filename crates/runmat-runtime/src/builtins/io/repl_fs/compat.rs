@@ -365,6 +365,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const WHAT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "what accepts no input or one host text folder name; integer and resident numeric values reject before provider or filesystem access.",
+};
 simple_descriptor!(
     FILEATTRIB_SIGNATURES,
     FILEATTRIB_DESCRIPTOR,
@@ -566,6 +571,17 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const WINQUERYREG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "value = winqueryreg(rootkey, subkey, valname) for REG_DWORD",
+        inputs: &[],
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Text-only registry lookup inputs can return a documented exact int32 scalar for a 32-bit REG_DWORD value. The Windows command output is decoded as a 32-bit bit pattern without a floating conversion.",
+    }];
 
 pub(super) fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -987,9 +1003,19 @@ fn truthy(value: &Value) -> bool {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::io::repl_fs::compat::WHAT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::WHAT_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn what_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(compat_error(
+            "what",
+            "what: folder must be a host string scalar or character vector",
+        ));
+    }
     let args = gather_args("what", &args).await?;
     if args.len() > 1 {
         return Err(compat_error("what", "what: too many input arguments"));
@@ -1908,11 +1934,21 @@ fn numeric_usize(value: &Value, name: &str, arg: &str) -> BuiltinResult<usize> {
     summary = "Query values from the Windows registry.",
     keywords = "winqueryreg,windows,registry",
     accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
+    type_resolver(crate::builtins::io::type_resolvers::data_unknown_type),
     descriptor(crate::builtins::io::repl_fs::compat::WINQUERYREG_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::repl_fs::compat::WINQUERYREG_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn winqueryreg_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(compat_error(
+            "winqueryreg",
+            "winqueryreg: registry selectors must be host string scalars or character vectors",
+        ));
+    }
     let args = gather_args("winqueryreg", &args).await?;
     if args.len() < 2 || args.len() > 3 {
         return Err(compat_error(
@@ -1921,6 +1957,11 @@ async fn winqueryreg_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let root = scalar_text(&args[0], "winqueryreg", "root")?;
+    if root == "name" && args.len() == 3 {
+        let rootkey = scalar_text(&args[1], "winqueryreg", "root")?;
+        let subkey = scalar_text(&args[2], "winqueryreg", "key")?;
+        return query_windows_registry_names(&rootkey, &subkey);
+    }
     let key = scalar_text(&args[1], "winqueryreg", "key")?;
     let value = args
         .get(2)
@@ -1950,7 +1991,78 @@ fn query_windows_registry(root: &str, key: &str, value: Option<&str>) -> Builtin
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ));
     }
-    Ok(char_value(String::from_utf8_lossy(&output.stdout).trim()))
+    parse_registry_query_value(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn parse_registry_query_value(output: &str) -> BuiltinResult<Value> {
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if let Some(index) = fields.iter().position(|field| *field == "REG_DWORD") {
+            let raw = fields.get(index + 1).ok_or_else(|| {
+                compat_error("winqueryreg", "winqueryreg: malformed REG_DWORD output")
+            })?;
+            let bits = raw
+                .strip_prefix("0x")
+                .map_or_else(|| raw.parse::<u32>(), |hex| u32::from_str_radix(hex, 16))
+                .map_err(|_| {
+                    compat_error("winqueryreg", "winqueryreg: malformed REG_DWORD value")
+                })?;
+            return Ok(Value::Int(runmat_builtins::IntValue::I32(bits as i32)));
+        }
+        for kind in ["REG_SZ", "REG_EXPAND_SZ"] {
+            if let Some(index) = fields.iter().position(|field| *field == kind) {
+                return Ok(char_value(&fields[index + 1..].join(" ")));
+            }
+        }
+    }
+    Err(compat_error(
+        "winqueryreg",
+        "winqueryreg: registry query returned no supported value",
+    ))
+}
+
+#[cfg(windows)]
+fn query_windows_registry_names(root: &str, key: &str) -> BuiltinResult<Value> {
+    let mut full = root.to_string();
+    if !key.is_empty() {
+        full.push('\\');
+        full.push_str(key);
+    }
+    let output = Command::new("reg")
+        .args(["query", &full])
+        .output()
+        .map_err(|err| compat_error("winqueryreg", format!("winqueryreg: {err}")))?;
+    if !output.status.success() {
+        return Err(compat_error(
+            "winqueryreg",
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    let names = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            fields
+                .iter()
+                .position(|field| field.starts_with("REG_"))
+                .map(|index| fields[..index].join(" "))
+                .filter(|name| !name.is_empty())
+        })
+        .collect();
+    cellstr(names)
+}
+
+#[cfg(not(windows))]
+fn query_windows_registry_names(_root: &str, _key: &str) -> BuiltinResult<Value> {
+    Err(compat_error(
+        "winqueryreg",
+        "winqueryreg: Windows registry is unavailable on this platform",
+    ))
 }
 
 #[cfg(not(windows))]
@@ -1968,6 +2080,33 @@ mod tests {
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
+    }
+
+    #[test]
+    fn what_rejects_integer_folder_before_filesystem_access() {
+        let error = run(what_builtin(vec![Value::Int(
+            runmat_builtins::IntValue::U64(u64::MAX),
+        )]))
+        .expect_err("integer folder must reject");
+        assert!(error.message().contains("host string scalar"));
+    }
+
+    #[test]
+    fn winqueryreg_decodes_dword_as_exact_int32() {
+        let positive = parse_registry_query_value(
+            "HKEY_CURRENT_USER\\Software\\RunMat\n    Count    REG_DWORD    0x7fffffff\n",
+        )
+        .expect("positive DWORD");
+        assert_eq!(
+            positive,
+            Value::Int(runmat_builtins::IntValue::I32(i32::MAX))
+        );
+
+        let bit_pattern = parse_registry_query_value(
+            "HKEY_CURRENT_USER\\Software\\RunMat\n    Count    REG_DWORD    0xffffffff\n",
+        )
+        .expect("full DWORD bit pattern");
+        assert_eq!(bit_pattern, Value::Int(runmat_builtins::IntValue::I32(-1)));
     }
 
     fn unowned_resident_value() -> Value {

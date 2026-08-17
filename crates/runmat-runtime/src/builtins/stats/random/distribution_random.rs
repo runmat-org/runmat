@@ -282,12 +282,6 @@ fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
     }
 }
 
-fn finish(name: &'static str, data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
-    Tensor::new(data, shape)
-        .map(tensor::tensor_into_value)
-        .map_err(|err| random_internal(name, format!("{name}: {err}")))
-}
-
 fn validate_gamma(name: &'static str, args: &RandomArgs) -> BuiltinResult<()> {
     for value in &args.first {
         if value.is_nan() || *value < 0.0 {
@@ -1043,6 +1037,101 @@ pub mod wblrnd {
     use super::*;
     random_descriptor!("wblrnd", WBLRND_SIGNATURES);
 
+    const INTEGER_SCALE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "wblrnd-integer-scale",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "wblrnd with a typed-integer scale parameter is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:WblrndIntegerScaleExtension"),
+    };
+
+    const INTEGER_SHAPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "wblrnd-integer-shape",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "wblrnd with a typed-integer shape parameter is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:WblrndIntegerShapeExtension"),
+    };
+
+    const INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "wblrnd-integer-size",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "wblrnd with typed-integer size arguments is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:WblrndIntegerSizeExtension"),
+    };
+
+    const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "wblrnd-logical-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "wblrnd with logical parameters or size arguments is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:WblrndLogicalInputExtension"),
+    };
+
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+        INTEGER_SCALE_EXTENSION,
+        INTEGER_SHAPE_EXTENSION,
+        INTEGER_SIZE_EXTENSION,
+        LOGICAL_INPUT_EXTENSION,
+    ];
+
+    const INTEGER_SCALE_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "a",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer scale values are gated before gather and must remain exact at the binary64 sampling boundary.",
+        }];
+
+    const INTEGER_SHAPE_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "b",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer shape values are gated before gather and must remain exact at the binary64 sampling boundary.",
+        }];
+
+    const INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "sz",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+            notes: "Typed-integer size values are decoded from authoritative storage as bounded structural dimensions.",
+        }];
+
+    pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+        BuiltinIntegerCapabilityDescriptor {
+            form: "r = wblrnd(integer_a, b, ___)",
+            inputs: &INTEGER_SCALE_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::HostAndGpu,
+            overload: BuiltinIntegerOverloadKind::Multiple,
+            notes: "The public parameter classes are single and double. RunMat mode accepts every integer class after exact conversion validation; a documented single parameter still selects single output, and resident parameter inputs preserve provider ownership.",
+        },
+        BuiltinIntegerCapabilityDescriptor {
+            form: "r = wblrnd(a, integer_b, ___)",
+            inputs: &INTEGER_SHAPE_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::HostAndGpu,
+            overload: BuiltinIntegerOverloadKind::Multiple,
+            notes: "The RunMat-only integer shape parameter crosses one checked binary64 sampling boundary without changing the documented floating output-class rule.",
+        },
+        BuiltinIntegerCapabilityDescriptor {
+            form: "r = wblrnd(a, b, integer_sz)",
+            inputs: &INTEGER_SIZE_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::Structural,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::StructuralParameter,
+            notes: "The public size arguments are integer-valued single or double values. RunMat-only typed-integer sizes are exact structural controls and do not select precision or output residency.",
+        },
+    ];
+
     #[runtime_builtin(
         name = "wblrnd",
         category = "stats/random",
@@ -1050,15 +1139,109 @@ pub mod wblrnd {
         keywords = "wblrnd,weibull,random,distribution,statistics",
         type_resolver(super::random_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::random::distribution_random::wblrnd"
     )]
     pub(crate) async fn wblrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        let args = parse_two_parameter_args("wblrnd", args).await?;
-        validate_weibull("wblrnd", &args)?;
-        let len = tensor::element_count(&args.shape);
-        let data = random::generate_weibull(&args.first, &args.second, len, "wblrnd")
+        ensure_extensions(&args)?;
+        ensure_exact_integer_values(&args).await?;
+        let output_single = args.iter().take(2).any(is_single_value);
+        let gpu_source = gpu_helpers::select_resident_output_source(
+            args.iter().take(2).filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            }),
+            "wblrnd",
+        )?;
+        let parsed = parse_two_parameter_args("wblrnd", args).await?;
+        validate_weibull("wblrnd", &parsed)?;
+        let len = tensor::element_count(&parsed.shape);
+        let data = random::generate_weibull(&parsed.first, &parsed.second, len, "wblrnd")
             .map_err(|err| random_internal("wblrnd", err.message().to_string()))?;
-        finish("wblrnd", data, args.shape)
+        let host = if output_single {
+            Value::Tensor(
+                Tensor::from_f32(
+                    data.into_iter().map(|value| value as f32).collect(),
+                    parsed.shape,
+                )
+                .map_err(|err| random_internal("wblrnd", format!("wblrnd: {err}")))?,
+            )
+        } else {
+            Tensor::new(data, parsed.shape)
+                .map(tensor::tensor_into_value)
+                .map_err(|err| random_internal("wblrnd", format!("wblrnd: {err}")))?
+        };
+        match gpu_source {
+            Some(source) => gpu_helpers::restore_class_preserving_value(&source, host, "wblrnd"),
+            None => Ok(host),
+        }
+    }
+
+    fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
+        for (value, extension) in args
+            .iter()
+            .take(2)
+            .zip([&INTEGER_SCALE_EXTENSION, &INTEGER_SHAPE_EXTENSION])
+        {
+            if is_typed_integer_value(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(extension, "wblrnd")?;
+            }
+        }
+        if args.iter().skip(2).any(is_typed_integer_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGER_SIZE_EXTENSION,
+                "wblrnd",
+            )?;
+        }
+        if args.iter().any(is_logical_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_INPUT_EXTENSION,
+                "wblrnd",
+            )?;
+        }
+        Ok(())
+    }
+
+    async fn ensure_exact_integer_values(args: &[Value]) -> BuiltinResult<()> {
+        for value in args
+            .iter()
+            .take(2)
+            .filter(|value| is_typed_integer_value(value))
+        {
+            let tensor = value_to_tensor("wblrnd", value).await?;
+            let inexact = tensor.integer_storage().is_some_and(|storage| {
+                storage.exact_values().iter().any(|value| {
+                    !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value)
+                })
+            });
+            if inexact {
+                return Err(random_error(
+                    "wblrnd",
+                    "wblrnd: integer parameters must be exactly representable as double",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn is_typed_integer_value(value: &Value) -> bool {
+        matches!(value, Value::Int(_))
+            || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    }
+
+    fn is_logical_value(value: &Value) -> bool {
+        matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    }
+
+    fn is_single_value(value: &Value) -> bool {
+        matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            || matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(handle)
+                    && runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F32))
     }
 }
 
@@ -1568,5 +1751,67 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn wblrnd_typed_integer_roles_are_independently_gated() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset();
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cases = [
+            (
+                vec![
+                    integer_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+                    Value::Num(3.0),
+                ],
+                "RunMat:compatibility:WblrndIntegerScaleExtension",
+            ),
+            (
+                vec![
+                    Value::Num(4.0),
+                    integer_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]),
+                ],
+                "RunMat:compatibility:WblrndIntegerShapeExtension",
+            ),
+            (
+                vec![
+                    Value::Num(4.0),
+                    Value::Num(3.0),
+                    integer_tensor(IntegerStorage::U16(vec![2, 3]), vec![1, 2]),
+                ],
+                "RunMat:compatibility:WblrndIntegerSizeExtension",
+            ),
+        ];
+        for (args, identifier) in cases {
+            let error = block_on(wblrnd::wblrnd_builtin(args)).expect_err("integer role gate");
+            assert_eq!(error.identifier(), Some(identifier));
+        }
+    }
+
+    #[test]
+    fn wblrnd_rejects_lossy_wide_parameter_and_preserves_single_output() {
+        let _guard = random::test_lock().lock().unwrap();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        reset();
+        let error = block_on(wblrnd::wblrnd_builtin(vec![
+            integer_tensor(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]),
+            Value::Num(3.0),
+        ]))
+        .expect_err("lossy parameter must reject");
+        assert!(
+            error.message().contains("exactly representable as double"),
+            "unexpected error: {}",
+            error.message()
+        );
+
+        let output = block_on(wblrnd::wblrnd_builtin(vec![
+            Value::Tensor(Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap()),
+            Value::Num(3.0),
+        ]))
+        .expect("single wblrnd");
+        let Value::Tensor(output) = output else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
     }
 }

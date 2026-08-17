@@ -1626,6 +1626,16 @@ mod tests {
             ("wblinv", "wblinv-integer-scale"),
             ("wblinv", "wblinv-integer-shape"),
             ("wblinv", "wblinv-logical-input"),
+            ("wblrnd", "wblrnd-integer-scale"),
+            ("wblrnd", "wblrnd-integer-shape"),
+            ("wblrnd", "wblrnd-integer-size"),
+            ("wblrnd", "wblrnd-logical-input"),
+            ("weboptions", "weboptions-explicit-gpu-input"),
+            ("weboptions", "weboptions-query-parameters"),
+            ("weboptions", "weboptions-struct-copy"),
+            ("webread", "webread-explicit-gpu-input"),
+            ("websave", "websave-explicit-gpu-input"),
+            ("webwrite", "webwrite-explicit-gpu-input"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2236,6 +2246,7 @@ mod tests {
                 "vartype",
                 "verLessThan",
                 "version",
+                "what",
             ]
         );
         for (name, audit) in audited {
