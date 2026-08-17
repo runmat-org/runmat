@@ -544,3 +544,41 @@ fn noncanonical_order_and_summary_substitution_fail() {
     summary.face_count = 2;
     assert!(topology().validate_against(&summary).is_err());
 }
+
+#[test]
+fn occurrence_transform_resolves_world_points_and_vectors() {
+    let mut topology = topology();
+    topology.instances[0].transform = GeometryTransform([
+        0.0, -2.0, 0.0, 3.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 2.0, 5.0, 0.0, 0.0, 0.0, 1.0,
+    ]);
+    let transform = topology.world_transform_for(&topology.edges[0].id).unwrap();
+    assert_eq!(
+        transform.transform_point([1.0, 2.0, 3.0]),
+        [-1.0, 6.0, 11.0]
+    );
+    assert_eq!(
+        transform.transform_vector([1.0, 2.0, 3.0]),
+        [-4.0, 2.0, 6.0]
+    );
+
+    let unknown = PersistentEntityId {
+        kind: PersistentEntityKind::Edge,
+        source_topology_id: "unknown".into(),
+        assembly_path: vec!["absent".into()],
+    };
+    assert!(topology.world_transform_for(&unknown).is_err());
+}
+
+#[test]
+fn affine_composition_applies_parent_before_local() {
+    let parent = GeometryTransform([
+        2.0, 0.0, 0.0, 10.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ]);
+    let local = GeometryTransform([
+        1.0, 0.0, 0.0, 3.0, 0.0, 1.0, 0.0, 4.0, 0.0, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 1.0,
+    ]);
+    assert_eq!(
+        parent.compose(&local).transform_point([1.0, 1.0, 1.0]),
+        [18.0, 10.0, 12.0]
+    );
+}

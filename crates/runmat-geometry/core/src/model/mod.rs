@@ -10,6 +10,7 @@ mod exact_topology_assembly_validation;
 mod exact_topology_solid_validation;
 mod exact_topology_validation;
 mod exact_topology_validation_support;
+mod exact_transform;
 mod faceted_artifact;
 mod field;
 mod geometry;
