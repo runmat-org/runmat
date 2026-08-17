@@ -14,6 +14,7 @@ struct OcctExactShapePayload;
 struct OcctCurveRangePayload;
 struct OcctCurveDerivativesPayload;
 struct OcctCurveProjectionPayload;
+struct OcctPcurveDerivativesPayload;
 struct OcctPreviewSessionChunkOptions;
 struct OcctPreviewSessionChunkPayload;
 struct OcctPreviewSessionStartPayload;
@@ -54,6 +55,18 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
     std::uint64_t shape_key,
     rust::Slice<const double> point_m,
     double absolute_error_m);
+OcctPcurveDerivativesPayload exact_pcurve_derivatives(
+    std::uint64_t session_id,
+    std::uint64_t face_key,
+    std::uint64_t wire_key,
+    std::uint64_t coedge_position,
+    std::int8_t seam_image,
+    double parameter);
+OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
+                                         std::uint64_t face_key,
+                                         std::uint64_t wire_key,
+                                         std::uint64_t coedge_position,
+                                         std::int8_t seam_image);
 void close_exact_evaluator_session(std::uint64_t session_id);
 
 } // namespace occt_backend

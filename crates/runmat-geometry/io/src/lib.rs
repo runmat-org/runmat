@@ -16,7 +16,7 @@ pub use import::{
     GeometryImportContext, GeometryImportOptions,
 };
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
-pub use occt::evaluator::OcctExactCurveEvaluator;
+pub use occt::evaluator::OcctExactEvaluator;
 pub use preview::{
     close_cad_preview_session, read_cad_preview_session_chunk, start_cad_preview_session,
     CadPreviewSessionChunk, CadPreviewSessionStart,

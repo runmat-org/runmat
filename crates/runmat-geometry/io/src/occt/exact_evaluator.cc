@@ -2,15 +2,25 @@
 #include "runmat-geometry-io/src/occt/occt_bridge.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ShapeSet.hxx>
 #include <BRep_Builder.hxx>
 #include <Extrema_ExtPC.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <TopAbs_ShapeEnum.hxx>
+#include <TopAbs_Orientation.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Wire.hxx>
+#include <Geom2d_Curve.hxx>
+#include <gp_Pnt2d.hxx>
+#include <gp_Vec2d.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
@@ -82,6 +92,84 @@ void require_range(const BRepAdaptor_Curve& curve, double start, double end) {
   if (start > end || start < curve.FirstParameter() || end > curve.LastParameter()) {
     throw std::runtime_error("OCCT exact curve range is outside the edge domain");
   }
+}
+
+struct PcurveData {
+  Handle(Geom2d_Curve) curve;
+  double start = 0.0;
+  double end = 0.0;
+};
+
+PcurveData pcurve(const ExactEvaluatorSession& session,
+                  std::uint64_t face_key,
+                  std::uint64_t wire_key,
+                  std::uint64_t coedge_position,
+                  std::int8_t seam_image) {
+  if (face_key == 0 || wire_key == 0 || coedge_position == 0 ||
+      face_key > static_cast<std::uint64_t>(session.shapes.NbShapes()) ||
+      wire_key > static_cast<std::uint64_t>(session.shapes.NbShapes()) ||
+      seam_image < -1 || seam_image > 1) {
+    throw std::runtime_error("OCCT exact pcurve token is outside the B-rep topology");
+  }
+
+  TopoDS_Face face;
+  for (TopExp_Explorer faces(session.root, TopAbs_FACE); faces.More(); faces.Next()) {
+    if (static_cast<std::uint64_t>(session.shapes.Index(faces.Current())) == face_key) {
+      face = TopoDS::Face(faces.Current());
+      break;
+    }
+  }
+  if (face.IsNull()) {
+    throw std::runtime_error("OCCT exact pcurve token does not identify a face use");
+  }
+
+  TopoDS_Wire wire;
+  for (TopoDS_Iterator wires(face, Standard_False, Standard_True); wires.More(); wires.Next()) {
+    if (wires.Value().ShapeType() == TopAbs_WIRE &&
+        static_cast<std::uint64_t>(session.shapes.Index(wires.Value())) == wire_key) {
+      wire = TopoDS::Wire(wires.Value());
+      break;
+    }
+  }
+  if (wire.IsNull()) {
+    throw std::runtime_error("OCCT exact pcurve wire is not owned by its face");
+  }
+
+  BRepTools_WireExplorer edge_uses(wire, face);
+  std::uint64_t position = 1;
+  while (edge_uses.More() && position < coedge_position) {
+    edge_uses.Next();
+    ++position;
+  }
+  if (!edge_uses.More() || position != coedge_position) {
+    throw std::runtime_error("OCCT exact pcurve coedge position is outside its wire");
+  }
+  TopoDS_Edge edge_use = edge_uses.Current();
+  if (seam_image >= 0) {
+    TopoDS_Edge local_edge = edge_use;
+    if (face.Orientation() == TopAbs_REVERSED) {
+      local_edge.Reverse();
+    }
+    const std::int8_t resolved_image =
+        local_edge.Orientation() == TopAbs_REVERSED ? 1 : 0;
+    if (resolved_image != seam_image || !BRep_Tool::IsClosed(edge_use, face)) {
+      throw std::runtime_error("OCCT exact pcurve seam image does not match its oriented use");
+    }
+  } else if (BRep_Tool::IsClosed(edge_use, face)) {
+    throw std::runtime_error("OCCT exact pcurve omitted a required seam image");
+  }
+
+  PcurveData result;
+  result.curve = BRep_Tool::CurveOnSurface(edge_use, face, result.start, result.end);
+  if (result.curve.IsNull()) {
+    throw std::runtime_error("OCCT exact pcurve is unavailable for its face use");
+  }
+  require_finite(result.start, "pcurve range start");
+  require_finite(result.end, "pcurve range end");
+  if (result.start > result.end) {
+    throw std::runtime_error("OCCT exact pcurve has a reversed parameter domain");
+  }
+  return result;
 }
 
 } // namespace
@@ -229,6 +317,50 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
   result.point_z = best_point.Z() * scale;
   result.distance = std::sqrt(best_squared_distance) * scale;
   require_finite(result.distance, "projection distance");
+  return result;
+}
+
+OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
+                                         std::uint64_t face_key,
+                                         std::uint64_t wire_key,
+                                         std::uint64_t coedge_position,
+                                         std::int8_t seam_image) {
+  const auto value = session(session_id);
+  const PcurveData pcurve_value =
+      pcurve(*value, face_key, wire_key, coedge_position, seam_image);
+  OcctCurveRangePayload result;
+  result.start = pcurve_value.start;
+  result.end = pcurve_value.end;
+  return result;
+}
+
+OcctPcurveDerivativesPayload exact_pcurve_derivatives(
+    std::uint64_t session_id,
+    std::uint64_t face_key,
+    std::uint64_t wire_key,
+    std::uint64_t coedge_position,
+    std::int8_t seam_image,
+    double parameter) {
+  const auto value = session(session_id);
+  const PcurveData pcurve_value =
+      pcurve(*value, face_key, wire_key, coedge_position, seam_image);
+  require_finite(parameter, "pcurve parameter");
+  if (parameter < pcurve_value.start || parameter > pcurve_value.end) {
+    throw std::runtime_error("OCCT exact pcurve parameter is outside the edge domain");
+  }
+  gp_Pnt2d point;
+  gp_Vec2d first;
+  gp_Vec2d second;
+  pcurve_value.curve->D2(parameter, point, first, second);
+  OcctPcurveDerivativesPayload result;
+  result.range_start = pcurve_value.start;
+  result.range_end = pcurve_value.end;
+  result.point_u = point.X();
+  result.point_v = point.Y();
+  result.first_u = first.X();
+  result.first_v = first.Y();
+  result.second_u = second.X();
+  result.second_v = second.Y();
   return result;
 }
 

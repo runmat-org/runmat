@@ -211,6 +211,18 @@ pub(crate) mod bridge {
         distance: f64,
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct OcctPcurveDerivativesPayload {
+        range_start: f64,
+        range_end: f64,
+        point_u: f64,
+        point_v: f64,
+        first_u: f64,
+        first_v: f64,
+        second_u: f64,
+        second_v: f64,
+    }
+
     #[derive(Debug, Clone)]
     struct OcctPreviewSessionStartPayload {
         session_id: u64,
@@ -277,6 +289,23 @@ pub(crate) mod bridge {
             point_m: &[f64],
             absolute_error_m: f64,
         ) -> Result<OcctCurveProjectionPayload>;
+
+        fn exact_pcurve_derivatives(
+            session_id: u64,
+            face_key: u64,
+            wire_key: u64,
+            coedge_position: u64,
+            seam_image: i8,
+            parameter: f64,
+        ) -> Result<OcctPcurveDerivativesPayload>;
+
+        fn exact_pcurve_range(
+            session_id: u64,
+            face_key: u64,
+            wire_key: u64,
+            coedge_position: u64,
+            seam_image: i8,
+        ) -> Result<OcctCurveRangePayload>;
 
         fn close_exact_evaluator_session(session_id: u64);
 

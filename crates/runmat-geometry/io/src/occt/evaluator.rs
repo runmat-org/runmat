@@ -2,23 +2,32 @@ use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
     CurveDerivatives, CurveEvaluatorId, CurveProjection, ExactCurveEvaluator,
-    ExactCurveImplementation, GeometryEvaluationControl, GeometryEvaluationError,
-    GeometryEvaluationErrorKind, ParameterRange,
+    ExactCurveImplementation, ExactPcurveImplementation, GeometryEvaluationControl,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, ParameterRange, PcurveEvaluatorId,
 };
 
 use super::ffi;
 use crate::exact::ImportedExactCad;
 
-/// Native evaluator for kernel-backed curves from one admitted OCCT representation.
+/// Native evaluator for kernel-backed geometry from one admitted OCCT representation.
 ///
 /// The representation is loaded once. Immutable session state is shared across calls, while
 /// execution retains authority over cancellation and query-work budgets through the core trait.
-pub struct OcctExactCurveEvaluator {
-    session_id: u64,
+pub struct OcctExactEvaluator {
+    pub(super) session_id: u64,
     curve_keys: BTreeMap<CurveEvaluatorId, u64>,
+    pub(super) pcurve_keys: BTreeMap<PcurveEvaluatorId, PcurveKey>,
 }
 
-impl OcctExactCurveEvaluator {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PcurveKey {
+    pub face: u64,
+    pub wire: u64,
+    pub position: u64,
+    pub seam_image: i8,
+}
+
+impl OcctExactEvaluator {
     pub fn new(imported: &ImportedExactCad) -> Result<Self, GeometryEvaluationError> {
         let representation_digest = imported.representation_digest();
         let mut curve_keys = BTreeMap::new();
@@ -54,6 +63,34 @@ impl OcctExactCurveEvaluator {
                 "OCCT curve evaluator inventory does not match exact topology",
             ));
         }
+        let mut pcurve_keys = BTreeMap::new();
+        for record in &imported.evaluators.pcurves {
+            let ExactPcurveImplementation::Kernel { reference } = &record.implementation else {
+                return Err(inconsistent(
+                    "an OCCT import cannot contain a portable pcurve evaluator",
+                ));
+            };
+            if reference.representation_digest != representation_digest {
+                return Err(inconsistent(
+                    "pcurve evaluator does not bind the supplied OCCT representation",
+                ));
+            }
+            let key = parse_pcurve_token(&reference.entity_token)?;
+            if pcurve_keys.insert(record.id.clone(), key).is_some() {
+                return Err(inconsistent("duplicate OCCT pcurve evaluator identity"));
+            }
+        }
+        let topology_pcurve_ids = imported
+            .topology
+            .coedges
+            .iter()
+            .map(|coedge| &coedge.pcurve_evaluator_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        if topology_pcurve_ids != pcurve_keys.keys().collect() {
+            return Err(inconsistent(
+                "OCCT pcurve evaluator inventory does not match exact topology",
+            ));
+        }
         let session_id = ffi::bridge::start_exact_evaluator_session(
             &imported.representation,
             imported.meters_per_source_unit,
@@ -62,6 +99,7 @@ impl OcctExactCurveEvaluator {
         Ok(Self {
             session_id,
             curve_keys,
+            pcurve_keys,
         })
     }
 
@@ -104,13 +142,13 @@ impl OcctExactCurveEvaluator {
     }
 }
 
-impl Drop for OcctExactCurveEvaluator {
+impl Drop for OcctExactEvaluator {
     fn drop(&mut self) {
         ffi::bridge::close_exact_evaluator_session(self.session_id);
     }
 }
 
-impl ExactCurveEvaluator for OcctExactCurveEvaluator {
+impl ExactCurveEvaluator for OcctExactEvaluator {
     fn parameter_range(
         &self,
         id: &CurveEvaluatorId,
@@ -254,6 +292,32 @@ fn parse_edge_token(token: &str) -> Result<u64, GeometryEvaluationError> {
     Ok(key)
 }
 
+fn parse_pcurve_token(token: &str) -> Result<PcurveKey, GeometryEvaluationError> {
+    let parts = token.split(':').collect::<Vec<_>>();
+    if let ["face", face, "wire", wire, "coedge", position, "seam", seam_image] = parts.as_slice() {
+        let parsed = PcurveKey {
+            face: face.parse().unwrap_or(0),
+            wire: wire.parse().unwrap_or(0),
+            position: position.parse().unwrap_or(0),
+            seam_image: seam_image.parse().unwrap_or(-2),
+        };
+        if parsed.face != 0
+            && parsed.wire != 0
+            && parsed.position != 0
+            && (-1..=1).contains(&parsed.seam_image)
+            && format!(
+                "face:{:020}:wire:{:020}:coedge:{:020}:seam:{}",
+                parsed.face, parsed.wire, parsed.position, parsed.seam_image
+            ) == token
+        {
+            return Ok(parsed);
+        }
+    }
+    Err(inconsistent(
+        "OCCT pcurve evaluator has an invalid face-use token",
+    ))
+}
+
 fn normalized(value: [f64; 3]) -> Option<[f64; 3]> {
     let length = norm(value);
     (length.is_finite() && length > 0.0).then(|| value.map(|component| component / length))
@@ -304,144 +368,4 @@ fn invalid_result(reason: impl Into<String>) -> GeometryEvaluationError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        import::GeometryImportContext, import_exact_cad, ExactCadImportOptions, GeometryFormat,
-    };
-    use runmat_geometry_core::{GeometryEvaluationError, UnitSystem};
-    use sha2::Digest as _;
-
-    const BOX: &[u8] = include_bytes!("../../tests/fixtures/box.brep");
-
-    struct Unlimited;
-
-    impl GeometryEvaluationControl for Unlimited {
-        fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
-            Ok(())
-        }
-
-        fn consume_iterations(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
-            Ok(())
-        }
-
-        fn consume_search_work(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
-            Ok(())
-        }
-
-        fn consume_allocation_bytes(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
-            Ok(())
-        }
-    }
-
-    struct Cancelled;
-
-    impl GeometryEvaluationControl for Cancelled {
-        fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
-            Err(GeometryEvaluationError::new(
-                GeometryEvaluationErrorKind::Cancelled,
-                "test cancellation",
-            ))
-        }
-
-        fn consume_iterations(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
-            unreachable!()
-        }
-
-        fn consume_search_work(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
-            unreachable!()
-        }
-
-        fn consume_allocation_bytes(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
-            unreachable!()
-        }
-    }
-
-    #[test]
-    fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
-        let imported = import_exact_cad(
-            "box.brep",
-            BOX,
-            GeometryFormat::Brep,
-            &ExactCadImportOptions::default(),
-            &GeometryImportContext::new(),
-        )
-        .unwrap();
-        let raw_digest: [u8; 32] = sha2::Sha256::digest(&imported.representation).into();
-        assert_eq!(imported.representation_digest(), raw_digest);
-        let evaluator = OcctExactCurveEvaluator::new(&imported).unwrap();
-        let id = &imported.topology.edges[0].curve_evaluator_id;
-        let range = evaluator.parameter_range(id).unwrap();
-        let start = evaluator.point(id, range.start, &Unlimited).unwrap();
-        let end = evaluator.point(id, range.end, &Unlimited).unwrap();
-        let expected_length = norm([end[0] - start[0], end[1] - start[1], end[2] - start[2]]);
-        let length = evaluator
-            .arc_length_m(id, range, 1.0e-12, &Unlimited)
-            .unwrap();
-        assert!((length - expected_length).abs() < 1.0e-12);
-
-        let parameter = (range.start + range.end) * 0.5;
-        let point = evaluator.point(id, parameter, &Unlimited).unwrap();
-        let tangent = evaluator.unit_tangent(id, parameter, &Unlimited).unwrap();
-        assert!((norm(tangent) - 1.0).abs() < 1.0e-12);
-        assert_eq!(
-            evaluator
-                .curvature_1_per_m(id, parameter, &Unlimited)
-                .unwrap(),
-            0.0
-        );
-        let projection = evaluator
-            .inverse_project(id, point, 1.0e-12, &Unlimited)
-            .unwrap();
-        assert!((projection.parameter - parameter).abs() < 1.0e-12);
-        assert!(projection.distance_m < 1.0e-12);
-        assert_eq!(
-            evaluator
-                .point(id, range.end + 1.0, &Unlimited)
-                .unwrap_err()
-                .kind,
-            GeometryEvaluationErrorKind::ParameterOutsideDomain
-        );
-        assert_eq!(
-            evaluator.point(id, parameter, &Cancelled).unwrap_err().kind,
-            GeometryEvaluationErrorKind::Cancelled
-        );
-        assert_eq!(
-            evaluator
-                .parameter_range(&CurveEvaluatorId::new("curve:unknown").unwrap())
-                .unwrap_err()
-                .kind,
-            GeometryEvaluationErrorKind::UnknownEvaluator
-        );
-
-        let millimeter_options = ExactCadImportOptions {
-            source_units: UnitSystem::Millimeter,
-            ..ExactCadImportOptions::default()
-        };
-        let millimeter_import = import_exact_cad(
-            "box.brep",
-            BOX,
-            GeometryFormat::Brep,
-            &millimeter_options,
-            &GeometryImportContext::new(),
-        )
-        .unwrap();
-        let millimeter_evaluator = OcctExactCurveEvaluator::new(&millimeter_import).unwrap();
-        let millimeter_length = millimeter_evaluator
-            .arc_length_m(
-                &millimeter_import.topology.edges[0].curve_evaluator_id,
-                range,
-                1.0e-15,
-                &Unlimited,
-            )
-            .unwrap();
-        assert!((millimeter_length - length * 0.001).abs() < 1.0e-15);
-
-        let mut corrupt = imported.clone();
-        corrupt.representation[0] ^= 1;
-        assert_eq!(
-            OcctExactCurveEvaluator::new(&corrupt).err().unwrap().kind,
-            GeometryEvaluationErrorKind::InconsistentGeometry
-        );
-    }
-}
+mod tests;

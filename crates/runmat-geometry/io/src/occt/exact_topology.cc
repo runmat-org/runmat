@@ -176,7 +176,12 @@ void append_exact_topology(OcctExactShapePayload& result,
           if (occurrence > 1) {
             throw std::runtime_error("OCCT exact seam edge has more than two face uses");
           }
-          coedge_payload.seam_image = static_cast<std::int8_t>(occurrence);
+          TopoDS_Edge local_edge = edge;
+          if (face.Orientation() == TopAbs_REVERSED) {
+            local_edge.Reverse();
+          }
+          coedge_payload.seam_image =
+              local_edge.Orientation() == TopAbs_REVERSED ? 1 : 0;
         }
         if (BRep_Tool::Degenerated(edge)) {
           face_payload.singular = true;

@@ -254,8 +254,8 @@ pub(super) fn project_exact_contracts(
                 id: pcurve_id(coedge.wire_key, coedge.coedge_key),
                 implementation: ExactPcurveImplementation::Kernel {
                     reference: evaluator_ref(format!(
-                        "face:{:020}:wire:{:020}:coedge:{:020}",
-                        coedge.face_key, coedge.wire_key, coedge.coedge_key
+                        "face:{:020}:wire:{:020}:coedge:{:020}:seam:{}",
+                        coedge.face_key, coedge.wire_key, coedge.coedge_key, coedge.seam_image
                     )),
                 },
             })
