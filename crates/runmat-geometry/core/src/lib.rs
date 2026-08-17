@@ -9,10 +9,16 @@ pub use model::{
     AssemblyNode, CadColorEvidence, CadCurveEvaluationSample, CadCurveEvaluationSampleSource,
     CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource,
     CadFaceEvaluator, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
-    CadSemanticKind, EntityIdRange, GeometryAsset, GeometryContractError, GeometrySource,
-    GeometryTolerancePolicy, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
-    MeshKind, PersistentEntityId, PersistentEntityKind, Region, RegionEntityMapping,
-    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+    CadSemanticKind, DisplayTessellationRefV2, EntityIdRange, ExactBRepModelV2,
+    ExactGeometryCapabilitiesV2, FacetedSolidModelV2, GeometryAsset, GeometryContractError,
+    GeometryDigest, GeometryDocumentV2, GeometryHealingPolicyV2, GeometryModelV2,
+    GeometryObjectRefV2, GeometryRevisionIdentityV2, GeometrySource, GeometrySourceFormatV2,
+    GeometrySourceIdentityV2, GeometryTolerancePolicy, MaterialEvidence,
+    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, PersistentEntityId, PersistentEntityKind,
+    Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
+    TessellationProfile, UnitSystem, DISPLAY_TESSELLATION_MEDIA_TYPE_V2, EXACT_BREP_MEDIA_TYPE_V2,
+    FACETED_SOLID_MEDIA_TYPE_V2, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
+    GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
 pub use selection::{EntityKind, EntityRef};
 

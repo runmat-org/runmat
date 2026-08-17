@@ -1,5 +1,6 @@
 mod analysis_identity;
 mod assembly;
+mod document_v2;
 mod field;
 mod geometry;
 mod material_evidence;
@@ -14,6 +15,7 @@ pub use analysis_identity::{
     GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind,
 };
 pub use assembly::AssemblyNode;
+pub use document_v2::*;
 pub use field::{FieldLocation, FieldValueKind};
 pub use geometry::{GeometryAsset, GeometrySource};
 pub use material_evidence::{MaterialEvidence, MaterialEvidenceConfidence};
