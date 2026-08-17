@@ -555,6 +555,61 @@ pub const RANDSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
     },
 ];
 
+const UNIDRND_INTEGER_LIMIT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unidrnd-integer-limit",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unidrnd with a typed-integer upper limit is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnidrndIntegerLimitExtension"),
+};
+const UNIDRND_INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unidrnd-integer-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unidrnd with typed-integer size arguments is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnidrndIntegerSizeExtension"),
+};
+const UNIDRND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    UNIDRND_INTEGER_LIMIT_EXTENSION,
+    UNIDRND_INTEGER_SIZE_EXTENSION,
+];
+const UNIDRND_INTEGER_LIMIT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double upper limits; RunMat mode accepts typed integers only when the sampling boundary can represent them exactly as binary64.",
+    }];
+const UNIDRND_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz, sz1, ...",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double size controls; RunMat mode decodes typed integer extents exactly as structural values.",
+    }];
+pub const UNIDRND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "r = unidrnd(integer_n, ___)",
+        inputs: &UNIDRND_INTEGER_LIMIT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The upper limit is extension-gated before gather and must cross the binary64 random-sampling boundary without rounding.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "r = unidrnd(n, integer_sz)",
+        inputs: &UNIDRND_INTEGER_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed extents are extension-gated before provider access and parsed exactly as output shape.",
+    },
+];
+
 const UNIDRND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "r = unidrnd(n)",
@@ -1700,9 +1755,30 @@ pub mod unidrnd {
         keywords = "unidrnd,uniform,discrete,random,integer,statistics",
         type_resolver(super::numeric_type),
         descriptor(self::DESCRIPTOR),
+        extensions(UNIDRND_EXTENSIONS),
+        integer_capabilities(UNIDRND_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::random::sampling::unidrnd"
     )]
     pub(crate) async fn unidrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        if let Some(value) = args.first() {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &UNIDRND_INTEGER_LIMIT_EXTENSION,
+                "unidrnd",
+                "upper-limit",
+            )
+            .await?;
+        }
+        if args
+            .iter()
+            .skip(1)
+            .any(crate::builtins::common::validation::value_has_native_integer_class)
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &UNIDRND_INTEGER_SIZE_EXTENSION,
+                "unidrnd",
+            )?;
+        }
         let (n, shape) = super::parse_unidrnd_args(args).await?;
         let len = tensor::element_count(&shape);
         let uniforms = random::generate_uniform(len, "unidrnd")?;
@@ -2870,6 +2946,7 @@ mod tests {
     fn unidrnd_reads_typed_integer_upper_bound_storage_exactly() {
         let _lock = random::test_lock().lock().unwrap();
         random::reset_rng();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let n = poisoned_int_tensor(IntegerStorage::U16(vec![3, 3, 3]), vec![3, 1], f64::NAN);
         let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
         match out {
@@ -2883,6 +2960,37 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unidrnd_typed_integer_roles_are_gated_and_wide_limits_must_be_exact() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
+        let limit_error = block_on(unidrnd::unidrnd_builtin(vec![Value::Int(IntValue::U16(3))]))
+            .expect_err("typed limit must be gated");
+        assert_eq!(
+            limit_error.identifier(),
+            UNIDRND_INTEGER_LIMIT_EXTENSION.error_identifier
+        );
+        let size_error = block_on(unidrnd::unidrnd_builtin(vec![
+            Value::Num(3.0),
+            Value::Int(IntValue::U8(2)),
+        ]))
+        .expect_err("typed size must be gated");
+        assert_eq!(
+            size_error.identifier(),
+            UNIDRND_INTEGER_SIZE_EXTENSION.error_identifier
+        );
+        drop(compatibility);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let lossy = block_on(unidrnd::unidrnd_builtin(vec![Value::Int(IntValue::U64(
+            9_007_199_254_740_993,
+        ))]))
+        .expect_err("lossy upper limit must reject");
+        assert!(lossy.message().contains("exactly representable"));
+        drop(extensions);
     }
 
     #[test]

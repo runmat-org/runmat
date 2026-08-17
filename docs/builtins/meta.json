@@ -163893,7 +163893,11 @@
           "when": "The active filesystem provider returns a malformed save-file selection.",
           "message": "uiputfile: invalid file selection"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "uiputfile accepts textual filter, title, and default-name inputs. Its filter-index output is an integer-valued double scalar, not a native integer-class input boundary."
+      }
     },
     {
       "name": "uitable",
@@ -163953,6 +163957,43 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "uitable-explicit-gpu-data",
+          "mode": "RunMatOnly",
+          "description": "uitable with explicitly GPU-resident data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UitableExplicitGpuDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ui = uitable(..., Data=integer_data, ...)",
+          "inputs": [
+            {
+              "name": "Data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The Data property accepts every numeric type and retains the exact integer class, shape, and values in the UI component object."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host integer data remains exact in the Data property. Automatically resident data gathers transparently through its owner; explicit gpuArray data is a separately gated extension."
+        }
       ]
     },
     {
@@ -163982,7 +164023,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "typename = underlyingType(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The query reports the exact signedness and width of host or resident integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Returns a host string scalar from coherent dtype metadata without reading or gathering payload values."
+        }
+      ]
     },
     {
       "name": "unicode2native",
@@ -164162,6 +164232,76 @@
           "when": "Internal conversion or allocation fails.",
           "message": "sampling: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "unidrnd-integer-limit",
+          "mode": "RunMatOnly",
+          "description": "unidrnd with a typed-integer upper limit is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnidrndIntegerLimitExtension"
+        },
+        {
+          "id": "unidrnd-integer-size",
+          "mode": "RunMatOnly",
+          "description": "unidrnd with typed-integer size arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnidrndIntegerSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = unidrnd(integer_n, ___)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double upper limits; RunMat mode accepts typed integers only when the sampling boundary can represent them exactly as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The upper limit is extension-gated before gather and must cross the binary64 random-sampling boundary without rounding."
+        },
+        {
+          "form": "r = unidrnd(n, integer_sz)",
+          "inputs": [
+            {
+              "name": "sz, sz1, ...",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double size controls; RunMat mode decodes typed integer extents exactly as structural values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed extents are extension-gated before provider access and parsed exactly as output shape."
+        }
       ]
     },
     {
@@ -164286,6 +164426,98 @@
           "identifier": "RunMat:unifrnd:Internal",
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "unifrnd: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "unifrnd-integer-lower-bound",
+          "mode": "RunMatOnly",
+          "description": "unifrnd with a typed-integer lower bound is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnifrndIntegerLowerBoundExtension"
+        },
+        {
+          "id": "unifrnd-integer-upper-bound",
+          "mode": "RunMatOnly",
+          "description": "unifrnd with a typed-integer upper bound is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnifrndIntegerUpperBoundExtension"
+        },
+        {
+          "id": "unifrnd-integer-size",
+          "mode": "RunMatOnly",
+          "description": "unifrnd with typed-integer size arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnifrndIntegerSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = unifrnd(integer_a, integer_b, ___)",
+          "inputs": [
+            {
+              "name": "a",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double lower bounds; typed integers cross a checked binary64 sampling boundary in RunMat mode."
+            },
+            {
+              "name": "b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double upper bounds; typed integers cross a checked binary64 sampling boundary in RunMat mode."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each typed bound is independently gated and must be exactly representable before entering the binary64 uniform generator."
+        },
+        {
+          "form": "r = unifrnd(a, b, integer_sz)",
+          "inputs": [
+            {
+              "name": "sz, sz1, ...",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double size controls; RunMat mode decodes typed integer extents exactly as structural values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed extents are extension-gated before provider access and parsed exactly without selecting the distribution computation domain."
         }
       ]
     },
@@ -164918,7 +165150,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "unsetenv accepts a host text environment-variable name; integer and resident numeric values reject before provider or environment access."
+      }
     },
     {
       "name": "unwrap",
@@ -165040,6 +165276,109 @@
           "identifier": "RunMat:unwrap:Internal",
           "when": "Internal gather, tensor conversion, or allocation fails.",
           "message": "unwrap: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "unwrap-integer-phase-data",
+          "mode": "RunMatOnly",
+          "description": "unwrap with typed-integer phase data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnwrapIntegerPhaseDataExtension"
+        },
+        {
+          "id": "unwrap-logical-phase-data",
+          "mode": "RunMatOnly",
+          "description": "unwrap with logical phase data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnwrapLogicalPhaseDataExtension"
+        },
+        {
+          "id": "unwrap-integer-tolerance",
+          "mode": "RunMatOnly",
+          "description": "unwrap with a typed-integer tolerance is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UnwrapIntegerToleranceExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Q = unwrap(integer_P, tol?, dim?)",
+          "inputs": [
+            {
+              "name": "P",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The compatibility target documents single and double phase data; RunMat mode admits typed integers only through a checked binary64 phase boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed phase values are independently gated and must be exactly representable before unwrapping; the extension returns double so phase corrections are not coerced back into integer storage."
+        },
+        {
+          "form": "Q = unwrap(P, integer_tol, dim?)",
+          "inputs": [
+            {
+              "name": "tol",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The compatibility target documents single and double tolerance; RunMat mode admits a typed integer scalar only when it is exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The tolerance is independently gated and crosses a checked binary64 comparison boundary without changing the documented output class selected by P."
+        },
+        {
+          "form": "Q = unwrap(P, tol, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented dimension accepts every integer class and is decoded exactly as a positive structural index."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The dimension remains exact through validation and selects a traversal axis without entering phase arithmetic."
         }
       ]
     },
@@ -165346,6 +165685,109 @@
           "identifier": "RunMat:sampleRate:BuildOutput",
           "when": "Output tensor construction fails.",
           "message": "sample-rate builtin: failed to build output"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "upsample-integer-factor",
+          "mode": "RunMatOnly",
+          "description": "upsample with a typed-integer factor is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UpsampleIntegerFactorExtension"
+        },
+        {
+          "id": "upsample-integer-phase",
+          "mode": "RunMatOnly",
+          "description": "upsample with a typed-integer phase is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UpsampleIntegerPhaseExtension"
+        },
+        {
+          "id": "upsample-nd-input",
+          "mode": "RunMatOnly",
+          "description": "upsample with an input having more than two dimensions is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:UpsampleNdInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = upsample(integer_X, N, PHASE?)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The public X argument has no datatype restriction. Zero insertion preserves authoritative integer elements, class, and shape exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Host storage is copied without conversion; resident integer storage uses owner-resolved allocation and scatter with matching device, shape, storage, and integer class."
+        },
+        {
+          "form": "Y = upsample(X, integer_N, PHASE?)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The factor is extension-gated before X or any provider is accessed, then converted exactly to a host size."
+        },
+        {
+          "form": "Y = upsample(X, N, integer_PHASE)",
+          "inputs": [
+            {
+              "name": "PHASE",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The phase is extension-gated before X or any provider is accessed, parsed exactly, and range-checked against N."
         }
       ]
     },

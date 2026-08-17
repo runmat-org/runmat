@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs through the host filesystem provider. GPU-resident textual arguments are gathered before the save-file request is made."
+    "notes": "Runs through the host filesystem provider. Provider-resident numeric arguments are invalid text and reject before provider access or a save-file request."
   },
   "fusion": {
     "elementwise": false,
@@ -33,7 +33,8 @@
     "`file = uiputfile()` uses an all-files filter.",
     "`uiputfile(filter)` accepts a character vector, string scalar, semicolon-delimited pattern list, or an N-by-1/N-by-2 cell array of patterns and descriptions.",
     "`uiputfile(filter, title, defaultName)` forwards the dialog title and initial file or directory path to the filesystem provider.",
-    "The selected `path` output is the containing directory with a trailing path separator. The `index` output is the one-based selected filter index.",
+    "The selected `path` output is the containing directory with a trailing path separator. The `index` output is a one-based integer-valued double, not a native integer-class result.",
+    "Inputs are textual. Host or provider-resident numeric values are rejected before the save-file request is made.",
     "Cancellation returns numeric zero for `file`, `path`, and `index`, matching MATLAB. This is also the behavior for filesystem providers that do not implement a save-file picker."
   ],
   "examples": [

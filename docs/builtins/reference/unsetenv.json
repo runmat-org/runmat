@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Host-side compatibility builtin. Numeric and provider-resident inputs are invalid environment-variable names and reject before provider or environment access."
   },
   "fusion": {
     "elementwise": false,
@@ -25,7 +25,8 @@
   },
   "description": "Remove an environment variable from the current RunMat process.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
+    "Accepts a string scalar or character row vector naming the environment variable.",
+    "Integer and other numeric inputs are not part of the API. Provider-resident numeric values reject before provider or environment access.",
     "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
     "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
   ],

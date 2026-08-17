@@ -4556,3 +4556,27 @@ fn categorical_categories_and_dictionary_lookup_have_semantics() {
     .unwrap();
     assert_eq!(value, Value::Num(20.0));
 }
+
+#[test]
+fn uitable_data_property_preserves_wide_integer_class_and_values() {
+    let data = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("integer table data"),
+    );
+    let output =
+        block_on(uitable_builtin(vec![Value::from("Data"), data])).expect("uitable construction");
+    let Value::Object(object) = output else {
+        panic!("expected uitable object");
+    };
+    let Value::Tensor(stored) = object.properties.get("Data").expect("Data property") else {
+        panic!("expected numeric Data property");
+    };
+    assert_eq!(
+        stored.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+    );
+    assert_eq!(stored.shape, vec![1, 2]);
+}

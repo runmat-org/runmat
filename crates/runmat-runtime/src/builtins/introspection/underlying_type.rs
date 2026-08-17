@@ -166,6 +166,26 @@ pub const IS_UNDERLYING_TYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IS_UNDERLYING_TYPE_ERRORS,
 };
+const UNDERLYING_TYPE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "The query reports the exact signedness and width of host or resident integer storage.",
+    }];
+pub const UNDERLYING_TYPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "typename = underlyingType(integer_X)",
+        inputs: &UNDERLYING_TYPE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Returns a host string scalar from coherent dtype metadata without reading or gathering payload values.",
+    }];
 const IS_UNDERLYING_TYPE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The predicate inspects the exact signedness and width of host or resident integer storage." }];
 pub const IS_UNDERLYING_TYPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isUnderlyingType(integer_X, typename)", inputs: &IS_UNDERLYING_TYPE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Returns a host logical scalar from authoritative dtype metadata without reading or gathering payload values." }];
 
@@ -177,6 +197,9 @@ pub const IS_UNDERLYING_TYPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDesc
     accel = "metadata",
     type_resolver(underlying_type_type),
     descriptor(crate::builtins::introspection::underlying_type::UNDERLYING_TYPE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::underlying_type::UNDERLYING_TYPE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::underlying_type"
 )]
 fn underlying_type_builtin(value: Value) -> BuiltinResult<String> {

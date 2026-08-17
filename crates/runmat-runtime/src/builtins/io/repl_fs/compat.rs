@@ -290,6 +290,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const UNSETENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "unsetenv accepts a host text environment-variable name; integer and resident numeric values reject before provider or environment access.",
+};
 simple_descriptor!(
     MATLABROOT_SIGNATURES,
     MATLABROOT_DESCRIPTOR,
@@ -818,9 +823,16 @@ fn value_contains_resident(value: &Value) -> bool {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::repl_fs::compat::UNSETENV_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::UNSETENV_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn unsetenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident) {
+        return Err(compat_error(
+            "unsetenv",
+            "unsetenv: name must be text; provider-resident numeric values are invalid",
+        ));
+    }
     let args = gather_args("unsetenv", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(

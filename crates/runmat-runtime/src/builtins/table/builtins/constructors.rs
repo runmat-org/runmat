@@ -1080,6 +1080,33 @@ fn parquet_value_contains_typed_integer(value: &Value) -> bool {
         || matches!(value, Value::Object(object) if object.properties.values().any(parquet_value_contains_typed_integer))
 }
 
+const UITABLE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "uitable-explicit-gpu-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "uitable with explicitly GPU-resident data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UitableExplicitGpuDataExtension"),
+};
+pub const UITABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [UITABLE_EXPLICIT_GPU_EXTENSION];
+const UITABLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The Data property accepts every numeric type and retains the exact integer class, shape, and values in the UI component object.",
+    }];
+pub const UITABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ui = uitable(..., Data=integer_data, ...)",
+        inputs: &UITABLE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host integer data remains exact in the Data property. Automatically resident data gathers transparently through its owner; explicit gpuArray data is a separately gated extension.",
+    }];
+
 #[runtime_builtin(
     name = "uitable",
     category = "table",
@@ -1087,10 +1114,23 @@ fn parquet_value_contains_typed_integer(value: &Value) -> bool {
     keywords = "uitable,ui,table,Data",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::UITABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::UITABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn uitable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UITABLE_EXPLICIT_GPU_EXTENSION,
+            "uitable",
+        )?;
+    }
     let args = gather_values(&args).await?;
     let mut object = ObjectInstance::new(UITABLE_CLASS.to_string());
     let data = parse_named_option(&args, "Data")

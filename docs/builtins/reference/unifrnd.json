@@ -35,9 +35,11 @@
     "`unifrnd(a, b, n)` returns an `n × n` matrix of samples.",
     "`unifrnd(a, b, m, n)` returns an `m × n` matrix of samples.",
     "`unifrnd(a, b, sz)` accepts a size vector and returns an array with shape `sz`.",
-    "`a` and `b` must be scalar numeric values.",
+    "`a` and `b` must be scalar single or double values on the compatibility surface.",
+    "Native typed-integer bounds are independently gated RunMat extensions and must be exactly representable before entering binary64 sampling.",
     "`a` must be less than `b`; `unifrnd` errors if `a >= b`.",
-    "All outputs are double precision regardless of input type."
+    "Native typed-integer size controls are a separately gated RunMat extension and are decoded exactly as structural extents.",
+    "The currently implemented scalar-parameter path returns double output. Complete documented single-parameter class propagation and array parameter broadcasting remain implementation gaps."
   ],
   "examples": [
     {

@@ -23,6 +23,86 @@ const RESAMPLE_NAME: &str = "resample";
 const DEFAULT_RESAMPLE_N: usize = 10;
 const DEFAULT_RESAMPLE_BETA: f64 = 5.0;
 
+const UPSAMPLE_INTEGER_FACTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-integer-factor",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with a typed-integer factor is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleIntegerFactorExtension"),
+};
+const UPSAMPLE_INTEGER_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-integer-phase",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with a typed-integer phase is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleIntegerPhaseExtension"),
+};
+const UPSAMPLE_ND_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upsample-nd-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upsample with an input having more than two dimensions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpsampleNdInputExtension"),
+};
+const UPSAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    UPSAMPLE_INTEGER_FACTOR_EXTENSION,
+    UPSAMPLE_INTEGER_PHASE_EXTENSION,
+    UPSAMPLE_ND_INPUT_EXTENSION,
+];
+const UPSAMPLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public X argument has no datatype restriction. Zero insertion preserves authoritative integer elements, class, and shape exactly.",
+    }];
+const UPSAMPLE_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes.",
+    }];
+const UPSAMPLE_INTEGER_PHASE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "PHASE",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N.",
+    }];
+pub const UPSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(integer_X, N, PHASE?)",
+        inputs: &UPSAMPLE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Host storage is copied without conversion; resident integer storage uses owner-resolved allocation and scatter with matching device, shape, storage, and integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(X, integer_N, PHASE?)",
+        inputs: &UPSAMPLE_INTEGER_FACTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The factor is extension-gated before X or any provider is accessed, then converted exactly to a host size.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = upsample(X, N, integer_PHASE)",
+        inputs: &UPSAMPLE_INTEGER_PHASE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The phase is extension-gated before X or any provider is accessed, parsed exactly, and range-checked against N.",
+    },
+];
+
 const DOWNSAMPLE_INTEGER_FACTOR_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "downsample-integer-factor",
@@ -628,10 +708,30 @@ fn sample_error_with_source(
     summary = "Increase sample rate by inserting zeros between samples.",
     keywords = "upsample,sample rate,zero insertion,signal processing",
     type_resolver(upsample_type),
+    extensions(UPSAMPLE_EXTENSIONS),
+    integer_capabilities(UPSAMPLE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::signal::sample_rate::UPSAMPLE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::sample_rate"
 )]
 async fn upsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_typed_integer_value(&n) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_INTEGER_FACTOR_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
+    if rest.first().is_some_and(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_INTEGER_PHASE_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
+    if value_rank(&x).is_some_and(|rank| rank > 2) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &UPSAMPLE_ND_INPUT_EXTENSION,
+            UPSAMPLE_NAME,
+        )?;
+    }
     sample_rate_builtin(UPSAMPLE_NAME, SampleOp::Up, x, n, rest).await
 }
 
@@ -2426,6 +2526,32 @@ mod tests {
     }
 
     #[test]
+    fn upsample_typed_controls_are_separately_extension_gated() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let factor_error = block_on(upsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Int(runmat_builtins::IntValue::U8(2)),
+            vec![],
+        ))
+        .expect_err("integer factor extension");
+        assert_eq!(
+            factor_error.identifier(),
+            UPSAMPLE_INTEGER_FACTOR_EXTENSION.error_identifier
+        );
+        let phase_error = block_on(upsample_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            Value::Num(2.0),
+            vec![Value::Int(runmat_builtins::IntValue::U8(1))],
+        ))
+        .expect_err("integer phase extension");
+        assert_eq!(
+            phase_error.identifier(),
+            UPSAMPLE_INTEGER_PHASE_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
     fn downsample_nd_input_is_extension_gated() {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(downsample_builtin(
@@ -2813,6 +2939,7 @@ mod tests {
 
     #[test]
     fn sample_rate_operates_along_first_non_singleton_nd_dimension() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = call_upsample(vec![
             tensor(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]),
             Value::Num(2.0),
@@ -2966,7 +3093,7 @@ mod tests {
     }
 
     #[test]
-    fn resample_scalar_integer_option_reads_typed_integer_storage_without_mirror() {
+    fn resample_scalar_integer_option_decodes_exact_native_value() {
         let scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("scalar");
         let vector =
