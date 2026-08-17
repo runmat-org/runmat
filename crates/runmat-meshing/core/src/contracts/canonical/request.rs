@@ -5,7 +5,7 @@ use super::{
     MeshingContractError, MetricFieldRequest,
 };
 
-pub const MESHING_REQUEST_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_REQUEST_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -103,10 +103,17 @@ fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
     );
 
     let mut invalid = request();
+    let entity_id = PersistentEntityId {
+        kind: PersistentEntityKind::Face,
+        source_topology_id: "face:overflow".into(),
+        assembly_path: vec!["root".into()],
+    };
     invalid.metric.contributions = (0..=65_536)
         .map(|_| MetricContribution {
-            source: MetricSourceKind::Global,
-            scope: MetricContributionScope::Global,
+            source: MetricSourceKind::Face,
+            scope: MetricContributionScope::Entity {
+                entity_id: entity_id.clone(),
+            },
             metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         })
         .collect();
@@ -138,6 +145,54 @@ fn metric_requires_a_symmetric_positive_definite_tensor() {
         yz: 0.0,
     };
     assert!(overflowing.validate().is_err());
+}
+
+#[test]
+fn metric_contributions_are_typed_unique_and_canonical() {
+    let mut metric = request().metric;
+    let curve_id = PersistentEntityId {
+        kind: PersistentEntityKind::Edge,
+        source_topology_id: "edge:1".into(),
+        assembly_path: vec!["root".into()],
+    };
+    let region_id = PersistentEntityId {
+        kind: PersistentEntityKind::Region,
+        source_topology_id: "region:1".into(),
+        assembly_path: vec!["root".into()],
+    };
+    metric.contributions = vec![
+        MetricContribution {
+            source: MetricSourceKind::Region,
+            scope: MetricContributionScope::Region { region_id },
+            metric: MetricTensor3::isotropic_length_m(0.008).unwrap(),
+        },
+        MetricContribution {
+            source: MetricSourceKind::Curve,
+            scope: MetricContributionScope::Entity {
+                entity_id: curve_id,
+            },
+            metric: MetricTensor3::isotropic_length_m(0.004).unwrap(),
+        },
+    ];
+    metric.validate().unwrap();
+
+    metric.contributions.swap(0, 1);
+    assert_eq!(metric.validate().unwrap_err().field, "metric contributions");
+    metric.contributions[0] = metric.contributions[1].clone();
+    assert_eq!(metric.validate().unwrap_err().field, "metric contributions");
+
+    let mut wrong_region = metric.contributions[0].clone();
+    wrong_region.scope = MetricContributionScope::Region {
+        region_id: PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "face:not-region".into(),
+            assembly_path: vec!["root".into()],
+        },
+    };
+    assert_eq!(
+        wrong_region.validate().unwrap_err().field,
+        "metric contribution region"
+    );
 }
 
 #[test]

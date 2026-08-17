@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::{validate_finite, MeshingContractError, PersistentEntityId};
+use std::cmp::Ordering;
+
+use super::{validate_finite, MeshingContractError, PersistentEntityId, PersistentEntityKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,11 +91,28 @@ pub enum MetricSourceKind {
     SolutionIndicator,
 }
 
+impl MetricSourceKind {
+    pub const fn canonical_rank(self) -> u8 {
+        match self {
+            Self::Global => 0,
+            Self::Region => 1,
+            Self::Point => 2,
+            Self::Curve => 3,
+            Self::Face => 4,
+            Self::Volume => 5,
+            Self::Proximity => 6,
+            Self::Feature => 7,
+            Self::Load => 8,
+            Self::Contact => 9,
+            Self::SolutionIndicator => 10,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MetricContributionScope {
-    Global,
-    Region { region_id: String },
+    Region { region_id: PersistentEntityId },
     Entity { entity_id: PersistentEntityId },
 }
 
@@ -108,17 +127,21 @@ pub struct MetricContribution {
 impl MetricContribution {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         self.metric.validate()?;
+        if self.source == MetricSourceKind::Global {
+            return Err(MeshingContractError::invalid(
+                "metric contribution source",
+                "global sizing is represented only by global_metric",
+            ));
+        }
         match &self.scope {
-            MetricContributionScope::Global => {
-                if self.source != MetricSourceKind::Global {
+            MetricContributionScope::Region { region_id } => {
+                region_id.validate()?;
+                if region_id.kind != PersistentEntityKind::Region {
                     return Err(MeshingContractError::invalid(
-                        "metric contribution scope",
-                        "global scope requires the global source kind",
+                        "metric contribution region",
+                        "region scope requires a persistent region identity",
                     ));
                 }
-            }
-            MetricContributionScope::Region { region_id } => {
-                super::validate_token("metric region id", region_id, 512)?;
             }
             MetricContributionScope::Entity { entity_id } => entity_id.validate()?,
         }
@@ -155,6 +178,56 @@ impl MetricFieldRequest {
         for contribution in &self.contributions {
             contribution.validate()?;
         }
+        if self
+            .contributions
+            .windows(2)
+            .any(|pair| compare_contributions(&pair[0], &pair[1]) != Ordering::Less)
+        {
+            return Err(MeshingContractError::invalid(
+                "metric contributions",
+                "must be unique and canonically ordered by source, scope, identity, and tensor",
+            ));
+        }
         Ok(())
     }
+}
+
+fn compare_contributions(left: &MetricContribution, right: &MetricContribution) -> Ordering {
+    left.source
+        .canonical_rank()
+        .cmp(&right.source.canonical_rank())
+        .then_with(|| compare_scopes(&left.scope, &right.scope))
+        .then_with(|| compare_metrics(left.metric, right.metric))
+}
+
+fn compare_scopes(left: &MetricContributionScope, right: &MetricContributionScope) -> Ordering {
+    match (left, right) {
+        (
+            MetricContributionScope::Region { region_id: left },
+            MetricContributionScope::Region { region_id: right },
+        )
+        | (
+            MetricContributionScope::Entity { entity_id: left },
+            MetricContributionScope::Entity { entity_id: right },
+        ) => left.cmp(right),
+        (MetricContributionScope::Region { .. }, MetricContributionScope::Entity { .. }) => {
+            Ordering::Less
+        }
+        (MetricContributionScope::Entity { .. }, MetricContributionScope::Region { .. }) => {
+            Ordering::Greater
+        }
+    }
+}
+
+fn compare_metrics(left: MetricTensor3, right: MetricTensor3) -> Ordering {
+    for (left, right) in [left.xx, left.yy, left.zz, left.xy, left.xz, left.yz]
+        .into_iter()
+        .zip([right.xx, right.yy, right.zz, right.xy, right.xz, right.yz])
+    {
+        let ordering = left.total_cmp(&right);
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    Ordering::Equal
 }

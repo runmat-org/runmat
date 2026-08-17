@@ -215,19 +215,7 @@ fn validate_metric_resolution(
 }
 
 pub(super) const fn metric_source_rank(source: MetricSourceKind) -> u8 {
-    match source {
-        MetricSourceKind::Global => 0,
-        MetricSourceKind::Region => 1,
-        MetricSourceKind::Point => 2,
-        MetricSourceKind::Curve => 3,
-        MetricSourceKind::Face => 4,
-        MetricSourceKind::Volume => 5,
-        MetricSourceKind::Proximity => 6,
-        MetricSourceKind::Feature => 7,
-        MetricSourceKind::Load => 8,
-        MetricSourceKind::Contact => 9,
-        MetricSourceKind::SolutionIndicator => 10,
-    }
+    source.canonical_rank()
 }
 
 fn validate_resolution(
