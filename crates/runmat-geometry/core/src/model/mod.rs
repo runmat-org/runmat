@@ -1,5 +1,6 @@
 mod analysis_identity;
 mod assembly;
+mod canonical;
 mod document;
 mod exact_artifact;
 mod exact_evaluator;

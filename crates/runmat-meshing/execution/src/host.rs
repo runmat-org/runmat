@@ -6,8 +6,12 @@ use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
     PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
+use runmat_geometry_core::{
+    decode_geometry_document, encode_geometry_document, GeometryDocument, GeometryModel,
+};
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingRequest, MeshingStageIdentity, MeshingWorkloadRequest,
+    CanonicalMeshingContract, MeshingCapabilityRequirement, MeshingInputKind, MeshingRequest,
+    MeshingStageIdentity, MeshingWorkloadRequest,
 };
 
 use crate::task::validate_inputs;
@@ -28,6 +32,7 @@ pub struct MeshingHostWorkload {
     pub stage_identity: MeshingStageIdentity,
     pub resolved_request: MeshingRequest,
     pub artifact_access: MeshingArtifactAccess,
+    pub exact_geometry_document: Option<GeometryDocument>,
 }
 
 impl MeshingHostWorkload {
@@ -36,6 +41,7 @@ impl MeshingHostWorkload {
         stage_identity: MeshingStageIdentity,
         resolved_request: MeshingRequest,
         artifact_access: MeshingArtifactAccess,
+        exact_geometry_document: Option<GeometryDocument>,
     ) -> MeshingExecutionResult<Self> {
         let host = Self {
             schema_version: MESHING_HOST_WORKLOAD_SCHEMA_VERSION,
@@ -43,6 +49,7 @@ impl MeshingHostWorkload {
             stage_identity,
             resolved_request,
             artifact_access,
+            exact_geometry_document,
         };
         host.validate()?;
         Ok(host)
@@ -58,6 +65,7 @@ impl MeshingHostWorkload {
         self.stage_identity.validate()?;
         self.resolved_request.validate()?;
         self.artifact_access.validate()?;
+        self.validate_exact_geometry_document()?;
         if self.workload.stage != self.stage_identity.stage
             || self.workload.stage_identity_digest != self.stage_identity.canonical_digest()?
             || self.stage_identity.resolved_request_digest
@@ -77,18 +85,31 @@ impl MeshingHostWorkload {
         let identity = self.stage_identity.canonical_encode()?;
         let request = self.resolved_request.canonical_encode()?;
         let access = encode_access(&self.artifact_access)?;
+        let exact_geometry_document = self
+            .exact_geometry_document
+            .as_ref()
+            .map(encode_geometry_document)
+            .transpose()?
+            .unwrap_or_default();
         let mut bytes = Vec::with_capacity(
             HOST_PREFIX.len()
                 + 2
-                + 4 * 4
+                + 5 * 4
                 + workload.len()
                 + identity.len()
                 + request.len()
-                + access.len(),
+                + access.len()
+                + exact_geometry_document.len(),
         );
         bytes.extend_from_slice(HOST_PREFIX);
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
-        for component in [&workload, &identity, &request, &access] {
+        for component in [
+            &workload,
+            &identity,
+            &request,
+            &access,
+            &exact_geometry_document,
+        ] {
             if component.len() > MAX_COMPONENT_BYTES {
                 return Err(MeshingExecutionError::Invalid(
                     "meshing host workload component exceeds its bound".into(),
@@ -117,6 +138,12 @@ impl MeshingHostWorkload {
         let stage_identity = MeshingStageIdentity::canonical_decode(decoder.component()?)?;
         let resolved_request = MeshingRequest::canonical_decode(decoder.component()?)?;
         let artifact_access = decode_access(decoder.component()?)?;
+        let document_bytes = decoder.component()?;
+        let exact_geometry_document = if document_bytes.is_empty() {
+            None
+        } else {
+            Some(decode_geometry_document(document_bytes)?)
+        };
         decoder.finish()?;
         let host = Self {
             schema_version,
@@ -124,6 +151,7 @@ impl MeshingHostWorkload {
             stage_identity,
             resolved_request,
             artifact_access,
+            exact_geometry_document,
         };
         host.validate()?;
         if host.canonical_bytes()? != bytes {
@@ -132,6 +160,56 @@ impl MeshingHostWorkload {
             ));
         }
         Ok(host)
+    }
+
+    fn validate_exact_geometry_document(&self) -> MeshingExecutionResult<()> {
+        let exact_inputs = self
+            .workload
+            .inputs
+            .iter()
+            .filter(|input| input.kind == MeshingInputKind::ExactGeometry)
+            .collect::<Vec<_>>();
+        match (exact_inputs.as_slice(), &self.exact_geometry_document) {
+            ([], None) => Ok(()),
+            ([input], Some(document)) => {
+                document.validate()?;
+                let GeometryModel::ExactBRep { model } = &document.model else {
+                    return Err(MeshingExecutionError::Invalid(
+                        "exact geometry input requires an exact geometry document".into(),
+                    ));
+                };
+                let kernel_is_required =
+                    self.workload
+                        .required_capabilities
+                        .iter()
+                        .any(|capability| {
+                            matches!(
+                                capability,
+                                MeshingCapabilityRequirement::ExactCadKernel { abi }
+                                    if abi == &model.kernel_abi
+                            )
+                        });
+                if !document.display_tessellations.is_empty()
+                    || document.primary_artifact().digest.bytes() != input.digest.bytes()
+                    || document.source.content_digest.bytes()
+                        != self.stage_identity.geometry.source_digest.bytes()
+                    || document.revision.revision != self.stage_identity.geometry.geometry_revision
+                    || document.revision.persistent_mapping_version
+                        != self.stage_identity.geometry.persistent_mapping_version
+                    || document.tolerance != self.resolved_request.tolerance
+                    || !kernel_is_required
+                {
+                    return Err(MeshingExecutionError::Identity(
+                        "exact geometry document does not bind the task identity and capability",
+                    ));
+                }
+                Ok(())
+            }
+            _ => Err(MeshingExecutionError::Invalid(
+                "host workload requires exactly one document for exactly one exact geometry input"
+                    .into(),
+            )),
+        }
     }
 
     pub fn program_request(

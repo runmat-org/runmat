@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::{
-    codec::digest, AdmittedExactGeometry, ExactGeometryManifest, EXACT_EVALUATOR_MEDIA_TYPE,
+    AdmittedExactGeometry, ExactGeometryManifest, EXACT_EVALUATOR_MEDIA_TYPE,
     EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION, EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE,
 };
 use crate::{
@@ -189,7 +189,9 @@ fn validate_component(
 }
 
 fn verify_object(reference: &GeometryObjectRef, bytes: &[u8]) -> Result<(), GeometryContractError> {
-    if reference.encoded_length != bytes.len() as u64 || reference.digest != digest(bytes)? {
+    if reference.encoded_length != bytes.len() as u64
+        || reference.digest != crate::model::canonical::digest(bytes)?
+    {
         return Err(invalid(
             "geometry component bytes",
             "encoded length or SHA-256 content identity does not match its reference",

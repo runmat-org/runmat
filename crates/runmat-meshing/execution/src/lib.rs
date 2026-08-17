@@ -52,7 +52,7 @@ pub use publication::{
 pub use response::{MeshingHostResponse, MESHING_HOST_RESPONSE_SCHEMA_VERSION};
 pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
-    MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,
+    MeshingStageInvocation, MeshingStageKernel, PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
 pub use task::{
     build_task_submission, MeshingExecutionContext, MeshingTaskEffectPolicy,

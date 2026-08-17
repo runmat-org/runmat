@@ -15,7 +15,7 @@ use crate::{
 
 fn object(bytes: &[u8], media_type: &str) -> GeometryObjectRef {
     GeometryObjectRef {
-        digest: super::codec::digest(bytes).unwrap(),
+        digest: crate::model::canonical::digest(bytes).unwrap(),
         encoded_length: bytes.len() as u64,
         media_type: media_type.into(),
         schema_version: GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,

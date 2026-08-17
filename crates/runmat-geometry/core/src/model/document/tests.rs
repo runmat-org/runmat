@@ -111,6 +111,21 @@ fn exact_document_is_path_free_and_display_is_derived() {
 }
 
 #[test]
+fn geometry_document_has_a_bounded_canonical_round_trip() {
+    let document = exact_document();
+    let encoded = encode_geometry_document(&document).unwrap();
+    assert_eq!(decode_geometry_document(&encoded).unwrap(), document);
+
+    let mut trailing = encoded.clone();
+    trailing.push(0);
+    assert!(decode_geometry_document(&trailing).is_err());
+    let mut wrong_domain = encoded;
+    wrong_domain[0] ^= 1;
+    assert!(decode_geometry_document(&wrong_domain).is_err());
+    assert!(decode_geometry_document(&vec![0; 4 * 1024 * 1024 + 1]).is_err());
+}
+
+#[test]
 fn exact_sources_cannot_degrade_to_faceted_payloads() {
     let mut document = exact_document();
     document.model = faceted_model();

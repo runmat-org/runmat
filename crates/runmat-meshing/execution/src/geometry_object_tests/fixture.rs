@@ -16,7 +16,7 @@ fn parameter(start: f64, end: f64) -> ParameterRange {
     ParameterRange { start, end }
 }
 
-pub(super) fn geometry() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorRegistry) {
+pub(crate) fn geometry() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorRegistry) {
     let root = id(PersistentEntityKind::Assembly, "root");
     let part = id(PersistentEntityKind::Assembly, "part");
     let instance = id(PersistentEntityKind::Instance, "instance");

@@ -394,6 +394,36 @@ impl Fixture {
         )
         .unwrap()
     }
+
+    pub(crate) fn bind_exact_geometry(
+        &mut self,
+        document: &runmat_geometry_core::GeometryDocument,
+        input: ValueRef,
+    ) {
+        let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+            panic!("test fixture requires exact geometry")
+        };
+        self.request.tolerance = document.tolerance;
+        self.identity.geometry.source_digest =
+            StableDigest::from_bytes(*document.source.content_digest.bytes());
+        self.identity.geometry.geometry_revision = document.revision.revision;
+        self.identity.geometry.persistent_mapping_version =
+            document.revision.persistent_mapping_version;
+        self.identity.resolved_request_digest = self.request.canonical_digest().unwrap();
+        self.identity.tolerance_policy_digest = self.request.tolerance.canonical_digest().unwrap();
+        self.identity.prerequisites = vec![MeshingInputRef {
+            kind: MeshingInputKind::ExactGeometry,
+            digest: StableDigest::from_bytes(*input.logical_digest.bytes()),
+        }];
+        self.workload.inputs = self.identity.prerequisites.clone();
+        self.workload.stage_identity_digest = self.identity.canonical_digest().unwrap();
+        for capability in &mut self.workload.required_capabilities {
+            if let MeshingCapabilityRequirement::ExactCadKernel { abi } = capability {
+                *abi = model.kernel_abi.clone();
+            }
+        }
+        self.input = input;
+    }
 }
 
 fn request() -> MeshingRequest {

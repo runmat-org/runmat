@@ -1,9 +1,14 @@
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ExecutableForm;
 use runmat_meshing_core::MeshingStageKind;
 
+use crate::geometry_object_tests::fixture::geometry;
 use crate::task_tests::Fixture;
-use crate::{MeshingHostWorkload, MESHING_HOST_TARGET_PROFILE};
+use crate::{
+    prepare_exact_geometry_input, prepare_exact_geometry_objects, MeshingHostWorkload,
+    MESHING_HOST_TARGET_PROFILE,
+};
 
 #[test]
 fn host_workload_has_a_stable_bounded_round_trip() {
@@ -81,12 +86,72 @@ fn vm_facing_form_rejects_inline_geometry_arguments() {
     assert!(MeshingHostWorkload::from_program_request(&request).is_err());
 }
 
+#[test]
+fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
+    let (document, topology, evaluators) = geometry();
+    let objects = prepare_exact_geometry_objects(
+        document,
+        topology,
+        evaluators,
+        None,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let document = objects.document.clone();
+    let access = crate::MeshingArtifactAccess {
+        authorization_scope: "exact-host-run".into(),
+        encryption_context: Digest::sha256(b"exact-host-context"),
+    };
+    let input =
+        prepare_exact_geometry_input(objects, access.clone(), ObjectInventoryLimits::default())
+            .unwrap();
+    let mut fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
+    fixture.context.artifact_access = access.clone();
+    fixture.bind_exact_geometry(&document, input.root_input().clone());
+    let host = MeshingHostWorkload::new(
+        fixture.workload.clone(),
+        fixture.identity.clone(),
+        fixture.request.clone(),
+        access,
+        Some(document.clone()),
+    )
+    .unwrap();
+    let bytes = host.canonical_bytes().unwrap();
+    assert_eq!(
+        MeshingHostWorkload::from_canonical_bytes(&bytes).unwrap(),
+        host
+    );
+    host.program_request(revision(), std::slice::from_ref(input.root_input()))
+        .unwrap();
+
+    assert!(MeshingHostWorkload::new(
+        fixture.workload.clone(),
+        fixture.identity.clone(),
+        fixture.request.clone(),
+        fixture.context.artifact_access.clone(),
+        None,
+    )
+    .is_err());
+    let mut wrong_document = document;
+    wrong_document.source.content_digest =
+        runmat_geometry_core::GeometryDigest::from_bytes([88; 32]);
+    assert!(MeshingHostWorkload::new(
+        fixture.workload,
+        fixture.identity,
+        fixture.request,
+        fixture.context.artifact_access,
+        Some(wrong_document),
+    )
+    .is_err());
+}
+
 fn host(fixture: &Fixture) -> MeshingHostWorkload {
     MeshingHostWorkload::new(
         fixture.workload.clone(),
         fixture.identity.clone(),
         fixture.request.clone(),
         fixture.context.artifact_access.clone(),
+        None,
     )
     .unwrap()
 }

@@ -1,8 +1,10 @@
+mod codec;
 mod payload;
 mod validation;
 
 use serde::{Deserialize, Serialize};
 
+pub use codec::{decode_geometry_document, encode_geometry_document};
 pub use payload::{
     DisplayTessellationRef, ExactBRepModel, ExactGeometryCapabilities, FacetedSolidModel,
     GeometryModel, GeometryObjectRef, DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE,

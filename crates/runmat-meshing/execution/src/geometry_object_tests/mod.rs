@@ -1,4 +1,4 @@
-mod fixture;
+pub(crate) mod fixture;
 
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 

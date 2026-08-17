@@ -1,6 +1,7 @@
 use crate::{
-    import_result_publication, prepare_result_publication, prepare_stage_objects,
-    MeshingExecutionError, MeshingHostWorkload, PreparedMeshingResultPublication,
+    import_exact_geometry_input, import_result_publication, prepare_result_publication,
+    prepare_stage_objects, MeshingExecutionError, MeshingHostWorkload, PreparedExactGeometryInput,
+    PreparedMeshingResultPublication,
 };
 use runmat_execution::value::ValuePayload;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
@@ -9,16 +10,45 @@ use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_meshing_core::{
     build_chunked_stage_payload, build_closed_stage_manifest, CanonicalMeshingContract,
     MeshingCancellationSignal, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream,
-    MeshingFailure, MeshingFailureCategory, MeshingManifestDisposition, MeshingPartitionIdentity,
-    MeshingPartitionKind, MeshingStageKind, MeshingStageResultKind, MeshingWorkloadResult,
-    StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
+    MeshingFailure, MeshingFailureCategory, MeshingInputKind, MeshingManifestDisposition,
+    MeshingPartitionIdentity, MeshingPartitionKind, MeshingStageKind, MeshingStageResultKind,
+    MeshingWorkloadResult, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
 };
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PreparedMeshingInput {
+    ExactGeometry(Box<PreparedExactGeometryInput>),
+    StageArtifact(Box<PreparedMeshingResultPublication>),
+}
+
+impl PreparedMeshingInput {
+    pub const fn exact_geometry(&self) -> Option<&PreparedExactGeometryInput> {
+        match self {
+            Self::ExactGeometry(input) => Some(input),
+            Self::StageArtifact(_) => None,
+        }
+    }
+
+    pub const fn stage_artifact(&self) -> Option<&PreparedMeshingResultPublication> {
+        match self {
+            Self::ExactGeometry(_) => None,
+            Self::StageArtifact(input) => Some(input),
+        }
+    }
+
+    fn objects(&self) -> &[runmat_execution_artifact::LogicalObject] {
+        match self {
+            Self::ExactGeometry(input) => &input.geometry_objects().objects,
+            Self::StageArtifact(input) => &input.stage_objects().objects,
+        }
+    }
+}
 
 use super::budget::{failure, MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl};
 
 pub struct MeshingStageInvocation<'a, 'control> {
     pub host: &'a MeshingHostWorkload,
-    pub inputs: &'a [PreparedMeshingResultPublication],
+    pub inputs: &'a [PreparedMeshingInput],
     pub control: &'a mut MeshingStageControl<'control>,
 }
 
@@ -102,9 +132,31 @@ where
     let host = MeshingHostWorkload::from_program_request(request)?;
     let roots = input_roots(request)?;
     let limits = effective_limits(&host, inventory_limits)?;
-    let inputs = roots
+    let inputs = host
+        .workload
+        .inputs
         .iter()
-        .map(|root| import_result_publication(store, root, host.artifact_access.clone(), limits))
+        .zip(&roots)
+        .map(|(input, root)| match input.kind {
+            MeshingInputKind::ExactGeometry => import_exact_geometry_input(
+                store,
+                host.exact_geometry_document.clone().ok_or_else(|| {
+                    MeshingExecutionError::Invalid(
+                        "exact geometry input is missing its host document".into(),
+                    )
+                })?,
+                root,
+                host.artifact_access.clone(),
+                limits,
+            )
+            .map(Box::new)
+            .map(PreparedMeshingInput::ExactGeometry),
+            MeshingInputKind::StageArtifact => {
+                import_result_publication(store, root, host.artifact_access.clone(), limits)
+                    .map(Box::new)
+                    .map(PreparedMeshingInput::StageArtifact)
+            }
+        })
         .collect::<Result<Vec<_>, _>>()?;
     validate_combined_input_inventory(&inputs, limits)?;
 
@@ -282,13 +334,13 @@ fn effective_chunk_policy(
 }
 
 fn validate_combined_input_inventory(
-    inputs: &[PreparedMeshingResultPublication],
+    inputs: &[PreparedMeshingInput],
     limits: ObjectInventoryLimits,
 ) -> Result<(), MeshingExecutionError> {
     let mut objects = std::collections::BTreeMap::new();
     let mut total = 0_u64;
     for input in inputs {
-        for object in &input.stage_objects().objects {
+        for object in input.objects() {
             match objects.insert(object.descriptor.digest, object.descriptor.encoded_length) {
                 Some(length) if length != object.descriptor.encoded_length => {
                     return Err(MeshingExecutionError::Identity(

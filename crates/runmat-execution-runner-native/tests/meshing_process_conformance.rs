@@ -672,7 +672,7 @@ fn fixture_for(
             },
         ],
     };
-    let host = MeshingHostWorkload::new(workload, identity, request, access).unwrap();
+    let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
     let program = host.program_request(revision, &[]).unwrap();
     (host, program)
 }
