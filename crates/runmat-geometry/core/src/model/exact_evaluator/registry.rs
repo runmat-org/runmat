@@ -4,6 +4,8 @@ use super::{
     BodyMassProperties, CurveEvaluatorId, MassPropertiesEvaluatorId, ParameterRange,
     PcurveEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
 };
+use crate::GeometryContractError;
+use std::collections::BTreeSet;
 
 pub const EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION: u16 = 2;
 
@@ -222,6 +224,70 @@ pub enum ExactTrimClassifierImplementation {
 pub struct ExactMassPropertiesRecord {
     pub id: MassPropertiesEvaluatorId,
     pub implementation: ExactMassPropertiesImplementation,
+}
+
+impl ExactEvaluatorRegistry {
+    /// Returns the one immutable kernel representation required by kernel-backed records.
+    /// A registry cannot span representations because entity tokens are meaningful only
+    /// within the representation whose digest namespaces them.
+    pub fn kernel_representation_digest(&self) -> Result<Option<[u8; 32]>, GeometryContractError> {
+        let mut digests = BTreeSet::new();
+        for digest in
+            self.curves
+                .iter()
+                .filter_map(|record| match &record.implementation {
+                    ExactCurveImplementation::Kernel { reference } => {
+                        Some(reference.representation_digest)
+                    }
+                    ExactCurveImplementation::Portable { .. } => None,
+                })
+                .chain(
+                    self.pcurves
+                        .iter()
+                        .filter_map(|record| match &record.implementation {
+                            ExactPcurveImplementation::Kernel { reference } => {
+                                Some(reference.representation_digest)
+                            }
+                            ExactPcurveImplementation::Portable { .. } => None,
+                        }),
+                )
+                .chain(
+                    self.surfaces
+                        .iter()
+                        .filter_map(|record| match &record.implementation {
+                            ExactSurfaceImplementation::Kernel { reference } => {
+                                Some(reference.representation_digest)
+                            }
+                            ExactSurfaceImplementation::Portable { .. } => None,
+                        }),
+                )
+                .chain(self.trim_classifiers.iter().filter_map(
+                    |record| match &record.implementation {
+                        ExactTrimClassifierImplementation::Kernel { reference } => {
+                            Some(reference.representation_digest)
+                        }
+                        ExactTrimClassifierImplementation::OrientedPcurveWinding => None,
+                    },
+                ))
+                .chain(self.mass_properties.iter().filter_map(
+                    |record| match &record.implementation {
+                        ExactMassPropertiesImplementation::Kernel { reference } => {
+                            Some(reference.representation_digest)
+                        }
+                        ExactMassPropertiesImplementation::KernelValidated { .. } => None,
+                    },
+                ))
+        {
+            digests.insert(digest);
+        }
+        if digests.len() > 1 {
+            return Err(GeometryContractError::invalid(
+                "kernel evaluator representation",
+                "one exact evaluator registry cannot reference multiple kernel representations",
+            ));
+        }
+        Ok(digests.into_iter().next())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

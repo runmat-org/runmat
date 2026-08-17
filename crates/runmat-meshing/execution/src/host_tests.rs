@@ -99,6 +99,7 @@ fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
         topology,
         evaluators,
         None,
+        None,
         ObjectInventoryLimits::default(),
     )
     .unwrap();

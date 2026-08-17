@@ -203,6 +203,23 @@ fn invalid_kernel_and_mass_evidence_fail_closed() {
     };
     assert!(kernel.validate_against(&topology(), &model()).is_err());
 
+    let mut split_kernel = registry();
+    split_kernel.curves[0].implementation = ExactCurveImplementation::Kernel {
+        reference: KernelEvaluatorRef {
+            entity_token: "edge:1".into(),
+            representation_digest: [3; 32],
+        },
+    };
+    split_kernel.surfaces[0].implementation = ExactSurfaceImplementation::Kernel {
+        reference: KernelEvaluatorRef {
+            entity_token: "face:1".into(),
+            representation_digest: [4; 32],
+        },
+    };
+    assert!(split_kernel
+        .validate_against(&topology(), &model())
+        .is_err());
+
     let mut mass = registry();
     let ExactMassPropertiesImplementation::KernelValidated {
         properties,

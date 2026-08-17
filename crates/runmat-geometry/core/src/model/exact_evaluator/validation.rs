@@ -169,6 +169,7 @@ impl ExactEvaluatorRegistry {
         for record in &self.mass_properties {
             validate_mass_properties(&record.implementation)?;
         }
+        self.kernel_representation_digest()?;
 
         validate_topology_claims(self, topology)
     }

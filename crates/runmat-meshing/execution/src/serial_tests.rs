@@ -624,6 +624,7 @@ impl Fixture {
             topology,
             evaluators,
             None,
+            None,
             ObjectInventoryLimits::default(),
         )
         .unwrap();

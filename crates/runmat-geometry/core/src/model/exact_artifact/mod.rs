@@ -19,6 +19,8 @@ pub const EXACT_TOPOLOGY_MEDIA_TYPE: &str =
     "application/vnd.runmat.geometry.exact-topology.v2+cbor";
 pub const EXACT_EVALUATOR_MEDIA_TYPE: &str =
     "application/vnd.runmat.geometry.exact-evaluators.v2+cbor";
+pub const KERNEL_REPRESENTATION_MEDIA_TYPE: &str =
+    "application/vnd.runmat.geometry.kernel-representation.v2+brep";
 pub const GEOMETRY_HEALING_MEDIA_TYPE: &str =
     "application/vnd.runmat.geometry.healing-report.v2+cbor";
 
@@ -34,6 +36,8 @@ pub struct ExactGeometryManifest {
     pub topology: GeometryObjectRef,
     pub evaluators: GeometryObjectRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel_representation: Option<GeometryObjectRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub healing_report: Option<GeometryObjectRef>,
 }
 
@@ -42,6 +46,7 @@ pub struct AdmittedExactGeometry {
     pub manifest: ExactGeometryManifest,
     pub topology: ExactBRepTopology,
     pub evaluators: ExactEvaluatorRegistry,
+    pub kernel_representation: Option<Vec<u8>>,
     pub healing_report: Option<GeometryHealingReport>,
 }
 

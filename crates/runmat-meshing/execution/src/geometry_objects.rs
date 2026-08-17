@@ -11,7 +11,7 @@ use runmat_geometry_core::{
     ExactGeometryManifest, GeometryDigest, GeometryDocument, GeometryHealingReport, GeometryModel,
     GeometryObjectRef, EXACT_BREP_MEDIA_TYPE, EXACT_EVALUATOR_MEDIA_TYPE,
     EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION, EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE,
-    GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
+    GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION, KERNEL_REPRESENTATION_MEDIA_TYPE,
 };
 
 use crate::object_support::{
@@ -22,6 +22,7 @@ use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult
 const EXACT_MANIFEST_SCHEMA: &str = "runmat.geometry.exact-manifest.v2";
 const EXACT_TOPOLOGY_SCHEMA: &str = "runmat.geometry.exact-topology.v2";
 const EXACT_EVALUATORS_SCHEMA: &str = "runmat.geometry.exact-evaluators.v2";
+const KERNEL_REPRESENTATION_SCHEMA: &str = "runmat.geometry.kernel-representation.v2";
 const HEALING_REPORT_SCHEMA: &str = "runmat.geometry.healing-report.v2";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,6 +37,7 @@ pub struct PreparedExactGeometryObjects {
     pub manifest: ExactGeometryManifest,
     pub topology: ExactBRepTopology,
     pub evaluators: ExactEvaluatorRegistry,
+    pub kernel_representation: Option<Vec<u8>>,
     pub healing_report: Option<GeometryHealingReport>,
     pub root: ObjectDescriptor,
     pub objects: Vec<LogicalObject>,
@@ -54,6 +56,7 @@ impl PreparedExactGeometryObjects {
             self.document.clone(),
             self.topology.clone(),
             self.evaluators.clone(),
+            self.kernel_representation.clone(),
             self.healing_report.clone(),
             limits,
         )?;
@@ -144,6 +147,7 @@ pub fn prepare_exact_geometry_objects(
     mut document: GeometryDocument,
     topology: ExactBRepTopology,
     evaluators: ExactEvaluatorRegistry,
+    kernel_representation: Option<Vec<u8>>,
     healing_report: Option<GeometryHealingReport>,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedExactGeometryObjects> {
@@ -164,6 +168,16 @@ pub fn prepare_exact_geometry_objects(
         EXACT_EVALUATOR_MEDIA_TYPE,
         evaluator_bytes,
     )?;
+    let kernel_representation_object = kernel_representation
+        .as_ref()
+        .map(|bytes| {
+            geometry_object(
+                "geometry/canonical/kernel",
+                KERNEL_REPRESENTATION_MEDIA_TYPE,
+                bytes.clone(),
+            )
+        })
+        .transpose()?;
     let healing_object = healing_report
         .as_ref()
         .map(|report| {
@@ -181,6 +195,9 @@ pub fn prepare_exact_geometry_objects(
         kernel_abi: model.kernel_abi.clone(),
         topology: geometry_reference(&topology_object),
         evaluators: geometry_reference(&evaluator_object),
+        kernel_representation: kernel_representation_object
+            .as_ref()
+            .map(geometry_reference),
         healing_report: healing_object.as_ref().map(geometry_reference),
     };
     let manifest_object = geometry_object(
@@ -194,9 +211,15 @@ pub fn prepare_exact_geometry_objects(
     model.artifact = geometry_reference(&manifest_object);
     document.validate()?;
 
-    let mut objects = Vec::with_capacity(if healing_object.is_some() { 4 } else { 3 });
+    let mut objects = Vec::with_capacity(
+        3 + usize::from(kernel_representation_object.is_some())
+            + usize::from(healing_object.is_some()),
+    );
     objects.push(topology_object);
     objects.push(evaluator_object);
+    if let Some(object) = kernel_representation_object {
+        objects.push(object);
+    }
     if let Some(object) = healing_object {
         objects.push(object);
     }
@@ -208,13 +231,21 @@ pub fn prepare_exact_geometry_objects(
         &objects.last().expect("manifest object").bytes,
         &objects[0].bytes,
         &objects[1].bytes,
-        healing_report.as_ref().map(|_| objects[2].bytes.as_slice()),
+        kernel_representation.as_deref(),
+        healing_report.as_ref().map(|_| {
+            objects
+                .iter()
+                .find(|object| object.descriptor.media_type == GEOMETRY_HEALING_MEDIA_TYPE)
+                .map(|object| object.bytes.as_slice())
+                .expect("prepared healing object")
+        }),
     )?;
     Ok(PreparedExactGeometryObjects {
         document,
         manifest,
         topology,
         evaluators,
+        kernel_representation,
         healing_report,
         root,
         objects,
@@ -238,11 +269,9 @@ pub fn import_exact_geometry_objects(
     enforce_object_length("exact geometry manifest", root.encoded_length, limits)?;
     let manifest_bytes = read_exact(source, root.digest, root.encoded_length)?;
     let manifest = ExactGeometryManifest::canonical_decode(&manifest_bytes)?;
-    let object_count = if manifest.healing_report.is_some() {
-        4
-    } else {
-        3
-    };
+    let object_count = 3
+        + usize::from(manifest.kernel_representation.is_some())
+        + usize::from(manifest.healing_report.is_some());
     if object_count > limits.max_objects {
         return Err(ArtifactError::Limit("too many exact geometry objects".into()).into());
     }
@@ -261,6 +290,19 @@ pub fn import_exact_geometry_objects(
         &mut total_bytes,
         limits,
     )?;
+    let kernel_representation = manifest
+        .kernel_representation
+        .as_ref()
+        .map(|reference| {
+            read_component(
+                source,
+                "kernel representation",
+                reference,
+                &mut total_bytes,
+                limits,
+            )
+        })
+        .transpose()?;
     let healing_bytes = manifest
         .healing_report
         .as_ref()
@@ -285,8 +327,14 @@ pub fn import_exact_geometry_objects(
         .as_deref()
         .map(decode_geometry_healing_report)
         .transpose()?;
-    let prepared =
-        prepare_exact_geometry_objects(document, topology, evaluators, healing_report, limits)?;
+    let prepared = prepare_exact_geometry_objects(
+        document,
+        topology,
+        evaluators,
+        kernel_representation,
+        healing_report,
+        limits,
+    )?;
     if prepared.root.digest != root.digest || prepared.root.encoded_length != root.encoded_length {
         return Err(MeshingExecutionError::Identity(
             "imported exact geometry manifest differs from requested root",
@@ -329,6 +377,7 @@ fn exact_object_reference(
         match object.descriptor.media_type.as_str() {
             EXACT_TOPOLOGY_MEDIA_TYPE => EXACT_TOPOLOGY_SCHEMA,
             EXACT_EVALUATOR_MEDIA_TYPE => EXACT_EVALUATORS_SCHEMA,
+            KERNEL_REPRESENTATION_MEDIA_TYPE => KERNEL_REPRESENTATION_SCHEMA,
             GEOMETRY_HEALING_MEDIA_TYPE => HEALING_REPORT_SCHEMA,
             _ => {
                 return Err(MeshingExecutionError::Identity(

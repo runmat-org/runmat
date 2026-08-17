@@ -43,9 +43,15 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> E
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };
     let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
-    let geometry_objects =
-        prepare_exact_geometry_objects(document, topology, evaluators, None, limits().inventory)
-            .unwrap();
+    let geometry_objects = prepare_exact_geometry_objects(
+        document,
+        topology,
+        evaluators,
+        None,
+        None,
+        limits().inventory,
+    )
+    .unwrap();
     let document = geometry_objects.document.clone();
     let input =
         prepare_exact_geometry_input(geometry_objects, access.clone(), limits().inventory).unwrap();

@@ -77,6 +77,7 @@ fn closure() -> (GeometryDocument, Vec<u8>, Vec<u8>, Vec<u8>) {
         kernel_abi: exact_model.kernel_abi.clone(),
         topology: object(&topology_bytes, EXACT_TOPOLOGY_MEDIA_TYPE),
         evaluators: object(&evaluator_bytes, EXACT_EVALUATOR_MEDIA_TYPE),
+        kernel_representation: None,
         healing_report: None,
     };
     let manifest_bytes = manifest.canonical_encode().unwrap();
@@ -149,6 +150,7 @@ fn optional_healing_evidence_must_produce_the_admitted_topology() {
         kernel_abi: model.kernel_abi.clone(),
         topology: object(&topology_bytes, EXACT_TOPOLOGY_MEDIA_TYPE),
         evaluators: object(&evaluator_bytes, EXACT_EVALUATOR_MEDIA_TYPE),
+        kernel_representation: None,
         healing_report: Some(object(&healing_bytes, GEOMETRY_HEALING_MEDIA_TYPE)),
     };
     let manifest_bytes = manifest.canonical_encode().unwrap();
@@ -161,6 +163,7 @@ fn optional_healing_evidence_must_produce_the_admitted_topology() {
         &manifest_bytes,
         &topology_bytes,
         &evaluator_bytes,
+        None,
         Some(&healing_bytes),
     )
     .unwrap();
@@ -174,7 +177,8 @@ fn optional_healing_evidence_must_produce_the_admitted_topology() {
 fn exact_geometry_closure_round_trips_and_is_independently_admitted() {
     let (document, manifest, topology, evaluators) = closure();
     let admitted =
-        admit_exact_geometry_closure(&document, &manifest, &topology, &evaluators, None).unwrap();
+        admit_exact_geometry_closure(&document, &manifest, &topology, &evaluators, None, None)
+            .unwrap();
     assert_eq!(
         admitted.topology,
         crate::model::exact_topology_tests::topology()
@@ -189,13 +193,15 @@ fn closure_rejects_corruption_missing_components_and_identity_drift() {
     let corrupt_index = topology.len() / 2;
     topology[corrupt_index] ^= 1;
     assert!(
-        admit_exact_geometry_closure(&document, &manifest, &topology, &evaluators, None,).is_err()
+        admit_exact_geometry_closure(&document, &manifest, &topology, &evaluators, None, None)
+            .is_err()
     );
 
     let (mut document, manifest, topology, evaluators) = closure();
     document.source.content_digest = crate::GeometryDigest::from_bytes([8; 32]);
     assert!(
-        admit_exact_geometry_closure(&document, &manifest, &topology, &evaluators, None,).is_err()
+        admit_exact_geometry_closure(&document, &manifest, &topology, &evaluators, None, None)
+            .is_err()
     );
 }
 
@@ -223,4 +229,70 @@ fn manifest_rejects_duplicate_component_identity_and_unknown_schema() {
     manifest.evaluators.digest = crate::GeometryDigest::from_bytes([4; 32]);
     manifest.schema_version += 1;
     assert!(manifest.canonical_encode().is_err());
+}
+
+#[test]
+fn kernel_evaluators_require_their_inventoried_representation_bytes() {
+    let mut exact_model = model();
+    let topology = topology();
+    let mut evaluators = registry();
+    let representation = b"DBRep_DrawableShape\nfixture".to_vec();
+    let representation_ref = object(&representation, KERNEL_REPRESENTATION_MEDIA_TYPE);
+    evaluators.curves[0].implementation = crate::ExactCurveImplementation::Kernel {
+        reference: crate::KernelEvaluatorRef {
+            entity_token: "edge:part-definition:edge-1".into(),
+            representation_digest: *representation_ref.digest.bytes(),
+        },
+    };
+    let topology_bytes = encode_exact_topology(&topology, &exact_model).unwrap();
+    let evaluator_bytes = encode_exact_evaluators(&evaluators, &topology, &exact_model).unwrap();
+    let manifest = ExactGeometryManifest {
+        schema_version: EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION,
+        source_digest: crate::GeometryDigest::from_bytes([7; 32]),
+        revision: GeometryRevisionIdentity {
+            revision: 1,
+            persistent_mapping_version: 1,
+            parent_document_digest: None,
+        },
+        kernel_abi: exact_model.kernel_abi.clone(),
+        topology: object(&topology_bytes, EXACT_TOPOLOGY_MEDIA_TYPE),
+        evaluators: object(&evaluator_bytes, EXACT_EVALUATOR_MEDIA_TYPE),
+        kernel_representation: Some(representation_ref),
+        healing_report: None,
+    };
+    let manifest_bytes = manifest.canonical_encode().unwrap();
+    exact_model.artifact = object(&manifest_bytes, EXACT_BREP_MEDIA_TYPE);
+    let document = document(exact_model);
+
+    let admitted = admit_exact_geometry_closure(
+        &document,
+        &manifest_bytes,
+        &topology_bytes,
+        &evaluator_bytes,
+        Some(&representation),
+        None,
+    )
+    .unwrap();
+    assert_eq!(admitted.kernel_representation, Some(representation.clone()));
+    assert!(admit_exact_geometry_closure(
+        &document,
+        &manifest_bytes,
+        &topology_bytes,
+        &evaluator_bytes,
+        None,
+        None,
+    )
+    .is_err());
+
+    let mut corrupt = representation;
+    corrupt.push(0);
+    assert!(admit_exact_geometry_closure(
+        &document,
+        &manifest_bytes,
+        &topology_bytes,
+        &evaluator_bytes,
+        Some(&corrupt),
+        None,
+    )
+    .is_err());
 }

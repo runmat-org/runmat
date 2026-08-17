@@ -106,7 +106,7 @@ fn classifier_and_mass_properties_preserve_typed_failures() {
     kernel_registry.mass_properties[0].implementation = ExactMassPropertiesImplementation::Kernel {
         reference: KernelEvaluatorRef {
             entity_token: "body:1".into(),
-            representation_digest: [5; 32],
+            representation_digest: [4; 32],
         },
     };
     let evaluator = PortableExactEvaluator::new(&kernel_registry, &topology, &model()).unwrap();

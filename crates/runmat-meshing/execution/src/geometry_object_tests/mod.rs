@@ -2,6 +2,9 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 
 use crate::tests::MemoryCache;
 use runmat_execution::value::ValueRefKind;
+use runmat_geometry_core::{
+    ExactCurveImplementation, KernelEvaluatorRef, KERNEL_REPRESENTATION_MEDIA_TYPE,
+};
 
 use crate::{
     import_exact_geometry_input, import_exact_geometry_objects, prepare_exact_geometry_input,
@@ -15,6 +18,7 @@ fn exact_geometry_round_trips_through_shared_input_objects() {
         document,
         topology,
         evaluators,
+        None,
         None,
         ObjectInventoryLimits::default(),
     )
@@ -40,12 +44,63 @@ fn exact_geometry_round_trips_through_shared_input_objects() {
 }
 
 #[test]
+fn kernel_representation_is_a_verified_transfer_object() {
+    let (document, topology, mut evaluators) = runmat_geometry_fixtures::exact_circle();
+    let representation = b"DBRep_DrawableShape\nexact-circle".to_vec();
+    evaluators.curves[0].implementation = ExactCurveImplementation::Kernel {
+        reference: KernelEvaluatorRef {
+            entity_token: "edge:part-definition:edge-circle".into(),
+            representation_digest: *runmat_execution::Digest::sha256(&representation).bytes(),
+        },
+    };
+    let prepared = prepare_exact_geometry_objects(
+        document,
+        topology,
+        evaluators,
+        Some(representation.clone()),
+        None,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let representation_object = prepared
+        .objects
+        .iter()
+        .find(|object| object.descriptor.media_type == KERNEL_REPRESENTATION_MEDIA_TYPE)
+        .unwrap();
+    assert_eq!(representation_object.bytes, representation);
+
+    let mut cache = MemoryCache::default();
+    cache.insert_all(&prepared.objects);
+    let imported = import_exact_geometry_objects(
+        &cache,
+        prepared.document.clone(),
+        prepared.root_reference(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(imported, prepared);
+
+    cache.replace(
+        representation_object.descriptor.digest,
+        b"poisoned".to_vec(),
+    );
+    assert!(import_exact_geometry_objects(
+        &cache,
+        prepared.document.clone(),
+        prepared.root_reference(),
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+}
+
+#[test]
 fn exact_geometry_import_rehashes_cache_and_binds_document_root() {
     let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     let prepared = prepare_exact_geometry_objects(
         document,
         topology,
         evaluators,
+        None,
         None,
         ObjectInventoryLimits::default(),
     )
@@ -84,6 +139,7 @@ fn exact_geometry_object_count_and_total_bytes_are_hard_limits() {
         topology,
         evaluators,
         None,
+        None,
         ObjectInventoryLimits {
             max_objects: 2,
             ..ObjectInventoryLimits::default()
@@ -96,6 +152,7 @@ fn exact_geometry_object_count_and_total_bytes_are_hard_limits() {
         document,
         topology,
         evaluators,
+        None,
         None,
         ObjectInventoryLimits::default(),
     )
@@ -121,6 +178,7 @@ fn exact_geometry_projects_to_complete_driver_owned_input_inventory() {
         document,
         topology,
         evaluators,
+        None,
         None,
         ObjectInventoryLimits::default(),
     )
@@ -163,6 +221,7 @@ fn exact_geometry_input_rejects_wrong_authority_and_object_kind() {
         document,
         topology,
         evaluators,
+        None,
         None,
         ObjectInventoryLimits::default(),
     )

@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use super::{
     AdmittedExactGeometry, ExactGeometryManifest, EXACT_EVALUATOR_MEDIA_TYPE,
     EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION, EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE,
+    KERNEL_REPRESENTATION_MEDIA_TYPE,
 };
 use crate::{
     model::analysis_identity::validate_token, GeometryContractError, GeometryDocument,
@@ -30,12 +31,16 @@ impl ExactGeometryManifest {
         validate_token("exact geometry kernel ABI", &self.kernel_abi, 128)?;
         validate_component(&self.topology, EXACT_TOPOLOGY_MEDIA_TYPE)?;
         validate_component(&self.evaluators, EXACT_EVALUATOR_MEDIA_TYPE)?;
+        if let Some(representation) = &self.kernel_representation {
+            validate_component(representation, KERNEL_REPRESENTATION_MEDIA_TYPE)?;
+        }
         if let Some(healing) = &self.healing_report {
             validate_component(healing, GEOMETRY_HEALING_MEDIA_TYPE)?;
         }
         let mut digests = BTreeSet::new();
         for component in [&self.topology, &self.evaluators]
             .into_iter()
+            .chain(self.kernel_representation.iter())
             .chain(self.healing_report.iter())
         {
             if !digests.insert(component.digest) {
@@ -80,6 +85,7 @@ pub fn admit_exact_geometry_closure(
     manifest_bytes: &[u8],
     topology_bytes: &[u8],
     evaluator_bytes: &[u8],
+    kernel_representation_bytes: Option<&[u8]>,
     healing_bytes: Option<&[u8]>,
 ) -> Result<AdmittedExactGeometry, GeometryContractError> {
     document.validate()?;
@@ -96,6 +102,36 @@ pub fn admit_exact_geometry_closure(
     verify_object(&manifest.evaluators, evaluator_bytes)?;
     let topology = super::decode_exact_topology(topology_bytes, model)?;
     let evaluators = super::decode_exact_evaluators(evaluator_bytes, &topology, model)?;
+    let required_representation_digest = evaluators.kernel_representation_digest()?;
+    let kernel_representation = match (
+        &manifest.kernel_representation,
+        kernel_representation_bytes,
+        required_representation_digest,
+    ) {
+        (Some(reference), Some(bytes), Some(required_digest)) => {
+            verify_object(reference, bytes)?;
+            if reference.digest.bytes() != &required_digest {
+                return Err(invalid(
+                    "kernel representation binding",
+                    "every kernel evaluator must bind the inventoried representation object",
+                ));
+            }
+            Some(bytes.to_vec())
+        }
+        (None, None, None) => None,
+        (Some(_), Some(_), None) => {
+            return Err(invalid(
+                "kernel representation component",
+                "portable evaluator closures cannot carry an unreferenced kernel representation",
+            ));
+        }
+        _ => {
+            return Err(invalid(
+                "kernel representation component",
+                "manifest reference, supplied bytes, and kernel evaluator references must agree",
+            ));
+        }
+    };
     let healing_report = match (&manifest.healing_report, healing_bytes) {
         (Some(reference), Some(bytes)) => {
             verify_object(reference, bytes)?;
@@ -135,6 +171,7 @@ pub fn admit_exact_geometry_closure(
         manifest,
         topology,
         evaluators,
+        kernel_representation,
         healing_report,
     })
 }
