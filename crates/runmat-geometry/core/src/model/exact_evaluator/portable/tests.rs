@@ -1,83 +1,11 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
 use super::super::super::exact_topology_tests::{model, topology};
 use super::super::tests::registry;
 use super::super::*;
+use super::test_support::BudgetControl;
 use super::*;
 
-struct BudgetControl {
-    cancelled: AtomicBool,
-    iterations: AtomicU64,
-    search_work: AtomicU64,
-    allocation_bytes: AtomicU64,
-}
-
-impl BudgetControl {
-    fn new(iterations: u64, search_work: u64) -> Self {
-        Self {
-            cancelled: AtomicBool::new(false),
-            iterations: AtomicU64::new(iterations),
-            search_work: AtomicU64::new(search_work),
-            allocation_bytes: AtomicU64::new(u64::MAX),
-        }
-    }
-
-    fn cancelled() -> Self {
-        let control = Self::new(u64::MAX, u64::MAX);
-        control.cancelled.store(true, Ordering::Relaxed);
-        control
-    }
-
-    fn allocation_limited(allocation_bytes: u64) -> Self {
-        Self {
-            cancelled: AtomicBool::new(false),
-            iterations: AtomicU64::new(u64::MAX),
-            search_work: AtomicU64::new(u64::MAX),
-            allocation_bytes: AtomicU64::new(allocation_bytes),
-        }
-    }
-
-    fn consume(remaining: &AtomicU64, count: u64) -> Result<(), GeometryEvaluationError> {
-        remaining
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                value.checked_sub(count)
-            })
-            .map(|_| ())
-            .map_err(|_| {
-                GeometryEvaluationError::new(
-                    GeometryEvaluationErrorKind::BudgetExceeded,
-                    "test evaluation budget exceeded",
-                )
-            })
-    }
-}
-
-impl GeometryEvaluationControl for BudgetControl {
-    fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
-        if self.cancelled.load(Ordering::Relaxed) {
-            return Err(GeometryEvaluationError::new(
-                GeometryEvaluationErrorKind::Cancelled,
-                "test evaluation cancelled",
-            ));
-        }
-        Ok(())
-    }
-
-    fn consume_iterations(&self, count: u64) -> Result<(), GeometryEvaluationError> {
-        Self::consume(&self.iterations, count)
-    }
-
-    fn consume_search_work(&self, count: u64) -> Result<(), GeometryEvaluationError> {
-        Self::consume(&self.search_work, count)
-    }
-
-    fn consume_allocation_bytes(&self, count: u64) -> Result<(), GeometryEvaluationError> {
-        Self::consume(&self.allocation_bytes, count)
-    }
-}
-
 fn generous_control() -> BudgetControl {
-    BudgetControl::new(10_000_000, 10_000_000)
+    BudgetControl::generous()
 }
 
 fn assert_near(actual: f64, expected: f64, tolerance: f64) {
@@ -90,7 +18,8 @@ fn assert_near(actual: f64, expected: f64, tolerance: f64) {
 #[test]
 fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
     let registry = registry();
-    let evaluator = PortableExactEvaluator::new(&registry, &topology(), &model()).unwrap();
+    let topology = topology();
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, &model()).unwrap();
     let control = generous_control();
     let curve_id = CurveEvaluatorId::new("curve:1").unwrap();
     let at_quarter = ExactCurveEvaluator::derivatives(
@@ -325,13 +254,16 @@ fn kernel_ownership_cancellation_and_budgets_fail_explicitly() {
             representation_digest: [7; 32],
         },
     };
-    let evaluator = PortableExactEvaluator::new(&kernel_registry, &topology(), &model()).unwrap();
+    let kernel_topology = topology();
+    let evaluator =
+        PortableExactEvaluator::new(&kernel_registry, &kernel_topology, &model()).unwrap();
     let id = CurveEvaluatorId::new("curve:1").unwrap();
     let error = ExactCurveEvaluator::point(&evaluator, &id, 0.0, &generous_control()).unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::KernelUnavailable);
 
     let registry = registry();
-    let evaluator = PortableExactEvaluator::new(&registry, &topology(), &model()).unwrap();
+    let portable_topology = topology();
+    let evaluator = PortableExactEvaluator::new(&registry, &portable_topology, &model()).unwrap();
     let error =
         ExactCurveEvaluator::point(&evaluator, &id, 0.0, &BudgetControl::cancelled()).unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::Cancelled);

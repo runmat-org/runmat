@@ -81,6 +81,7 @@ pub enum GeometryEvaluationErrorKind {
     UnknownEvaluator,
     ParameterOutsideDomain,
     ProjectionDidNotConverge,
+    ClassificationDidNotConverge,
     KernelUnavailable,
     KernelFailure,
     InvalidResult,

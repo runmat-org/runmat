@@ -22,17 +22,37 @@ pub(super) fn adaptive_arc_length(
     range: ParameterRange,
     absolute_error_m: f64,
     control: &dyn GeometryEvaluationControl,
-    mut speed: impl FnMut(f64) -> Result<f64, GeometryEvaluationError>,
+    speed: impl FnMut(f64) -> Result<f64, GeometryEvaluationError>,
 ) -> Result<f64, GeometryEvaluationError> {
-    if !absolute_error_m.is_finite() || absolute_error_m <= 0.0 {
+    let value = adaptive_scalar_integral(
+        range,
+        absolute_error_m,
+        control,
+        "arc-length integration",
+        speed,
+    )?;
+    if value < 0.0 {
+        return Err(invalid("arc-length integration produced a negative result"));
+    }
+    Ok(value)
+}
+
+pub(super) fn adaptive_scalar_integral(
+    range: ParameterRange,
+    absolute_error: f64,
+    control: &dyn GeometryEvaluationControl,
+    operation: &str,
+    mut value_at: impl FnMut(f64) -> Result<f64, GeometryEvaluationError>,
+) -> Result<f64, GeometryEvaluationError> {
+    if !absolute_error.is_finite() || absolute_error <= 0.0 {
         return Err(invalid(
-            "arc-length error bound must be finite and positive",
+            "integration error bound must be finite and positive",
         ));
     }
     let initial_midpoint = midpoint(range.start, range.end);
-    let start_value = speed(range.start)?;
-    let midpoint_value = speed(initial_midpoint)?;
-    let end_value = speed(range.end)?;
+    let start_value = finite_sample(value_at(range.start)?, operation)?;
+    let midpoint_value = finite_sample(value_at(initial_midpoint)?, operation)?;
+    let end_value = finite_sample(value_at(range.end)?, operation)?;
     let initial = simpson(
         range.start,
         range.end,
@@ -48,7 +68,7 @@ pub(super) fn adaptive_arc_length(
         midpoint_value,
         end_value,
         estimate: initial,
-        tolerance: absolute_error_m,
+        tolerance: absolute_error,
         depth: 0,
     }];
     let mut accepted = 0.0;
@@ -58,14 +78,14 @@ pub(super) fn adaptive_arc_length(
         control.consume_iterations(1)?;
         visited = visited.saturating_add(1);
         if visited > MAX_INTEGRATION_INTERVALS {
-            return Err(budget(
-                "arc-length integration exceeded its hard interval bound",
-            ));
+            return Err(budget(&format!(
+                "{operation} exceeded its hard interval bound"
+            )));
         }
         let left_midpoint = midpoint(interval.start, interval.midpoint);
         let right_midpoint = midpoint(interval.midpoint, interval.end);
-        let left_midpoint_value = speed(left_midpoint)?;
-        let right_midpoint_value = speed(right_midpoint)?;
+        let left_midpoint_value = finite_sample(value_at(left_midpoint)?, operation)?;
+        let right_midpoint_value = finite_sample(value_at(right_midpoint)?, operation)?;
         let left = simpson(
             interval.start,
             interval.midpoint,
@@ -90,9 +110,9 @@ pub(super) fn adaptive_arc_length(
             || left_midpoint == interval.start
             || right_midpoint == interval.midpoint
         {
-            return Err(budget(
-                "arc-length integration could not meet the requested error within its hard depth bound",
-            ));
+            return Err(budget(&format!(
+                "{operation} could not meet the requested error within its hard depth bound"
+            )));
         }
         let child_tolerance = interval.tolerance * 0.5;
         let depth = interval.depth + 1;
@@ -119,10 +139,19 @@ pub(super) fn adaptive_arc_length(
             depth,
         });
     }
-    if !accepted.is_finite() || accepted < 0.0 {
-        return Err(invalid("arc-length integration produced an invalid result"));
+    if !accepted.is_finite() {
+        return Err(invalid("integration produced a non-finite result"));
     }
     Ok(accepted)
+}
+
+fn finite_sample(value: f64, operation: &str) -> Result<f64, GeometryEvaluationError> {
+    if !value.is_finite() {
+        return Err(invalid(&format!(
+            "{operation} produced a non-finite sample"
+        )));
+    }
+    Ok(value)
 }
 
 fn simpson(start: f64, end: f64, start_value: f64, midpoint_value: f64, end_value: f64) -> f64 {

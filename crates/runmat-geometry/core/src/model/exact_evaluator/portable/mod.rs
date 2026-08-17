@@ -1,5 +1,6 @@
 mod curve;
 mod integration;
+mod mass_properties;
 mod pcurve;
 mod projection;
 mod spline;
@@ -7,29 +8,32 @@ mod surface;
 mod surface_curvature;
 mod surface_projection;
 mod surface_spline;
+mod trim_classifier;
 mod vector;
 
 use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError};
 use super::{
-    CurveEvaluatorId, ExactCurveEvaluatorRecord, ExactEvaluatorRegistry,
-    ExactPcurveEvaluatorRecord, ExactSurfaceEvaluatorRecord, GeometryEvaluationError,
-    GeometryEvaluationErrorKind, PcurveEvaluatorId, SurfaceEvaluatorId,
+    CurveEvaluatorId, ExactCurveEvaluatorRecord, ExactEvaluatorRegistry, ExactMassPropertiesRecord,
+    ExactPcurveEvaluatorRecord, ExactSurfaceEvaluatorRecord, ExactTrimClassifierRecord,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, MassPropertiesEvaluatorId,
+    PcurveEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
 };
 
 /// Portable evaluator for analytic and NURBS definitions. Construction performs
 /// full topology/registry admission; kernel records remain explicit ABI-owned calls.
 pub struct PortableExactEvaluator<'a> {
     registry: &'a ExactEvaluatorRegistry,
+    topology: &'a ExactBRepTopology,
 }
 
 impl<'a> PortableExactEvaluator<'a> {
     pub fn new(
         registry: &'a ExactEvaluatorRegistry,
-        topology: &ExactBRepTopology,
+        topology: &'a ExactBRepTopology,
         model: &ExactBRepModel,
     ) -> Result<Self, GeometryContractError> {
         registry.validate_against(topology, model)?;
-        Ok(Self { registry })
+        Ok(Self { registry, topology })
     }
 
     fn curve_record(
@@ -64,6 +68,28 @@ impl<'a> PortableExactEvaluator<'a> {
             .map(|index| &self.registry.surfaces[index])
             .map_err(|_| unknown("surface", id.as_str()))
     }
+
+    fn trim_classifier_record(
+        &self,
+        id: &TrimClassifierId,
+    ) -> Result<&ExactTrimClassifierRecord, GeometryEvaluationError> {
+        self.registry
+            .trim_classifiers
+            .binary_search_by(|record| record.id.cmp(id))
+            .map(|index| &self.registry.trim_classifiers[index])
+            .map_err(|_| unknown("trim classifier", id.as_str()))
+    }
+
+    fn mass_properties_record(
+        &self,
+        id: &MassPropertiesEvaluatorId,
+    ) -> Result<&ExactMassPropertiesRecord, GeometryEvaluationError> {
+        self.registry
+            .mass_properties
+            .binary_search_by(|record| record.id.cmp(id))
+            .map(|index| &self.registry.mass_properties[index])
+            .map_err(|_| unknown("mass-properties", id.as_str()))
+    }
 }
 
 fn unknown(kind: &str, id: &str) -> GeometryEvaluationError {
@@ -91,4 +117,8 @@ fn outside_domain(reason: impl Into<String>) -> GeometryEvaluationError {
 #[cfg(test)]
 mod surface_tests;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod trim_mass_tests;

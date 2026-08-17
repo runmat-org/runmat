@@ -41,7 +41,7 @@ impl ExactPcurveEvaluator for PortableExactEvaluator<'_> {
     }
 }
 
-fn evaluate_pcurve(
+pub(super) fn evaluate_pcurve(
     definition: &ExactPcurveDefinition,
     parameter: f64,
     control: &dyn GeometryEvaluationControl,
