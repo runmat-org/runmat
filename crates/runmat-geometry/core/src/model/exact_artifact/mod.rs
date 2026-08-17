@@ -1,4 +1,5 @@
 mod codec;
+mod construction;
 mod validation;
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ pub use codec::{
     decode_exact_evaluators, decode_exact_topology, decode_geometry_healing_report,
     encode_exact_evaluators, encode_exact_topology, encode_geometry_healing_report,
 };
+pub use construction::build_exact_geometry_closure;
 pub use validation::admit_exact_geometry_closure;
 
 pub const EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION: u16 = 2;
@@ -48,6 +50,17 @@ pub struct AdmittedExactGeometry {
     pub evaluators: ExactEvaluatorRegistry,
     pub kernel_representation: Option<Vec<u8>>,
     pub healing_report: Option<GeometryHealingReport>,
+}
+
+/// Canonical byte closure produced by geometry before any storage or transport projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EncodedExactGeometryClosure {
+    pub document: crate::GeometryDocument,
+    pub manifest: ExactGeometryManifest,
+    pub manifest_bytes: Vec<u8>,
+    pub topology_bytes: Vec<u8>,
+    pub evaluator_bytes: Vec<u8>,
+    pub healing_bytes: Option<Vec<u8>>,
 }
 
 #[cfg(test)]

@@ -5,12 +5,11 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::{validate_inventory, ObjectInventoryLimits};
 use runmat_execution_artifact::{ArtifactError, LogicalObject, ObjectDescriptor, ObjectNamespace};
 use runmat_geometry_core::{
-    admit_exact_geometry_closure, decode_exact_evaluators, decode_exact_topology,
-    decode_geometry_healing_report, encode_exact_evaluators, encode_exact_topology,
-    encode_geometry_healing_report, ExactBRepTopology, ExactEvaluatorRegistry,
+    build_exact_geometry_closure, decode_exact_evaluators, decode_exact_topology,
+    decode_geometry_healing_report, ExactBRepTopology, ExactEvaluatorRegistry,
     ExactGeometryManifest, GeometryDigest, GeometryDocument, GeometryHealingReport, GeometryModel,
     GeometryObjectRef, EXACT_BREP_MEDIA_TYPE, EXACT_EVALUATOR_MEDIA_TYPE,
-    EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION, EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE,
+    EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE,
     GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION, KERNEL_REPRESENTATION_MEDIA_TYPE,
 };
 
@@ -144,29 +143,29 @@ pub fn import_exact_geometry_input(
 }
 
 pub fn prepare_exact_geometry_objects(
-    mut document: GeometryDocument,
+    document: GeometryDocument,
     topology: ExactBRepTopology,
     evaluators: ExactEvaluatorRegistry,
     kernel_representation: Option<Vec<u8>>,
     healing_report: Option<GeometryHealingReport>,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedExactGeometryObjects> {
-    let GeometryModel::ExactBRep { model } = &document.model else {
-        return Err(MeshingExecutionError::Invalid(
-            "faceted geometry cannot be packaged as an exact closure".into(),
-        ));
-    };
-    let topology_bytes = encode_exact_topology(&topology, model)?;
-    let evaluator_bytes = encode_exact_evaluators(&evaluators, &topology, model)?;
+    let encoded = build_exact_geometry_closure(
+        document,
+        &topology,
+        &evaluators,
+        kernel_representation.as_deref(),
+        healing_report.as_ref(),
+    )?;
     let topology_object = geometry_object(
         "geometry/canonical/topology",
         EXACT_TOPOLOGY_MEDIA_TYPE,
-        topology_bytes,
+        encoded.topology_bytes,
     )?;
     let evaluator_object = geometry_object(
         "geometry/canonical/evaluators",
         EXACT_EVALUATOR_MEDIA_TYPE,
-        evaluator_bytes,
+        encoded.evaluator_bytes,
     )?;
     let kernel_representation_object = kernel_representation
         .as_ref()
@@ -180,36 +179,32 @@ pub fn prepare_exact_geometry_objects(
         .transpose()?;
     let healing_object = healing_report
         .as_ref()
-        .map(|report| {
+        .zip(encoded.healing_bytes)
+        .map(|(_, bytes)| {
             geometry_object(
                 "geometry/canonical/healing",
                 GEOMETRY_HEALING_MEDIA_TYPE,
-                encode_geometry_healing_report(report)?,
+                bytes,
             )
         })
         .transpose()?;
-    let manifest = ExactGeometryManifest {
-        schema_version: EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION,
-        source_digest: document.source.content_digest,
-        revision: document.revision.clone(),
-        kernel_abi: model.kernel_abi.clone(),
-        topology: geometry_reference(&topology_object),
-        evaluators: geometry_reference(&evaluator_object),
-        kernel_representation: kernel_representation_object
-            .as_ref()
-            .map(geometry_reference),
-        healing_report: healing_object.as_ref().map(geometry_reference),
-    };
     let manifest_object = geometry_object(
         "geometry/canonical/manifests",
         EXACT_BREP_MEDIA_TYPE,
-        manifest.canonical_encode()?,
+        encoded.manifest_bytes,
     )?;
-    let GeometryModel::ExactBRep { model } = &mut document.model else {
-        unreachable!()
-    };
-    model.artifact = geometry_reference(&manifest_object);
-    document.validate()?;
+    validate_geometry_reference(&topology_object, &encoded.manifest.topology)?;
+    validate_geometry_reference(&evaluator_object, &encoded.manifest.evaluators)?;
+    if let (Some(object), Some(reference)) = (
+        &kernel_representation_object,
+        &encoded.manifest.kernel_representation,
+    ) {
+        validate_geometry_reference(object, reference)?;
+    }
+    if let (Some(object), Some(reference)) = (&healing_object, &encoded.manifest.healing_report) {
+        validate_geometry_reference(object, reference)?;
+    }
+    validate_geometry_reference(&manifest_object, encoded.document.primary_artifact())?;
 
     let mut objects = Vec::with_capacity(
         3 + usize::from(kernel_representation_object.is_some())
@@ -226,23 +221,9 @@ pub fn prepare_exact_geometry_objects(
     let root = manifest_object.descriptor.clone();
     objects.push(manifest_object);
     validate_inventory(&objects, limits)?;
-    admit_exact_geometry_closure(
-        &document,
-        &objects.last().expect("manifest object").bytes,
-        &objects[0].bytes,
-        &objects[1].bytes,
-        kernel_representation.as_deref(),
-        healing_report.as_ref().map(|_| {
-            objects
-                .iter()
-                .find(|object| object.descriptor.media_type == GEOMETRY_HEALING_MEDIA_TYPE)
-                .map(|object| object.bytes.as_slice())
-                .expect("prepared healing object")
-        }),
-    )?;
     Ok(PreparedExactGeometryObjects {
-        document,
-        manifest,
+        document: encoded.document,
+        manifest: encoded.manifest,
         topology,
         evaluators,
         kernel_representation,
@@ -363,6 +344,18 @@ fn geometry_reference(object: &LogicalObject) -> GeometryObjectRef {
         media_type: object.descriptor.media_type.clone(),
         schema_version: GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
     }
+}
+
+fn validate_geometry_reference(
+    object: &LogicalObject,
+    reference: &GeometryObjectRef,
+) -> MeshingExecutionResult<()> {
+    if geometry_reference(object) != *reference {
+        return Err(MeshingExecutionError::Identity(
+            "execution object differs from its geometry-owned reference",
+        ));
+    }
+    Ok(())
 }
 
 fn exact_object_reference(

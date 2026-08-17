@@ -88,6 +88,31 @@ fn closure() -> (GeometryDocument, Vec<u8>, Vec<u8>, Vec<u8>) {
 }
 
 #[test]
+fn geometry_core_constructs_and_readmits_the_canonical_closure() {
+    let topology = topology();
+    let evaluators = registry();
+    let encoded =
+        build_exact_geometry_closure(document(model()), &topology, &evaluators, None, None)
+            .unwrap();
+
+    assert_eq!(
+        encoded.document.primary_artifact(),
+        &object(&encoded.manifest_bytes, EXACT_BREP_MEDIA_TYPE)
+    );
+    let admitted = admit_exact_geometry_closure(
+        &encoded.document,
+        &encoded.manifest_bytes,
+        &encoded.topology_bytes,
+        &encoded.evaluator_bytes,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(admitted.topology, topology);
+    assert_eq!(admitted.evaluators, evaluators);
+}
+
+#[test]
 fn optional_healing_evidence_must_produce_the_admitted_topology() {
     let (mut document, _, topology_bytes, evaluator_bytes) = closure();
     let GeometryModel::ExactBRep { model } = &document.model else {

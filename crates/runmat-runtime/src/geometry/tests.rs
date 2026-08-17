@@ -565,6 +565,39 @@ fn load_op_maps_cancelled_import_error_code() {
 }
 
 #[test]
+fn load_error_mapping_covers_exact_import_failures() {
+    let context = OperationContext::new(None, None);
+    let cases = [
+        (
+            GeometryImportError::InvalidGeometry("open shell".into()),
+            "RM.GEOMETRY.LOAD.INVALID_GEOMETRY",
+            OperationErrorType::Validation,
+        ),
+        (
+            GeometryImportError::InvalidOptions("missing units".into()),
+            "RM.GEOMETRY.LOAD.INVALID_OPTIONS",
+            OperationErrorType::Input,
+        ),
+        (
+            GeometryImportError::ExactRepresentationCapacityExceeded { limit: 8 },
+            "RM.GEOMETRY.LOAD.EXACT_REPRESENTATION_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+        ),
+        (
+            GeometryImportError::ExactEntityCapacityExceeded { limit: 8 },
+            "RM.GEOMETRY.LOAD.EXACT_ENTITY_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+        ),
+    ];
+    for (source, code, error_type) in cases {
+        let error = map_geometry_load_error("/part.brep", source, &context);
+        assert_eq!(error.error_code, code);
+        assert_eq!(error.error_type, error_type);
+        assert!(!error.retryable);
+    }
+}
+
+#[test]
 fn load_op_maps_parse_error_for_glb_payload() {
     let error = geometry_load_op(
         "/mesh.glb",

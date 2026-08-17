@@ -2450,6 +2450,26 @@ fn map_geometry_load_error(
             OperationErrorType::Capacity,
             false,
         ),
+        GeometryImportError::ExactRepresentationCapacityExceeded { .. } => (
+            "RM.GEOMETRY.LOAD.EXACT_REPRESENTATION_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+            false,
+        ),
+        GeometryImportError::ExactEntityCapacityExceeded { .. } => (
+            "RM.GEOMETRY.LOAD.EXACT_ENTITY_LIMIT_EXCEEDED",
+            OperationErrorType::Capacity,
+            false,
+        ),
+        GeometryImportError::InvalidGeometry(_) => (
+            "RM.GEOMETRY.LOAD.INVALID_GEOMETRY",
+            OperationErrorType::Validation,
+            false,
+        ),
+        GeometryImportError::InvalidOptions(_) => (
+            "RM.GEOMETRY.LOAD.INVALID_OPTIONS",
+            OperationErrorType::Input,
+            false,
+        ),
         GeometryImportError::BackendUnavailable(_) => (
             "RM.GEOMETRY.LOAD.BACKEND_UNAVAILABLE",
             OperationErrorType::Backend,
