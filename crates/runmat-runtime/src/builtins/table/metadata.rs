@@ -599,13 +599,7 @@ const PREDICATE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Predicate result.",
 }];
-const WRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bytesWritten",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of bytes written.",
-}];
+const WRITE_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 
 const READTABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -844,9 +838,9 @@ const PREDICATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &PREDICATE_OUTPUT,
 }];
 const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "bytesWritten = writeTabular(T, filename, ...)",
+    label: "writeTabular(T, filename, ...)",
     inputs: &VALUE_AND_ARGS_INPUTS,
-    outputs: &WRITE_OUTPUT,
+    outputs: &WRITE_NO_OUTPUT,
 }];
 const OBJECT_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "out = table.subsref(obj, kind, payload)",

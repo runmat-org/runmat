@@ -1463,9 +1463,18 @@ fn apply_text_property(
         }
         "color" => style.color = Some(parse_color_value(&opts, value)?),
         "fontsize" => {
-            style.font_size = Some(value_as_f64(value).ok_or_else(|| {
+            let font_size = value_as_f64(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FontSize must be numeric"))
-            })? as f32)
+            })?;
+            if !font_size.is_finite() || font_size <= 0.0 || font_size > MAX_AXES_FONT_SIZE_POINTS {
+                return Err(plotting_error(
+                    builtin,
+                    format!(
+                        "{builtin}: FontSize must be a positive finite value no larger than {MAX_AXES_FONT_SIZE_POINTS}"
+                    ),
+                ));
+            }
+            style.font_size = Some(font_size as f32);
         }
         "fontweight" => {
             style.font_weight = Some(value_as_string(value).ok_or_else(|| {

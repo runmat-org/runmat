@@ -33,13 +33,7 @@ pub(super) type WriteLock = Arc<AsyncMutex<()>>;
 type WeakWriteLock = Weak<AsyncMutex<()>>;
 static WRITE_LOCKS: OnceLock<StdMutex<HashMap<String, WeakWriteLock>>> = OnceLock::new();
 
-const WRITECELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bytesWritten",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of bytes written to the destination file.",
-}];
+const WRITECELL_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 const WRITECELL_INPUTS_CELL_FILENAME: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "C",
@@ -111,19 +105,19 @@ const WRITECELL_INPUTS_NAME_VALUE_PAIRS: [BuiltinParamDescriptor; 3] = [
 ];
 const WRITECELL_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = writecell(C, filename)",
+        label: "writecell(C, filename)",
         inputs: &WRITECELL_INPUTS_CELL_FILENAME,
-        outputs: &WRITECELL_OUTPUT,
+        outputs: &WRITECELL_NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = writecell(C, filename, name, optionValue)",
+        label: "writecell(C, filename, name, optionValue)",
         inputs: &WRITECELL_INPUTS_NAME_VALUE,
-        outputs: &WRITECELL_OUTPUT,
+        outputs: &WRITECELL_NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = writecell(C, filename, nameValuePairs...)",
+        label: "writecell(C, filename, nameValuePairs...)",
         inputs: &WRITECELL_INPUTS_NAME_VALUE_PAIRS,
-        outputs: &WRITECELL_OUTPUT,
+        outputs: &WRITECELL_NO_OUTPUT,
     },
 ];
 
@@ -185,8 +179,16 @@ const WRITECELL_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExte
     description: "writecell with explicit gpuArray input is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:WritecellExplicitGpuInputExtension"),
 };
-pub const WRITECELL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [WRITECELL_EXPLICIT_GPU_EXTENSION];
+const WRITECELL_BYTES_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "writecell-bytes-written-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Request a bytes-written output from writecell",
+    error_identifier: Some("RunMat:compatibility:WritecellBytesOutputExtension"),
+};
+pub const WRITECELL_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    WRITECELL_EXPLICIT_GPU_EXTENSION,
+    WRITECELL_BYTES_OUTPUT_EXTENSION,
+];
 
 const WRITECELL_INTEGER_CONTENT_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -313,6 +315,19 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(writecell_error(&WRITECELL_ERROR_ARG_CONFIG));
+    }
+    let requested_outputs = crate::output_count::current_output_count();
+    if requested_outputs.is_some_and(|count| count > 1) {
+        return Err(writecell_error_with(
+            &WRITECELL_ERROR_ARG_CONFIG,
+            "writecell: too many output arguments",
+        ));
+    }
+    if requested_outputs.is_some_and(|count| count > 0) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITECELL_BYTES_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     if crate::builtins::common::validation::value_contains_explicit_gpu(&data)
         || rest
@@ -1530,9 +1545,9 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"bytesWritten = writecell(C, filename)"));
-        assert!(labels.contains(&"bytesWritten = writecell(C, filename, name, optionValue)"));
-        assert!(labels.contains(&"bytesWritten = writecell(C, filename, nameValuePairs...)"));
+        assert!(labels.contains(&"writecell(C, filename)"));
+        assert!(labels.contains(&"writecell(C, filename, name, optionValue)"));
+        assert!(labels.contains(&"writecell(C, filename, nameValuePairs...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1796,6 +1811,23 @@ mod tests {
         assert_eq!(
             error.identifier(),
             WRITECELL_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn writecell_bytes_output_is_gated_before_filesystem_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        let data = cell(vec![Value::Num(1.0)], 1, 1);
+
+        let error = block_on(writecell_builtin(
+            data,
+            vec![Value::from("definitely/missing/out.csv")],
+        ))
+        .expect_err("strict mode rejects the bytes-written output before file access");
+        assert_eq!(
+            error.identifier(),
+            WRITECELL_BYTES_OUTPUT_EXTENSION.error_identifier
         );
     }
 

@@ -171302,7 +171302,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "bytesWritten = writecell(C, filename)",
+          "label": "writecell(C, filename)",
           "inputs": [
             {
               "name": "C",
@@ -171319,18 +171319,10 @@
               "description": "Output file path."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the destination file."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "bytesWritten = writecell(C, filename, name, optionValue)",
+          "label": "writecell(C, filename, name, optionValue)",
           "inputs": [
             {
               "name": "C",
@@ -171361,18 +171353,10 @@
               "description": "Value for the preceding option name."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the destination file."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "bytesWritten = writecell(C, filename, nameValuePairs...)",
+          "label": "writecell(C, filename, nameValuePairs...)",
           "inputs": [
             {
               "name": "C",
@@ -171396,15 +171380,7 @@
               "description": "Name-value option pairs."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the destination file."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -171451,6 +171427,12 @@
           "mode": "RunMatOnly",
           "description": "writecell with explicit gpuArray input is a RunMat extension",
           "error_identifier": "RunMat:compatibility:WritecellExplicitGpuInputExtension"
+        },
+        {
+          "id": "writecell-bytes-written-output",
+          "mode": "RunMatOnly",
+          "description": "Request a bytes-written output from writecell",
+          "error_identifier": "RunMat:compatibility:WritecellBytesOutputExtension"
         }
       ],
       "integer_capabilities": [
@@ -171556,7 +171538,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "bytesWritten = writematrix(data, filename)",
+          "label": "writematrix(data, filename)",
           "inputs": [
             {
               "name": "data",
@@ -171573,18 +171555,10 @@
               "description": "Output file path."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the destination file."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "bytesWritten = writematrix(data, filename, name, optionValue)",
+          "label": "writematrix(data, filename, name, optionValue)",
           "inputs": [
             {
               "name": "data",
@@ -171615,18 +171589,10 @@
               "description": "Value for the preceding option name."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the destination file."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "bytesWritten = writematrix(data, filename, nameValuePairs...)",
+          "label": "writematrix(data, filename, nameValuePairs...)",
           "inputs": [
             {
               "name": "data",
@@ -171650,15 +171616,7 @@
               "description": "Name-value option pairs."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the destination file."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -171698,6 +171656,88 @@
           "when": "The destination file cannot be opened or written.",
           "message": "writematrix: file write failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "writematrix-bytes-written-output",
+          "mode": "RunMatOnly",
+          "description": "Request a bytes-written output from writematrix",
+          "error_identifier": "RunMat:compatibility:WritematrixBytesOutputExtension"
+        },
+        {
+          "id": "writematrix-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "Pass explicit gpuArray input to writematrix",
+          "error_identifier": "RunMat:compatibility:WritematrixExplicitGpuInputExtension"
+        },
+        {
+          "id": "writematrix-quote-strings-logical-alias",
+          "mode": "RunMatOnly",
+          "description": "Use logical or numeric aliases for the QuoteStrings option",
+          "error_identifier": "RunMat:compatibility:WritematrixQuoteStringsAliasExtension"
+        },
+        {
+          "id": "writematrix-text-format-options",
+          "mode": "RunMatOnly",
+          "description": "Use the DecimalSeparator or LineEnding text-format option",
+          "error_identifier": "RunMat:compatibility:WritematrixTextFormatOptionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "writematrix(integer_A, filename, ___)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric matrices from all eight integer classes serialize from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Every integer element is rendered from its exact signed or unsigned decimal value. Automatically resident data gathers transparently; explicit device input is separately gated."
+        },
+        {
+          "form": "writematrix(A, filename, 'QuoteStrings', integer_alias)",
+          "inputs": [
+            {
+              "name": "QuoteStrings logical alias",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact integer zero and one as aliases for the text-valued QuoteStrings option."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode accepts the documented text values; RunMat mode additionally maps exact zero to none and exact one to all."
+        }
       ]
     },
     {
@@ -171706,7 +171746,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "bytesWritten = writeTabular(T, filename, ...)",
+          "label": "writeTabular(T, filename, ...)",
           "inputs": [
             {
               "name": "A",
@@ -171723,15 +171763,7 @@
               "description": "Name-value options or conversion arguments."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -171764,6 +171796,82 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "writetable-bytes-written-output",
+          "mode": "RunMatOnly",
+          "description": "Request a bytes-written output from writetable",
+          "error_identifier": "RunMat:compatibility:WritetableBytesOutputExtension"
+        },
+        {
+          "id": "writetable-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "Pass explicit gpuArray input to writetable",
+          "error_identifier": "RunMat:compatibility:WritetableExplicitGpuInputExtension"
+        },
+        {
+          "id": "writetable-integer-logical-option",
+          "mode": "RunMatOnly",
+          "description": "Use a typed-integer WriteVariableNames value with writetable",
+          "error_identifier": "RunMat:compatibility:WritetableIntegerLogicalOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "writetable(T_with_integer_variables, filename, ___)",
+          "inputs": [
+            {
+              "name": "integer table variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric table variables from all eight integer classes serialize from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer cells retain their exact decimal value through delimited-text serialization. Automatically resident values gather transparently; explicit device input is separately gated."
+        },
+        {
+          "form": "writetable(T, filename, 'WriteVariableNames', typed_integer)",
+          "inputs": [
+            {
+              "name": "WriteVariableNames",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact integer zero and one as logical aliases for WriteVariableNames."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects the typed-integer alias before file access; RunMat mode classifies exact zero or one."
         }
       ]
     },
@@ -171773,7 +171881,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "bytesWritten = writeTabular(T, filename, ...)",
+          "label": "writeTabular(T, filename, ...)",
           "inputs": [
             {
               "name": "A",
@@ -171790,15 +171898,7 @@
               "description": "Name-value options or conversion arguments."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -171831,6 +171931,82 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "writetimetable-bytes-written-output",
+          "mode": "RunMatOnly",
+          "description": "Request a bytes-written output from writetimetable",
+          "error_identifier": "RunMat:compatibility:WritetimetableBytesOutputExtension"
+        },
+        {
+          "id": "writetimetable-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "Pass explicit gpuArray input to writetimetable",
+          "error_identifier": "RunMat:compatibility:WritetimetableExplicitGpuInputExtension"
+        },
+        {
+          "id": "writetimetable-integer-logical-option",
+          "mode": "RunMatOnly",
+          "description": "Use a typed-integer WriteVariableNames value with writetimetable",
+          "error_identifier": "RunMat:compatibility:WritetimetableIntegerLogicalOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "writetimetable(TT_with_integer_variables, filename, ___)",
+          "inputs": [
+            {
+              "name": "integer table variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric table variables from all eight integer classes serialize from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer cells retain their exact decimal value through delimited-text serialization. Automatically resident values gather transparently; explicit device input is separately gated."
+        },
+        {
+          "form": "writetimetable(TT, filename, 'WriteVariableNames', typed_integer)",
+          "inputs": [
+            {
+              "name": "WriteVariableNames",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact integer zero and one as logical aliases for WriteVariableNames."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects the typed-integer alias before file access; RunMat mode classifies exact zero or one."
         }
       ]
     },
@@ -171965,6 +172141,97 @@
           "when": "Internal plotting state update fails.",
           "message": "xlabel: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "xlabel-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow typed-integer aliases for encoded axes handles",
+          "error_identifier": "RunMat:compatibility:XlabelIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = xlabel(integer_txt)",
+          "inputs": [
+            {
+              "name": "txt",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A scalar integer label is formatted from its exact signed or unsigned decimal value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact decimal spelling becomes the stored String property; the graphics handle is returned as a double scalar."
+        },
+        {
+          "form": "h = xlabel(..., 'FontSize', integer_size)",
+          "inputs": [
+            {
+              "name": "FontSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for FontSize; accepted values are positive finite practical renderer sizes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "FontSize crosses the graphics scalar boundary after shared positive finite size validation."
+        },
+        {
+          "form": "h = xlabel(integer_ax, txt, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for RunMat's encoded axes handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "RunMat mode parses the gated scalar before resolving the encoded axes handle; strict mode rejects before graphics state access."
+        }
       ]
     },
     {
@@ -172040,6 +172307,35 @@
           "identifier": "RunMat:xlim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xlim: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "limits = xlim(integer_limits)",
+          "inputs": [
+            {
+              "name": "limits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for the two-element limits vector."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "RunMat compares same-class integer endpoints exactly, then validates that they remain distinct when converted to the graphics coordinate domain; queried limits are double."
         }
       ]
     },
@@ -172173,6 +172469,116 @@
           "identifier": "RunMat:xline:Internal",
           "when": "Internal plotting state update fails.",
           "message": "xline: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = xline(integer_x, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for reference-line coordinates."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Coordinates cross the graphics floating-point boundary after numeric classification; returned graphics handles are double."
+        },
+        {
+          "form": "h = xline(..., 'Color', integer_rgb)",
+          "inputs": [
+            {
+              "name": "Color",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer RGB components are accepted when every component is in the documented interval from zero through one."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Validated RGB components cross the renderer color boundary."
+        },
+        {
+          "form": "h = xline(..., 'LineWidth', integer_width)",
+          "inputs": [
+            {
+              "name": "LineWidth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer line widths are accepted when the scalar is finite and positive."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The validated positive width crosses the renderer scalar boundary."
+        },
+        {
+          "form": "h = xline(..., 'Visible', integer_visible)",
+          "inputs": [
+            {
+              "name": "Visible",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric visibility values must be exactly zero or one."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The integer is classified exactly as zero or one before the graphics state is updated."
         }
       ]
     },
@@ -172406,6 +172812,76 @@
           "identifier": "RunMat:xlsread:TensorBuild",
           "when": "Output arrays cannot be materialized.",
           "message": "xlsread: unable to construct output"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "xlsread-numeric-range",
+          "mode": "RunMatOnly",
+          "description": "Use a numeric row and column vector as an xlsread range",
+          "error_identifier": "RunMat:compatibility:XlsreadNumericRangeExtension"
+        },
+        {
+          "id": "xlsread-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "Pass explicit gpuArray selectors to xlsread",
+          "error_identifier": "RunMat:compatibility:XlsreadExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "num = xlsread(filename, integer_sheet, ___)",
+          "inputs": [
+            {
+              "name": "sheet",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for the one-based worksheet selector and are decoded exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact positive selector chooses a worksheet; numeric spreadsheet output remains double."
+        },
+        {
+          "form": "num = xlsread(filename, sheet, integer_range)",
+          "inputs": [
+            {
+              "name": "numeric range",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode accepts an integer row and column vector in place of the documented textual range."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects the numeric-range extension before file access; RunMat mode parses the native integer vector exactly."
         }
       ]
     },
@@ -172793,6 +173269,103 @@
           "identifier": "RunMat:xlswrite:OutputCount",
           "when": "Caller requests more outputs than xlswrite supports.",
           "message": "xlswrite: unsupported output count"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "xlswrite-numeric-range",
+          "mode": "RunMatOnly",
+          "description": "Use a numeric row and column vector as an xlswrite range",
+          "error_identifier": "RunMat:compatibility:XlswriteNumericRangeExtension"
+        },
+        {
+          "id": "xlswrite-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "Pass explicit gpuArray input to xlswrite",
+          "error_identifier": "RunMat:compatibility:XlswriteExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "status = xlswrite(filename, integer_A, ___)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for spreadsheet data and serialize from authoritative storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Dense, sparse, and scalar cell integer values retain their exact signed or unsigned values through spreadsheet serialization."
+        },
+        {
+          "form": "status = xlswrite(filename, A, integer_sheet, ___)",
+          "inputs": [
+            {
+              "name": "sheet",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for the one-based worksheet selector and are decoded exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact positive selector chooses the worksheet without a floating conversion."
+        },
+        {
+          "form": "status = xlswrite(filename, A, sheet, integer_range)",
+          "inputs": [
+            {
+              "name": "numeric range",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode accepts an integer row and column vector in place of the documented textual range."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects the numeric-range extension before file access; RunMat mode parses the native integer vector exactly."
         }
       ]
     },

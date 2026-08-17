@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as SpreadsheetReader};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, Tensor, Value,
 };
@@ -28,6 +32,43 @@ const MAX_XLSREAD_WORKBOOK_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_XLSREAD_ZIP_ENTRIES: usize = 65_536;
+
+const XLSREAD_NUMERIC_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xlsread-numeric-range",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Use a numeric row and column vector as an xlsread range",
+    error_identifier: Some("RunMat:compatibility:XlsreadNumericRangeExtension"),
+};
+const XLSREAD_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "xlsread-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Pass explicit gpuArray selectors to xlsread",
+    error_identifier: Some("RunMat:compatibility:XlsreadExplicitGpuInputExtension"),
+};
+pub const XLSREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    XLSREAD_NUMERIC_RANGE_EXTENSION,
+    XLSREAD_EXPLICIT_GPU_EXTENSION,
+];
+const XLSREAD_INTEGER_SHEET_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sheet",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for the one-based worksheet selector and are decoded exactly.",
+    }];
+const XLSREAD_INTEGER_RANGE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numeric range",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode accepts an integer row and column vector in place of the documented textual range.",
+    }];
+pub const XLSREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "num = xlsread(filename, integer_sheet, ___)", inputs: &XLSREAD_INTEGER_SHEET_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The exact positive selector chooses a worksheet; numeric spreadsheet output remains double." },
+    BuiltinIntegerCapabilityDescriptor { form: "num = xlsread(filename, sheet, integer_range)", inputs: &XLSREAD_INTEGER_RANGE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Strict mode rejects the numeric-range extension before file access; RunMat mode parses the native integer vector exactly." },
+];
 
 const XLSREAD_OUTPUT_NUM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "num",
@@ -253,9 +294,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::xlsread_type),
     descriptor(crate::builtins::io::tabular::xlsread::XLSREAD_DESCRIPTOR),
+    extensions(crate::builtins::io::tabular::xlsread::XLSREAD_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::tabular::xlsread::XLSREAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::tabular::xlsread"
 )]
 async fn xlsread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&path)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XLSREAD_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if rest.len() >= 2 && is_numeric_range_value(&rest[1]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &XLSREAD_NUMERIC_RANGE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let path_value = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;
@@ -263,6 +322,10 @@ async fn xlsread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     let resolved = resolve_path(&path_value)?;
     let result = read_spreadsheet(&resolved, &request).await?;
     result.into_requested_value()
+}
+
+fn is_numeric_range_value(value: &Value) -> bool {
+    matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
 }
 
 fn xlsread_error_with(
@@ -1560,6 +1623,23 @@ mod tests {
             Tensor::new(vec![usize::MAX as f64, 1.0], vec![1, 2]).expect("boundary range"),
         );
         assert!(parse_range(&boundary).is_err());
+    }
+
+    #[test]
+    fn xlsread_gates_numeric_range_before_file_access() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let range = Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2])
+            .expect("numeric range");
+        let error = futures::executor::block_on(xlsread_builtin(
+            Value::from("definitely-missing.xlsx"),
+            vec![Value::from("Sheet1"), Value::Tensor(range)],
+        ))
+        .expect_err("strict mode rejects numeric ranges");
+        assert_eq!(
+            error.identifier(),
+            XLSREAD_NUMERIC_RANGE_EXTENSION.error_identifier
+        );
+        drop(strict);
     }
     use futures::executor::block_on;
     use std::fs;
