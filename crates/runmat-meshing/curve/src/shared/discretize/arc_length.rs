@@ -1,3 +1,4 @@
+use crate::shared::{SharedCurveError, SharedCurveErrorKind};
 use runmat_geometry_core::{
     ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl, GeometryTransform, ParameterRange,
 };
@@ -5,10 +6,9 @@ use runmat_geometry_core::{
 use super::{
     error::{edge_error, geometry_error},
     math::{dot, norm},
-    types::{SharedCurveDiscretizationError, SharedCurveDiscretizationErrorKind},
 };
 
-pub(super) fn world_arc_length(
+pub(crate) fn world_arc_length(
     edge: &ExactEdge,
     curves: &dyn ExactCurveEvaluator,
     control: &dyn GeometryEvaluationControl,
@@ -16,7 +16,7 @@ pub(super) fn world_arc_length(
     range: ParameterRange,
     absolute_error_m: f64,
     maximum_depth: u16,
-) -> Result<f64, SharedCurveDiscretizationError> {
+) -> Result<f64, SharedCurveError> {
     if let Some(scale) = similarity_scale(transform) {
         return curves
             .arc_length_m(
@@ -39,7 +39,7 @@ pub(super) fn world_arc_length(
         if !value.is_finite() || value <= 0.0 {
             return Err(edge_error(
                 edge,
-                SharedCurveDiscretizationErrorKind::InvalidResult,
+                SharedCurveErrorKind::GeometricMismatch,
                 "curve arc-length derivative",
                 "transformed curve speed must be finite and positive",
             ));
@@ -65,14 +65,14 @@ pub(super) fn world_arc_length(
 #[allow(clippy::too_many_arguments)]
 fn adaptive_simpson(
     edge: &ExactEdge,
-    speed: &dyn Fn(f64) -> Result<f64, SharedCurveDiscretizationError>,
+    speed: &dyn Fn(f64) -> Result<f64, SharedCurveError>,
     start: f64,
     end: f64,
     values: [f64; 3],
     tolerance: f64,
     depth: u16,
     maximum_depth: u16,
-) -> Result<f64, SharedCurveDiscretizationError> {
+) -> Result<f64, SharedCurveError> {
     let midpoint = (start + end) * 0.5;
     let left_midpoint = (start + midpoint) * 0.5;
     let right_midpoint = (midpoint + end) * 0.5;
@@ -88,7 +88,7 @@ fn adaptive_simpson(
     if depth >= maximum_depth {
         return Err(edge_error(
             edge,
-            SharedCurveDiscretizationErrorKind::ResourceLimit,
+            SharedCurveErrorKind::ResourceLimit,
             "curve arc-length integration",
             "requested absolute error exceeds the integration depth limit",
         ));

@@ -4,18 +4,16 @@ use runmat_geometry_core::{
 };
 
 use crate::shared::{
-    shared_curve_node_id, CurveResolutionEvidence, SharedCurve, SharedCurveFaceUse,
-    SharedCurveMesh, SharedCurveNode, SHARED_CURVE_MESH_SCHEMA_VERSION,
+    shared_curve_node_id, CurveResolutionEvidence, SharedCurve, SharedCurveError,
+    SharedCurveErrorKind, SharedCurveFaceUse, SharedCurveMesh, SharedCurveNode,
+    SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
 use super::{
     arc_length::world_arc_length,
     error::{edge_error, geometry_error, require_parameter_range, validate_options},
     sampling::{interval_evidence, EvaluatedPoint, EvaluationCache},
-    types::{
-        CurveMetricField, SharedCurveDiscretizationError, SharedCurveDiscretizationErrorKind,
-        SharedCurveDiscretizationOptions,
-    },
+    types::{CurveMetricField, SharedCurveDiscretizationOptions},
 };
 
 pub fn discretize_shared_curves(
@@ -25,7 +23,7 @@ pub fn discretize_shared_curves(
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
-) -> Result<SharedCurveMesh, SharedCurveDiscretizationError> {
+) -> Result<SharedCurveMesh, SharedCurveError> {
     validate_options(options)?;
     let mut edges = Vec::with_capacity(topology.edges.len());
     for edge in &topology.edges {
@@ -47,9 +45,9 @@ pub fn discretize_shared_curves(
         edges,
     };
     mesh.validate_against(topology)
-        .map_err(|error| SharedCurveDiscretizationError {
+        .map_err(|error| SharedCurveError {
             edge_id: None,
-            kind: SharedCurveDiscretizationErrorKind::InvalidResult,
+            kind: SharedCurveErrorKind::GeometricMismatch,
             field: error.field,
             reason: error.reason,
         })?;
@@ -65,11 +63,11 @@ fn discretize_edge(
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
-) -> Result<SharedCurve, SharedCurveDiscretizationError> {
+) -> Result<SharedCurve, SharedCurveError> {
     if edge.is_degenerate {
         return Err(edge_error(
             edge,
-            SharedCurveDiscretizationErrorKind::UnsatisfiedConstraint,
+            SharedCurveErrorKind::UnsatisfiedConstraint,
             "degenerate exact edge",
             "zero-length exact edges require singular-boundary discretization",
         ));
@@ -81,7 +79,7 @@ fn discretize_edge(
     let transform = topology.world_transform_for(&edge.id).map_err(|error| {
         edge_error(
             edge,
-            SharedCurveDiscretizationErrorKind::InvalidResult,
+            SharedCurveErrorKind::GeometricMismatch,
             "edge occurrence transform",
             error.to_string(),
         )
@@ -96,7 +94,7 @@ fn discretize_edge(
     {
         return Err(edge_error(
             edge,
-            SharedCurveDiscretizationErrorKind::UnsatisfiedConstraint,
+            SharedCurveErrorKind::UnsatisfiedConstraint,
             "minimum metric edge length",
             "upper geometric bounds require an edge shorter than the requested minimum",
         ));
@@ -149,7 +147,7 @@ fn discretize_edge(
         if pcurve_range != parameter_range {
             return Err(edge_error(
                 edge,
-                SharedCurveDiscretizationErrorKind::InvalidResult,
+                SharedCurveErrorKind::GeometricMismatch,
                 "pcurve parameter range",
                 "edge and coedge evaluator ranges differ",
             ));
@@ -178,7 +176,7 @@ fn discretize_edge(
         face_uses,
         requested: options.resolution,
         achieved,
-        metric_resolution: cache.metric_evidence(),
+        metric_resolution: cache.metric_evidence_for(&samples)?,
     })
 }
 
@@ -189,7 +187,7 @@ fn subdivide(
     depth: u16,
     output: &mut Vec<EvaluatedPoint>,
     options: SharedCurveDiscretizationOptions,
-) -> Result<(), SharedCurveDiscretizationError> {
+) -> Result<(), SharedCurveError> {
     let evidence = interval_evidence(cache, left, right)?;
     let violates = evidence.chordal_deviation_m > options.resolution.maximum_chordal_deviation_m
         || evidence.tangent_change_rad > options.resolution.maximum_tangent_change_rad
@@ -200,7 +198,7 @@ fn subdivide(
         {
             return Err(edge_error(
                 cache.edge,
-                SharedCurveDiscretizationErrorKind::ResourceLimit,
+                SharedCurveErrorKind::ResourceLimit,
                 "curve subdivision",
                 "required refinement exceeds the per-edge node or depth limit",
             ));
@@ -216,7 +214,7 @@ fn subdivide(
 fn resolution_evidence(
     cache: &mut EvaluationCache<'_>,
     samples: &[EvaluatedPoint],
-) -> Result<CurveResolutionEvidence, SharedCurveDiscretizationError> {
+) -> Result<CurveResolutionEvidence, SharedCurveError> {
     let mut maximum_chordal_deviation_m: f64 = 0.0;
     let mut maximum_tangent_change_rad: f64 = 0.0;
     let mut minimum_metric_edge_length = f64::INFINITY;

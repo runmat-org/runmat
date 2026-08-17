@@ -2,7 +2,7 @@ use runmat_geometry_core::{ParameterRange, PersistentEntityId, TopologicalOrient
 use runmat_meshing_core::{MetricSourceKind, StableDigest};
 use serde::{Deserialize, Serialize};
 
-use super::SharedCurveValidationError;
+use super::SharedCurveError;
 
 pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 1;
 
@@ -17,7 +17,7 @@ impl SharedCurveMesh {
     pub fn validate_against(
         &self,
         topology: &runmat_geometry_core::ExactBRepTopology,
-    ) -> Result<(), SharedCurveValidationError> {
+    ) -> Result<(), SharedCurveError> {
         super::validation::validate_shared_curve_mesh(self, topology)
     }
 }

@@ -1,29 +1,27 @@
+use crate::shared::{SharedCurveError, SharedCurveErrorKind};
 use runmat_geometry_core::{ExactEdge, GeometryEvaluationError, ParameterRange};
 
-use super::types::{
-    SharedCurveDiscretizationError, SharedCurveDiscretizationErrorKind,
-    SharedCurveDiscretizationOptions,
-};
+use super::types::SharedCurveDiscretizationOptions;
 
-pub(super) fn require_parameter_range(
+pub(crate) fn require_parameter_range(
     edge: &ExactEdge,
     range: ParameterRange,
-) -> Result<(), SharedCurveDiscretizationError> {
+) -> Result<(), SharedCurveError> {
     if range.start.is_finite() && range.end.is_finite() && range.start < range.end {
         Ok(())
     } else {
         Err(edge_error(
             edge,
-            SharedCurveDiscretizationErrorKind::InvalidResult,
+            SharedCurveErrorKind::GeometricMismatch,
             "curve parameter range",
             "exact evaluator range must be finite and increasing",
         ))
     }
 }
 
-pub(super) fn validate_options(
+pub(crate) fn validate_options(
     options: SharedCurveDiscretizationOptions,
-) -> Result<(), SharedCurveDiscretizationError> {
+) -> Result<(), SharedCurveError> {
     let resolution = options.resolution;
     if !resolution.maximum_chordal_deviation_m.is_finite()
         || resolution.maximum_chordal_deviation_m <= 0.0
@@ -35,36 +33,37 @@ pub(super) fn validate_options(
         || resolution.minimum_metric_edge_length > resolution.maximum_metric_edge_length
         || options.maximum_nodes_per_edge < 2
         || options.maximum_subdivision_depth == 0
+        || !options.geometry_absolute_error_m.is_finite()
+        || options.geometry_absolute_error_m <= 0.0
+        || !options.pcurve_absolute_error.is_finite()
+        || options.pcurve_absolute_error <= 0.0
         || !options.arc_length_absolute_error_m.is_finite()
         || options.arc_length_absolute_error_m <= 0.0
     {
-        return Err(SharedCurveDiscretizationError::invalid(
+        return Err(SharedCurveError::invalid_request(
             "shared curve discretization options",
-            "resolution, node, depth, and arc-length bounds must be finite, positive, and ordered",
+            "resolution, node, depth, geometry, pcurve, and arc-length bounds must be finite, positive, and ordered",
         ));
     }
     Ok(())
 }
 
-pub(super) fn geometry_error(
-    edge: &ExactEdge,
-    error: GeometryEvaluationError,
-) -> SharedCurveDiscretizationError {
+pub(crate) fn geometry_error(edge: &ExactEdge, error: GeometryEvaluationError) -> SharedCurveError {
     edge_error(
         edge,
-        SharedCurveDiscretizationErrorKind::GeometryEvaluation(error.kind),
+        SharedCurveErrorKind::GeometryEvaluation(error.kind),
         "exact evaluator",
         error.reason,
     )
 }
 
-pub(super) fn edge_error(
+pub(crate) fn edge_error(
     edge: &ExactEdge,
-    kind: SharedCurveDiscretizationErrorKind,
+    kind: SharedCurveErrorKind,
     field: impl Into<String>,
     reason: impl Into<String>,
-) -> SharedCurveDiscretizationError {
-    SharedCurveDiscretizationError {
+) -> SharedCurveError {
+    SharedCurveError {
         edge_id: Some(edge.id.clone()),
         kind,
         field: field.into(),

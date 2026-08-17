@@ -104,6 +104,107 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
         .unwrap(),
         mesh
     );
+    let report = validate_shared_curve_geometry(
+        &mesh,
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &UnlimitedControl,
+        options,
+    )
+    .unwrap();
+    assert_eq!(report.edge_count, 1);
+    assert_eq!(report.node_count, curve.nodes.len() as u64);
+    assert_eq!(
+        report.metric_evaluation_count,
+        curve.metric_resolution.evaluation_count
+    );
+}
+
+#[test]
+fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact");
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let metric = UniformCurveMetric::from_target_size_m(0.25).unwrap();
+    let options = shared_options();
+    let mesh = discretize_shared_curves(
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &UnlimitedControl,
+        options,
+    )
+    .unwrap();
+    let validate = |candidate: &SharedCurveMesh| {
+        validate_shared_curve_geometry(
+            candidate,
+            &topology,
+            &evaluator,
+            &evaluator,
+            &metric,
+            &UnlimitedControl,
+            options,
+        )
+    };
+
+    let cancelled = validate_shared_curve_geometry(
+        &mesh,
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &CancelledControl,
+        options,
+    )
+    .unwrap_err();
+    assert_eq!(
+        cancelled.kind,
+        SharedCurveErrorKind::GeometryEvaluation(
+            runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled
+        )
+    );
+
+    let mut coordinates = mesh.clone();
+    coordinates.edges[0].nodes[1].coordinates_m[0] += 1.0e-4;
+    assert_eq!(
+        validate(&coordinates).unwrap_err().kind,
+        SharedCurveErrorKind::GeometricMismatch
+    );
+
+    let mut uv = mesh.clone();
+    uv.edges[0].face_uses[0].node_uv[1][0] += 1.0e-4;
+    assert_eq!(
+        validate(&uv).unwrap_err().kind,
+        SharedCurveErrorKind::GeometricMismatch
+    );
+
+    let mut arc = mesh.clone();
+    arc.edges[0].nodes[1].arc_length_m += 1.0e-4;
+    assert_eq!(
+        validate(&arc).unwrap_err().kind,
+        SharedCurveErrorKind::GeometricMismatch
+    );
+
+    let mut understated = mesh.clone();
+    understated.edges[0].achieved.maximum_chordal_deviation_m = 1.0e-12;
+    assert_eq!(
+        validate(&understated).unwrap_err().kind,
+        SharedCurveErrorKind::GeometricMismatch
+    );
+
+    let mut false_source = mesh;
+    false_source.edges[0].metric_resolution.active_sources =
+        vec![runmat_meshing_core::MetricSourceKind::Feature];
+    assert_eq!(
+        validate(&false_source).unwrap_err().kind,
+        SharedCurveErrorKind::GeometricMismatch
+    );
 }
 
 #[test]
@@ -126,10 +227,7 @@ fn constructive_curve_discretization_fails_at_its_hard_node_limit() {
         options,
     )
     .unwrap_err();
-    assert_eq!(
-        error.kind,
-        SharedCurveDiscretizationErrorKind::ResourceLimit
-    );
+    assert_eq!(error.kind, SharedCurveErrorKind::ResourceLimit);
     assert_eq!(error.edge_id, Some(topology.edges[0].id.clone()));
 }
 
@@ -153,10 +251,7 @@ fn constructive_curve_discretization_reports_incompatible_minimum_length() {
         options,
     )
     .unwrap_err();
-    assert_eq!(
-        error.kind,
-        SharedCurveDiscretizationErrorKind::UnsatisfiedConstraint
-    );
+    assert_eq!(error.kind, SharedCurveErrorKind::UnsatisfiedConstraint);
     assert_eq!(error.field, "minimum metric edge length");
 }
 
@@ -231,7 +326,7 @@ fn constructive_curves_preserve_typed_evaluator_cancellation() {
     .unwrap_err();
     assert_eq!(
         error.kind,
-        SharedCurveDiscretizationErrorKind::GeometryEvaluation(
+        SharedCurveErrorKind::GeometryEvaluation(
             runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled
         )
     );
@@ -247,6 +342,8 @@ fn shared_options() -> SharedCurveDiscretizationOptions {
         },
         maximum_nodes_per_edge: 1_024,
         maximum_subdivision_depth: 20,
+        geometry_absolute_error_m: 1.0e-10,
+        pcurve_absolute_error: 1.0e-10,
         arc_length_absolute_error_m: 1.0e-10,
     }
 }

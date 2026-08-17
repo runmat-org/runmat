@@ -1,7 +1,7 @@
 use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
 use runmat_geometry_core::ExactBRepTopology;
 
-use super::{validation::invalid, SharedCurveMesh, SharedCurveValidationError};
+use super::{SharedCurveError, SharedCurveMesh};
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-curve-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "shared-curve-mesh/v1";
@@ -12,7 +12,7 @@ const CONTRACT_LIMITS: CanonicalLimits =
 pub fn encode_shared_curve_mesh(
     mesh: &SharedCurveMesh,
     topology: &ExactBRepTopology,
-) -> Result<Vec<u8>, SharedCurveValidationError> {
+) -> Result<Vec<u8>, SharedCurveError> {
     mesh.validate_against(topology)?;
     runmat_canonical_codec::encode_contract(CODEC_PREFIX, CONTRACT_DOMAIN, mesh, CONTRACT_LIMITS)
         .map_err(map_codec_error)
@@ -22,7 +22,7 @@ pub fn encode_shared_curve_mesh(
 pub fn decode_shared_curve_mesh(
     bytes: &[u8],
     topology: &ExactBRepTopology,
-) -> Result<SharedCurveMesh, SharedCurveValidationError> {
+) -> Result<SharedCurveMesh, SharedCurveError> {
     decode_with_limits(bytes, topology, CONTRACT_LIMITS)
 }
 
@@ -30,7 +30,7 @@ fn decode_with_limits(
     bytes: &[u8],
     topology: &ExactBRepTopology,
     limits: CanonicalLimits,
-) -> Result<SharedCurveMesh, SharedCurveValidationError> {
+) -> Result<SharedCurveMesh, SharedCurveError> {
     let mesh: SharedCurveMesh =
         runmat_canonical_codec::decode_contract(CODEC_PREFIX, CONTRACT_DOMAIN, bytes, limits)
             .map_err(map_codec_error)?;
@@ -43,7 +43,7 @@ pub(super) fn decode_with_byte_limit(
     bytes: &[u8],
     topology: &ExactBRepTopology,
     maximum_encoded_bytes: usize,
-) -> Result<SharedCurveMesh, SharedCurveValidationError> {
+) -> Result<SharedCurveMesh, SharedCurveError> {
     decode_with_limits(
         bytes,
         topology,
@@ -51,6 +51,6 @@ pub(super) fn decode_with_byte_limit(
     )
 }
 
-fn map_codec_error(error: CanonicalCodecError) -> SharedCurveValidationError {
-    invalid(error.field, error.reason)
+fn map_codec_error(error: CanonicalCodecError) -> SharedCurveError {
+    SharedCurveError::invalid_encoding(error.field, error.reason)
 }

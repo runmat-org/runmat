@@ -7,31 +7,17 @@ use runmat_meshing_core::MetricSourceKind;
 
 use super::{
     shared_curve_node_id, CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve,
-    SharedCurveMesh, SHARED_CURVE_MESH_SCHEMA_VERSION,
+    SharedCurveError, SharedCurveMesh, SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
 const MAX_CURVE_NODES: usize = 20_000_000;
 const MAX_CURVE_FACE_USES: usize = 20_000_000;
 const MAX_CURVE_UV_SAMPLES: usize = 100_000_000;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SharedCurveValidationError {
-    pub field: String,
-    pub reason: String,
-}
-
-impl std::fmt::Display for SharedCurveValidationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "invalid {}: {}", self.field, self.reason)
-    }
-}
-
-impl std::error::Error for SharedCurveValidationError {}
-
 pub(super) fn validate_shared_curve_mesh(
     mesh: &SharedCurveMesh,
     topology: &ExactBRepTopology,
-) -> Result<(), SharedCurveValidationError> {
+) -> Result<(), SharedCurveError> {
     if mesh.schema_version != SHARED_CURVE_MESH_SCHEMA_VERSION {
         return Err(invalid("shared curve schema", "unsupported version"));
     }
@@ -92,7 +78,7 @@ fn validate_curve(
     curve: &SharedCurve,
     edge: &ExactEdge,
     expected_coedges: Option<&Vec<&ExactCoedge>>,
-) -> Result<(), SharedCurveValidationError> {
+) -> Result<(), SharedCurveError> {
     if curve.source_edge_id.kind != PersistentEntityKind::Edge
         || !finite_range(curve.parameter_range.start, curve.parameter_range.end)
         || curve.nodes.len() < 2
@@ -174,7 +160,7 @@ fn validate_curve(
     Ok(())
 }
 
-fn validate_metric_resolution(curve: &SharedCurve) -> Result<(), SharedCurveValidationError> {
+fn validate_metric_resolution(curve: &SharedCurve) -> Result<(), SharedCurveError> {
     let evidence = &curve.metric_resolution;
     if evidence.active_sources.is_empty()
         || evidence.evaluation_count < curve.nodes.len() as u64
@@ -214,7 +200,7 @@ pub(super) const fn metric_source_rank(source: MetricSourceKind) -> u8 {
 fn validate_resolution(
     requested: CurveResolutionPolicy,
     achieved: CurveResolutionEvidence,
-) -> Result<(), SharedCurveValidationError> {
+) -> Result<(), SharedCurveError> {
     let requested_values = [
         requested.maximum_chordal_deviation_m,
         requested.maximum_tangent_change_rad,
@@ -253,12 +239,6 @@ fn finite_range(start: f64, end: f64) -> bool {
     start.is_finite() && end.is_finite() && start < end
 }
 
-pub(super) fn invalid(
-    field: impl Into<String>,
-    reason: impl Into<String>,
-) -> SharedCurveValidationError {
-    SharedCurveValidationError {
-        field: field.into(),
-        reason: reason.into(),
-    }
+pub(super) fn invalid(field: impl Into<String>, reason: impl Into<String>) -> SharedCurveError {
+    SharedCurveError::invalid_contract(field, reason)
 }
