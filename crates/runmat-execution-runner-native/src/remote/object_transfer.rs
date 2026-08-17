@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef};
 use runmat_execution::Digest;
+use runmat_execution_artifact::cache::{CacheExport, CacheImport};
+use runmat_execution_artifact::{ArtifactError, ArtifactResult, LogicalObject};
 use runmat_execution_transport_native::transfer::{ObjectChunk, ResumeState};
 
 use super::protocol::{RemoteWorkerCommand, RemoteWorkerOutcome};
@@ -23,7 +26,43 @@ struct PartialObject {
 pub(super) struct RemoteObjectCache {
     complete: HashMap<runmat_execution::identity::ValueId, (ValueRef, Vec<u8>)>,
     partial: HashMap<runmat_execution::identity::ValueId, PartialObject>,
+    generated: HashMap<Digest, Vec<u8>>,
     buffered_bytes: u64,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct RemoteObjectStore(Arc<Mutex<RemoteObjectCache>>);
+
+impl RemoteObjectStore {
+    pub(super) fn handle(
+        &self,
+        command: RemoteWorkerCommand,
+        authorization_scope: &str,
+    ) -> RemoteWorkerOutcome {
+        handle_command(
+            &mut self.0.lock().expect("remote object store poisoned"),
+            command,
+            authorization_scope,
+        )
+    }
+}
+
+impl CacheImport for RemoteObjectStore {
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        self.0
+            .lock()
+            .expect("remote object store poisoned")
+            .read_verified(digest)
+    }
+}
+
+impl CacheExport for RemoteObjectStore {
+    fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {
+        self.0
+            .lock()
+            .expect("remote object store poisoned")
+            .write_verified(object)
+    }
 }
 
 impl RemoteObjectCache {
@@ -120,11 +159,22 @@ impl RemoteObjectCache {
         authorization_scope: &str,
     ) -> NativeExecutionResult<(ObjectChunk, bool)> {
         validate_reference(reference, authorization_scope)?;
-        let (stored, bytes) = self
-            .complete
-            .get(&reference.id)
-            .ok_or_else(|| protocol("remote object is unavailable or incomplete"))?;
-        if stored != reference || offset > reference.encoded_length {
+        let bytes = match self.complete.get(&reference.id) {
+            Some((stored, bytes)) if stored == reference => bytes,
+            Some(_) => {
+                return Err(protocol(
+                    "remote object download reference differs from stored content",
+                ))
+            }
+            None => self
+                .generated
+                .get(&reference.logical_digest)
+                .ok_or_else(|| protocol("remote object is unavailable or incomplete"))?,
+        };
+        if bytes.len() as u64 != reference.encoded_length
+            || Digest::sha256(bytes) != reference.logical_digest
+            || offset > reference.encoded_length
+        {
             return Err(protocol(
                 "remote object download reference or offset differs",
             ));
@@ -144,6 +194,78 @@ impl RemoteObjectCache {
                 bytes: bytes[start..end].to_vec(),
             },
             end == bytes.len(),
+        ))
+    }
+}
+
+impl CacheImport for RemoteObjectCache {
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        let bytes = self
+            .generated
+            .get(&digest)
+            .or_else(|| {
+                self.complete.values().find_map(|(reference, bytes)| {
+                    (reference.logical_digest == digest).then_some(bytes)
+                })
+            })
+            .cloned();
+        if bytes
+            .as_ref()
+            .is_some_and(|bytes| Digest::sha256(bytes) != digest)
+        {
+            return Err(ArtifactError::Identity(
+                "remote cache returned bytes under the wrong digest".into(),
+            ));
+        }
+        Ok(bytes)
+    }
+}
+
+impl CacheExport for RemoteObjectCache {
+    fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {
+        object.validate()?;
+        if object.descriptor.encoded_length == 0
+            || object.descriptor.encoded_length > MAX_REMOTE_OBJECT_BYTES
+        {
+            return Err(ArtifactError::Limit(
+                "remote generated object exceeds its per-object bound".into(),
+            ));
+        }
+        if let Some(existing) = self.generated.get(&object.descriptor.digest) {
+            return identical(existing, &object.bytes);
+        }
+        if let Some(existing) = self.complete.values().find_map(|(reference, bytes)| {
+            (reference.logical_digest == object.descriptor.digest).then_some(bytes)
+        }) {
+            return identical(existing, &object.bytes);
+        }
+        if self.complete.len().saturating_add(self.generated.len()) >= MAX_REMOTE_OBJECTS {
+            return Err(ArtifactError::Limit(
+                "remote generated object inventory exceeds its count bound".into(),
+            ));
+        }
+        let next_total = self
+            .buffered_bytes
+            .checked_add(object.descriptor.encoded_length)
+            .ok_or_else(|| ArtifactError::Limit("remote object byte total overflowed".into()))?;
+        if next_total > MAX_REMOTE_OBJECT_TOTAL_BYTES {
+            return Err(ArtifactError::Limit(
+                "remote generated object inventory exceeds its byte bound".into(),
+            ));
+        }
+        self.generated
+            .insert(object.descriptor.digest, object.bytes.clone());
+        self.buffered_bytes = next_total;
+        Ok(())
+    }
+}
+
+fn identical(existing: &[u8], expected: &[u8]) -> ArtifactResult<()> {
+    if existing == expected {
+        Ok(())
+    } else {
+        Err(ArtifactError::Identity(
+            "remote object digest was reused for different content".into(),
         ))
     }
 }
@@ -292,5 +414,37 @@ mod tests {
         corrupt.logical_digest = Digest::sha256(b"substituted");
         assert!(cache.probe(&corrupt, "run-object").is_err());
         assert!(cache.probe(&reference, "another-run").is_err());
+    }
+
+    #[test]
+    fn generated_objects_use_the_same_verified_download_store() {
+        let bytes = b"generated canonical bytes".to_vec();
+        let object = LogicalObject::new(
+            runmat_execution_artifact::ObjectNamespace::ResultValue,
+            "remote/generated",
+            "application/vnd.runmat.test",
+            bytes.clone(),
+        )
+        .unwrap();
+        let reference = reference(&bytes);
+        let mut store = RemoteObjectStore::default();
+        store.write_verified(&object).unwrap();
+        assert_eq!(
+            store.read_verified(object.descriptor.digest).unwrap(),
+            Some(bytes.clone())
+        );
+        let outcome = store.handle(
+            RemoteWorkerCommand::GetObjectChunk {
+                reference,
+                offset: 0,
+                maximum_bytes: 1024,
+            },
+            "run-object",
+        );
+        assert!(matches!(
+            outcome,
+            RemoteWorkerOutcome::ObjectChunk { chunk, complete }
+                if chunk.bytes == bytes && complete
+        ));
     }
 }

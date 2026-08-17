@@ -1,12 +1,22 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
+use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_execution::identity::ArtifactId;
-use runmat_execution::resource::Capability;
+use runmat_execution::resource::{Capability, ResourceInventory};
 use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
-use runmat_execution_artifact::ProgramExecutionResponse;
+use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
+use runmat_execution_artifact::cache::{CacheExport, CacheImport};
+use runmat_execution_artifact::{
+    ArtifactResult, ExecutableForm, ExecutionBundleBuilder, LogicalObject, ProgramExecutionResponse,
+};
+use runmat_execution_runner::{PoolSpec, WorkerSpec};
+use runmat_execution_transport_native::frame::FrameLimits;
+use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicyV2, CanonicalMeshingContract, GeometryRevisionRef,
     GeometryTolerancePolicy, MeshElementOrderV2, MeshingCapabilityRequirementV2,
@@ -25,8 +35,9 @@ use runmat_meshing_execution::{
 };
 
 use runmat_execution_runner_native::{
-    execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
-    NativeProgramSession, NATIVE_OBJECT_STORE_ROOT_ENV,
+    execute_meshing_program_request, run_meshing_worker_stdio, run_remote_meshing_worker_quic,
+    NativeMeshingHostLimits, NativeProgramSession, QuicRemoteWorkerChannel, RemotePoolDriver,
+    RemoteWorkerChannel, RemoteWorkerChannelConfig, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
 struct AdmissionKernel;
@@ -236,6 +247,189 @@ async fn parent() {
     drop(cancel_task);
     drop(cancel_session);
     assert!(!cancel_store_root.exists());
+
+    remote_conformance().await;
+}
+
+async fn remote_conformance() {
+    let project_root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project_root.path().join("src")).unwrap();
+    std::fs::write(
+        project_root.path().join("runmat.toml"),
+        "[package]\nname = \"remote-meshing\"\n[sources]\nroots = [\"src\"]\n",
+    )
+    .unwrap();
+    let project = runmat_package::build_frozen_project(
+        &project_root.path().join("runmat.toml"),
+        BTreeSet::new(),
+    )
+    .unwrap();
+    let project_identity = project.revision();
+    let revision = ProgramRevision::new(
+        Digest::from_bytes(*project_identity.graph_digest.bytes()),
+        Digest::from_bytes(*project_identity.source_revision.bytes()),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+    )
+    .unwrap();
+    let (host, request) = fixture_for(revision.clone(), "remote-meshing-run");
+    let bundle = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_compiled_package_closure()
+        .with_materialized_program(
+            request.recipe.clone(),
+            ExecutableForm::MeshingWorkloadV2,
+            request.artifact.executable_bytes.clone(),
+        )
+        .build()
+        .unwrap();
+    let mut bundle_bytes = Vec::new();
+    write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
+
+    let CertifiedKey { cert, signing_key } =
+        generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
+    let certificate_der = cert.der().to_vec();
+    let listener = QuicOverlayListener::bind(
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        vec![certificate_der.clone()],
+        signing_key.serialize_der(),
+        FrameLimits::default(),
+    )
+    .unwrap();
+    let authority = listener.local_addr().unwrap();
+    let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-meshing-scope"]);
+    let pool_id = runmat_execution::PoolId::derive(&[b"remote-meshing-pool"]);
+    let worker = WorkerSpec {
+        id: runmat_execution::identity::WorkerId::derive(&[b"remote-meshing-worker"]),
+        pool_id,
+        resources: worker_inventory(),
+    };
+    let run_key =
+        runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([17; 32]).unwrap();
+    let server = run_remote_meshing_worker_quic(
+        listener,
+        "remote-meshing-run",
+        worker.clone(),
+        31,
+        [19; 16],
+        run_key.clone(),
+        FrameLimits::default(),
+        Arc::new(AdmissionKernel),
+        limits(),
+    );
+    let client = async {
+        let channel = QuicRemoteWorkerChannel::connect(
+            RemoteWorkerChannelConfig {
+                run_identity: "remote-meshing-run".into(),
+                node_identity: "remote-meshing-node".into(),
+                worker,
+                driver_fence: 31,
+                session_id: [19; 16],
+                run_key,
+                limits: FrameLimits::default(),
+            },
+            &PinnedQuicEndpoint {
+                authority,
+                server_name: "runmat.execution".into(),
+                certificate_der,
+            },
+        )
+        .await
+        .unwrap();
+        let pool = RemotePoolDriver::new_with_value_scope(
+            scope_id,
+            PoolSpec {
+                id: pool_id,
+                min_workers: 1,
+                max_workers: 1,
+                max_in_flight: 1,
+                resource_limit: worker_inventory(),
+            },
+            31,
+            bundle_bytes,
+            "remote-meshing-run",
+        )
+        .unwrap();
+        pool.add_worker(channel.clone()).await.unwrap();
+        let completion = pool
+            .submit(
+                submission_for(scope_id, pool_id, &host, &request),
+                request.clone(),
+            )
+            .unwrap();
+        let success = tokio::time::timeout(Duration::from_secs(10), completion.wait())
+            .await
+            .expect("remote meshing completion timeout")
+            .unwrap();
+        let [ValuePayload::Object(remote_root)] = success.outputs.as_slice() else {
+            panic!("remote meshing returned a non-object root")
+        };
+        let mut remote_store = TestStore::default();
+        for reference in &success.result_objects {
+            remote_store.0.insert(
+                reference.logical_digest,
+                pool.execution_object(reference)
+                    .unwrap()
+                    .expect("verified remote result object")
+                    .to_vec(),
+            );
+        }
+        let imported = import_result_publication(
+            &remote_store,
+            remote_root,
+            host.artifact_access.clone(),
+            limits().inventory,
+        )
+        .unwrap();
+        assert_eq!(imported.result_objects(), success.result_objects);
+
+        let mut serial_store = TestStore::default();
+        let serial = execute_meshing_program_request(
+            &request,
+            &mut serial_store,
+            &AdmissionKernel,
+            &NeverCancelled,
+            &mut NoopMeshingProgress,
+            limits(),
+        );
+        let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = serial else {
+            panic!("serial meshing reference did not externalize its result")
+        };
+        assert_eq!(outputs, success.outputs);
+        tokio::time::timeout(Duration::from_secs(5), channel.drain())
+            .await
+            .expect("remote meshing drain timeout")
+            .unwrap();
+    };
+    let (server, ()) = tokio::join!(server, client);
+    server.unwrap();
+}
+
+#[derive(Default)]
+struct TestStore(BTreeMap<Digest, Vec<u8>>);
+
+impl CacheImport for TestStore {
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        Ok(self.0.get(&digest).cloned())
+    }
+}
+
+impl CacheExport for TestStore {
+    fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {
+        object.validate()?;
+        self.0
+            .insert(object.descriptor.digest, object.bytes.clone());
+        Ok(())
+    }
+}
+
+fn worker_inventory() -> ResourceInventory {
+    ResourceInventory {
+        cpu_millicores: 1_000,
+        memory_bytes: 4_000_000,
+        scratch_bytes: 4_000_000,
+        accelerators: Vec::new(),
+        capabilities: worker_capabilities(),
+    }
 }
 
 fn config(root: &Path, worker_mode: &str) -> runmat_execution_runner_native::NativeExecutionConfig {
@@ -254,6 +448,15 @@ fn submission(
     host: &MeshingHostWorkloadV2,
     request: &runmat_execution_artifact::ProgramExecutionRequest,
 ) -> runmat_execution_runner::TaskSubmission {
+    submission_for(session.scope_id(), session.pool_id(), host, request)
+}
+
+fn submission_for(
+    scope_id: runmat_execution::ExecutionScopeId,
+    pool_id: runmat_execution::PoolId,
+    host: &MeshingHostWorkloadV2,
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+) -> runmat_execution_runner::TaskSubmission {
     build_task_submission(
         &host.workload,
         &host.stage_identity,
@@ -261,8 +464,8 @@ fn submission(
         &[],
         BTreeSet::new(),
         &MeshingExecutionContext {
-            scope_id: session.scope_id(),
-            pool_id: session.pool_id(),
+            scope_id,
+            pool_id,
             program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
             artifact_access: host.artifact_access.clone(),
             cpu_millicores: 1000,
@@ -294,8 +497,18 @@ fn fixture() -> (
     MeshingHostWorkloadV2,
     runmat_execution_artifact::ProgramExecutionRequest,
 ) {
+    fixture_for(revision(), "native-meshing-run")
+}
+
+fn fixture_for(
+    revision: ProgramRevision,
+    authorization_scope: &str,
+) -> (
+    MeshingHostWorkloadV2,
+    runmat_execution_artifact::ProgramExecutionRequest,
+) {
     let access = MeshingArtifactAccess {
-        authorization_scope: "native-meshing-run".into(),
+        authorization_scope: authorization_scope.into(),
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };
     let request = request();
@@ -345,7 +558,7 @@ fn fixture() -> (
         ],
     };
     let host = MeshingHostWorkloadV2::new(workload, identity, request, access).unwrap();
-    let program = host.program_request(revision(), &[]).unwrap();
+    let program = host.program_request(revision, &[]).unwrap();
     (host, program)
 }
 

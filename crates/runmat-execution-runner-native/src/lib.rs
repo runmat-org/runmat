@@ -26,10 +26,11 @@ pub use object_store::NativeObjectStore;
 pub use program_session::{NativeProgramSession, NativeProgramTask};
 pub use protocol::{ProgramProgress, WorkerResponse};
 pub use remote::{
-    run_remote_driver_from_env, run_remote_worker_from_env, run_remote_worker_quic,
-    run_remote_worker_relay, QuicRemoteWorkerChannel, RelayRemoteWorkerChannel, RemoteAttempt,
-    RemoteBundleReceipt, RemoteObjectReceipt, RemotePoolDriver, RemoteTaskCompletion,
-    RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerRelayRequest,
+    run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
+    run_remote_worker_quic, run_remote_worker_relay, QuicRemoteWorkerChannel,
+    RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt, RemoteObjectReceipt,
+    RemotePoolDriver, RemoteTaskCompletion, RemoteValueReceipt, RemoteWorkerChannel,
+    RemoteWorkerChannelConfig, RemoteWorkerRelayRequest,
 };
 pub use service::NativeExecutionService;
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};

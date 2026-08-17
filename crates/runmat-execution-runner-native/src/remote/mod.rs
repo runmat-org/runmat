@@ -16,7 +16,9 @@ mod relay_channel;
 mod route;
 mod value_transfer;
 mod worker_bundle;
+mod worker_entry;
 mod worker_env;
+mod worker_execution;
 mod worker_server;
 
 pub use channel::{
@@ -27,10 +29,11 @@ pub use driver::run_remote_driver_from_env;
 pub use pool::{RemotePoolDriver, RemoteTaskCompletion};
 pub use quic_channel::{QuicRemoteWorkerChannel, RemoteWorkerChannelConfig};
 pub use relay_channel::RelayRemoteWorkerChannel;
-pub use worker_env::run_remote_worker_from_env;
-pub use worker_server::{
-    run_remote_worker_quic, run_remote_worker_relay, RemoteWorkerRelayRequest,
+pub use worker_entry::{
+    run_remote_meshing_worker_quic, run_remote_worker_quic, run_remote_worker_relay,
+    RemoteWorkerRelayRequest,
 };
+pub use worker_env::run_remote_worker_from_env;
 
 #[cfg(test)]
 mod pool_tests;

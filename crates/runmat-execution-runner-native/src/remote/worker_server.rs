@@ -3,17 +3,16 @@ use std::sync::Arc;
 
 use runmat_execution::identity::AttemptId;
 use runmat_execution_artifact::encryption::RunKeyMaterial;
-use runmat_execution_artifact::ExecutionBundle;
-use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptSuccess, WorkerSpec};
+use runmat_execution_artifact::{ExecutableForm, ExecutionBundle, ProgramExecutionResponse};
+use runmat_execution_runner::WorkerSpec;
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
-use runmat_execution_transport_native::overlay::{QuicOverlayListener, WebSocketRelayConnection};
 use tokio::sync::Mutex;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
     REMOTE_WORKER_PROTOCOL_V2,
 };
-use super::route::{QuicFrameRoute, RelayFrameRoute, RemoteFrameRoute};
+use super::route::RemoteFrameRoute;
 use super::RemoteAttempt;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -21,100 +20,31 @@ struct WorkerState {
     bundle: Option<ExecutionBundle>,
     materialized_project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     bundle_digest: Option<runmat_execution::Digest>,
-    attempts: HashMap<AttemptId, tokio::task::JoinHandle<()>>,
+    attempts: HashMap<AttemptId, ActiveAttempt>,
     values: HashMap<runmat_execution::identity::ValueId, runmat_execution::value::ValuePayload>,
-    objects: super::object_transfer::RemoteObjectCache,
+    objects: super::object_transfer::RemoteObjectStore,
     draining: bool,
     bundle_cache: Option<std::path::PathBuf>,
 }
 
-struct WorkerLoopContext {
-    run_identity: String,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
-    bundle_cache: Option<std::path::PathBuf>,
+struct ActiveAttempt {
+    task: tokio::task::JoinHandle<()>,
+    cancellation: Arc<super::worker_execution::AttemptCancellation>,
+    cooperative: bool,
 }
 
-pub async fn run_remote_worker_quic(
-    listener: QuicOverlayListener,
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
-) -> NativeExecutionResult<()> {
-    let connection = Arc::new(listener.accept().await.map_err(protocol)?);
-    tokio::task::LocalSet::new()
-        .run_until(run_worker_loop(
-            Arc::new(QuicFrameRoute(connection)),
-            WorkerLoopContext {
-                run_identity: run_identity.into(),
-                worker,
-                driver_fence,
-                session_id,
-                run_key,
-                limits,
-                bundle_cache: None,
-            },
-        ))
-        .await
+pub(super) struct WorkerLoopContext {
+    pub(super) run_identity: String,
+    pub(super) worker: WorkerSpec,
+    pub(super) driver_fence: u64,
+    pub(super) session_id: [u8; 16],
+    pub(super) run_key: RunKeyMaterial,
+    pub(super) limits: FrameLimits,
+    pub(super) bundle_cache: Option<std::path::PathBuf>,
+    pub(super) meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
 }
 
-pub struct RemoteWorkerRelayRequest<'a> {
-    pub url: &'a str,
-    pub headers: &'a [(String, String)],
-    pub run_identity: String,
-    pub worker: WorkerSpec,
-    pub driver_fence: u64,
-    pub session_id: [u8; 16],
-    pub run_key: RunKeyMaterial,
-    pub limits: FrameLimits,
-}
-
-pub async fn run_remote_worker_relay(
-    request: RemoteWorkerRelayRequest<'_>,
-) -> NativeExecutionResult<()> {
-    run_remote_worker_relay_cached(request, None).await
-}
-
-pub(crate) async fn run_remote_worker_relay_cached(
-    request: RemoteWorkerRelayRequest<'_>,
-    bundle_cache: Option<std::path::PathBuf>,
-) -> NativeExecutionResult<()> {
-    let RemoteWorkerRelayRequest {
-        url,
-        headers,
-        run_identity,
-        worker,
-        driver_fence,
-        session_id,
-        run_key,
-        limits,
-    } = request;
-    let connection = WebSocketRelayConnection::connect(url, headers, limits)
-        .await
-        .map_err(protocol)?;
-    tokio::task::LocalSet::new()
-        .run_until(run_worker_loop(
-            Arc::new(RelayFrameRoute::new(connection)),
-            WorkerLoopContext {
-                run_identity,
-                worker,
-                driver_fence,
-                session_id,
-                run_key,
-                limits,
-                bundle_cache,
-            },
-        ))
-        .await
-}
-
-async fn run_worker_loop(
+pub(super) async fn run_worker_loop(
     connection: Arc<dyn RemoteFrameRoute>,
     context: WorkerLoopContext,
 ) -> NativeExecutionResult<()> {
@@ -126,6 +56,7 @@ async fn run_worker_loop(
         run_key,
         limits,
         bundle_cache,
+        meshing_host,
     } = context;
     let mut receiver = EncryptedFrameSession::new(
         run_identity.clone(),
@@ -151,7 +82,7 @@ async fn run_worker_loop(
         bundle_digest: None,
         attempts: HashMap::new(),
         values: HashMap::new(),
-        objects: super::object_transfer::RemoteObjectCache::default(),
+        objects: super::object_transfer::RemoteObjectStore::default(),
         draining: false,
         bundle_cache,
     }));
@@ -313,12 +244,29 @@ async fn run_worker_loop(
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
                 let state_for_task = Arc::clone(&state);
-                let materialized_project =
-                    state.lock().await.materialized_project.as_ref().cloned();
+                let (materialized_project, objects) = {
+                    let state = state.lock().await;
+                    (
+                        state.materialized_project.as_ref().cloned(),
+                        state.objects.clone(),
+                    )
+                };
+                let cooperative =
+                    attempt.program.artifact.form == ExecutableForm::MeshingWorkloadV2;
+                let cancellation =
+                    Arc::new(super::worker_execution::AttemptCancellation::default());
+                let cancellation_for_task = Arc::clone(&cancellation);
+                let meshing_host = meshing_host.clone();
                 let drain_complete_for_task = Arc::clone(&drain_complete);
+                let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
                 let task = tokio::task::spawn_local(async move {
+                    if start_receiver.await.is_err() {
+                        return;
+                    }
                     let mut program = attempt.program;
-                    let materialized = {
+                    let materialized = if cooperative {
+                        Ok(program.arguments.clone())
+                    } else {
                         let state = state_for_task.lock().await;
                         program
                             .arguments
@@ -329,43 +277,20 @@ async fn run_worker_loop(
                     let response = match materialized {
                         Ok(arguments) => {
                             program.arguments = arguments;
-                            crate::execute_host_program_request_with_project(
+                            super::worker_execution::execute(
                                 program,
-                                materialized_project
-                                    .as_deref()
-                                    .map(crate::materialized_project::MaterializedProject::handoff),
+                                materialized_project,
+                                meshing_host,
+                                objects,
+                                cancellation_for_task,
                             )
                             .await
                         }
-                        Err(error) => {
-                            runmat_execution_artifact::ProgramExecutionResponse::Failure {
-                                message: error.to_string(),
-                            }
-                        }
-                    };
-                    let report = match response {
-                        runmat_execution_artifact::ProgramExecutionResponse::Success { value } => {
-                            AttemptReport::Succeeded {
-                                result: AttemptSuccess {
-                                    outputs: vec![value],
-                                    result_objects: Vec::new(),
-                                },
-                            }
-                        }
-                        runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
-                            ..
-                        } => AttemptReport::Failed {
-                            kind: AttemptFailureKind::Rejected,
-                            message: "remote externalized results require verified artifact transfer"
-                                .into(),
-                        },
-                        runmat_execution_artifact::ProgramExecutionResponse::Failure {
-                            message,
-                        } => AttemptReport::Failed {
-                            kind: AttemptFailureKind::Execution,
-                            message,
+                        Err(error) => ProgramExecutionResponse::Failure {
+                            message: error.to_string(),
                         },
                     };
+                    let report = super::worker_execution::report(response);
                     let _ = reply(
                         connection.as_ref(),
                         &sender,
@@ -383,12 +308,30 @@ async fn run_worker_loop(
                         drain_complete_for_task.notify_waiters();
                     }
                 });
-                state.lock().await.attempts.insert(attempt_id, task);
+                state.lock().await.attempts.insert(
+                    attempt_id,
+                    ActiveAttempt {
+                        task,
+                        cancellation,
+                        cooperative,
+                    },
+                );
+                let _ = start_sender.send(());
             }
             RemoteWorkerCommand::Cancel { attempt_id } => {
-                if let Some(task) = state.lock().await.attempts.remove(&attempt_id) {
-                    task.abort();
+                let mut state = state.lock().await;
+                if let Some(active) = state.attempts.get(&attempt_id) {
+                    active.cancellation.cancel();
+                    if !active.cooperative {
+                        if let Some(active) = state.attempts.remove(&attempt_id) {
+                            active.task.abort();
+                        }
+                    }
                 }
+                if state.draining && state.attempts.is_empty() {
+                    drain_complete.notify_waiters();
+                }
+                drop(state);
                 reply(
                     connection.as_ref(),
                     &sender,
@@ -417,11 +360,7 @@ async fn run_worker_loop(
                 }
             }
             command => {
-                let outcome = super::object_transfer::handle_command(
-                    &mut state.lock().await.objects,
-                    command,
-                    &run_identity,
-                );
+                let outcome = state.lock().await.objects.handle(command, &run_identity);
                 reply_kind(
                     connection.as_ref(),
                     &sender,

@@ -9,7 +9,7 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 use sha2::{Digest as _, Sha256};
 
-use super::worker_server::{run_remote_worker_relay_cached, RemoteWorkerRelayRequest};
+use super::worker_entry::{run_remote_worker_relay_cached, RemoteWorkerRelayRequest};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 #[derive(serde::Deserialize)]
