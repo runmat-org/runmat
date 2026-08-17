@@ -2,6 +2,7 @@
 
 pub mod cad;
 pub mod exact;
+pub mod faceted;
 pub mod import;
 pub mod normalize;
 pub mod preview;
@@ -13,6 +14,7 @@ mod occt;
 pub use exact::{
     import_exact_cad, ExactCadAnalysisOptions, ExactCadImportOptions, ImportedExactCad,
 };
+pub use faceted::{import_faceted_solid, FacetedSolidImportOptions, ImportedFacetedSolid};
 pub use import::{
     import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
     GeometryImportContext, GeometryImportOptions,

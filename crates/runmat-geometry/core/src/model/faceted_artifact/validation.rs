@@ -97,6 +97,7 @@ fn validate_triangles(
     shell_indices: &BTreeMap<PersistentEntityId, usize>,
 ) -> Result<(), GeometryContractError> {
     let mut ids = BTreeSet::new();
+    let mut used_vertices = vec![false; solid.vertices.len()];
     for triangle in &solid.triangles {
         validate_id(&triangle.id, PersistentEntityKind::Face, &mut ids)?;
         if !shell_indices.contains_key(&triangle.shell_id) {
@@ -108,6 +109,15 @@ fn validate_triangles(
         let [a, b, c] = triangle.vertex_indices;
         if a == b || b == c || c == a {
             return Err(invalid("faceted triangle", "vertices must be distinct"));
+        }
+        for index in [a, b, c] {
+            let Some(used) = used_vertices.get_mut(index as usize) else {
+                return Err(invalid(
+                    "faceted triangle",
+                    "vertex index is outside the payload",
+                ));
+            };
+            *used = true;
         }
         let points = [a, b, c].map(|index| {
             solid
@@ -131,6 +141,12 @@ fn validate_triangles(
         if cross.iter().any(|value| !value.is_finite()) || cross.iter().all(|value| *value == 0.0) {
             return Err(invalid("faceted triangle", "triangle is degenerate"));
         }
+    }
+    if used_vertices.into_iter().any(|used| !used) {
+        return Err(invalid(
+            "faceted solid inventory",
+            "every vertex must be referenced by the authoritative topology",
+        ));
     }
     Ok(())
 }

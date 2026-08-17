@@ -144,6 +144,17 @@ fn faceted_solid_rejects_open_or_inconsistently_oriented_boundaries() {
 }
 
 #[test]
+fn faceted_solid_rejects_unreferenced_vertices() {
+    let mut solid = tetrahedron();
+    solid.vertices.push(FacetedVertex {
+        id: id(PersistentEntityKind::Vertex, "faceted:vertex:unused"),
+        coordinates_m: [2.0, 2.0, 2.0],
+    });
+
+    assert!(solid.validate_against(&model_for(&solid)).is_err());
+}
+
+#[test]
 fn faceted_solid_rejects_corrupt_or_mismatched_artifacts() {
     let closure = build_faceted_solid_closure(document(), tetrahedron()).unwrap();
     let mut corrupted = closure.solid_bytes.clone();
