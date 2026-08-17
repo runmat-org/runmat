@@ -20,6 +20,24 @@ use crate::{
     sniff::{detect_geometry_format, GeometryFormat},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabeledSubshapeRemapConflictKind {
+    Deleted,
+    Split,
+    Merged,
+    MissingTarget,
+    AmbiguousTarget,
+    UnsupportedKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabeledSubshapeRemapConflict {
+    pub kind: LabeledSubshapeRemapConflictKind,
+    pub label_entries: Vec<String>,
+    pub source_topology_ids: Vec<String>,
+    pub candidate_topology_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct GeometryImportOptions {
     pub max_triangles: Option<u64>,
@@ -113,6 +131,10 @@ pub enum GeometryImportError {
     #[error("GEOMETRY_HEALING_LIMIT_EXCEEDED: {failure:?}")]
     HealingLimitExceeded {
         failure: runmat_geometry_core::GeometryHealingFailure,
+    },
+    #[error("GEOMETRY_REVISION_CONFLICT: {conflict:?}")]
+    RevisionConflict {
+        conflict: LabeledSubshapeRemapConflict,
     },
     #[error("GEOMETRY_IMPORT_OPTIONS_INVALID: {0}")]
     InvalidOptions(String),

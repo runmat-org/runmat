@@ -13,6 +13,8 @@ namespace occt_backend {
 
 struct OcctImportOptions;
 
+using ExactHealingDigest = std::array<std::uint8_t, 32>;
+
 struct ExactHealingMutation {
   TopoDS_Shape shape;
   std::uint64_t identity_work_bytes = 0;
@@ -23,11 +25,15 @@ struct ExactHealingMutation {
   struct Relation {
     std::uint8_t kind = 0;
     std::vector<std::string> path_segments;
-    std::array<std::uint8_t, 32> source_digest{};
-    std::array<std::uint8_t, 32> target_digest{};
+    ExactHealingDigest source_digest{};
+    ExactHealingDigest target_digest{};
   };
   std::vector<Relation> relations;
 };
+
+ExactHealingDigest persistent_healing_digest(const TopoDS_Shape& shape,
+                                              const OcctImportOptions& options,
+                                              std::uint64_t& byte_work);
 
 ExactHealingMutation consolidate_exact_duplicates(const TopoDS_Shape& shape,
                                                   const OcctImportOptions& options,

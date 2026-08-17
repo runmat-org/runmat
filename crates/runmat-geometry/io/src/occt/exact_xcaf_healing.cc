@@ -1,6 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "runmat-geometry-io/src/occt/exact_assembly.hxx"
 #include "runmat-geometry-io/src/occt/exact_xcaf_healing.hxx"
+#include "runmat-geometry-io/src/occt/exact_xcaf_subshape_remap.hxx"
 
 #include <BRepCheck_Analyzer.hxx>
 #include <TCollection_AsciiString.hxx>
@@ -129,20 +130,9 @@ ExactXcafHealingResult heal_exact_xcaf_definitions(
 
   ExactXcafHealingResult result;
   result.identity_work_bytes = initial_identity_work;
-  const bool changes_topology = options.heal_duplicates || options.heal_sew ||
-                                options.heal_gaps ||
-                                options.heal_short_edges_and_sliver_faces;
   for (auto& [definition_key, uses] : definitions) {
     (void)definition_key;
     std::sort(uses.paths.begin(), uses.paths.end());
-    if (changes_topology) {
-      TDF_LabelSequence subshapes;
-      if (XCAFDoc_ShapeTool::GetSubShapes(uses.label, subshapes) &&
-          subshapes.Length() > 0) {
-        throw std::runtime_error(
-            "OCCT topology healing cannot preserve labeled XCAF subshapes");
-      }
-    }
     TopoDS_Shape definition_shape = XCAFDoc_ShapeTool::GetShape(uses.label);
     if (definition_shape.IsNull()) {
       throw std::runtime_error("OCCT XCAF definition has no shape");
@@ -158,6 +148,14 @@ ExactXcafHealingResult heal_exact_xcaf_definitions(
       result.identity_work_bytes = mutation.identity_work_bytes;
       current = mutation.shape;
       const bool changed = before != serialize_exact_shape(current, options);
+      if (changed) {
+        remap_exact_xcaf_subshapes(shape_tool,
+                                  uses.label,
+                                  current,
+                                  mutation,
+                                  options,
+                                  result.identity_work_bytes);
+      }
       result.duplicates_consolidated |= changed;
       definition_changed |= changed;
       result.post_duplicate_kernel_valid &=
@@ -174,6 +172,12 @@ ExactXcafHealingResult heal_exact_xcaf_definitions(
       current = mutation.shape;
       const bool changed = before != serialize_exact_shape(current, options);
       if (changed) {
+        remap_exact_xcaf_subshapes(shape_tool,
+                                  uses.label,
+                                  current,
+                                  mutation,
+                                  options,
+                                  result.identity_work_bytes);
         append_occurrence_relations(mutation, uses, result);
         retain_maximum_displacement(mutation, result);
       }
@@ -196,6 +200,12 @@ ExactXcafHealingResult heal_exact_xcaf_definitions(
       result.identity_work_bytes = mutation.identity_work_bytes;
       current = mutation.shape;
       if (mutation.changed) {
+        remap_exact_xcaf_subshapes(shape_tool,
+                                  uses.label,
+                                  current,
+                                  mutation,
+                                  options,
+                                  result.identity_work_bytes);
         append_occurrence_relations(mutation, uses, result);
         retain_maximum_displacement(mutation, result);
       }

@@ -2470,6 +2470,11 @@ fn map_geometry_load_error(
             OperationErrorType::Validation,
             false,
         ),
+        GeometryImportError::RevisionConflict { .. } => (
+            "RM.GEOMETRY.LOAD.REVISION_CONFLICT",
+            OperationErrorType::Validation,
+            false,
+        ),
         GeometryImportError::InvalidGeometry(_) => (
             "RM.GEOMETRY.LOAD.INVALID_GEOMETRY",
             OperationErrorType::Validation,

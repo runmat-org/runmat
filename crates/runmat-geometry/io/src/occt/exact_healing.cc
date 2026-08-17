@@ -25,6 +25,7 @@
 #include <map>
 #include <limits>
 #include <sstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -48,11 +49,9 @@ private:
   OcctImportOptions options_;
 };
 
-using ShapeDigest = std::array<std::uint8_t, 32>;
-
-ShapeDigest persistent_digest(const TopoDS_Shape& shape,
-                              const OcctImportOptions& options,
-                              std::uint64_t& byte_work) {
+ExactHealingDigest compute_persistent_digest(const TopoDS_Shape& shape,
+                                             const OcctImportOptions& options,
+                                             std::uint64_t& byte_work) {
   const TopoDS_Shape canonical = shape.Oriented(TopAbs_FORWARD);
   std::ostringstream stream;
   HealingProgress progress(options);
@@ -73,21 +72,22 @@ ShapeDigest persistent_digest(const TopoDS_Shape& shape,
   if (digest.size() != 32) {
     throw std::runtime_error("OCCT healing identity digest has an invalid length");
   }
-  ShapeDigest result;
+  ExactHealingDigest result;
   std::copy(digest.begin(), digest.end(), result.begin());
   return result;
 }
 
-std::vector<ShapeDigest> persistent_inventory(const TopoDS_Shape& root,
-                                              const TopAbs_ShapeEnum kind,
-                                              const OcctImportOptions& options,
-                                              std::uint64_t& byte_work) {
+std::vector<ExactHealingDigest> persistent_inventory(
+    const TopoDS_Shape& root,
+    const TopAbs_ShapeEnum kind,
+    const OcctImportOptions& options,
+    std::uint64_t& byte_work) {
   TopTools_IndexedMapOfShape shapes;
   TopExp::MapShapes(root, kind, shapes);
-  std::vector<ShapeDigest> result;
+  std::vector<ExactHealingDigest> result;
   result.reserve(static_cast<std::size_t>(shapes.Extent()));
   for (Standard_Integer index = 1; index <= shapes.Extent(); ++index) {
-    result.push_back(persistent_digest(shapes(index), options, byte_work));
+    result.push_back(compute_persistent_digest(shapes(index), options, byte_work));
   }
   std::sort(result.begin(), result.end());
   return result;
@@ -117,11 +117,11 @@ void append_relations(const TopoDS_Shape& before,
                       ExactHealingMutation& mutation) {
   TopTools_IndexedMapOfShape target_shapes;
   TopExp::MapShapes(after, kind, target_shapes);
-  std::map<ShapeDigest, TopoDS_Shape> targets;
+  std::map<ExactHealingDigest, TopoDS_Shape> targets;
   for (Standard_Integer index = 1; index <= target_shapes.Extent(); ++index) {
     const TopoDS_Shape& target = target_shapes(index);
     targets.emplace(
-        persistent_digest(target, options, mutation.identity_work_bytes), target);
+        compute_persistent_digest(target, options, mutation.identity_work_bytes), target);
   }
 
   TopTools_IndexedMapOfShape source_shapes;
@@ -132,7 +132,7 @@ void append_relations(const TopoDS_Shape& before,
     relation.kind = relation_kind;
     relation.path_segments = {"root"};
     relation.source_digest =
-        persistent_digest(source, options, mutation.identity_work_bytes);
+        compute_persistent_digest(source, options, mutation.identity_work_bytes);
     TopoDS_Shape target;
     if (sewing.IsModifiedSubShape(source)) {
       target = sewing.ModifiedSubShape(source);
@@ -143,13 +143,41 @@ void append_relations(const TopoDS_Shape& before,
       }
     }
     if (!target.IsNull()) {
-      const ShapeDigest digest =
-          persistent_digest(target, options, mutation.identity_work_bytes);
+      const ExactHealingDigest digest =
+          compute_persistent_digest(target, options, mutation.identity_work_bytes);
       if (targets.find(digest) != targets.end()) {
         relation.target_digest = digest;
       }
     }
     mutation.relations.push_back(relation);
+  }
+}
+
+void append_content_relations(const TopoDS_Shape& before,
+                              const TopoDS_Shape& after,
+                              const TopAbs_ShapeEnum kind,
+                              const std::uint8_t relation_kind,
+                              const OcctImportOptions& options,
+                              ExactHealingMutation& mutation) {
+  std::set<ExactHealingDigest> targets;
+  TopTools_IndexedMapOfShape target_shapes;
+  TopExp::MapShapes(after, kind, target_shapes);
+  for (Standard_Integer index = 1; index <= target_shapes.Extent(); ++index) {
+    targets.insert(compute_persistent_digest(
+        target_shapes(index), options, mutation.identity_work_bytes));
+  }
+  TopTools_IndexedMapOfShape source_shapes;
+  TopExp::MapShapes(before, kind, source_shapes);
+  for (Standard_Integer index = 1; index <= source_shapes.Extent(); ++index) {
+    ExactHealingMutation::Relation relation;
+    relation.kind = relation_kind;
+    relation.path_segments = {"root"};
+    relation.source_digest = compute_persistent_digest(
+        source_shapes(index), options, mutation.identity_work_bytes);
+    if (targets.count(relation.source_digest) != 0) {
+      relation.target_digest = relation.source_digest;
+    }
+    mutation.relations.push_back(std::move(relation));
   }
 }
 
@@ -162,11 +190,11 @@ void append_context_relations(const TopoDS_Shape& before,
                               ExactHealingMutation& mutation) {
   TopTools_IndexedMapOfShape target_shapes;
   TopExp::MapShapes(after, kind, target_shapes);
-  std::map<ShapeDigest, TopoDS_Shape> targets;
+  std::map<ExactHealingDigest, TopoDS_Shape> targets;
   for (Standard_Integer index = 1; index <= target_shapes.Extent(); ++index) {
     const TopoDS_Shape& target = target_shapes(index);
     targets.emplace(
-        persistent_digest(target, options, mutation.identity_work_bytes), target);
+        compute_persistent_digest(target, options, mutation.identity_work_bytes), target);
   }
 
   TopTools_IndexedMapOfShape source_shapes;
@@ -177,7 +205,7 @@ void append_context_relations(const TopoDS_Shape& before,
     relation.kind = relation_kind;
     relation.path_segments = {"root"};
     relation.source_digest =
-        persistent_digest(source, options, mutation.identity_work_bytes);
+        compute_persistent_digest(source, options, mutation.identity_work_bytes);
     TopoDS_Shape replacement;
     const Standard_Integer status = context->Status(source, replacement, Standard_True);
     if (status > 0 && !replacement.IsNull()) {
@@ -188,7 +216,7 @@ void append_context_relations(const TopoDS_Shape& before,
       }
       TopoDS_Shape admitted;
       for (Standard_Integer mapped_index = 1; mapped_index <= mapped.Extent(); ++mapped_index) {
-        const ShapeDigest digest = persistent_digest(
+        const ExactHealingDigest digest = compute_persistent_digest(
             mapped(mapped_index), options, mutation.identity_work_bytes);
         if (targets.find(digest) != targets.end()) {
           if (!admitted.IsNull()) {
@@ -200,7 +228,7 @@ void append_context_relations(const TopoDS_Shape& before,
       }
       if (!admitted.IsNull()) {
         relation.target_digest =
-            persistent_digest(admitted, options, mutation.identity_work_bytes);
+            compute_persistent_digest(admitted, options, mutation.identity_work_bytes);
       }
     } else if (status == 0) {
       const auto existing = targets.find(relation.source_digest);
@@ -260,6 +288,12 @@ void measure_vertex_displacement(const std::vector<gp_Pnt>& sources,
 
 } // namespace
 
+ExactHealingDigest persistent_healing_digest(const TopoDS_Shape& shape,
+                                              const OcctImportOptions& options,
+                                              std::uint64_t& byte_work) {
+  return compute_persistent_digest(shape, options, byte_work);
+}
+
 ExactHealingMutation consolidate_exact_duplicates(const TopoDS_Shape& shape,
                                                   const OcctImportOptions& options,
                                                   std::uint64_t initial_identity_work) {
@@ -270,12 +304,12 @@ ExactHealingMutation consolidate_exact_duplicates(const TopoDS_Shape& shape,
     return mutation;
   }
 
-  std::vector<std::pair<ShapeDigest, TopoDS_Shape>> children;
+  std::vector<std::pair<ExactHealingDigest, TopoDS_Shape>> children;
   for (TopoDS_Iterator iterator(shape, Standard_False, Standard_True); iterator.More();
        iterator.Next()) {
     const TopoDS_Shape& child = iterator.Value();
     children.emplace_back(
-        persistent_digest(child, options, mutation.identity_work_bytes), child);
+        compute_persistent_digest(child, options, mutation.identity_work_bytes), child);
   }
   std::sort(children.begin(), children.end(), [](const auto& left, const auto& right) {
     return left.first < right.first;
@@ -296,6 +330,10 @@ ExactHealingMutation consolidate_exact_duplicates(const TopoDS_Shape& shape,
   }
   mutation.shape = consolidated;
   mutation.changed = true;
+  append_content_relations(
+      shape, consolidated, TopAbs_VERTEX, 0, options, mutation);
+  append_content_relations(shape, consolidated, TopAbs_EDGE, 1, options, mutation);
+  append_content_relations(shape, consolidated, TopAbs_FACE, 2, options, mutation);
   return mutation;
 }
 

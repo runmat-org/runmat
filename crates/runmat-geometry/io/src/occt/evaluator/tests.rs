@@ -1,4 +1,5 @@
 use super::*;
+use crate::import::LabeledSubshapeRemapConflictKind;
 use crate::{
     import::{GeometryImportContext, GeometryImportError},
     import_exact_cad, ExactCadImportOptions, GeometryFormat,
@@ -25,6 +26,10 @@ const SLIVER_FACE_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/sliver_
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
 const XCAF_SHORT_EDGE_ASSEMBLY: &[u8] =
     include_bytes!("../../../tests/fixtures/xcaf_short_edge_assembly.step");
+const XCAF_LABELED_FACE_ASSEMBLY: &[u8] =
+    include_bytes!("../../../tests/fixtures/xcaf_labeled_face_assembly.step");
+const XCAF_LABELED_SHORT_EDGE_ASSEMBLY: &[u8] =
+    include_bytes!("../../../tests/fixtures/xcaf_labeled_short_edge_assembly.step");
 
 struct Unlimited;
 
@@ -671,6 +676,33 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
         .unwrap()
         .healing_bytes
         .is_some());
+
+    let repaired_labeled_face = import_exact_cad(
+        "xcaf_labeled_face_assembly.step",
+        XCAF_LABELED_FACE_ASSEMBLY,
+        GeometryFormat::Step,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(repaired_labeled_face.topology.instances.len(), 3);
+    assert_eq!(repaired_labeled_face.topology.edges.len(), 8);
+
+    let deleted_label = import_exact_cad(
+        "xcaf_labeled_short_edge_assembly.step",
+        XCAF_LABELED_SHORT_EDGE_ASSEMBLY,
+        GeometryFormat::Step,
+        &options,
+        &context,
+    )
+    .unwrap_err();
+    let GeometryImportError::RevisionConflict { conflict } = deleted_label else {
+        panic!("expected a typed revision conflict");
+    };
+    assert_eq!(conflict.kind, LabeledSubshapeRemapConflictKind::Deleted);
+    assert_eq!(conflict.label_entries.len(), 1);
+    assert_eq!(conflict.source_topology_ids.len(), 1);
+    assert!(conflict.candidate_topology_ids.is_empty());
 }
 
 fn persistent_names(imported: &crate::ImportedExactCad) -> Vec<String> {

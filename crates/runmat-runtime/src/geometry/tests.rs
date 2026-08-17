@@ -5,6 +5,7 @@ use runmat_geometry_core::{
     CadLabelRef, CadRegionOwnership, CadSemanticKind, GeometryHealingFailure,
     GeometryHealingOperationKind, MeshDescriptor, RegionEntityMapping, SurfaceMesh,
 };
+use runmat_geometry_io::import::{LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -606,6 +607,18 @@ fn load_error_mapping_covers_exact_import_failures() {
                 },
             },
             "RM.GEOMETRY.LOAD.HEALING_LIMIT_EXCEEDED",
+            OperationErrorType::Validation,
+        ),
+        (
+            GeometryImportError::RevisionConflict {
+                conflict: LabeledSubshapeRemapConflict {
+                    kind: LabeledSubshapeRemapConflictKind::Deleted,
+                    label_entries: vec!["0:1:1".into()],
+                    source_topology_ids: vec!["source".into()],
+                    candidate_topology_ids: Vec::new(),
+                },
+            },
+            "RM.GEOMETRY.LOAD.REVISION_CONFLICT",
             OperationErrorType::Validation,
         ),
     ];

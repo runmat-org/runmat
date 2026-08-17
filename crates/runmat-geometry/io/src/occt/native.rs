@@ -6,6 +6,7 @@ use super::{
 use crate::exact::{ExactCadImportOptions, ImportedExactCad};
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
+    LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind,
 };
 use runmat_geometry_core::{BodyMassProperties, GeometryDigest, GeometrySourceFormat, UnitSystem};
 use sha2::{Digest, Sha256};
@@ -14,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
 const DEFAULT_ANGULAR_DEFLECTION: f64 = 0.5;
 const OCCT_IMPORT_CANCELLED_MESSAGE: &str = "OCCT CAD import cancelled";
+const XCAF_REMAP_CONFLICT_PREFIX: &str = "RUNMAT_XCAF_REMAP|";
 static NATIVE_CAD_BACKEND_USED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn native_cad_backend_was_used() -> bool {
@@ -305,7 +307,9 @@ fn exact_bridge_error(
     options: &ExactCadImportOptions,
 ) -> GeometryImportError {
     let message = err.to_string();
-    if message.contains(OCCT_IMPORT_CANCELLED_MESSAGE) {
+    if let Some(conflict) = parse_xcaf_remap_conflict(&message) {
+        GeometryImportError::RevisionConflict { conflict }
+    } else if message.contains(OCCT_IMPORT_CANCELLED_MESSAGE) {
         GeometryImportError::Cancelled
     } else if message.contains("exact representation exceeded") {
         GeometryImportError::ExactRepresentationCapacityExceeded {
@@ -330,6 +334,44 @@ fn exact_bridge_error(
     } else {
         GeometryImportError::ParseFailed(format!("OCCT exact CAD import failed: {message}"))
     }
+}
+
+fn parse_xcaf_remap_conflict(message: &str) -> Option<LabeledSubshapeRemapConflict> {
+    let marker = message.find(XCAF_REMAP_CONFLICT_PREFIX)?;
+    let encoded = &message[marker + XCAF_REMAP_CONFLICT_PREFIX.len()..];
+    if encoded.len() > 64 * 1024 {
+        return None;
+    }
+    let fields = encoded.split('|').collect::<Vec<_>>();
+    if fields.len() != 4 {
+        return None;
+    }
+    let kind = match fields[0] {
+        "deleted" => LabeledSubshapeRemapConflictKind::Deleted,
+        "split" => LabeledSubshapeRemapConflictKind::Split,
+        "merged" => LabeledSubshapeRemapConflictKind::Merged,
+        "missing_target" => LabeledSubshapeRemapConflictKind::MissingTarget,
+        "ambiguous_target" => LabeledSubshapeRemapConflictKind::AmbiguousTarget,
+        "unsupported_kind" => LabeledSubshapeRemapConflictKind::UnsupportedKind,
+        _ => return None,
+    };
+    let parse_list = |field: &str| {
+        let values = field
+            .split(',')
+            .filter(|item| !item.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        (values.len() <= 1_024 && values.iter().all(|item| item.len() <= 128)).then_some(values)
+    };
+    let label_entries = parse_list(fields[1])?;
+    let source_topology_ids = parse_list(fields[2])?;
+    let candidate_topology_ids = parse_list(fields[3])?;
+    Some(LabeledSubshapeRemapConflict {
+        kind,
+        label_entries,
+        source_topology_ids,
+        candidate_topology_ids,
+    })
 }
 
 fn payload_to_topology(
@@ -465,5 +507,31 @@ fn ffi_format(format: OcctCadFormat) -> ffi::bridge::OcctCadFormat {
         OcctCadFormat::Step => ffi::bridge::OcctCadFormat::Step,
         OcctCadFormat::Iges => ffi::bridge::OcctCadFormat::Iges,
         OcctCadFormat::Brep => ffi::bridge::OcctCadFormat::Brep,
+    }
+}
+
+#[cfg(test)]
+mod remap_conflict_tests {
+    use super::*;
+
+    #[test]
+    fn parses_bounded_labeled_subshape_conflict_fields() {
+        let conflict = parse_xcaf_remap_conflict(
+            "bridge: RUNMAT_XCAF_REMAP|merged|0:1:1,0:1:2|source-a,source-b|target-a",
+        )
+        .unwrap();
+        assert_eq!(conflict.kind, LabeledSubshapeRemapConflictKind::Merged);
+        assert_eq!(conflict.label_entries, ["0:1:1", "0:1:2"]);
+        assert_eq!(conflict.source_topology_ids, ["source-a", "source-b"]);
+        assert_eq!(conflict.candidate_topology_ids, ["target-a"]);
+    }
+
+    #[test]
+    fn rejects_unknown_or_malformed_labeled_subshape_conflicts() {
+        assert!(parse_xcaf_remap_conflict("RUNMAT_XCAF_REMAP|unknown|label||").is_none());
+        assert!(
+            parse_xcaf_remap_conflict("RUNMAT_XCAF_REMAP|deleted|label|source||unexpected")
+                .is_none()
+        );
     }
 }
