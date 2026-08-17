@@ -13,4 +13,4 @@ pub use portable::*;
 pub use registry::*;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

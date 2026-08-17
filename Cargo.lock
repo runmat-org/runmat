@@ -6610,8 +6610,10 @@ dependencies = [
 name = "runmat-geometry-core"
 version = "0.6.1"
 dependencies = [
+ "runmat-canonical-codec",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

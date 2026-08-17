@@ -1,6 +1,7 @@
 mod analysis_identity;
 mod assembly;
 mod document;
+mod exact_artifact;
 mod exact_evaluator;
 mod exact_topology;
 mod exact_topology_assembly_validation;
@@ -23,6 +24,7 @@ pub use analysis_identity::{
 };
 pub use assembly::AssemblyNode;
 pub use document::*;
+pub use exact_artifact::*;
 pub use exact_evaluator::*;
 pub use exact_topology::*;
 pub use field::{FieldLocation, FieldValueKind};
