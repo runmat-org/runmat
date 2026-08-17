@@ -391,6 +391,7 @@ pub const MUST_BE_TEXT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinInt
 pub const MUST_BE_TEXT_SCALAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeTextScalar is a text-shape validator; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
 pub const MUST_BE_VALID_VARIABLE_NAME_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "mustBeValidVariableName accepts text names only; integer host or resident values fail before numeric conversion, payload access, or provider lookup." };
 pub const NAMEDARGS2CELL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "namedargs2cell accepts only a scalar structure. A top-level integer host or resident value rejects without conversion or provider access, while integer values stored in valid structure fields are preserved exactly as ordinary payloads." };
+pub const VALIDATE_FUNCTION_SIGNATURES_JSON_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "validateFunctionSignaturesJSON accepts text paths in the compatibility target and a text JSON payload in the current RunMat implementation; integer and resident numeric values are not valid in either form and reject without conversion or provider access." };
 
 const MUST_BE_INTEGER_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "mustBeInteger.resident-input",
@@ -516,7 +517,10 @@ pub async fn dispatch_validator_async(builtin: &str, args: Vec<Value>) -> Builti
     if matches!(value, Value::GpuTensor(_))
         && matches!(
             builtin,
-            "mustBeText" | "mustBeTextScalar" | "mustBeValidVariableName"
+            "mustBeText"
+                | "mustBeTextScalar"
+                | "mustBeValidVariableName"
+                | "validateFunctionSignaturesJSON"
         )
     {
         require_exact_arg_count(builtin, &args, 1)?;
@@ -2501,7 +2505,8 @@ validator_builtin!(
 );
 validator_builtin!(
     validate_function_signatures_json_builtin,
-    "validateFunctionSignaturesJSON"
+    "validateFunctionSignaturesJSON",
+    audit = self::VALIDATE_FUNCTION_SIGNATURES_JSON_INTEGER_AUDIT
 );
 
 #[cfg(test)]
@@ -3809,6 +3814,10 @@ mod tests {
 
     #[test]
     fn validate_function_signatures_json_checks_json_syntax() {
+        assert_eq!(
+            VALIDATE_FUNCTION_SIGNATURES_JSON_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
         ok(
             "validateFunctionSignaturesJSON",
             vec![Value::String(r#"{"functions":[]}"#.into())],
@@ -3817,5 +3826,17 @@ mod tests {
             "validateFunctionSignaturesJSON",
             vec![Value::String("{not json}".into())],
         );
+        err(
+            "validateFunctionSignaturesJSON",
+            vec![Value::Int(IntValue::U64(u64::MAX))],
+        );
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = dispatch_validator("validateFunctionSignaturesJSON", vec![resident])
+            .expect_err("resident numeric input must reject as invalid text");
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
     }
 }

@@ -17,6 +17,7 @@ An extension is deliberate user-visible behavior beyond RunMat's MATLAB compatib
 
 - RunMat syntax such as `async function` and `await`.
 - RunMat APIs such as `spawn` and the `data.*` persistence namespace.
+- RunMat utility functions without a compatibility-target counterpart, such as `urlencode` and `urldecode`.
 - Additional builtin signatures, options, aliases, or accepted data classes identified as RunMat-only on a function's reference page.
 - Explicit device behavior that is useful in RunMat but is not part of the compatible function surface.
 

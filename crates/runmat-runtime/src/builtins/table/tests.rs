@@ -4338,6 +4338,34 @@ fn table_selector_objects_filter_rows_and_variables() {
 }
 
 #[test]
+fn vartype_accepts_text_and_rejects_integer_or_resident_values_before_gather() {
+    assert_eq!(
+        VARTYPE_INTEGER_AUDIT.kind,
+        runmat_builtins::BuiltinIntegerAuditKind::NotApplicable
+    );
+    let Value::Object(selector) = block_on(vartype_builtin(Value::from("integer"))).unwrap() else {
+        panic!("expected vartype selector");
+    };
+    assert_eq!(
+        selector.properties.get("Type"),
+        Some(&Value::from("integer"))
+    );
+
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    });
+    for invalid in [Value::Int(IntValue::U64(u64::MAX)), resident] {
+        let error = block_on(vartype_builtin(invalid)).expect_err("invalid vartype input");
+        assert!(error
+            .message()
+            .contains("host string scalar or character vector"));
+        assert!(!error.message().to_ascii_lowercase().contains("provider"));
+    }
+}
+
+#[test]
 fn timerange_defaults_to_half_open_and_orders_wide_integer_row_times_exactly() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let base = 1_u64 << 53;

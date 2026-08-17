@@ -537,6 +537,11 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
+pub const USERPATH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "userpath accepts no input or one host text path/command; integer and resident numeric values reject before provider or search-path access.",
+};
 simple_descriptor!(
     RESTOREDEFAULTPATH_SIGNATURES,
     RESTOREDEFAULTPATH_DESCRIPTOR,
@@ -1421,9 +1426,19 @@ async fn rehash_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::repl_fs::compat::USERPATH_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::USERPATH_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn userpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        crate::builtins::common::validation::value_has_native_integer_class(value)
+            || matches!(value, Value::GpuTensor(_))
+    }) {
+        return Err(compat_error(
+            "userpath",
+            "userpath: path or command must be host text",
+        ));
+    }
     let args = gather_args("userpath", &args).await?;
     match args.len() {
         0 => Ok(char_value(&default_userpath())),
@@ -1973,6 +1988,22 @@ mod tests {
             FILEATTRIB_INTEGER_AUDIT.kind,
             BuiltinIntegerAuditKind::NotApplicable
         );
+        assert_eq!(
+            USERPATH_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+    }
+
+    #[test]
+    fn userpath_rejects_integer_and_resident_values_before_provider_access() {
+        for invalid in [
+            Value::Int(runmat_builtins::IntValue::I64(i64::MIN)),
+            unowned_resident_value(),
+        ] {
+            let error = run(userpath_builtin(vec![invalid])).expect_err("invalid path text");
+            assert!(error.message().contains("must be host text"));
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
     }
 
     #[test]

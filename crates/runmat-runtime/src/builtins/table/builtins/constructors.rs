@@ -12,6 +12,12 @@ use runmat_macros::runtime_builtin;
 
 const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
 
+pub const VARTYPE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "vartype accepts one host string scalar or character vector naming a variable class; integer and resident numeric values reject before provider access or selector construction.",
+};
+
 pub(in crate::builtins::table) const TIMERANGE_NUMERIC_BOUNDS_EXTENSION:
     BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "timerange-numeric-bounds",
@@ -772,15 +778,26 @@ fn timerange_argument_is_numeric(value: &Value) -> bool {
     keywords = "vartype,table,selector,variable type",
     accel = "cpu",
     descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    integer_audit(crate::builtins::table::builtins::constructors::VARTYPE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn vartype_builtin(value: Value) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        || matches!(value, Value::GpuTensor(_))
+    {
+        return Err(invalid_argument(
+            "vartype: type must be a host string scalar or character vector",
+        ));
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;
+    let kind = scalar_text(&value, "vartype type")?;
     let mut object = ObjectInstance::new(VARTYPE_CLASS.to_string());
-    object.properties.insert("Type".to_string(), value);
+    object
+        .properties
+        .insert("Type".to_string(), Value::String(kind));
     Ok(Value::Object(object))
 }
 

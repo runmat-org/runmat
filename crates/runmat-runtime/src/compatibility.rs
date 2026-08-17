@@ -142,25 +142,30 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_release_label_is_centralized_in_documentation() {
-        let docs_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
-        let canonical_policy = docs_root.join("development/backwards-compat.md");
+    fn compatibility_release_label_is_centralized_in_the_repository() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let canonical_policy = workspace_root.join("docs/development/backwards-compat.md");
+        let runtime_policy = workspace_root.join("crates/runmat-runtime/src/compatibility.rs");
         let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
-        let mut pending = vec![docs_root];
+        let mut pending = ["crates", "docs", "scripts"]
+            .into_iter()
+            .map(|directory| workspace_root.join(directory))
+            .collect::<Vec<_>>();
         while let Some(directory) = pending.pop() {
-            for entry in std::fs::read_dir(&directory).expect("read documentation directory") {
-                let path = entry.expect("read documentation entry").path();
+            for entry in std::fs::read_dir(&directory).expect("read repository directory") {
+                let path = entry.expect("read repository entry").path();
                 if path.is_dir() {
                     pending.push(path);
                 } else if matches!(
                     path.extension().and_then(|extension| extension.to_str()),
-                    Some("md" | "json")
+                    Some("json" | "md" | "rs" | "sh" | "toml" | "yaml" | "yml")
                 ) && path != canonical_policy
+                    && path != runtime_policy
                 {
-                    let contents = std::fs::read_to_string(&path).expect("read documentation file");
+                    let contents = std::fs::read_to_string(&path).expect("read repository file");
                     assert!(
                         !contents.to_ascii_lowercase().contains(&release_label),
-                        "the compatibility release label must be documented only in {}: {}",
+                        "the compatibility release label must appear only in {} and the runtime policy: {}",
                         canonical_policy.display(),
                         path.display()
                     );
@@ -1608,6 +1613,10 @@ mod tests {
             ("upsample", "upsample-integer-factor"),
             ("upsample", "upsample-integer-phase"),
             ("upsample", "upsample-nd-input"),
+            ("vec2word", "vec2word-integer-k"),
+            ("vec2word", "vec2word-integer-vectors"),
+            ("vecnorm", "vecnorm-integer-input"),
+            ("vecnorm", "vecnorm-integer-order"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2184,10 +2193,38 @@ mod tests {
                 "saveas",
                 "savefig",
                 "saveobj",
+                "second",
+                "sendmail",
                 "splitlines",
+                "stats",
+                "str2double",
+                "str2func",
+                "str2num",
+                "strcat",
+                "strcmp",
+                "strcmpi",
                 "strip",
+                "strjoin",
+                "strjust",
+                "strlength",
+                "strrep",
+                "strsplit",
+                "strtok",
+                "strtrim",
+                "superclasses",
+                "suptitle",
+                "system",
+                "tokenDetails",
+                "tokenizedDocument",
                 "uigetfile",
+                "uiputfile",
+                "unsetenv",
                 "upper",
+                "urldecode",
+                "urlencode",
+                "userpath",
+                "validateFunctionSignaturesJSON",
+                "vartype",
             ]
         );
         for (name, audit) in audited {

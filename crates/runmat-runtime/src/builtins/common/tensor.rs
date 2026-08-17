@@ -90,8 +90,8 @@ pub fn integer_tensor_from_f64_like(
         .map_err(|e| format!("integer tensor conversion: {e}"))
 }
 
-/// Return a tensor's numeric values as f64, reading typed integer storage
-/// exactly instead of using the compatibility backing buffer.
+/// Materialize a tensor's authoritative numeric values in the f64 computation domain.
+/// Callers that admit integers are responsible for any required exactness check.
 pub fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
 }
@@ -105,8 +105,8 @@ pub fn tensor_values_f64_cow(tensor: &Tensor) -> Cow<'_, [f64]> {
     }
 }
 
-/// Return one numeric tensor value as f64, reading typed integer storage exactly
-/// instead of using the compatibility backing buffer.
+/// Read one authoritative numeric tensor value into the f64 computation domain.
+/// Callers that admit integers are responsible for any required exactness check.
 pub fn tensor_value_f64(tensor: &Tensor, index: usize) -> f64 {
     match tensor
         .numeric_value_at(index)

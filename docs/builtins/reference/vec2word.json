@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`vec2word` compares host-resident word embedding model data; it does not use provider kernels in this slice."
+    "notes": "`vec2word` compares host-resident word embedding model data and has no provider kernel. Supported resident query data may gather automatically through its owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -31,6 +31,7 @@
     "`emb` must be a RunMat `wordEmbedding` compatibility object.",
     "`M` must be an `n`-by-`emb.Dimension` numeric matrix.",
     "`k` is an optional positive integer from `1` through the vocabulary size. The default is `1`.",
+    "Native integer storage for `M` and native integer storage for `k` are independent RunMat language extensions. Integer query values must be exactly representable as double before distance calculation, while `k` is decoded as an exact structural value.",
     "The default distance metric is cosine distance. `vec2word(___, 'Distance', 'euclidean')` uses Euclidean distance.",
     "`words` is an `n`-by-`k` string array. `dist` is an `n`-by-`k` numeric matrix.",
     "For zero-norm query or vocabulary vectors under cosine distance, RunMat reports infinite distance so finite matches sort ahead of them."
@@ -50,7 +51,7 @@
   "faqs": [
     {
       "question": "Which distances are supported?",
-      "answer": "RunMat supports `\"cosine\"` and `\"euclidean\"` in this slice."
+      "answer": "RunMat supports `\"cosine\"` and `\"euclidean\"`."
     },
     {
       "question": "Does `vec2word` execute on the GPU?",
@@ -65,6 +66,10 @@
     {
       "label": "word2vec",
       "url": "./word2vec"
+    },
+    {
+      "label": "MATLAB Language Extensions",
+      "url": "/docs/runtime/getting-started/matlab-language-extensions"
     }
   ],
   "syntax": {
@@ -75,12 +80,13 @@
     },
     "points": [
       "`distance` must be `\"cosine\"` or `\"euclidean\"`.",
-      "`M` columns must equal `emb.Dimension`."
+      "`M` columns must equal `emb.Dimension`.",
+      "Native integer `M` and native integer `k` require RunMat language extensions to be enabled."
     ]
   },
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
   },
-  "gpu_residency": "`vec2word` currently compares host text-model storage and has no provider kernel."
+  "gpu_residency": "`vec2word` compares host text-model storage and has no provider kernel. Supported resident query data may gather automatically through its owning provider."
 }

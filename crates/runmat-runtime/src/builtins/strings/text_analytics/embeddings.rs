@@ -425,6 +425,63 @@ pub const VEC2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &VEC2WORD_ERRORS,
 };
 
+pub const VEC2WORD_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "vec2word-integer-vectors",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "vec2word with typed-integer embedding vectors is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Vec2wordIntegerVectorsExtension"),
+    };
+pub const VEC2WORD_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "vec2word-integer-k",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "vec2word with a typed-integer neighbor count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Vec2wordIntegerKExtension"),
+};
+pub const VEC2WORD_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    VEC2WORD_INTEGER_MATRIX_EXTENSION,
+    VEC2WORD_INTEGER_K_EXTENSION,
+];
+
+const VEC2WORD_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode accepts typed-integer query vectors only when every value is exactly representable at the binary64 distance boundary.",
+    }];
+const VEC2WORD_INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The typed neighbor count is decoded exactly as a positive platform-sized structural value; it does not enter distance arithmetic.",
+    }];
+pub const VEC2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "words = vec2word(emb, integer_M, ___)",
+        inputs: &VEC2WORD_INTEGER_MATRIX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated integer matrix crosses one checked binary64 cosine or Euclidean distance boundary. Words are strings and optional distances are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "words = vec2word(emb, M, integer_k, ___)",
+        inputs: &VEC2WORD_INTEGER_K_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The gated typed k selects an exact result count and never enters floating distance computation.",
+    },
+];
+
 pub const DOC2SEQUENCE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -821,9 +878,14 @@ async fn word2vec_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::embeddings::VEC2WORD_DESCRIPTOR),
+    extensions(crate::builtins::strings::text_analytics::embeddings::VEC2WORD_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::embeddings::VEC2WORD_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    enforce_vec2word_integer_policy(&args).await?;
     let gathered = gather_args(args, "vec2word").await?;
     let (object, matrix, options) = parse_vec2word_args(gathered)?;
     let embedding = embedding_from_object(&object, "vec2word")?;
@@ -896,6 +958,28 @@ async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             .map_err(|err| embedding_error("vec2word", err))?,
     );
     Ok(Value::OutputList(vec![words, dist]))
+}
+
+async fn enforce_vec2word_integer_policy(args: &[Value]) -> BuiltinResult<()> {
+    if let Some(matrix) = args.get(1) {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            matrix,
+            &VEC2WORD_INTEGER_MATRIX_EXTENSION,
+            "vec2word",
+            "embedding vector",
+        )
+        .await?;
+    }
+    if args
+        .get(2)
+        .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &VEC2WORD_INTEGER_K_EXTENSION,
+            "vec2word",
+        )?;
+    }
+    Ok(())
 }
 
 async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
@@ -2755,7 +2839,7 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
 }
 
 fn is_numeric_scalar(value: &Value) -> bool {
-    matches!(value, Value::Num(_))
+    matches!(value, Value::Num(_) | Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor))
 }
 
@@ -3755,6 +3839,61 @@ mod tests {
             panic!("expected distances");
         };
         assert!(dist.materialize_f64()[0] < dist.materialize_f64()[1]);
+    }
+
+    #[tokio::test]
+    async fn vec2word_gates_typed_vectors_and_neighbor_count_independently() {
+        let model = || EmbeddingModel {
+            vocabulary: vec!["east".into(), "north".into()],
+            vectors: vec![1.0, 0.0, 0.0, 1.0],
+            dimension: 2,
+        };
+        let matrix = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap())
+        };
+
+        let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = vec2word_builtin(vec![embedding_object(model()).unwrap(), matrix()])
+            .await
+            .expect_err("typed vectors must be gated");
+        assert_eq!(
+            error.identifier(),
+            VEC2WORD_INTEGER_MATRIX_EXTENSION.error_identifier
+        );
+        let error = vec2word_builtin(vec![
+            embedding_object(model()).unwrap(),
+            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ])
+        .await
+        .expect_err("typed k must be gated");
+        assert_eq!(
+            error.identifier(),
+            VEC2WORD_INTEGER_K_EXTENSION.error_identifier
+        );
+        drop(compatibility);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = vec2word_builtin(vec![
+            embedding_object(model()).unwrap(),
+            matrix(),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ])
+        .await
+        .expect("RunMat typed vec2word forms");
+        assert!(matches!(result, Value::OutputList(_)));
+        let wide = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, 0]),
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let error = vec2word_builtin(vec![embedding_object(model()).unwrap(), wide])
+            .await
+            .expect_err("lossy integer vector must reject");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(extensions);
     }
 
     #[tokio::test]

@@ -165818,7 +165818,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "urldecode accepts host text only; integer and resident numeric values reject before provider access or decoding."
+      }
     },
     {
       "name": "urlencode",
@@ -165847,7 +165851,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "urlencode accepts host text only; integer and resident numeric values reject before provider access or encoding."
+      }
     },
     {
       "name": "userpath",
@@ -165876,7 +165884,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "userpath accepts no input or one host text path/command; integer and resident numeric values reject before provider or search-path access."
+      }
     },
     {
       "name": "vaderSentimentScores",
@@ -165989,6 +166001,35 @@
           "when": "Inputs do not match supported vaderSentimentScores forms.",
           "message": "vaderSentimentScores: invalid input"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "scores = vaderSentimentScores(documents, SentimentLexicon=table(integer_scores))",
+          "inputs": [
+            {
+              "name": "SentimentLexicon.SentimentScore",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric scalar scores may use any integer class. Their required [-4, 4] range is validated on authoritative storage before exact conversion into the VADER floating computation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Every valid integer lexicon score is exactly representable as binary64 because the public domain is [-4, 4]. Automatic residency may gather the enclosing table through its owner; outputs are host double score vectors."
+        }
       ]
     },
     {
@@ -166030,7 +166071,11 @@
           "when": "A validator receives an unsupported argument count or argument type.",
           "message": "invalid argument validation input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "validateFunctionSignaturesJSON accepts text paths in the compatibility target and a text JSON payload in the current RunMat implementation; integer and resident numeric values are not valid in either form and reject without conversion or provider access."
+      }
     },
     {
       "name": "var",
@@ -166570,7 +166615,11 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "vartype accepts one host string scalar or character vector naming a variable class; integer and resident numeric values reject before provider access or selector construction."
+      }
     },
     {
       "name": "vec2word",
@@ -166661,6 +166710,76 @@
           "identifier": "RunMat:vec2word:InvalidInput",
           "when": "Inputs do not match a supported vec2word form.",
           "message": "vec2word received invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "vec2word-integer-vectors",
+          "mode": "RunMatOnly",
+          "description": "vec2word with typed-integer embedding vectors is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Vec2wordIntegerVectorsExtension"
+        },
+        {
+          "id": "vec2word-integer-k",
+          "mode": "RunMatOnly",
+          "description": "vec2word with a typed-integer neighbor count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Vec2wordIntegerKExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "words = vec2word(emb, integer_M, ___)",
+          "inputs": [
+            {
+              "name": "M",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode accepts typed-integer query vectors only when every value is exactly representable at the binary64 distance boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The gated integer matrix crosses one checked binary64 cosine or Euclidean distance boundary. Words are strings and optional distances are double."
+        },
+        {
+          "form": "words = vec2word(emb, M, integer_k, ___)",
+          "inputs": [
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The typed neighbor count is decoded exactly as a positive platform-sized structural value; it does not enter distance arithmetic."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The gated typed k selects an exact result count and never enters floating distance computation."
         }
       ]
     },
@@ -166772,6 +166891,103 @@
           "identifier": "RunMat:vecnorm:Internal",
           "when": "Runtime fails while reducing, allocating, gathering, or uploading values.",
           "message": "vecnorm: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "vecnorm-integer-input",
+          "mode": "RunMatOnly",
+          "description": "vecnorm with typed-integer array data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:VecnormIntegerInputExtension"
+        },
+        {
+          "id": "vecnorm-integer-order",
+          "mode": "RunMatOnly",
+          "description": "vecnorm with a typed-integer norm order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:VecnormIntegerOrderExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "N = vecnorm(integer_A, ___)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data classes are single and double. RunMat mode accepts real integer arrays only when every value is exactly representable at the binary64 norm boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The gated integer array crosses one checked binary64 norm boundary. Host results are double and automatic residency restores results to the owning provider when supported."
+        },
+        {
+          "form": "N = vecnorm(A, integer_p, dim?)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed norm order is a RunMat extension and enters the floating exponent only after exact binary64 representability is proved."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The gated typed p is checked before conversion into the norm exponent; it does not select the output class."
+        },
+        {
+          "form": "N = vecnorm(A, p, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented dimension accepts every integer class and is decoded exactly as a positive platform-sized structural value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Dimension selection remains exact and does not enter norm arithmetic; invalid or non-platform-sized values reject without floating conversion."
         }
       ]
     },

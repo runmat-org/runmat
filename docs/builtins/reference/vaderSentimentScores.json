@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`vaderSentimentScores` consumes host tokenizedDocument metadata and returns host score vectors; it does not use provider kernels."
+    "notes": "`vaderSentimentScores` consumes host tokenizedDocument metadata and returns host score vectors. Resident payloads inside supported objects may gather automatically through their owning provider; the function has no provider kernel."
   },
   "fusion": {
     "elementwise": false,
@@ -32,6 +32,7 @@
     "`documents` must be a RunMat `tokenizedDocument` compatibility object with English language metadata.",
     "Compound scores are normalized to the range [-1, 1] from token sentiment values after applying booster, dampener, negation, capitalization, and punctuation modifiers.",
     "`SentimentLexicon` accepts a RunMat table with lowercase string `Token` values and numeric `SentimentScore` values in the documented range [-4, 4].",
+    "`SentimentScore` accepts single, double, and all eight native integer classes. Integer scores are range-checked exactly before entering the floating sentiment calculation, and all outputs are double.",
     "`Boosters` and `Dampeners` accept string, character, cell, or string-array inputs. Column vectors are treated as word lists; multi-column string arrays are treated as row-wise n-grams with empty padding ignored.",
     "`Negations` accepts string, character, cell, or string-array word lists.",
     "RunMat ships a compact built-in English compatibility lexicon and modifier lists for common scripts and examples. For domain-specific or full-coverage scoring, pass an explicit `SentimentLexicon` table.",
@@ -65,7 +66,7 @@
     },
     {
       "question": "Does `vaderSentimentScores` execute on the GPU?",
-      "answer": "No. It performs host text/object processing and returns host numeric score vectors."
+      "answer": "No. It performs host text/object processing and returns host numeric score vectors. Supported resident payloads may gather automatically through their owning provider."
     }
   ],
   "links": [
@@ -87,9 +88,9 @@
     "points": [
       "`SentimentLexicon` must be a table with `Token` and `SentimentScore` variables.",
       "`Token` entries in a custom lexicon must be nonempty lowercase strings.",
-      "`SentimentScore` entries must be finite numeric values in [-4, 4].",
+      "`SentimentScore` entries must be finite single, double, or native integer values in [-4, 4].",
       "`Boosters`, `Dampeners`, and `Negations` must contain at least one word or n-gram when supplied.",
-      "Only English `tokenizedDocument` inputs are accepted in this slice."
+      "Only English `tokenizedDocument` inputs are accepted."
     ]
   },
   "source": {

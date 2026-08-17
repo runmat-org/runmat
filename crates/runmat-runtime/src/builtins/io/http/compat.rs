@@ -75,12 +75,24 @@ simple_descriptor!(
     "encoded = urlencode(text)",
     &INPUTS_ONE
 );
+pub const URLENCODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "urlencode accepts host text only; integer and resident numeric values reject before provider access or encoding.",
+    };
 simple_descriptor!(
     URLDECODE_SIGNATURES,
     URLDECODE_DESCRIPTOR,
     "decoded = urldecode(text)",
     &INPUTS_ONE
 );
+pub const URLDECODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "urldecode accepts host text only; integer and resident numeric values reject before provider access or decoding.",
+    };
 simple_descriptor!(
     WEBSAVE_SIGNATURES,
     WEBSAVE_DESCRIPTOR,
@@ -174,16 +186,23 @@ fn char_value(text: &str) -> Value {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::http::compat::URLENCODE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::http::compat::URLENCODE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn urlencode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("urlencode", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
             "urlencode",
             "urlencode: expected exactly one input",
         ));
     }
+    if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&args[0]) {
+        return Err(compat_error(
+            "urlencode",
+            "urlencode: text must be a host string scalar or character vector",
+        ));
+    }
+    let args = gather_args("urlencode", &args).await?;
     Ok(char_value(&percent_encode(&scalar_text(
         &args[0],
         "urlencode",
@@ -212,16 +231,23 @@ fn percent_encode(text: &str) -> String {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::string_type),
     descriptor(crate::builtins::io::http::compat::URLDECODE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::http::compat::URLDECODE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::http::compat"
 )]
 async fn urldecode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("urldecode", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
             "urldecode",
             "urldecode: expected exactly one input",
         ));
     }
+    if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&args[0]) {
+        return Err(compat_error(
+            "urldecode",
+            "urldecode: text must be a host string scalar or character vector",
+        ));
+    }
+    let args = gather_args("urldecode", &args).await?;
     Ok(char_value(&percent_decode(&scalar_text(
         &args[0],
         "urldecode",
@@ -654,6 +680,37 @@ mod tests {
         assert_eq!(encoded, char_value("a%20b%2Fc"));
         let decoded = run(urldecode_builtin(vec![char_value("a%20b%2Fc")])).unwrap();
         assert_eq!(decoded, char_value("a b/c"));
+    }
+
+    #[test]
+    fn url_text_helpers_reject_integer_and_resident_values_before_provider_access() {
+        assert_eq!(
+            URLENCODE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert_eq!(
+            URLDECODE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        let resident = || {
+            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+            })
+        };
+        for error in [
+            run(urlencode_builtin(vec![Value::Int(
+                runmat_builtins::IntValue::U64(u64::MAX),
+            )]))
+            .expect_err("integer text must reject"),
+            run(urldecode_builtin(vec![resident()])).expect_err("resident text must reject"),
+        ] {
+            assert!(error
+                .message()
+                .contains("host string scalar or character vector"));
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
     }
 
     #[test]
