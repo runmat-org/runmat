@@ -119,7 +119,7 @@ impl ExactSurfaceEvaluator for OcctExactEvaluator {
 
 impl OcctExactEvaluator {
     fn surface_key(&self, id: &SurfaceEvaluatorId) -> Result<u64, GeometryEvaluationError> {
-        self.surface_keys.get(id).copied().ok_or_else(|| {
+        self.bindings.surfaces.get(id).copied().ok_or_else(|| {
             GeometryEvaluationError::new(
                 GeometryEvaluationErrorKind::UnknownEvaluator,
                 format!("unknown OCCT surface evaluator {}", id.as_str()),

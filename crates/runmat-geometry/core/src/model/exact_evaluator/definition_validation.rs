@@ -3,10 +3,10 @@ use super::nurbs_validation::{
     validate_nurbs_curve2, validate_nurbs_curve3, validate_nurbs_surface,
 };
 use super::{
-    BodyMassProperties, ExactCurveDefinition, ExactCurveImplementation,
-    ExactMassPropertiesImplementation, ExactPcurveDefinition, ExactPcurveImplementation,
-    ExactSurfaceDefinition, ExactSurfaceImplementation, ExactTrimClassifierImplementation,
-    KernelEvaluatorRef, ParameterRange,
+    ExactCurveDefinition, ExactCurveImplementation, ExactMassPropertiesImplementation,
+    ExactPcurveDefinition, ExactPcurveImplementation, ExactSurfaceDefinition,
+    ExactSurfaceImplementation, ExactTrimClassifierImplementation, KernelEvaluatorRef,
+    ParameterRange,
 };
 use crate::model::GeometryContractError;
 
@@ -205,7 +205,7 @@ pub(super) fn validate_mass_properties(
             properties,
             validation_digest,
         } => {
-            validate_mass_values(properties)?;
+            properties.validate()?;
             if *validation_digest == [0; 32] {
                 return Err(invalid(
                     "mass-properties validation digest",
@@ -307,36 +307,6 @@ pub(super) fn surface_dynamic_value_count(implementation: &ExactSurfaceImplement
             .saturating_add(definition.control_points_m.len().saturating_mul(3)),
         _ => 0,
     }
-}
-
-fn validate_mass_values(properties: &BodyMassProperties) -> Result<(), GeometryContractError> {
-    if !properties.volume_m3.is_finite()
-        || properties.volume_m3 < 0.0
-        || !properties.surface_area_m2.is_finite()
-        || properties.surface_area_m2 <= 0.0
-    {
-        return Err(invalid(
-            "body mass properties",
-            "volume must be finite and non-negative; surface area must be finite and positive",
-        ));
-    }
-    finite_vector("body centroid", &properties.centroid_m)?;
-    if properties
-        .inertia_about_centroid_m5
-        .iter()
-        .any(|value| !value.is_finite())
-    {
-        return Err(invalid("body inertia", "all entries must be finite"));
-    }
-    let [ixx, iyy, izz, ..] = properties.inertia_about_centroid_m5;
-    if ixx < 0.0 || iyy < 0.0 || izz < 0.0 || ixx + iyy < izz || ixx + izz < iyy || iyy + izz < ixx
-    {
-        return Err(invalid(
-            "body inertia",
-            "principal diagonal moments must be non-negative and satisfy triangle inequalities",
-        ));
-    }
-    Ok(())
 }
 
 fn validate_kernel_ref(reference: &KernelEvaluatorRef) -> Result<(), GeometryContractError> {

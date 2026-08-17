@@ -442,7 +442,7 @@ const fn orientation(reversed: bool) -> TopologicalOrientation {
     }
 }
 
-fn mass_validation_digest(
+pub(super) fn mass_validation_digest(
     representation_digest: [u8; 32],
     properties: &BodyMassProperties,
 ) -> [u8; 32] {

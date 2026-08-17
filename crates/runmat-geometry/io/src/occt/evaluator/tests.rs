@@ -3,7 +3,8 @@ use crate::{
     import::GeometryImportContext, import_exact_cad, ExactCadImportOptions, GeometryFormat,
 };
 use runmat_geometry_core::{
-    GeometryEvaluationError, SurfaceEvaluatorId, TrimClassifierId, TrimDomainLocation, UnitSystem,
+    GeometryEvaluationError, MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
+    TrimDomainLocation, UnitSystem,
 };
 use sha2::Digest as _;
 
@@ -83,6 +84,31 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
             .unwrap_err()
             .kind,
         GeometryEvaluationErrorKind::InconsistentGeometry
+    );
+    let mass_id = &imported.topology.bodies[0].mass_properties_evaluator_id;
+    let mass_properties = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+        &evaluator, mass_id, &Unlimited,
+    )
+    .unwrap();
+    assert!((mass_properties.volume_m3 - 6.0).abs() < 1.0e-12);
+    assert!((mass_properties.surface_area_m2 - 22.0).abs() < 1.0e-12);
+    assert_eq!(
+        runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+            &evaluator, mass_id, &Cancelled,
+        )
+        .unwrap_err()
+        .kind,
+        GeometryEvaluationErrorKind::Cancelled
+    );
+    assert_eq!(
+        runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+            &evaluator,
+            &MassPropertiesEvaluatorId::new("mass:unknown").unwrap(),
+            &Unlimited,
+        )
+        .unwrap_err()
+        .kind,
+        GeometryEvaluationErrorKind::UnknownEvaluator
     );
     let id = &imported.topology.edges[0].curve_evaluator_id;
     let range = evaluator.parameter_range(id).unwrap();
@@ -390,11 +416,34 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     )
     .unwrap();
     assert!((millimeter_projection.distance_m - 0.00025).abs() < 1.0e-15);
+    let millimeter_mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+        &millimeter_evaluator,
+        &millimeter_import.topology.bodies[0].mass_properties_evaluator_id,
+        &Unlimited,
+    )
+    .unwrap();
+    assert!((millimeter_mass.volume_m3 - mass_properties.volume_m3 * 1.0e-9).abs() < 1.0e-20);
+    assert!(
+        (millimeter_mass.surface_area_m2 - mass_properties.surface_area_m2 * 1.0e-6).abs()
+            < 1.0e-18
+    );
 
     let mut corrupt = imported.clone();
     corrupt.representation[0] ^= 1;
     assert_eq!(
         OcctExactEvaluator::new(&corrupt).err().unwrap().kind,
+        GeometryEvaluationErrorKind::InconsistentGeometry
+    );
+    let mut corrupt_mass = imported.clone();
+    let runmat_geometry_core::ExactMassPropertiesImplementation::KernelValidated {
+        properties, ..
+    } = &mut corrupt_mass.evaluators.mass_properties[0].implementation
+    else {
+        panic!("box mass properties must be kernel validated")
+    };
+    properties.volume_m3 += 1.0;
+    assert_eq!(
+        OcctExactEvaluator::new(&corrupt_mass).err().unwrap().kind,
         GeometryEvaluationErrorKind::InconsistentGeometry
     );
 }

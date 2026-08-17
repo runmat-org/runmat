@@ -19,6 +19,10 @@ use std::collections::BTreeMap;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 pub(crate) mod evaluator;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_bindings;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod evaluator_mass;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod evaluator_pcurve;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod evaluator_surface;

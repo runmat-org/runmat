@@ -21,7 +21,7 @@ impl ExactTrimClassifier for OcctExactEvaluator {
                 "trim point and non-negative boundary tolerance must be finite",
             ));
         }
-        let face_key = self.trim_keys.get(id).copied().ok_or_else(|| {
+        let face_key = self.bindings.trims.get(id).copied().ok_or_else(|| {
             GeometryEvaluationError::new(
                 GeometryEvaluationErrorKind::UnknownEvaluator,
                 format!("unknown OCCT trim classifier {}", id.as_str()),

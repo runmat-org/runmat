@@ -4,6 +4,7 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepClass_FaceClassifier.hxx>
+#include <BRepGProp.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
@@ -21,7 +22,9 @@
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Wire.hxx>
 #include <Geom2d_Curve.hxx>
+#include <GProp_GProps.hxx>
 #include <gp_Pnt2d.hxx>
+#include <gp_Mat.hxx>
 #include <gp_Vec2d.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
@@ -399,6 +402,47 @@ std::int8_t exact_trim_classify(std::uint64_t session_id,
     default:
       throw std::runtime_error("OCCT exact trim classification did not converge");
   }
+}
+
+OcctMassPropertiesPayload exact_mass_properties(std::uint64_t session_id) {
+  const auto value = session(session_id);
+  GProp_GProps surface_properties;
+  BRepGProp::SurfaceProperties(value->root, surface_properties);
+  const double surface_area = surface_properties.Mass();
+  require_finite(surface_area, "surface area");
+  if (surface_area <= 0.0) {
+    throw std::runtime_error("OCCT exact body surface area must be positive");
+  }
+
+  const bool has_solid = TopExp_Explorer(value->root, TopAbs_SOLID).More();
+  GProp_GProps volume_properties;
+  if (has_solid) {
+    BRepGProp::VolumeProperties(value->root, volume_properties);
+    require_finite(volume_properties.Mass(), "volume");
+    if (volume_properties.Mass() <= 0.0) {
+      throw std::runtime_error("OCCT exact solid volume must be positive");
+    }
+  }
+  const GProp_GProps& centroid_properties = has_solid ? volume_properties : surface_properties;
+  const gp_Pnt centroid = centroid_properties.CentreOfMass();
+  const gp_Mat inertia = has_solid ? volume_properties.MatrixOfInertia() : gp_Mat();
+  const double scale = value->meters_per_source_unit;
+  const double scale2 = scale * scale;
+  const double scale3 = scale2 * scale;
+  const double scale5 = scale3 * scale2;
+  OcctMassPropertiesPayload result;
+  result.volume = has_solid ? volume_properties.Mass() * scale3 : 0.0;
+  result.surface_area = surface_area * scale2;
+  result.centroid_x = centroid.X() * scale;
+  result.centroid_y = centroid.Y() * scale;
+  result.centroid_z = centroid.Z() * scale;
+  result.inertia_xx = has_solid ? inertia.Value(1, 1) * scale5 : 0.0;
+  result.inertia_yy = has_solid ? inertia.Value(2, 2) * scale5 : 0.0;
+  result.inertia_zz = has_solid ? inertia.Value(3, 3) * scale5 : 0.0;
+  result.inertia_xy = has_solid ? inertia.Value(1, 2) * scale5 : 0.0;
+  result.inertia_xz = has_solid ? inertia.Value(1, 3) * scale5 : 0.0;
+  result.inertia_yz = has_solid ? inertia.Value(2, 3) * scale5 : 0.0;
+  return result;
 }
 
 void close_exact_evaluator_session(std::uint64_t session_id) {

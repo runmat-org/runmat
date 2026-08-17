@@ -45,8 +45,8 @@ impl OcctExactEvaluator {
     fn pcurve_key(
         &self,
         id: &PcurveEvaluatorId,
-    ) -> Result<super::evaluator::PcurveKey, GeometryEvaluationError> {
-        self.pcurve_keys.get(id).copied().ok_or_else(|| {
+    ) -> Result<super::evaluator_bindings::PcurveKey, GeometryEvaluationError> {
+        self.bindings.pcurves.get(id).copied().ok_or_else(|| {
             GeometryEvaluationError::new(
                 GeometryEvaluationErrorKind::UnknownEvaluator,
                 format!("unknown OCCT pcurve evaluator {}", id.as_str()),

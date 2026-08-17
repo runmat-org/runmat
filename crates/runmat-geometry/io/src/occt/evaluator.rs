@@ -1,14 +1,10 @@
-use std::collections::BTreeMap;
-
 use runmat_geometry_core::{
     CurveDerivatives, CurveEvaluatorId, CurveProjection, ExactCurveEvaluator,
-    ExactCurveImplementation, ExactPcurveImplementation, ExactSurfaceImplementation,
-    ExactTrimClassifierImplementation, GeometryEvaluationControl, GeometryEvaluationError,
-    GeometryEvaluationErrorKind, ParameterRange, PcurveEvaluatorId, SurfaceEvaluatorId,
-    TrimClassifierId,
+    GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
+    ParameterRange,
 };
 
-use super::ffi;
+use super::{evaluator_bindings::EvaluatorBindings, ffi};
 use crate::exact::ImportedExactCad;
 
 /// Native evaluator for kernel-backed geometry from one admitted OCCT representation.
@@ -17,141 +13,12 @@ use crate::exact::ImportedExactCad;
 /// execution retains authority over cancellation and query-work budgets through the core trait.
 pub struct OcctExactEvaluator {
     pub(super) session_id: u64,
-    curve_keys: BTreeMap<CurveEvaluatorId, u64>,
-    pub(super) pcurve_keys: BTreeMap<PcurveEvaluatorId, PcurveKey>,
-    pub(super) surface_keys: BTreeMap<SurfaceEvaluatorId, u64>,
-    pub(super) trim_keys: BTreeMap<TrimClassifierId, u64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PcurveKey {
-    pub face: u64,
-    pub wire: u64,
-    pub position: u64,
-    pub seam_image: i8,
+    pub(super) bindings: EvaluatorBindings,
 }
 
 impl OcctExactEvaluator {
     pub fn new(imported: &ImportedExactCad) -> Result<Self, GeometryEvaluationError> {
-        let representation_digest = imported.representation_digest();
-        let mut curve_keys = BTreeMap::new();
-        for record in &imported.evaluators.curves {
-            let ExactCurveImplementation::Kernel { reference } = &record.implementation else {
-                return Err(inconsistent(
-                    "an OCCT import cannot contain a portable curve evaluator",
-                ));
-            };
-            if reference.representation_digest != representation_digest {
-                return Err(inconsistent(
-                    "curve evaluator does not bind the supplied OCCT representation",
-                ));
-            }
-            let shape_key = parse_edge_token(&reference.entity_token)?;
-            if curve_keys.insert(record.id.clone(), shape_key).is_some() {
-                return Err(inconsistent("duplicate OCCT curve evaluator identity"));
-            }
-        }
-        if curve_keys.is_empty() {
-            return Err(inconsistent(
-                "OCCT exact geometry contains no curve evaluators",
-            ));
-        }
-        let topology_curve_ids = imported
-            .topology
-            .edges
-            .iter()
-            .map(|edge| &edge.curve_evaluator_id)
-            .collect::<std::collections::BTreeSet<_>>();
-        if topology_curve_ids != curve_keys.keys().collect() {
-            return Err(inconsistent(
-                "OCCT curve evaluator inventory does not match exact topology",
-            ));
-        }
-        let mut pcurve_keys = BTreeMap::new();
-        for record in &imported.evaluators.pcurves {
-            let ExactPcurveImplementation::Kernel { reference } = &record.implementation else {
-                return Err(inconsistent(
-                    "an OCCT import cannot contain a portable pcurve evaluator",
-                ));
-            };
-            if reference.representation_digest != representation_digest {
-                return Err(inconsistent(
-                    "pcurve evaluator does not bind the supplied OCCT representation",
-                ));
-            }
-            let key = parse_pcurve_token(&reference.entity_token)?;
-            if pcurve_keys.insert(record.id.clone(), key).is_some() {
-                return Err(inconsistent("duplicate OCCT pcurve evaluator identity"));
-            }
-        }
-        let topology_pcurve_ids = imported
-            .topology
-            .coedges
-            .iter()
-            .map(|coedge| &coedge.pcurve_evaluator_id)
-            .collect::<std::collections::BTreeSet<_>>();
-        if topology_pcurve_ids != pcurve_keys.keys().collect() {
-            return Err(inconsistent(
-                "OCCT pcurve evaluator inventory does not match exact topology",
-            ));
-        }
-        let mut surface_keys = BTreeMap::new();
-        for record in &imported.evaluators.surfaces {
-            let ExactSurfaceImplementation::Kernel { reference } = &record.implementation else {
-                return Err(inconsistent(
-                    "an OCCT import cannot contain a portable surface evaluator",
-                ));
-            };
-            if reference.representation_digest != representation_digest {
-                return Err(inconsistent(
-                    "surface evaluator does not bind the supplied OCCT representation",
-                ));
-            }
-            let face_key = parse_face_token(&reference.entity_token, "surface evaluator")?;
-            if surface_keys.insert(record.id.clone(), face_key).is_some() {
-                return Err(inconsistent("duplicate OCCT surface evaluator identity"));
-            }
-        }
-        let topology_surface_ids = imported
-            .topology
-            .faces
-            .iter()
-            .map(|face| &face.surface_evaluator_id)
-            .collect::<std::collections::BTreeSet<_>>();
-        if topology_surface_ids != surface_keys.keys().collect() {
-            return Err(inconsistent(
-                "OCCT surface evaluator inventory does not match exact topology",
-            ));
-        }
-        let mut trim_keys = BTreeMap::new();
-        for record in &imported.evaluators.trim_classifiers {
-            let ExactTrimClassifierImplementation::Kernel { reference } = &record.implementation
-            else {
-                return Err(inconsistent(
-                    "an OCCT import cannot contain a portable trim classifier",
-                ));
-            };
-            if reference.representation_digest != representation_digest {
-                return Err(inconsistent(
-                    "trim classifier does not bind the supplied OCCT representation",
-                ));
-            }
-            let face_key = parse_face_token(&reference.entity_token, "trim classifier")?;
-            if trim_keys.insert(record.id.clone(), face_key).is_some() {
-                return Err(inconsistent("duplicate OCCT trim classifier identity"));
-            }
-        }
-        let topology_trim_ids = imported
-            .topology
-            .faces
-            .iter()
-            .map(|face| &face.trim_classifier_id)
-            .collect::<std::collections::BTreeSet<_>>();
-        if topology_trim_ids != trim_keys.keys().collect() {
-            return Err(inconsistent(
-                "OCCT trim classifier inventory does not match exact topology",
-            ));
-        }
+        let bindings = EvaluatorBindings::from_import(imported)?;
         let session_id = ffi::bridge::start_exact_evaluator_session(
             &imported.representation,
             imported.meters_per_source_unit,
@@ -159,10 +26,7 @@ impl OcctExactEvaluator {
         .map_err(kernel_error)?;
         Ok(Self {
             session_id,
-            curve_keys,
-            pcurve_keys,
-            surface_keys,
-            trim_keys,
+            bindings,
         })
     }
 
@@ -177,7 +41,7 @@ impl OcctExactEvaluator {
     }
 
     fn shape_key(&self, id: &CurveEvaluatorId) -> Result<u64, GeometryEvaluationError> {
-        self.curve_keys.get(id).copied().ok_or_else(|| {
+        self.bindings.curves.get(id).copied().ok_or_else(|| {
             GeometryEvaluationError::new(
                 GeometryEvaluationErrorKind::UnknownEvaluator,
                 format!("unknown OCCT curve evaluator {}", id.as_str()),
@@ -356,49 +220,6 @@ impl ExactCurveEvaluator for OcctExactEvaluator {
     }
 }
 
-fn parse_edge_token(token: &str) -> Result<u64, GeometryEvaluationError> {
-    let key = token
-        .strip_prefix("edge:")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|key| format!("edge:{key:020}") == token && *key != 0)
-        .ok_or_else(|| inconsistent("OCCT curve evaluator has an invalid edge token"))?;
-    Ok(key)
-}
-
-fn parse_pcurve_token(token: &str) -> Result<PcurveKey, GeometryEvaluationError> {
-    let parts = token.split(':').collect::<Vec<_>>();
-    if let ["face", face, "wire", wire, "coedge", position, "seam", seam_image] = parts.as_slice() {
-        let parsed = PcurveKey {
-            face: face.parse().unwrap_or(0),
-            wire: wire.parse().unwrap_or(0),
-            position: position.parse().unwrap_or(0),
-            seam_image: seam_image.parse().unwrap_or(-2),
-        };
-        if parsed.face != 0
-            && parsed.wire != 0
-            && parsed.position != 0
-            && (-1..=1).contains(&parsed.seam_image)
-            && format!(
-                "face:{:020}:wire:{:020}:coedge:{:020}:seam:{}",
-                parsed.face, parsed.wire, parsed.position, parsed.seam_image
-            ) == token
-        {
-            return Ok(parsed);
-        }
-    }
-    Err(inconsistent(
-        "OCCT pcurve evaluator has an invalid face-use token",
-    ))
-}
-
-fn parse_face_token(token: &str, role: &str) -> Result<u64, GeometryEvaluationError> {
-    token
-        .strip_prefix("face:")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|key| *key != 0 && format!("face:{key:020}") == token)
-        .ok_or_else(|| inconsistent(format!("OCCT {role} has an invalid face token")))
-}
-
 fn normalized(value: [f64; 3]) -> Option<[f64; 3]> {
     let length = norm(value);
     (length.is_finite() && length > 0.0).then(|| value.map(|component| component / length))
@@ -438,10 +259,6 @@ fn projection_error(error: impl std::fmt::Display) -> GeometryEvaluationError {
         GeometryEvaluationErrorKind::KernelFailure
     };
     GeometryEvaluationError::new(kind, reason)
-}
-
-fn inconsistent(reason: impl Into<String>) -> GeometryEvaluationError {
-    GeometryEvaluationError::new(GeometryEvaluationErrorKind::InconsistentGeometry, reason)
 }
 
 fn invalid_result(reason: impl Into<String>) -> GeometryEvaluationError {

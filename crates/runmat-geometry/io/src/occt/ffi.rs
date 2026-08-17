@@ -267,6 +267,21 @@ pub(crate) mod bridge {
         distance: f64,
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct OcctMassPropertiesPayload {
+        volume: f64,
+        surface_area: f64,
+        centroid_x: f64,
+        centroid_y: f64,
+        centroid_z: f64,
+        inertia_xx: f64,
+        inertia_yy: f64,
+        inertia_zz: f64,
+        inertia_xy: f64,
+        inertia_xz: f64,
+        inertia_yz: f64,
+    }
+
     #[derive(Debug, Clone)]
     struct OcctPreviewSessionStartPayload {
         session_id: u64,
@@ -377,6 +392,8 @@ pub(crate) mod bridge {
             point_m: &[f64],
             absolute_error_m: f64,
         ) -> Result<OcctSurfaceProjectionPayload>;
+
+        fn exact_mass_properties(session_id: u64) -> Result<OcctMassPropertiesPayload>;
 
         fn close_exact_evaluator_session(session_id: u64);
 

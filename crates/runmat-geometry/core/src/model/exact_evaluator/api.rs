@@ -1,3 +1,4 @@
+use super::super::GeometryContractError;
 use super::{
     CurveEvaluatorId, MassPropertiesEvaluatorId, PcurveEvaluatorId, SurfaceEvaluatorId,
     TrimClassifierId,
@@ -72,6 +73,40 @@ pub struct BodyMassProperties {
     pub centroid_m: [f64; 3],
     /// `[Ixx, Iyy, Izz, Ixy, Ixz, Iyz]` about the centroid, before density.
     pub inertia_about_centroid_m5: [f64; 6],
+}
+
+impl BodyMassProperties {
+    pub fn validate(&self) -> Result<(), GeometryContractError> {
+        if !self.volume_m3.is_finite()
+            || self.volume_m3 < 0.0
+            || !self.surface_area_m2.is_finite()
+            || self.surface_area_m2 <= 0.0
+            || self.centroid_m.iter().any(|value| !value.is_finite())
+            || self
+                .inertia_about_centroid_m5
+                .iter()
+                .any(|value| !value.is_finite())
+        {
+            return Err(GeometryContractError::invalid(
+                "body mass properties",
+                "volume, area, centroid, and inertia must be finite with non-negative volume and positive area",
+            ));
+        }
+        let [ixx, iyy, izz, ..] = self.inertia_about_centroid_m5;
+        if ixx < 0.0
+            || iyy < 0.0
+            || izz < 0.0
+            || ixx + iyy < izz
+            || ixx + izz < iyy
+            || iyy + izz < ixx
+        {
+            return Err(GeometryContractError::invalid(
+                "body inertia",
+                "principal diagonal moments must be non-negative and satisfy triangle inequalities",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
