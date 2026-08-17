@@ -1,6 +1,10 @@
 mod analysis_identity;
 mod assembly;
 mod document_v2;
+mod exact_topology;
+mod exact_topology_assembly_validation;
+mod exact_topology_validation;
+mod exact_topology_validation_support;
 mod field;
 mod geometry;
 mod material_evidence;
@@ -16,6 +20,7 @@ pub use analysis_identity::{
 };
 pub use assembly::AssemblyNode;
 pub use document_v2::*;
+pub use exact_topology::*;
 pub use field::{FieldLocation, FieldValueKind};
 pub use geometry::{GeometryAsset, GeometrySource};
 pub use material_evidence::{MaterialEvidence, MaterialEvidenceConfidence};
@@ -32,3 +37,6 @@ pub use source_geometry::{
 pub use tessellation_profile::{HealingMode, TessellationProfile};
 pub use topology::ElementKind;
 pub use units::UnitSystem;
+
+#[cfg(test)]
+mod exact_topology_tests;
