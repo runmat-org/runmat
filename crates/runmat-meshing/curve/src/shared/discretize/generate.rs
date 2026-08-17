@@ -56,7 +56,7 @@ pub fn discretize_shared_curves(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn discretize_edge(
+pub(crate) fn discretize_edge(
     topology: &ExactBRepTopology,
     edge: &ExactEdge,
     curves: &dyn ExactCurveEvaluator,

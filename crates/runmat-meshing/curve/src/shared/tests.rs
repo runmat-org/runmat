@@ -516,6 +516,116 @@ fn resolved_curve_metric_combines_all_incident_typed_sources() {
     );
 }
 
+#[test]
+fn canonical_edge_batches_join_independently_of_layout_and_completion_order() {
+    let (document, base_topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact");
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &base_topology, model)
+            .unwrap();
+    let topology = repeated_circle_topology(&base_topology, 5);
+    let metric = UniformCurveMetric::from_target_size_m(0.25).unwrap();
+    let options = shared_options();
+    let execute_layout = |maximum_edges| {
+        let descriptors = curve_partition_descriptors(&topology, maximum_edges).unwrap();
+        let mut batches = descriptors
+            .into_iter()
+            .map(|partition| {
+                discretize_shared_curve_partition(
+                    &topology,
+                    &evaluator,
+                    &evaluator,
+                    &metric,
+                    &UnlimitedControl,
+                    options,
+                    partition,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        batches.reverse();
+        join_shared_curve_batches(&topology, batches).unwrap()
+    };
+    let single_edge_batches = execute_layout(1);
+    let three_edge_batches = execute_layout(3);
+    assert_eq!(single_edge_batches, three_edge_batches);
+    assert_eq!(
+        encode_shared_curve_mesh(&single_edge_batches, &topology).unwrap(),
+        encode_shared_curve_mesh(&three_edge_batches, &topology).unwrap()
+    );
+
+    let descriptors = curve_partition_descriptors(&topology, 2).unwrap();
+    let incomplete = descriptors
+        .into_iter()
+        .take(2)
+        .map(|partition| {
+            discretize_shared_curve_partition(
+                &topology,
+                &evaluator,
+                &evaluator,
+                &metric,
+                &UnlimitedControl,
+                options,
+                partition,
+            )
+            .unwrap()
+        })
+        .collect();
+    assert!(join_shared_curve_batches(&topology, incomplete).is_err());
+
+    let descriptors = curve_partition_descriptors(&topology, 2).unwrap();
+    let first = discretize_shared_curve_partition(
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &UnlimitedControl,
+        options,
+        descriptors[0].clone(),
+    )
+    .unwrap();
+    let encoded = encode_shared_curve_batch(&first, &topology).unwrap();
+    assert_eq!(
+        decode_shared_curve_batch(&encoded, &topology).unwrap(),
+        first
+    );
+    assert_eq!(
+        encode_shared_curve_batch(
+            &decode_shared_curve_batch(&encoded, &topology).unwrap(),
+            &topology
+        )
+        .unwrap(),
+        encoded
+    );
+    assert!(
+        super::batch_codec::decode_with_byte_limit(&encoded, &topology, encoded.len() - 1).is_err()
+    );
+
+    let mut trailing = encoded.clone();
+    trailing.push(0);
+    assert!(decode_shared_curve_batch(&trailing, &topology).is_err());
+
+    let mut corrupt = encoded;
+    corrupt[0] ^= 1;
+    assert!(decode_shared_curve_batch(&corrupt, &topology).is_err());
+
+    let mut substituted = first.clone();
+    substituted.edges[1] = single_edge_batches.edges[2].clone();
+    assert!(encode_shared_curve_batch(&substituted, &topology).is_err());
+
+    let duplicate = vec![first.clone(), first];
+    assert!(join_shared_curve_batches(&topology, duplicate).is_err());
+}
+
+#[test]
+fn curve_partition_policy_enforces_hard_bounds() {
+    let (_, topology, _) = runmat_geometry_fixtures::exact_circle();
+    assert!(curve_partition_descriptors(&topology, 0).is_err());
+    assert!(curve_partition_descriptors(&repeated_circle_topology(&topology, 4_097), 1).is_err());
+}
+
 fn shared_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
@@ -715,4 +825,30 @@ fn circle_mesh(topology: &runmat_geometry_core::ExactBRepTopology) -> SharedCurv
             },
         }],
     }
+}
+
+fn repeated_circle_topology(
+    base: &runmat_geometry_core::ExactBRepTopology,
+    edge_count: usize,
+) -> runmat_geometry_core::ExactBRepTopology {
+    let mut topology = base.clone();
+    topology.edges = (0..edge_count)
+        .map(|index| {
+            let mut edge = base.edges[0].clone();
+            edge.id.source_topology_id = format!("edge:{index:04}");
+            edge
+        })
+        .collect();
+    topology.coedges = topology
+        .edges
+        .iter()
+        .enumerate()
+        .map(|(index, edge)| {
+            let mut coedge = base.coedges[0].clone();
+            coedge.id.source_topology_id = format!("coedge:{index:04}");
+            coedge.edge_id = edge.id.clone();
+            coedge
+        })
+        .collect();
+    topology
 }

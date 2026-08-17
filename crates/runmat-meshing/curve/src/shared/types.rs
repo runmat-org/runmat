@@ -5,11 +5,20 @@ use serde::{Deserialize, Serialize};
 use super::SharedCurveError;
 
 pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 3;
+pub const SHARED_CURVE_BATCH_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SharedCurveMesh {
     pub schema_version: u16,
+    pub edges: Vec<SharedCurve>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedCurveBatch {
+    pub schema_version: u16,
+    pub partition: runmat_meshing_core::MeshingPartitionDescriptor,
     pub edges: Vec<SharedCurve>,
 }
 

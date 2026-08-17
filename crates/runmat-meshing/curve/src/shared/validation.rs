@@ -182,6 +182,29 @@ fn validate_curve(
     Ok(())
 }
 
+pub(super) fn validate_curve_against_topology(
+    curve: &SharedCurve,
+    topology: &ExactBRepTopology,
+) -> Result<(), SharedCurveError> {
+    let edge = topology
+        .edges
+        .binary_search_by(|edge| edge.id.cmp(&curve.source_edge_id))
+        .ok()
+        .map(|index| &topology.edges[index])
+        .ok_or_else(|| {
+            invalid(
+                "shared curve edge",
+                "source edge is absent from exact topology",
+            )
+        })?;
+    let coedges = topology
+        .coedges
+        .iter()
+        .filter(|coedge| coedge.edge_id == curve.source_edge_id)
+        .collect::<Vec<_>>();
+    validate_curve(curve, edge, Some(&coedges))
+}
+
 fn validate_metric_resolution(
     curve: &SharedCurve,
     is_degenerate: bool,
