@@ -19,15 +19,15 @@ use runmat_execution_runner::port::BackendPort;
 use runmat_execution_runner::{AttemptReport, AttemptRequest};
 use runmat_meshing_core::{
     build_chunked_stage_payload, build_closed_stage_manifest, AlgorithmVersionSet,
-    CancellationPolicy, CanonicalMeshingContract, ElementOrder, GeometryRevisionRef,
-    GeometryTolerancePolicy, MeshingCancellationSignal, MeshingCapabilityRequirement,
-    MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingFailure,
-    MeshingFailureCategory, MeshingInputKind, MeshingInputRef, MeshingManifestDisposition,
-    MeshingPartitionDescriptor, MeshingPartitionKind, MeshingQualityTargets, MeshingRequest,
-    MeshingResourceBudget, MeshingStageIdentity, MeshingStageKind, MeshingStageResultKind,
-    MeshingWorkloadRequest, MetricCombinationRule, MetricFieldRequest, MetricTensor3,
-    NeverCancelled, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
-    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets, ElementOrder,
+    GeometryRevisionRef, GeometryTolerancePolicy, MeshingCancellationSignal,
+    MeshingCapabilityRequirement, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream,
+    MeshingFailure, MeshingFailureCategory, MeshingInputKind, MeshingInputRef,
+    MeshingManifestDisposition, MeshingPartitionDescriptor, MeshingPartitionKind,
+    MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
+    MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest, MetricCombinationRule,
+    MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
+    VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
     MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
@@ -919,6 +919,12 @@ fn request() -> MeshingRequest {
             contributions: Vec::new(),
         },
         quality: MeshingQualityTargets {
+            curve: CurveQualityTargets {
+                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_tangent_change_degrees: 5.0,
+                minimum_metric_edge_length: 0.1,
+                maximum_metric_edge_length: 1.5,
+            },
             surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,

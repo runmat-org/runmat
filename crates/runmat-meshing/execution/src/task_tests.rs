@@ -9,13 +9,14 @@ use runmat_execution::{Digest, ExecutionScopeId, PoolId};
 use runmat_execution_runner::driver::{DriverAction, DriverCommand, DriverConfig};
 use runmat_execution_runner::{Driver, PoolSpec, WorkerSpec};
 use runmat_meshing_core::{
-    AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, ElementOrder,
-    GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement, MeshingInputKind,
-    MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind, MeshingQualityTargets,
-    MeshingRequest, MeshingResourceBudget, MeshingStageIdentity, MeshingStageKind,
-    MeshingWorkloadRequest, MetricCombinationRule, MetricFieldRequest, MetricTensor3, StableDigest,
-    SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
+    AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets,
+    ElementOrder, GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
+    MeshingInputKind, MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind,
+    MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
+    MeshingStageKind, MeshingWorkloadRequest, MetricCombinationRule, MetricFieldRequest,
+    MetricTensor3, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
+    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -511,6 +512,12 @@ fn request() -> MeshingRequest {
             contributions: Vec::new(),
         },
         quality: MeshingQualityTargets {
+            curve: CurveQualityTargets {
+                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_tangent_change_degrees: 5.0,
+                minimum_metric_edge_length: 0.1,
+                maximum_metric_edge_length: 1.5,
+            },
             surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,

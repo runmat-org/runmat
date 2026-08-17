@@ -5,7 +5,7 @@ use super::{
     MeshingContractError, MetricFieldRequest,
 };
 
-pub const MESHING_REQUEST_SCHEMA_VERSION: u16 = 3;
+pub const MESHING_REQUEST_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +50,52 @@ pub struct SurfaceQualityTargets {
     pub maximum_physical_aspect_ratio: f64,
     pub maximum_chordal_deviation_m: f64,
     pub maximum_normal_deviation_degrees: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CurveQualityTargets {
+    pub maximum_chordal_deviation_m: f64,
+    pub maximum_tangent_change_degrees: f64,
+    pub minimum_metric_edge_length: f64,
+    pub maximum_metric_edge_length: f64,
+}
+
+impl CurveQualityTargets {
+    fn validate(&self) -> Result<(), MeshingContractError> {
+        for (field, value) in [
+            (
+                "maximum curve chordal deviation",
+                self.maximum_chordal_deviation_m,
+            ),
+            (
+                "maximum curve tangent change",
+                self.maximum_tangent_change_degrees,
+            ),
+            (
+                "minimum curve metric edge length",
+                self.minimum_metric_edge_length,
+            ),
+            (
+                "maximum curve metric edge length",
+                self.maximum_metric_edge_length,
+            ),
+        ] {
+            validate_finite(field, value)?;
+        }
+        if self.maximum_chordal_deviation_m <= 0.0
+            || !(0.0..=180.0).contains(&self.maximum_tangent_change_degrees)
+            || self.maximum_tangent_change_degrees == 0.0
+            || self.minimum_metric_edge_length <= 0.0
+            || self.minimum_metric_edge_length > self.maximum_metric_edge_length
+        {
+            return Err(MeshingContractError::invalid(
+                "curve quality targets",
+                "chordal, tangent, and ordered metric-length bounds must be positive",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl SurfaceQualityTargets {
@@ -125,12 +171,14 @@ impl VolumeQualityTargets {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingQualityTargets {
+    pub curve: CurveQualityTargets,
     pub surface: SurfaceQualityTargets,
     pub volume: VolumeQualityTargets,
 }
 
 impl MeshingQualityTargets {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
+        self.curve.validate()?;
         self.surface.validate()?;
         self.volume.validate()
     }

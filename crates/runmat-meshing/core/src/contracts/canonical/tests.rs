@@ -46,6 +46,12 @@ fn request() -> MeshingRequest {
             }],
         },
         quality: MeshingQualityTargets {
+            curve: CurveQualityTargets {
+                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_tangent_change_degrees: 5.0,
+                minimum_metric_edge_length: 0.1,
+                maximum_metric_edge_length: 1.5,
+            },
             surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
@@ -100,6 +106,13 @@ fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
     assert_eq!(
         invalid.validate().unwrap_err().field,
         "meshing resource budget"
+    );
+
+    let mut invalid = request();
+    invalid.quality.curve.minimum_metric_edge_length = 2.0;
+    assert_eq!(
+        invalid.validate().unwrap_err().field,
+        "curve quality targets"
     );
 
     let mut invalid = request();
