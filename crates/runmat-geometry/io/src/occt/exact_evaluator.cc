@@ -405,49 +405,68 @@ std::int8_t exact_trim_classify(std::uint64_t session_id,
 }
 
 OcctMassPropertiesPayload exact_mass_properties(std::uint64_t session_id,
-                                                std::uint64_t shape_key) {
+                                                rust::Slice<const std::uint64_t> shape_keys,
+                                                bool is_sheet_body) {
   const auto value = session(session_id);
-  if (shape_key == 0 || shape_key > static_cast<std::uint64_t>(value->shapes.NbShapes())) {
-    throw std::runtime_error("OCCT exact body token is outside the B-rep shape table");
+  if (shape_keys.empty()) {
+    throw std::runtime_error("OCCT exact body token contains no shapes");
   }
-  const TopoDS_Shape& body =
-      value->shapes.Shape(static_cast<Standard_Integer>(shape_key));
   GProp_GProps surface_properties;
-  BRepGProp::SurfaceProperties(body, surface_properties);
+  GProp_GProps volume_properties;
+  for (const std::uint64_t shape_key : shape_keys) {
+    if (shape_key == 0 || shape_key > static_cast<std::uint64_t>(value->shapes.NbShapes())) {
+      throw std::runtime_error("OCCT exact body token is outside the B-rep shape table");
+    }
+    const TopoDS_Shape& body =
+        value->shapes.Shape(static_cast<Standard_Integer>(shape_key));
+    GProp_GProps surface_component;
+    BRepGProp::SurfaceProperties(body, surface_component);
+    surface_properties.Add(surface_component);
+    if (is_sheet_body) {
+      if (body.ShapeType() != TopAbs_SHELL) {
+        throw std::runtime_error("OCCT exact sheet body token does not identify a shell");
+      }
+    } else {
+      if (body.ShapeType() != TopAbs_SOLID) {
+        throw std::runtime_error("OCCT exact solid body token does not identify a solid");
+      }
+      GProp_GProps volume_component;
+      BRepGProp::VolumeProperties(body, volume_component);
+      volume_properties.Add(volume_component);
+    }
+  }
   const double surface_area = surface_properties.Mass();
   require_finite(surface_area, "surface area");
   if (surface_area <= 0.0) {
     throw std::runtime_error("OCCT exact body surface area must be positive");
   }
 
-  const bool has_solid = TopExp_Explorer(body, TopAbs_SOLID).More();
-  GProp_GProps volume_properties;
-  if (has_solid) {
-    BRepGProp::VolumeProperties(body, volume_properties);
+  if (!is_sheet_body) {
     require_finite(volume_properties.Mass(), "volume");
     if (volume_properties.Mass() <= 0.0) {
       throw std::runtime_error("OCCT exact solid volume must be positive");
     }
   }
-  const GProp_GProps& centroid_properties = has_solid ? volume_properties : surface_properties;
+  const GProp_GProps& centroid_properties =
+      is_sheet_body ? surface_properties : volume_properties;
   const gp_Pnt centroid = centroid_properties.CentreOfMass();
-  const gp_Mat inertia = has_solid ? volume_properties.MatrixOfInertia() : gp_Mat();
+  const gp_Mat inertia = is_sheet_body ? gp_Mat() : volume_properties.MatrixOfInertia();
   const double scale = value->meters_per_source_unit;
   const double scale2 = scale * scale;
   const double scale3 = scale2 * scale;
   const double scale5 = scale3 * scale2;
   OcctMassPropertiesPayload result;
-  result.volume = has_solid ? volume_properties.Mass() * scale3 : 0.0;
+  result.volume = is_sheet_body ? 0.0 : volume_properties.Mass() * scale3;
   result.surface_area = surface_area * scale2;
   result.centroid_x = centroid.X() * scale;
   result.centroid_y = centroid.Y() * scale;
   result.centroid_z = centroid.Z() * scale;
-  result.inertia_xx = has_solid ? inertia.Value(1, 1) * scale5 : 0.0;
-  result.inertia_yy = has_solid ? inertia.Value(2, 2) * scale5 : 0.0;
-  result.inertia_zz = has_solid ? inertia.Value(3, 3) * scale5 : 0.0;
-  result.inertia_xy = has_solid ? inertia.Value(1, 2) * scale5 : 0.0;
-  result.inertia_xz = has_solid ? inertia.Value(1, 3) * scale5 : 0.0;
-  result.inertia_yz = has_solid ? inertia.Value(2, 3) * scale5 : 0.0;
+  result.inertia_xx = is_sheet_body ? 0.0 : inertia.Value(1, 1) * scale5;
+  result.inertia_yy = is_sheet_body ? 0.0 : inertia.Value(2, 2) * scale5;
+  result.inertia_zz = is_sheet_body ? 0.0 : inertia.Value(3, 3) * scale5;
+  result.inertia_xy = is_sheet_body ? 0.0 : inertia.Value(1, 2) * scale5;
+  result.inertia_xz = is_sheet_body ? 0.0 : inertia.Value(1, 3) * scale5;
+  result.inertia_yz = is_sheet_body ? 0.0 : inertia.Value(2, 3) * scale5;
   return result;
 }
 

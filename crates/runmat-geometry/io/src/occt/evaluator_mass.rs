@@ -15,7 +15,7 @@ impl ExactMassPropertiesEvaluator for OcctExactEvaluator {
             .bindings
             .mass_properties
             .get(id)
-            .copied()
+            .cloned()
             .ok_or_else(|| {
                 GeometryEvaluationError::new(
                     GeometryEvaluationErrorKind::UnknownEvaluator,
@@ -26,9 +26,13 @@ impl ExactMassPropertiesEvaluator for OcctExactEvaluator {
         control.consume_iterations(1)?;
         let properties = match binding {
             MassPropertiesBinding::Validated(properties) => properties,
-            MassPropertiesBinding::Kernel(shape_key) => {
-                let value = ffi::bridge::exact_mass_properties(self.session_id, shape_key)
-                    .map_err(|error| kernel(error.to_string()))?;
+            MassPropertiesBinding::Kernel {
+                shape_keys,
+                is_sheet_body,
+            } => {
+                let value =
+                    ffi::bridge::exact_mass_properties(self.session_id, &shape_keys, is_sheet_body)
+                        .map_err(|error| kernel(error.to_string()))?;
                 BodyMassProperties {
                     volume_m3: value.volume,
                     surface_area_m2: value.surface_area,

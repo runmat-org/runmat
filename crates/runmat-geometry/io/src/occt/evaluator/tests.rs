@@ -4,12 +4,15 @@ use crate::{
     import_exact_cad, ExactCadImportOptions, GeometryFormat,
 };
 use runmat_geometry_core::{
-    GeometryEvaluationError, MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
-    TrimDomainLocation, UnitSystem,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, MassPropertiesEvaluatorId,
+    SurfaceEvaluatorId, TrimClassifierId, TrimDomainLocation, UnitSystem,
 };
 use sha2::Digest as _;
 
 const BOX: &[u8] = include_bytes!("../../../tests/fixtures/box.brep");
+const DISCONNECTED_SOLIDS: &[u8] =
+    include_bytes!("../../../tests/fixtures/disconnected_solids.brep");
+const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_solid_sheet.brep");
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
 
 struct Unlimited;
@@ -141,6 +144,117 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
         ),
         Err(GeometryImportError::ExactEntityCapacityExceeded { limit: 50 })
     ));
+}
+
+#[test]
+fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
+    let imported = import_exact_cad(
+        "mixed_solid_sheet.brep",
+        MIXED_SOLID_SHEET,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert_eq!(imported.topology.assemblies.len(), 1);
+    assert_eq!(imported.topology.bodies.len(), 2);
+    assert_eq!(imported.topology.lumps.len(), 1);
+    assert_eq!(imported.topology.solids.len(), 1);
+    assert_eq!(imported.topology.shells.len(), 2);
+    assert_eq!(imported.topology.faces.len(), 7);
+    assert_eq!(imported.topology.edges.len(), 16);
+    assert_eq!(imported.topology.vertices.len(), 12);
+    assert_eq!(imported.topology.assemblies[0].body_ids.len(), 2);
+
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let solid = imported
+        .topology
+        .bodies
+        .iter()
+        .find(|body| !body.is_sheet_body)
+        .unwrap();
+    let sheet = imported
+        .topology
+        .bodies
+        .iter()
+        .find(|body| body.is_sheet_body)
+        .unwrap();
+    assert_eq!(solid.id.source_topology_id, "body:solid");
+    assert_eq!(sheet.id.source_topology_id, "body:sheet");
+    assert_eq!(solid.lump_ids.len(), 1);
+    assert!(solid.sheet_shell_ids.is_empty());
+    assert!(sheet.lump_ids.is_empty());
+    assert_eq!(sheet.sheet_shell_ids.len(), 1);
+
+    let solid_mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+        &evaluator,
+        &solid.mass_properties_evaluator_id,
+        &Unlimited,
+    )
+    .unwrap();
+    assert_eq!(solid_mass.volume_m3, 6.0);
+    assert_eq!(solid_mass.surface_area_m2, 22.0);
+    assert_eq!(solid_mass.centroid_m, [0.5, 1.0, 1.5]);
+
+    let sheet_mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+        &evaluator,
+        &sheet.mass_properties_evaluator_id,
+        &Unlimited,
+    )
+    .unwrap();
+    assert_eq!(sheet_mass.volume_m3, 0.0);
+    assert_eq!(sheet_mass.surface_area_m2, 8.0);
+    assert_eq!(sheet_mass.centroid_m, [1.0, 2.0, 10.0]);
+
+    let mut mislabeled = imported.clone();
+    let sheet_record = mislabeled
+        .evaluators
+        .mass_properties
+        .iter_mut()
+        .find(|record| record.id == sheet.mass_properties_evaluator_id)
+        .unwrap();
+    let runmat_geometry_core::ExactMassPropertiesImplementation::Kernel { reference } =
+        &mut sheet_record.implementation
+    else {
+        panic!("mixed bodies require body-specific kernel evaluators");
+    };
+    reference.entity_token = "body:solid".into();
+    assert!(matches!(
+        OcctExactEvaluator::new(&mislabeled),
+        Err(GeometryEvaluationError {
+            kind: GeometryEvaluationErrorKind::InconsistentGeometry,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn disconnected_solids_share_one_body_with_aggregate_mass_properties() {
+    let imported = import_exact_cad(
+        "disconnected_solids.brep",
+        DISCONNECTED_SOLIDS,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert_eq!(imported.topology.bodies.len(), 1);
+    assert_eq!(imported.topology.lumps.len(), 2);
+    assert_eq!(imported.topology.solids.len(), 2);
+    let body = &imported.topology.bodies[0];
+    assert!(!body.is_sheet_body);
+    assert_eq!(body.lump_ids.len(), 2);
+
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+        &evaluator,
+        &body.mass_properties_evaluator_id,
+        &Unlimited,
+    )
+    .unwrap();
+    assert_eq!(mass.volume_m3, 12.0);
+    assert_eq!(mass.surface_area_m2, 44.0);
+    assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
 }
 
 struct Cancelled;

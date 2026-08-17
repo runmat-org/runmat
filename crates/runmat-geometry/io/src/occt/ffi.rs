@@ -135,7 +135,6 @@ pub(crate) mod bridge {
         path_segments: Vec<String>,
         definition_index: u64,
         transform: Vec<f64>,
-        body_shape_key: u64,
     }
 
     #[derive(Debug, Clone)]
@@ -429,7 +428,8 @@ pub(crate) mod bridge {
 
         fn exact_mass_properties(
             session_id: u64,
-            shape_key: u64,
+            shape_keys: &[u64],
+            is_sheet_body: bool,
         ) -> Result<OcctMassPropertiesPayload>;
 
         fn close_exact_evaluator_session(session_id: u64);

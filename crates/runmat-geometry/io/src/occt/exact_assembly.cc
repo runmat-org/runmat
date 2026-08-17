@@ -154,7 +154,6 @@ void append_occurrence(
   }
   occurrence.definition_index = definition_index;
   append_transform(occurrence.transform, local_location.Transformation());
-  occurrence.body_shape_key = 0;
   const std::uint64_t occurrence_index = occurrence.occurrence_index;
   result.occurrences.push_back(std::move(occurrence));
 
@@ -196,8 +195,6 @@ void append_occurrence(
       throw std::runtime_error(
           "OCCT exact assembly occurrence definition is absent from the canonical B-rep shape table");
     }
-    result.occurrences[occurrence_index - 1].body_shape_key =
-        static_cast<std::uint64_t>(body_shape_key);
     append_exact_topology(result,
                           shape_set.Shape(body_shape_key),
                           shape_set,
@@ -237,7 +234,6 @@ void append_exact_occurrences(OcctExactShapePayload& result,
   root.path_segments.push_back("root");
   root.definition_index = 0;
   append_transform(root.transform, gp_Trsf());
-  root.body_shape_key = 0;
   result.occurrences.push_back(std::move(root));
 
   if (!has_xcaf || shape_tool.IsNull()) {
@@ -245,7 +241,6 @@ void append_exact_occurrences(OcctExactShapePayload& result,
     if (body_shape_key <= 0) {
       throw std::runtime_error("OCCT exact root shape is absent from its B-rep shape table");
     }
-    result.occurrences[0].body_shape_key = static_cast<std::uint64_t>(body_shape_key);
     append_exact_topology(result, root_shape, shape_set, 1, options);
     return;
   }

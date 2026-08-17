@@ -13,7 +13,9 @@ use runmat_geometry_core::{
 use sha2::{Digest, Sha256};
 
 use super::{
-    exact_projection_identity::*, exact_projection_occurrence::OccurrenceIndex, ffi::bridge,
+    exact_projection_identity::*,
+    exact_projection_occurrence::{BodyPartitions, OccurrenceIndex},
+    ffi::bridge,
 };
 use crate::{exact::exact_representation_digest, import::GeometryImportError};
 
@@ -25,7 +27,8 @@ pub(super) fn project_exact_contracts(
     let representation_digest = exact_representation_digest(&payload.representation);
     validate_projection_shape(payload)?;
     let occurrences = OccurrenceIndex::new(payload, representation_digest)?;
-    let assembly_projection = occurrences.project_assemblies()?;
+    let body_partitions = BodyPartitions::new(payload, &occurrences)?;
+    let assembly_projection = occurrences.project_assemblies(&body_partitions)?;
 
     let mut topology = ExactBRepTopology {
         schema_version: EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
@@ -219,8 +222,11 @@ pub(super) fn project_exact_contracts(
         })
         .collect::<Result<Vec<_>, GeometryImportError>>()?;
     topology.lumps.sort_by(|left, right| left.id.cmp(&right.id));
-    let (bodies, mass_properties) =
-        occurrences.project_bodies(payload, solid_mass_properties, representation_digest)?;
+    let (bodies, mass_properties) = body_partitions.project_bodies(
+        &occurrences,
+        solid_mass_properties,
+        representation_digest,
+    )?;
     topology.bodies = bodies;
 
     let evaluator_ref = |entity_token: String| runmat_geometry_core::KernelEvaluatorRef {

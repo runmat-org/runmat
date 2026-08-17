@@ -21,6 +21,16 @@ pub(super) struct AssemblyProjection {
     pub instances: Vec<ExactInstance>,
 }
 
+pub(super) struct BodyPartitions {
+    by_occurrence: BTreeMap<u64, Vec<BodyPartition>>,
+}
+
+struct BodyPartition {
+    is_sheet_body: bool,
+    lump_ids: Vec<PersistentEntityId>,
+    sheet_shell_ids: Vec<PersistentEntityId>,
+}
+
 impl<'a> OccurrenceIndex<'a> {
     pub fn new(
         payload: &'a bridge::OcctExactShapePayload,
@@ -102,7 +112,10 @@ impl<'a> OccurrenceIndex<'a> {
             .ok_or_else(|| invalid("OCCT exact topology references an unknown occurrence"))
     }
 
-    pub fn project_assemblies(&self) -> Result<AssemblyProjection, GeometryImportError> {
+    pub fn project_assemblies(
+        &self,
+        body_partitions: &BodyPartitions,
+    ) -> Result<AssemblyProjection, GeometryImportError> {
         let mut child_instances = BTreeMap::<u64, Vec<PersistentEntityId>>::new();
         let mut instances = Vec::new();
         for occurrence in self.occurrences.values().skip(1) {
@@ -126,7 +139,6 @@ impl<'a> OccurrenceIndex<'a> {
         }
         instances.sort_by(|left, right| left.id.cmp(&right.id));
 
-        let topology_occurrences = self.topology_occurrences();
         let mut assemblies = Vec::new();
         for occurrence in self.occurrences.values() {
             let mut children = child_instances
@@ -144,11 +156,7 @@ impl<'a> OccurrenceIndex<'a> {
                 } else {
                     self.definition_digests[&occurrence.definition_index]
                 },
-                body_ids: topology_occurrences
-                    .contains(&occurrence.occurrence_index)
-                    .then(|| body_id(path))
-                    .into_iter()
-                    .collect(),
+                body_ids: body_partitions.body_ids(occurrence.occurrence_index, path),
                 child_instance_ids: children,
             });
         }
@@ -159,16 +167,15 @@ impl<'a> OccurrenceIndex<'a> {
             instances,
         })
     }
+}
 
-    pub fn project_bodies(
-        &self,
+impl BodyPartitions {
+    pub fn new(
         payload: &bridge::OcctExactShapePayload,
-        solid_mass_properties: Option<&BodyMassProperties>,
-        representation_digest: [u8; 32],
-    ) -> Result<(Vec<ExactBody>, Vec<ExactMassPropertiesRecord>), GeometryImportError> {
-        let mut bodies = Vec::new();
-        let mut records = Vec::new();
-        for occurrence in self.occurrences.values() {
+        occurrences: &OccurrenceIndex<'_>,
+    ) -> Result<Self, GeometryImportError> {
+        let mut by_occurrence = BTreeMap::new();
+        for occurrence in occurrences.occurrences.values() {
             let index = occurrence.occurrence_index;
             let path = occurrence.path_segments.as_slice();
             let lump_ids = payload
@@ -194,79 +201,111 @@ impl<'a> OccurrenceIndex<'a> {
                 })
                 .map(|shell| shape_id(PersistentEntityKind::Shell, shell.shape_key, path))
                 .collect::<Vec<_>>();
-            if lump_ids.is_empty() && sheet_shell_ids.is_empty() {
-                if occurrence.body_shape_key != 0 {
-                    return Err(invalid(
-                        "OCCT exact body occurrence contains no body topology",
-                    ));
-                }
-                continue;
+            let mut partitions = Vec::new();
+            if !lump_ids.is_empty() {
+                partitions.push(BodyPartition {
+                    is_sheet_body: false,
+                    lump_ids,
+                    sheet_shell_ids: Vec::new(),
+                });
             }
-            if occurrence.body_shape_key == 0 {
-                return Err(invalid("OCCT exact body occurrence has no evaluator shape"));
+            if !sheet_shell_ids.is_empty() {
+                partitions.push(BodyPartition {
+                    is_sheet_body: true,
+                    lump_ids: Vec::new(),
+                    sheet_shell_ids,
+                });
             }
-            if !lump_ids.is_empty() && !sheet_shell_ids.is_empty() {
-                return Err(invalid(
-                    "mixed solid and sheet topology requires distinct OCCT body definitions",
-                ));
+            by_occurrence.insert(index, partitions);
+        }
+        for occurrence_index in payload
+            .lumps
+            .iter()
+            .map(|lump| lump.occurrence_index)
+            .chain(payload.shells.iter().map(|shell| shell.occurrence_index))
+        {
+            occurrences.path(occurrence_index)?;
+        }
+        Ok(Self { by_occurrence })
+    }
+
+    pub fn project_bodies(
+        &self,
+        occurrences: &OccurrenceIndex<'_>,
+        solid_mass_properties: Option<&BodyMassProperties>,
+        representation_digest: [u8; 32],
+    ) -> Result<(Vec<ExactBody>, Vec<ExactMassPropertiesRecord>), GeometryImportError> {
+        let mut bodies = Vec::new();
+        let mut records = Vec::new();
+        let body_count = self.by_occurrence.values().map(Vec::len).sum::<usize>();
+        for (occurrence_index, partitions) in &self.by_occurrence {
+            let path = occurrences.path(*occurrence_index)?;
+            for partition in partitions {
+                let mass_id = mass_id(path, partition.is_sheet_body);
+                let can_use_root_evidence = occurrences.occurrences.len() == 1
+                    && body_count == 1
+                    && !partition.is_sheet_body;
+                let implementation = if can_use_root_evidence {
+                    solid_mass_properties
+                        .copied()
+                        .map(
+                            |properties| ExactMassPropertiesImplementation::KernelValidated {
+                                properties,
+                                validation_digest: super::exact_projection::mass_validation_digest(
+                                    representation_digest,
+                                    &properties,
+                                ),
+                            },
+                        )
+                        .unwrap_or_else(|| ExactMassPropertiesImplementation::Kernel {
+                            reference: kernel_reference(representation_digest, false),
+                        })
+                } else {
+                    ExactMassPropertiesImplementation::Kernel {
+                        reference: kernel_reference(representation_digest, partition.is_sheet_body),
+                    }
+                };
+                records.push(ExactMassPropertiesRecord {
+                    id: mass_id.clone(),
+                    implementation,
+                });
+                bodies.push(ExactBody {
+                    id: body_id(path, partition.is_sheet_body),
+                    mass_properties_evaluator_id: mass_id,
+                    lump_ids: partition.lump_ids.clone(),
+                    is_sheet_body: partition.is_sheet_body,
+                    sheet_shell_ids: partition.sheet_shell_ids.clone(),
+                });
             }
-            let mass_id = mass_id(path);
-            let can_use_root_evidence = self.occurrences.len() == 1 && !lump_ids.is_empty();
-            let implementation = if can_use_root_evidence {
-                solid_mass_properties
-                    .copied()
-                    .map(
-                        |properties| ExactMassPropertiesImplementation::KernelValidated {
-                            properties,
-                            validation_digest: super::exact_projection::mass_validation_digest(
-                                representation_digest,
-                                &properties,
-                            ),
-                        },
-                    )
-                    .unwrap_or_else(|| ExactMassPropertiesImplementation::Kernel {
-                        reference: kernel_reference(
-                            representation_digest,
-                            occurrence.body_shape_key,
-                        ),
-                    })
-            } else {
-                ExactMassPropertiesImplementation::Kernel {
-                    reference: kernel_reference(representation_digest, occurrence.body_shape_key),
-                }
-            };
-            records.push(ExactMassPropertiesRecord {
-                id: mass_id.clone(),
-                implementation,
-            });
-            bodies.push(ExactBody {
-                id: body_id(path),
-                mass_properties_evaluator_id: mass_id,
-                lump_ids,
-                is_sheet_body: !sheet_shell_ids.is_empty(),
-                sheet_shell_ids,
-            });
         }
         bodies.sort_by(|left, right| left.id.cmp(&right.id));
         records.sort_by(|left, right| left.id.cmp(&right.id));
         Ok((bodies, records))
     }
 
-    fn topology_occurrences(&self) -> BTreeSet<u64> {
-        self.occurrences
-            .values()
-            .filter(|occurrence| occurrence.body_shape_key != 0)
-            .map(|occurrence| occurrence.occurrence_index)
-            .collect()
+    fn body_ids(&self, occurrence_index: u64, path: &[String]) -> Vec<PersistentEntityId> {
+        let mut ids = self
+            .by_occurrence
+            .get(&occurrence_index)
+            .into_iter()
+            .flatten()
+            .map(|partition| body_id(path, partition.is_sheet_body))
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
     }
 }
 
 fn kernel_reference(
     representation_digest: [u8; 32],
-    body_shape_key: u64,
+    is_sheet_body: bool,
 ) -> runmat_geometry_core::KernelEvaluatorRef {
     runmat_geometry_core::KernelEvaluatorRef {
-        entity_token: format!("body:{body_shape_key:020}"),
+        entity_token: if is_sheet_body {
+            "body:sheet".into()
+        } else {
+            "body:solid".into()
+        },
         representation_digest,
     }
 }
