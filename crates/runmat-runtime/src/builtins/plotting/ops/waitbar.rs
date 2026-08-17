@@ -1,8 +1,13 @@
 //! MATLAB-compatible `waitbar` progress figure builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,6 +20,60 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "waitbar";
+
+const INTEGER_PROGRESS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "waitbar-integer-progress",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "waitbar with typed-integer progress storage is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WaitbarIntegerProgressExtension"),
+};
+const INTEGER_HANDLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "waitbar-integer-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "waitbar with a typed-integer numeric figure alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WaitbarIntegerHandleExtension"),
+};
+pub const WAITBAR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [INTEGER_PROGRESS_EXTENSION, INTEGER_HANDLE_EXTENSION];
+
+const INTEGER_PROGRESS_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public page specifies a real progress number but does not enumerate native integer storage; RunMat gates typed integer progress independently.",
+    }];
+const INTEGER_HANDLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "f",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented argument is a Figure object; typed-integer numeric aliases are a gated RunMat representation extension.",
+    }];
+pub const WAITBAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = waitbar(integer_x, ...)",
+        inputs: &INTEGER_PROGRESS_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The exact scalar crosses one checked binary64 UI-metadata boundary and is clamped to the implemented progress interval before figure mutation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = waitbar(x, integer_f, ...)",
+        inputs: &INTEGER_HANDLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility gate precedes numeric handle decoding and any waitbar-state access; resident handles are not gathered.",
+    },
+];
 
 const OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -117,9 +176,23 @@ fn invalid(detail: impl AsRef<str>) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::waitbar::WAITBAR_DESCRIPTOR),
+    extensions(crate::builtins::plotting::waitbar::WAITBAR_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::waitbar::WAITBAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::waitbar"
 )]
 pub fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    if args.first().is_some_and(is_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_PROGRESS_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if args.get(1).is_some_and(is_typed_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_HANDLE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let request = parse_request(&args)?;
     let should_update_existing_waitbar = request.target.is_none()
         && request.message.is_none()
@@ -208,12 +281,39 @@ fn parse_request(args: &[Value]) -> BuiltinResult<WaitbarRequest> {
 }
 
 fn parse_progress(value: &Value) -> BuiltinResult<f64> {
+    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
+        let progress = exact_integer_f64(integer)
+            .ok_or_else(|| invalid("integer progress must be exactly representable as double"))?;
+        return Ok(progress.clamp(0.0, 1.0));
+    }
     let progress = super::style::value_as_f64(value)
         .ok_or_else(|| invalid("progress must be a numeric scalar"))?;
     if !progress.is_finite() {
         return Err(invalid("progress must be finite"));
     }
     Ok(progress.clamp(0.0, 1.0))
+}
+
+fn exact_integer_f64(value: IntValue) -> Option<f64> {
+    use num_traits::FromPrimitive;
+    let converted = value.to_f64();
+    let exact = match value {
+        IntValue::I8(value) => num_bigint::BigInt::from(value),
+        IntValue::I16(value) => num_bigint::BigInt::from(value),
+        IntValue::I32(value) => num_bigint::BigInt::from(value),
+        IntValue::I64(value) => num_bigint::BigInt::from(value),
+        IntValue::U8(value) => num_bigint::BigInt::from(value),
+        IntValue::U16(value) => num_bigint::BigInt::from(value),
+        IntValue::U32(value) => num_bigint::BigInt::from(value),
+        IntValue::U64(value) => num_bigint::BigInt::from(value),
+    };
+    (num_bigint::BigInt::from_f64(converted).as_ref() == Some(&exact)).then_some(converted)
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 fn figure_handle(value: &Value) -> Option<FigureHandle> {
@@ -436,5 +536,35 @@ mod tests {
             get_builtin(vec![Value::Num(tagged), Value::String("Tag".into())]).unwrap(),
             Value::String("client-progress".into())
         );
+    }
+
+    #[test]
+    fn waitbar_integer_roles_are_independently_gated() {
+        let _guard = setup();
+        let progress = Value::Int(IntValue::U8(1));
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = waitbar_builtin(vec![progress.clone()]).expect_err("progress gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:WaitbarIntegerProgressExtension")
+            );
+        }
+        let handle = {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            waitbar_builtin(vec![progress, Value::from("Loading")]).expect("integer progress")
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = waitbar_builtin(vec![
+                Value::Num(0.5),
+                Value::Int(IntValue::U32(handle as u32)),
+            ])
+            .expect_err("handle gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:WaitbarIntegerHandleExtension")
+            );
+        }
     }
 }

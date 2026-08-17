@@ -3,21 +3,63 @@
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    SymbolicExpr, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, SymbolicExpr, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::{
-    digits::{current_digits, validate_digits, validate_integer_digits, MAX_DIGITS},
+    digits::{current_digits, MAX_DIGITS},
     symbolic_expr_to_value, text_scalar, value_to_symbolic_scalar,
 };
 use crate::builtins::common::tensor;
 
 const BUILTIN_NAME: &str = "vpa";
+
+const VPA_INTEGER_VALUE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every built-in integer class is documented input. RunMat's current scalar symbolic surface lifts the authoritative integer directly into an exact BigInt-backed rational before decimal rendering.",
+    }];
+const VPA_INTEGER_DIGITS_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "d",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The positive significant-digit count is decoded exactly from every integer class; floating controls use the documented nearest-integer rounding before range validation.",
+    }];
+pub const VPA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = vpa(integer_y)",
+        inputs: &VPA_INTEGER_VALUE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The supported scalar result is symbolic; no integer payload crosses binary floating point, including int64 and uint64 extrema.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = vpa(y, integer_d)",
+        inputs: &VPA_INTEGER_DIGITS_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "d selects host arbitrary-precision evaluation state and is bounded to the supported precision range before allocation.",
+    },
+];
 
 const VPA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -99,6 +141,7 @@ pub const VPA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     summary = "Evaluate scalar symbolic or numeric input as a variable-precision decimal.",
     keywords = "vpa,symbolic,variable precision,digits,decimal",
     descriptor(crate::builtins::math::symbolic::vpa::VPA_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::symbolic::vpa::VPA_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::symbolic::vpa"
 )]
 async fn vpa_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -115,9 +158,18 @@ async fn vpa_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 fn parse_precision(value: &Value) -> BuiltinResult<usize> {
     if let Some(value) = tensor::scalar_integer_value(value) {
-        return validate_integer_digits(&value).map_err(|err| {
-            vpa_error_with_message(&VPA_ERRORS[2], format!("{}: {err}", VPA_ERRORS[2].message))
-        });
+        return value
+            .try_to_usize()
+            .filter(|digits| (1..=MAX_DIGITS).contains(digits))
+            .ok_or_else(|| {
+                vpa_error_with_message(
+                    &VPA_ERRORS[2],
+                    format!(
+                        "{}: supported range is 1..={MAX_DIGITS}",
+                        VPA_ERRORS[2].message
+                    ),
+                )
+            });
     }
     let parsed = match value {
         Value::Num(value) => *value,
@@ -133,12 +185,20 @@ fn parse_precision(value: &Value) -> BuiltinResult<usize> {
         }
         _ => return Err(vpa_error(&VPA_ERRORS[2])),
     };
-    validate_digits(parsed).map_err(|err| {
-        vpa_error_with_message(
+    if !parsed.is_finite() {
+        return Err(vpa_error(&VPA_ERRORS[2]));
+    }
+    let rounded = parsed.round();
+    if rounded < 1.0 || rounded > MAX_DIGITS as f64 {
+        return Err(vpa_error_with_message(
             &VPA_ERRORS[2],
-            format!("{}: {}", VPA_ERRORS[2].message, err),
-        )
-    })
+            format!(
+                "{}: supported range is 1..={MAX_DIGITS}",
+                VPA_ERRORS[2].message
+            ),
+        ));
+    }
+    Ok(rounded as usize)
 }
 
 fn symbolic_input(value: &Value) -> BuiltinResult<SymbolicExpr> {
@@ -495,6 +555,34 @@ mod tests {
             ))
             .expect("vpa");
             assert_eq!(value.to_string(), "3.14159265359");
+        }
+    }
+
+    #[test]
+    fn vpa_preserves_all_integer_scalar_classes_exactly() {
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(i8::MIN)),
+            Value::Int(runmat_builtins::IntValue::I16(i16::MIN)),
+            Value::Int(runmat_builtins::IntValue::I32(i32::MIN)),
+            Value::Int(runmat_builtins::IntValue::I64(i64::MIN)),
+            Value::Int(runmat_builtins::IntValue::U8(u8::MAX)),
+            Value::Int(runmat_builtins::IntValue::U16(u16::MAX)),
+            Value::Int(runmat_builtins::IntValue::U32(u32::MAX)),
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+        ] {
+            let expected = match &value {
+                Value::Int(runmat_builtins::IntValue::I8(value)) => value.to_string(),
+                Value::Int(runmat_builtins::IntValue::I16(value)) => value.to_string(),
+                Value::Int(runmat_builtins::IntValue::I32(value)) => value.to_string(),
+                Value::Int(runmat_builtins::IntValue::I64(value)) => value.to_string(),
+                Value::Int(runmat_builtins::IntValue::U8(value)) => value.to_string(),
+                Value::Int(runmat_builtins::IntValue::U16(value)) => value.to_string(),
+                Value::Int(runmat_builtins::IntValue::U32(value)) => value.to_string(),
+                Value::Int(runmat_builtins::IntValue::U64(value)) => value.to_string(),
+                _ => unreachable!(),
+            };
+            let result = block_on(vpa_builtin(value, vec![Value::Num(32.0)])).expect("vpa");
+            assert_eq!(result.to_string(), expected);
         }
     }
 

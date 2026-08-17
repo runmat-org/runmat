@@ -26,7 +26,9 @@
     "No arguments returns the RunMat package version.",
     "`'-release'` returns the centrally configured compatibility release for branching.",
     "`'-description'` returns a human-readable RunMat description.",
-    "`'-java'` returns an empty string because RunMat does not embed MATLAB's Java runtime."
+    "`'-java'` returns an empty string because RunMat does not embed MATLAB's Java runtime.",
+    "Options are text-only. Numeric and resident inputs are rejected without conversion or provider access.",
+    "The documented `'-date'` option and two-output `[v, d] = version` form are not implemented."
   ],
   "examples": [],
   "faqs": [

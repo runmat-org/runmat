@@ -2,7 +2,11 @@
 
 use once_cell::sync::Lazy;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, StructValue, Value,
 };
@@ -23,6 +27,54 @@ use crate::{build_runtime_error, RuntimeError};
 use tracing;
 
 const BUILTIN_NAME: &str = "warning";
+
+const INTEGER_ARRAY_FORMATTING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "warning-integer-array-formatting",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "warning with a nonscalar typed-integer formatting argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WarningIntegerArrayFormattingExtension"),
+};
+pub const WARNING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [INTEGER_ARRAY_FORMATTING_EXTENSION];
+
+const INTEGER_SCALAR_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented numeric-scalar replacement value includes every built-in integer class; integer conversions format the authoritative value directly.",
+    }];
+const INTEGER_ARRAY_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat can consume a host integer array across successive format conversions; this exceeds the warning page's numeric-scalar A contract and is independently gated.",
+    }];
+pub const WARNING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "warning(msg, integer_A, ...)",
+        inputs: &INTEGER_SCALAR_FORMAT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Signed and unsigned decimal conversions preserve exact values, including uint64 values above flintmax; warning state and the success sentinel remain host metadata.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "warning(msg, integer_array_A, ...)",
+        inputs: &INTEGER_ARRAY_FORMAT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The extension gate runs before formatting or warning-state mutation; host values are flattened in column-major order and retain exact integer formatting.",
+    },
+];
 
 const WARNING_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "state_or_status",
@@ -351,6 +403,8 @@ where
     suppress_auto_output = true,
     type_resolver(warning_type),
     descriptor(crate::builtins::diagnostics::warning::WARNING_DESCRIPTOR),
+    extensions(crate::builtins::diagnostics::warning::WARNING_EXTENSIONS),
+    integer_capabilities(crate::builtins::diagnostics::warning::WARNING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::diagnostics::warning"
 )]
 fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -410,6 +464,14 @@ fn handle_message_call(
 }
 
 fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+    if args.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some() && tensor.len() != 1)
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_ARRAY_FORMATTING_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let identifier = normalize_identifier(identifier_raw);
     let message = format_variadic(fmt, args).map_err(|flow| {
         remap_warning_flow(flow, &WARNING_ERROR_INVALID_INPUT, |err| {
@@ -1148,7 +1210,7 @@ fn structs_to_cell(structs: Vec<StructValue>) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -1486,6 +1548,30 @@ pub(crate) mod tests {
         assert_eq!(
             warning_type(&[Type::String], &ResolveContext::new(Vec::new())),
             Type::Unknown
+        );
+    }
+
+    #[test]
+    fn warning_formats_wide_integer_scalars_exactly() {
+        let formatted =
+            format_variadic("%u", &[Value::Int(IntValue::U64(u64::MAX))]).expect("format integer");
+        assert_eq!(formatted, u64::MAX.to_string());
+    }
+
+    #[test]
+    fn warning_gates_nonscalar_integer_format_arrays() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        reset_manager();
+        let values = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+                .expect("integer values"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error =
+            warning_builtin(vec![Value::from("%u %u"), values]).expect_err("array formatting gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:WarningIntegerArrayFormattingExtension")
         );
     }
 

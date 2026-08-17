@@ -1616,6 +1616,16 @@ mod tests {
             ("vec2word", "vec2word-integer-vectors"),
             ("vecnorm", "vecnorm-integer-input"),
             ("vecnorm", "vecnorm-integer-order"),
+            ("view", "view-integer-angles"),
+            ("view", "view-integer-axes-handle"),
+            ("waitbar", "waitbar-integer-handle"),
+            ("waitbar", "waitbar-integer-progress"),
+            ("warning", "warning-integer-array-formatting"),
+            ("wblinv", "wblinv-explicit-gpu-input"),
+            ("wblinv", "wblinv-integer-probability"),
+            ("wblinv", "wblinv-integer-scale"),
+            ("wblinv", "wblinv-integer-shape"),
+            ("wblinv", "wblinv-logical-input"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2224,6 +2234,8 @@ mod tests {
                 "userpath",
                 "validateFunctionSignaturesJSON",
                 "vartype",
+                "verLessThan",
+                "version",
             ]
         );
         for (name, audit) in audited {

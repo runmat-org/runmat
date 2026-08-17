@@ -167025,7 +167025,11 @@
           "when": "Arguments are malformed or unsupported.",
           "message": "runtime compatibility helper: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "verLessThan accepts two documented character-vector controls and returns logical; native and resident integer values are not version-number aliases."
+      }
     },
     {
       "name": "version",
@@ -167061,7 +167065,11 @@
           "when": "Arguments are malformed or unsupported.",
           "message": "runtime compatibility helper: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "version accepts no input or one documented text option and returns text; numeric and resident inputs reject before provider access."
+      }
     },
     {
       "name": "vertcat",
@@ -167122,6 +167130,35 @@
           "identifier": "RunMat:vertcat:TypeMismatch",
           "when": "Input classes cannot be concatenated together.",
           "message": "vertcat: incompatible input classes for concatenation"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = vertcat(A1,...,An) with real integer data",
+          "inputs": [
+            {
+              "name": "A1,...,An",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every real integer class participates in documented dimension-one concatenation. The leftmost integer input determines the output class when integers mix with unlike integer, floating, or logical operands."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "vertcat delegates to the settled cat(dim=1) engine, including exact wide-integer conversion, saturation, empty handling, owner validation, and typed gather/assemble/restore fallback."
         }
       ]
     },
@@ -167296,6 +167333,76 @@
           "when": "Internal plotting state operation fails.",
           "message": "view: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "view-integer-angles",
+          "mode": "RunMatOnly",
+          "description": "view with typed-integer angles or preset storage is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ViewIntegerAnglesExtension"
+        },
+        {
+          "id": "view-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "view with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ViewIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "angles = view(integer_angles_or_preset)",
+          "inputs": [
+            {
+              "name": "az, el, v, or dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public surface describes numbers and line-of-sight arrays without enumerating native integer storage; RunMat exposes typed integer angles and 2/3 presets behind one explicit extension gate."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Host integer storage remains exact until each angle crosses the renderer's binary32 camera-state boundary; values that cannot be represented exactly reject before plot mutation."
+        },
+        {
+          "form": "angles = view(integer_ax, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented target is an Axes object; typed-integer numeric aliases are a gated RunMat graphics representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility gate runs before numeric handle decoding or axes-state access; resident integer handles are not gathered."
+        }
       ]
     },
     {
@@ -167371,6 +167478,62 @@
           "identifier": "RunMat:vpa:InvalidDigits",
           "when": "The requested precision is not an integer in the supported range.",
           "message": "vpa: expected a positive integer digit count"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = vpa(integer_y)",
+          "inputs": [
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every built-in integer class is documented input. RunMat's current scalar symbolic surface lifts the authoritative integer directly into an exact BigInt-backed rational before decimal rendering."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The supported scalar result is symbolic; no integer payload crosses binary floating point, including int64 and uint64 extrema."
+        },
+        {
+          "form": "S = vpa(y, integer_d)",
+          "inputs": [
+            {
+              "name": "d",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positive significant-digit count is decoded exactly from every integer class; floating controls use the documented nearest-integer rounding before range validation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "d selects host arbitrary-precision evaluation state and is bounded to the supported precision range before allocation."
         }
       ]
     },
@@ -167491,6 +167654,76 @@
           "identifier": "RunMat:waitbar:InvalidArgument",
           "when": "Progress, handle, message, or property/value arguments are invalid.",
           "message": "waitbar: invalid argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "waitbar-integer-progress",
+          "mode": "RunMatOnly",
+          "description": "waitbar with typed-integer progress storage is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WaitbarIntegerProgressExtension"
+        },
+        {
+          "id": "waitbar-integer-handle",
+          "mode": "RunMatOnly",
+          "description": "waitbar with a typed-integer numeric figure alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WaitbarIntegerHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = waitbar(integer_x, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public page specifies a real progress number but does not enumerate native integer storage; RunMat gates typed integer progress independently."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact scalar crosses one checked binary64 UI-metadata boundary and is clamped to the implemented progress interval before figure mutation."
+        },
+        {
+          "form": "h = waitbar(x, integer_f, ...)",
+          "inputs": [
+            {
+              "name": "f",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented argument is a Figure object; typed-integer numeric aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility gate precedes numeric handle decoding and any waitbar-state access; resident handles are not gathered."
         }
       ]
     },
@@ -167918,6 +168151,70 @@
           "when": "Warning mode is configured to promote warnings to errors.",
           "message": "warning: promoted to error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "warning-integer-array-formatting",
+          "mode": "RunMatOnly",
+          "description": "warning with a nonscalar typed-integer formatting argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WarningIntegerArrayFormattingExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "warning(msg, integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric-scalar replacement value includes every built-in integer class; integer conversions format the authoritative value directly."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Signed and unsigned decimal conversions preserve exact values, including uint64 values above flintmax; warning state and the success sentinel remain host metadata."
+        },
+        {
+          "form": "warning(msg, integer_array_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat can consume a host integer array across successive format conversions; this exceeds the warning page's numeric-scalar A contract and is independently gated."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The extension gate runs before formatting or warning-state mutation; host values are flattened in column-major order and retain exact integer formatting."
+        }
       ]
     },
     {
@@ -167994,6 +168291,99 @@
           "identifier": "RunMat:wblinv:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "wblinv-integer-probability",
+          "mode": "RunMatOnly",
+          "description": "wblinv with typed-integer probabilities is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WblinvIntegerProbabilityExtension"
+        },
+        {
+          "id": "wblinv-integer-scale",
+          "mode": "RunMatOnly",
+          "description": "wblinv with typed-integer scale parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WblinvIntegerScaleExtension"
+        },
+        {
+          "id": "wblinv-integer-shape",
+          "mode": "RunMatOnly",
+          "description": "wblinv with typed-integer shape parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WblinvIntegerShapeExtension"
+        },
+        {
+          "id": "wblinv-logical-input",
+          "mode": "RunMatOnly",
+          "description": "wblinv with logical numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WblinvLogicalInputExtension"
+        },
+        {
+          "id": "wblinv-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "wblinv with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WblinvExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = wblinv(integer_p, integer_a, integer_b)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented probability datatype is single or double; typed integers are independently gated and must be exactly representable at the binary64 distribution boundary."
+            },
+            {
+              "name": "a",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented scale datatype is single or double; typed integers are independently gated and checked before conversion."
+            },
+            {
+              "name": "b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented shape datatype is single or double; typed integers are independently gated and checked before conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each typed role is gated independently before provider access. Admitted values cross one checked binary64 Weibull boundary; single dominates output only when another documented input is single, and automatic fallback restores through a physically compatible owner."
         }
       ]
     },

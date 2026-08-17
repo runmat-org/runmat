@@ -25,12 +25,12 @@
     {
       "name": "x",
       "type": "numeric scalar",
-      "description": "Progress fraction. Finite values are clamped into `[0, 1]`."
+      "description": "Progress fraction. Finite values are clamped into `[0, 1]`; typed-integer storage is a separately gated RunMat extension and must cross the UI metadata boundary exactly."
     },
     {
       "name": "h",
       "type": "figure handle",
-      "description": "Existing waitbar figure to update."
+      "description": "Existing waitbar figure to update. Typed-integer numeric aliases are a separately gated RunMat extension."
     },
     {
       "name": "msg",
@@ -52,7 +52,7 @@
     "`Tag` is a normal figure property for waitbars; new waitbars default to MATLAB's `TMWWaitbar` tag unless a `Tag` property is supplied.",
     "`CreateCancelBtn`, `Units`, and `WindowStyle` are accepted as compatibility no-ops because RunMat does not execute native UI callback code or native modal window behavior from waitbar creation."
   ],
-  "gpu_residency": "`waitbar` manages UI metadata only. It does not gather, copy, or mutate GPU-resident arrays.",
+  "gpu_residency": "`waitbar` manages host UI metadata only. Resident numeric progress and handle values are rejected without provider access.",
   "related": [
     {
       "label": "figure",

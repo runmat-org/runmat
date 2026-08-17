@@ -49,6 +49,8 @@ pub const RUNTIME_COMPAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 pub const ISDEPLOYED_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "isdeployed accepts no arguments and has no integer data, control, output-class, or provider surface." };
+pub const VERSION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "version accepts no input or one documented text option and returns text; numeric and resident inputs reject before provider access." };
+pub const VER_LESS_THAN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "verLessThan accepts two documented character-vector controls and returns logical; native and resident integer values are not version-number aliases." };
 
 #[runtime_builtin(
     name = "version",
@@ -56,6 +58,7 @@ pub const ISDEPLOYED_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinInteg
     summary = "Return RunMat's MATLAB-compatible version string.",
     keywords = "version,release,environment,compatibility",
     descriptor(crate::builtins::introspection::runtime_compat::RUNTIME_COMPAT_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::runtime_compat::VERSION_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
 fn version_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -84,6 +87,7 @@ fn version_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Compare the MATLAB compatibility version against a required version.",
     keywords = "verLessThan,version,compatibility",
     descriptor(crate::builtins::introspection::runtime_compat::RUNTIME_COMPAT_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::runtime_compat::VER_LESS_THAN_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
 fn ver_less_than_builtin(product: Value, version: Value) -> BuiltinResult<Value> {
@@ -193,5 +197,20 @@ mod tests {
             ver_less_than_builtin(Value::from("simulink"), Value::from("99.0")).unwrap(),
             Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn runtime_version_controls_reject_integer_aliases() {
+        assert!(version_builtin(vec![Value::Int(runmat_builtins::IntValue::I32(1))]).is_err());
+        assert!(ver_less_than_builtin(
+            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::from("26.1"),
+        )
+        .is_err());
+        assert!(ver_less_than_builtin(
+            Value::from("matlab"),
+            Value::Int(runmat_builtins::IntValue::I32(1)),
+        )
+        .is_err());
     }
 }
