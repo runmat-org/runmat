@@ -90,6 +90,27 @@ impl MetricTensor3 {
         }
         Ok(())
     }
+
+    pub fn conservative_minimum_length_m(&self) -> Result<f64, MetricContractError> {
+        self.validate()?;
+        // The maximum absolute row sum bounds the largest eigenvalue from above. Its reciprocal
+        // square root is therefore a conservative lower bound on the finest directional length.
+        let maximum_density = [
+            self.xx + self.xy.abs() + self.xz.abs(),
+            self.yy + self.xy.abs() + self.yz.abs(),
+            self.zz + self.xz.abs() + self.yz.abs(),
+        ]
+        .into_iter()
+        .fold(0.0_f64, f64::max);
+        let length = maximum_density.sqrt().recip();
+        if !length.is_finite() || length <= 0.0 {
+            return Err(MetricContractError::invalid(
+                "metric characteristic length",
+                "must be finite and greater than zero",
+            ));
+        }
+        Ok(length)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,7 +119,7 @@ pub enum MetricCombinationRule {
     MostRestrictiveIntersection,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetricSourceKind {
     Global,

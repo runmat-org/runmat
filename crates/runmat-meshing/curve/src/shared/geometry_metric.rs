@@ -7,9 +7,13 @@ use runmat_meshing_core::{
     MetricSourceKind, MetricTensor3, SurfaceQualityTargets,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{SharedCurveError, SharedCurveErrorKind};
+
+mod proximity;
+
+use proximity::{derive_proximity_contributions, ordered_pair, EdgeWitness};
 
 const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
 
@@ -26,6 +30,7 @@ pub fn derive_curve_geometry_metric(
 ) -> Result<MetricFieldRequest, SharedCurveError> {
     let mut contributions = Vec::new();
     let mut face_curvature = BTreeMap::new();
+    let mut edge_witnesses = Vec::new();
     for edge in &topology.edges {
         if edge.is_degenerate {
             continue;
@@ -42,6 +47,7 @@ pub fn derive_curve_geometry_metric(
         let mut maximum_curvature = 0.0_f64;
         let mut minimum_witness_chord = f64::INFINITY;
         let mut previous_point = None;
+        let mut witness_points = Vec::with_capacity(CURVATURE_SAMPLES_PER_EDGE as usize);
         let mut is_feature = topology
             .coedges
             .iter()
@@ -64,6 +70,7 @@ pub fn derive_curve_geometry_metric(
             let first = transform.transform_vector(derivatives.first_m);
             let second = transform.transform_vector(derivatives.second_m);
             let point = transform.transform_point(derivatives.point_m);
+            witness_points.push(point);
             if let Some(previous) = previous_point {
                 let chord = distance(previous, point);
                 if chord > 0.0 {
@@ -140,6 +147,22 @@ pub fn derive_curve_geometry_metric(
                 )?,
             });
         }
+        edge_witnesses.push(EdgeWitness {
+            edge_id: edge.id.clone(),
+            endpoint_ids: edge
+                .start_vertex_id
+                .iter()
+                .chain(&edge.end_vertex_id)
+                .cloned()
+                .collect(),
+            face_ids: topology
+                .coedges
+                .iter()
+                .filter(|coedge| coedge.edge_id == edge.id)
+                .map(|coedge| coedge.face_id.clone())
+                .collect(),
+            points_m: witness_points,
+        });
     }
     for (face_id, maximum_curvature) in face_curvature {
         if maximum_curvature == 0.0 {
@@ -166,6 +189,31 @@ pub fn derive_curve_geometry_metric(
             })?,
         });
     }
+    let contact_face_pairs = topology
+        .contacts
+        .iter()
+        .flat_map(|contact| {
+            contact.side_a_face_ids.iter().flat_map(move |left| {
+                contact
+                    .side_b_face_ids
+                    .iter()
+                    .map(move |right| ordered_pair(left.clone(), right.clone()))
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    let search_radius_m = request
+        .global_metric
+        .conservative_minimum_length_m()
+        .map_err(|error| {
+            SharedCurveError::invalid_request("curve proximity radius", error.to_string())
+        })?
+        * 2.0;
+    contributions.extend(derive_proximity_contributions(
+        edge_witnesses,
+        &contact_face_pairs,
+        search_radius_m,
+        control,
+    )?);
     request
         .intersect_contributions(contributions)
         .map_err(|error| {

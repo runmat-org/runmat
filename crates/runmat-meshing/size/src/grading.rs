@@ -26,7 +26,7 @@ pub fn grade_metric_evaluations(
         .map(|(entity, evaluation)| {
             Ok((
                 entity.clone(),
-                conservative_minimum_length_m(evaluation.metric)?,
+                evaluation.metric.conservative_minimum_length_m()?,
             ))
         })
         .collect::<Result<BTreeMap<_, _>, MetricContractError>>()?;
@@ -92,27 +92,6 @@ fn validate_graph(
     Ok(())
 }
 
-fn conservative_minimum_length_m(metric: MetricTensor3) -> Result<f64, MetricContractError> {
-    metric.validate()?;
-    // The maximum absolute row sum bounds the largest eigenvalue from above. Its reciprocal
-    // square root is therefore a conservative lower bound on the finest directional length.
-    let maximum_density = [
-        metric.xx + metric.xy.abs() + metric.xz.abs(),
-        metric.yy + metric.xy.abs() + metric.yz.abs(),
-        metric.zz + metric.xz.abs() + metric.yz.abs(),
-    ]
-    .into_iter()
-    .fold(0.0_f64, f64::max);
-    let length = maximum_density.sqrt().recip();
-    if !length.is_finite() || length <= 0.0 {
-        return Err(invalid(
-            "metric grading characteristic length",
-            "must be finite and greater than zero",
-        ));
-    }
-    Ok(length)
-}
-
 fn add(left: MetricTensor3, right: MetricTensor3) -> Result<MetricTensor3, MetricContractError> {
     let metric = MetricTensor3 {
         xx: left.xx + right.xx,
@@ -161,8 +140,20 @@ mod tests {
         assert_eq!(evaluations[&entities[0]].clipped_contribution_count, 0);
         assert_eq!(evaluations[&entities[1]].clipped_contribution_count, 1);
         assert_eq!(evaluations[&entities[2]].clipped_contribution_count, 1);
-        assert!(conservative_minimum_length_m(evaluations[&entities[1]].metric).unwrap() <= 0.2);
-        assert!(conservative_minimum_length_m(evaluations[&entities[2]].metric).unwrap() <= 0.4);
+        assert!(
+            evaluations[&entities[1]]
+                .metric
+                .conservative_minimum_length_m()
+                .unwrap()
+                <= 0.2
+        );
+        assert!(
+            evaluations[&entities[2]]
+                .metric
+                .conservative_minimum_length_m()
+                .unwrap()
+                <= 0.4
+        );
         assert_eq!(
             evaluations[&entities[2]].active_sources,
             vec![MetricSourceKind::Global]
