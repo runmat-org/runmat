@@ -1,6 +1,8 @@
 //! Exact CAD import boundary. This path returns kernel B-rep bytes and kernel-derived evidence;
 //! it never exposes or consumes display tessellation.
 
+use std::collections::BTreeMap;
+
 use runmat_geometry_core::{
     build_exact_geometry_closure, EncodedExactGeometryClosure, ExactBRepModel, ExactBRepTopology,
     ExactEvaluatorRegistry, GeometryDigest, GeometryDocument, GeometryHealingPolicy, GeometryModel,
@@ -29,6 +31,10 @@ pub struct ImportedExactCad {
     /// Exact evaluator bindings into `representation`; no display samples are admitted.
     pub evaluators: ExactEvaluatorRegistry,
     pub model: ExactBRepModel,
+    /// Kernel-private shape handles for body evaluators. Semantic identity remains exclusively in
+    /// the topology; these ordinals never enter serialized geometry contracts.
+    pub(crate) kernel_body_shapes:
+        BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
 }
 
 impl ImportedExactCad {
@@ -102,6 +108,9 @@ pub struct ExactCadImportOptions {
     pub max_representation_bytes: u64,
     /// Hard per-kind and expanded-occurrence aggregate topology bound.
     pub max_entities: u64,
+    /// Hard aggregate byte-work bound for canonical standalone subshape serialization used only
+    /// to derive persistent names. Serialized subshapes are hashed and discarded immediately.
+    pub max_identity_work_bytes: u64,
     /// Hard work bounds for independent exact-incidence admission after kernel import.
     pub max_validation_iterations: u64,
     pub max_validation_search_work: u64,
@@ -114,6 +123,7 @@ impl Default for ExactCadImportOptions {
             source_units: UnitSystem::Meter,
             max_representation_bytes: 512 * 1024 * 1024,
             max_entities: 10_000_000,
+            max_identity_work_bytes: 2 * 1024 * 1024 * 1024,
             max_validation_iterations: 10_000_000,
             max_validation_search_work: 100_000_000,
             max_validation_allocation_bytes: 512 * 1024 * 1024,
@@ -136,12 +146,14 @@ pub fn import_exact_cad(
     }
     if options.max_representation_bytes == 0
         || options.max_entities == 0
+        || options.max_identity_work_bytes == 0
         || options.max_validation_iterations == 0
         || options.max_validation_search_work == 0
         || options.max_validation_allocation_bytes == 0
     {
         return Err(GeometryImportError::InvalidOptions(
-            "exact representation, entity, and validation budgets must be nonzero".into(),
+            "exact representation, entity, identity-work, and validation budgets must be nonzero"
+                .into(),
         ));
     }
     let format = OcctCadFormat::from_geometry_format(format)

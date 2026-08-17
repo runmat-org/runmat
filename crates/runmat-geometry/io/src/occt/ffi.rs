@@ -1,3 +1,4 @@
+use sha2::Digest as _;
 use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -23,6 +24,7 @@ pub(crate) mod bridge {
         truncate_at_max_triangles: bool,
         max_exact_representation_bytes: u64,
         max_exact_entities: u64,
+        max_exact_identity_bytes: u64,
         cancel_token_id: u64,
     }
 
@@ -141,6 +143,7 @@ pub(crate) mod bridge {
     struct OcctExactVertexPayload {
         occurrence_index: u64,
         shape_key: u64,
+        identity_digest: Vec<u8>,
         point_x: f64,
         point_y: f64,
         point_z: f64,
@@ -151,6 +154,7 @@ pub(crate) mod bridge {
     struct OcctExactEdgePayload {
         occurrence_index: u64,
         shape_key: u64,
+        identity_digest: Vec<u8>,
         start_vertex_key: u64,
         end_vertex_key: u64,
         closed: bool,
@@ -162,6 +166,7 @@ pub(crate) mod bridge {
     struct OcctExactFacePayload {
         occurrence_index: u64,
         shape_key: u64,
+        identity_digest: Vec<u8>,
         reversed: bool,
         outer_wire_key: u64,
         inner_wire_keys: Vec<u64>,
@@ -174,6 +179,7 @@ pub(crate) mod bridge {
     struct OcctExactWirePayload {
         occurrence_index: u64,
         shape_key: u64,
+        identity_digest: Vec<u8>,
         face_key: u64,
         reversed: bool,
         coedge_keys: Vec<u64>,
@@ -195,6 +201,7 @@ pub(crate) mod bridge {
     struct OcctExactShellPayload {
         occurrence_index: u64,
         shape_key: u64,
+        identity_digest: Vec<u8>,
         reversed: bool,
         face_keys: Vec<u64>,
         face_reversed: Vec<bool>,
@@ -204,6 +211,7 @@ pub(crate) mod bridge {
     struct OcctExactSolidPayload {
         occurrence_index: u64,
         shape_key: u64,
+        identity_digest: Vec<u8>,
         outer_shell_key: u64,
         void_shell_keys: Vec<u64>,
     }
@@ -212,6 +220,7 @@ pub(crate) mod bridge {
     struct OcctExactLumpPayload {
         occurrence_index: u64,
         shape_key: u64,
+        identity_digest: Vec<u8>,
         from_compsolid: bool,
         solid_keys: Vec<u64>,
     }
@@ -451,6 +460,7 @@ pub(crate) mod bridge {
 
     extern "Rust" {
         fn occt_import_cancelled(cancel_token_id: u64) -> bool;
+        fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8>;
     }
 }
 
@@ -501,6 +511,13 @@ fn occt_import_cancelled(cancel_token_id: u64) -> bool {
         .and_then(|tokens| tokens.get(&cancel_token_id).cloned())
         .map(|flag| flag.load(Ordering::Relaxed))
         .unwrap_or(false)
+}
+
+fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8> {
+    let mut hasher = sha2::Sha256::new();
+    sha2::Digest::update(&mut hasher, b"runmat.occt-persistent-shape-name\0");
+    sha2::Digest::update(&mut hasher, bytes);
+    sha2::Digest::finalize(hasher).to_vec()
 }
 
 fn cancel_tokens() -> &'static Mutex<BTreeMap<u64, Arc<AtomicBool>>> {

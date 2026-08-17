@@ -120,7 +120,7 @@ pub(crate) fn import_exact_cad_shape(
             ],
         }
     });
-    let (topology, evaluators, model) = exact_projection::project_exact_contracts(
+    let projection = exact_projection::project_exact_contracts(
         &payload,
         meters_per_source_unit,
         mass_properties.as_ref(),
@@ -136,9 +136,10 @@ pub(crate) fn import_exact_cad_shape(
         kernel_version: payload.kernel_version,
         meters_per_source_unit,
         representation: payload.representation,
-        topology,
-        evaluators,
-        model,
+        topology: projection.topology,
+        evaluators: projection.evaluators,
+        model: projection.model,
+        kernel_body_shapes: projection.kernel_body_shapes,
     };
     let tolerance_m = imported
         .topology
@@ -252,6 +253,11 @@ fn exact_bridge_error(
         GeometryImportError::ExactEntityCapacityExceeded {
             limit: options.max_entities,
         }
+    } else if message.contains("exact persistent identity exceeded") {
+        GeometryImportError::ExactValidationBudgetExceeded(format!(
+            "persistent identity serialization exceeded {} bytes of work",
+            options.max_identity_work_bytes
+        ))
     } else if message.contains("OCCT exact outer shell")
         || message.contains("OCCT exact void shell")
         || message.contains("OCCT exact solid shell has no nesting witness")
@@ -351,6 +357,7 @@ fn ffi_import_options(
         truncate_at_max_triangles: options.budget_policy == GeometryImportBudgetPolicy::Truncate,
         max_exact_representation_bytes: u64::MAX,
         max_exact_entities: u64::MAX,
+        max_exact_identity_bytes: u64::MAX,
         cancel_token_id,
     }
 }
@@ -367,6 +374,7 @@ fn ffi_exact_import_options(
         truncate_at_max_triangles: false,
         max_exact_representation_bytes: options.max_representation_bytes,
         max_exact_entities: options.max_entities,
+        max_exact_identity_bytes: options.max_identity_work_bytes,
         cancel_token_id,
     }
 }

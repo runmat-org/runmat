@@ -11,8 +11,11 @@ use sha2::Digest as _;
 
 const BOX: &[u8] = include_bytes!("../../../tests/fixtures/box.brep");
 const BOX_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/box_cavity.brep");
+const COINCIDENT_SOLIDS: &[u8] = include_bytes!("../../../tests/fixtures/coincident_solids.brep");
 const DISCONNECTED_SOLIDS: &[u8] =
     include_bytes!("../../../tests/fixtures/disconnected_solids.brep");
+const DISCONNECTED_SOLIDS_REVERSED: &[u8] =
+    include_bytes!("../../../tests/fixtures/disconnected_solids_reversed.brep");
 const INVALID_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/invalid_cavity.brep");
 const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_solid_sheet.brep");
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
@@ -257,6 +260,193 @@ fn disconnected_solids_share_one_body_with_aggregate_mass_properties() {
     assert_eq!(mass.volume_m3, 12.0);
     assert_eq!(mass.surface_area_m2, 44.0);
     assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
+}
+
+#[test]
+fn persistent_entity_names_ignore_compound_child_order_and_are_bounded() {
+    let options = ExactCadImportOptions::default();
+    let context = GeometryImportContext::new();
+    let forward = import_exact_cad(
+        "disconnected_solids.brep",
+        DISCONNECTED_SOLIDS,
+        GeometryFormat::Brep,
+        &options,
+        &context,
+    )
+    .unwrap();
+    let reversed = import_exact_cad(
+        "disconnected_solids_reversed.brep",
+        DISCONNECTED_SOLIDS_REVERSED,
+        GeometryFormat::Brep,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_ne!(forward.representation, reversed.representation);
+    assert_eq!(persistent_names(&forward), persistent_names(&reversed));
+    assert_eq!(evaluator_names(&forward), evaluator_names(&reversed));
+    assert_ne!(curve_bindings(&forward), curve_bindings(&reversed));
+    assert!(persistent_names(&forward)
+        .iter()
+        .all(|name| name.starts_with("occt:") && name.len() == 69));
+    for imported in [&forward, &reversed] {
+        let evaluator = OcctExactEvaluator::new(imported).unwrap();
+        let body = &imported.topology.bodies[0];
+        let mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+            &evaluator,
+            &body.mass_properties_evaluator_id,
+            &Unlimited,
+        )
+        .unwrap();
+        assert_eq!(mass.volume_m3, 12.0);
+        assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
+    }
+
+    let limited = ExactCadImportOptions {
+        max_identity_work_bytes: 1,
+        ..options
+    };
+    assert!(matches!(
+        import_exact_cad(
+            "disconnected_solids.brep",
+            DISCONNECTED_SOLIDS,
+            GeometryFormat::Brep,
+            &limited,
+            &context,
+        ),
+        Err(GeometryImportError::ExactValidationBudgetExceeded(reason))
+            if reason.contains("persistent identity serialization")
+    ));
+}
+
+#[test]
+fn persistent_entity_names_reject_ambiguous_coincident_topology() {
+    let error = import_exact_cad(
+        "coincident_solids.brep",
+        COINCIDENT_SOLIDS,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        GeometryImportError::InvalidGeometry(reason)
+            if reason.contains("ambiguous coincident persistent names")
+    ));
+}
+
+fn persistent_names(imported: &crate::ImportedExactCad) -> Vec<String> {
+    let mut names = imported
+        .topology
+        .lumps
+        .iter()
+        .map(|entity| entity.id.source_topology_id.clone())
+        .chain(
+            imported
+                .topology
+                .solids
+                .iter()
+                .map(|entity| entity.id.source_topology_id.clone()),
+        )
+        .chain(
+            imported
+                .topology
+                .shells
+                .iter()
+                .map(|entity| entity.id.source_topology_id.clone()),
+        )
+        .chain(
+            imported
+                .topology
+                .faces
+                .iter()
+                .map(|entity| entity.id.source_topology_id.clone()),
+        )
+        .chain(
+            imported
+                .topology
+                .wires
+                .iter()
+                .map(|entity| entity.id.source_topology_id.clone()),
+        )
+        .chain(
+            imported
+                .topology
+                .coedges
+                .iter()
+                .map(|entity| entity.id.source_topology_id.clone()),
+        )
+        .chain(
+            imported
+                .topology
+                .edges
+                .iter()
+                .map(|entity| entity.id.source_topology_id.clone()),
+        )
+        .chain(
+            imported
+                .topology
+                .vertices
+                .iter()
+                .map(|entity| entity.id.source_topology_id.clone()),
+        )
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+fn evaluator_names(imported: &crate::ImportedExactCad) -> Vec<String> {
+    let mut names = imported
+        .evaluators
+        .curves
+        .iter()
+        .map(|record| record.id.as_str().to_owned())
+        .chain(
+            imported
+                .evaluators
+                .pcurves
+                .iter()
+                .map(|record| record.id.as_str().to_owned()),
+        )
+        .chain(
+            imported
+                .evaluators
+                .surfaces
+                .iter()
+                .map(|record| record.id.as_str().to_owned()),
+        )
+        .chain(
+            imported
+                .evaluators
+                .trim_classifiers
+                .iter()
+                .map(|record| record.id.as_str().to_owned()),
+        )
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+fn curve_bindings(imported: &crate::ImportedExactCad) -> Vec<(String, String)> {
+    let mut bindings = imported
+        .evaluators
+        .curves
+        .iter()
+        .map(|record| {
+            let runmat_geometry_core::ExactCurveImplementation::Kernel { reference } =
+                &record.implementation
+            else {
+                panic!("an OCCT import cannot contain a portable curve");
+            };
+            (
+                record.id.as_str().to_owned(),
+                reference.entity_token.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    bindings.sort();
+    bindings
 }
 
 #[test]

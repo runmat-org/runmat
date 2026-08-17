@@ -177,12 +177,6 @@ impl EvaluatorBindings {
             .iter()
             .map(|body| (&body.mass_properties_evaluator_id, body))
             .collect::<BTreeMap<_, _>>();
-        let lumps_by_id = imported
-            .topology
-            .lumps
-            .iter()
-            .map(|lump| (&lump.id, lump))
-            .collect::<BTreeMap<_, _>>();
         for record in &imported.evaluators.mass_properties {
             let body = bodies_by_evaluator
                 .get(&record.id)
@@ -205,7 +199,14 @@ impl EvaluatorBindings {
                         ));
                     }
                     MassPropertiesBinding::Kernel {
-                        shape_keys: body_shape_keys(body, &lumps_by_id)?,
+                        shape_keys: imported
+                            .kernel_body_shapes
+                            .get(&record.id)
+                            .filter(|keys| !keys.is_empty())
+                            .cloned()
+                            .ok_or_else(|| {
+                                inconsistent("OCCT body has no kernel shape inventory")
+                            })?,
                         is_sheet_body: body.is_sheet_body,
                     }
                 }
@@ -318,43 +319,6 @@ fn parse_face_token(token: &str, role: &str) -> Result<u64, GeometryEvaluationEr
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|key| *key != 0 && format!("face:{key:020}") == token)
         .ok_or_else(|| inconsistent(format!("OCCT {role} has an invalid face token")))
-}
-
-fn body_shape_keys(
-    body: &runmat_geometry_core::ExactBody,
-    lumps: &BTreeMap<&runmat_geometry_core::PersistentEntityId, &runmat_geometry_core::ExactLump>,
-) -> Result<Vec<u64>, GeometryEvaluationError> {
-    let ids = if body.is_sheet_body {
-        body.sheet_shell_ids.iter().collect::<Vec<_>>()
-    } else {
-        body.lump_ids
-            .iter()
-            .map(|id| {
-                lumps
-                    .get(id)
-                    .ok_or_else(|| inconsistent("OCCT body references an unknown lump"))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flat_map(|lump| lump.solid_ids.iter())
-            .collect::<Vec<_>>()
-    };
-    let keys = ids
-        .into_iter()
-        .map(|id| parse_shape_id(&id.source_topology_id))
-        .collect::<Result<Vec<_>, _>>()?;
-    if keys.is_empty() {
-        return Err(inconsistent("OCCT body has no evaluator shapes"));
-    }
-    Ok(keys)
-}
-
-fn parse_shape_id(source_topology_id: &str) -> Result<u64, GeometryEvaluationError> {
-    source_topology_id
-        .strip_prefix("brep-shape:")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|key| *key != 0 && format!("brep-shape:{key:020}") == source_topology_id)
-        .ok_or_else(|| inconsistent("OCCT body topology has an invalid shape identity"))
 }
 
 fn inconsistent(reason: impl Into<String>) -> GeometryEvaluationError {

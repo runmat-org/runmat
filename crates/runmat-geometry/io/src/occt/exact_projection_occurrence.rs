@@ -6,7 +6,9 @@ use runmat_geometry_core::{
 };
 use sha2::{Digest, Sha256};
 
-use super::{exact_projection_identity::*, ffi::bridge};
+use super::{
+    exact_persistent_names::PersistentNameIndex, exact_projection_identity::*, ffi::bridge,
+};
 use crate::import::GeometryImportError;
 
 pub(super) struct OccurrenceIndex<'a> {
@@ -25,8 +27,15 @@ pub(super) struct BodyPartitions {
     by_occurrence: BTreeMap<u64, Vec<BodyPartition>>,
 }
 
+pub(super) struct BodyProjection {
+    pub bodies: Vec<ExactBody>,
+    pub mass_properties: Vec<ExactMassPropertiesRecord>,
+    pub kernel_shapes: BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
+}
+
 struct BodyPartition {
     is_sheet_body: bool,
+    shape_keys: Vec<u64>,
     lump_ids: Vec<PersistentEntityId>,
     sheet_shell_ids: Vec<PersistentEntityId>,
 }
@@ -173,17 +182,19 @@ impl BodyPartitions {
     pub fn new(
         payload: &bridge::OcctExactShapePayload,
         occurrences: &OccurrenceIndex<'_>,
+        names: &PersistentNameIndex,
     ) -> Result<Self, GeometryImportError> {
         let mut by_occurrence = BTreeMap::new();
         for occurrence in occurrences.occurrences.values() {
             let index = occurrence.occurrence_index;
             let path = occurrence.path_segments.as_slice();
-            let lump_ids = payload
+            let mut lump_ids = payload
                 .lumps
                 .iter()
                 .filter(|lump| lump.occurrence_index == index)
-                .map(|lump| exact_lump_id(lump, path))
-                .collect::<Vec<_>>();
+                .map(|lump| names.lump_id(lump, path))
+                .collect::<Result<Vec<_>, _>>()?;
+            lump_ids.sort();
             let owned_shells = payload
                 .solids
                 .iter()
@@ -193,25 +204,49 @@ impl BodyPartitions {
                         .chain(solid.void_shell_keys.iter().copied())
                 })
                 .collect::<BTreeSet<_>>();
-            let sheet_shell_ids = payload
+            let mut sheet_shell_ids = payload
                 .shells
                 .iter()
                 .filter(|shell| {
                     shell.occurrence_index == index && !owned_shells.contains(&shell.shape_key)
                 })
-                .map(|shell| shape_id(PersistentEntityKind::Shell, shell.shape_key, path))
-                .collect::<Vec<_>>();
+                .map(|shell| {
+                    names.shape_id(
+                        PersistentEntityKind::Shell,
+                        shell.shape_key,
+                        shell.occurrence_index,
+                        path,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            sheet_shell_ids.sort();
             let mut partitions = Vec::new();
             if !lump_ids.is_empty() {
+                let shape_keys = payload
+                    .solids
+                    .iter()
+                    .filter(|solid| solid.occurrence_index == index)
+                    .map(|solid| solid.shape_key)
+                    .collect();
                 partitions.push(BodyPartition {
                     is_sheet_body: false,
+                    shape_keys,
                     lump_ids,
                     sheet_shell_ids: Vec::new(),
                 });
             }
             if !sheet_shell_ids.is_empty() {
+                let shape_keys = payload
+                    .shells
+                    .iter()
+                    .filter(|shell| {
+                        shell.occurrence_index == index && !owned_shells.contains(&shell.shape_key)
+                    })
+                    .map(|shell| shell.shape_key)
+                    .collect();
                 partitions.push(BodyPartition {
                     is_sheet_body: true,
+                    shape_keys,
                     lump_ids: Vec::new(),
                     sheet_shell_ids,
                 });
@@ -234,9 +269,10 @@ impl BodyPartitions {
         occurrences: &OccurrenceIndex<'_>,
         solid_mass_properties: Option<&BodyMassProperties>,
         representation_digest: [u8; 32],
-    ) -> Result<(Vec<ExactBody>, Vec<ExactMassPropertiesRecord>), GeometryImportError> {
+    ) -> Result<BodyProjection, GeometryImportError> {
         let mut bodies = Vec::new();
         let mut records = Vec::new();
+        let mut kernel_shapes = BTreeMap::new();
         let body_count = self.by_occurrence.values().map(Vec::len).sum::<usize>();
         for (occurrence_index, partitions) in &self.by_occurrence {
             let path = occurrences.path(*occurrence_index)?;
@@ -271,16 +307,21 @@ impl BodyPartitions {
                 });
                 bodies.push(ExactBody {
                     id: body_id(path, partition.is_sheet_body),
-                    mass_properties_evaluator_id: mass_id,
+                    mass_properties_evaluator_id: mass_id.clone(),
                     lump_ids: partition.lump_ids.clone(),
                     is_sheet_body: partition.is_sheet_body,
                     sheet_shell_ids: partition.sheet_shell_ids.clone(),
                 });
+                kernel_shapes.insert(mass_id, partition.shape_keys.clone());
             }
         }
         bodies.sort_by(|left, right| left.id.cmp(&right.id));
         records.sort_by(|left, right| left.id.cmp(&right.id));
-        Ok((bodies, records))
+        Ok(BodyProjection {
+            bodies,
+            mass_properties: records,
+            kernel_shapes,
+        })
     }
 
     fn body_ids(&self, occurrence_index: u64, path: &[String]) -> Vec<PersistentEntityId> {

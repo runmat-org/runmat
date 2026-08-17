@@ -65,7 +65,8 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert!(first.topology.lumps[0]
         .id
         .source_topology_id
-        .starts_with("brep-solid-lump:"));
+        .starts_with("occt:"));
+    assert_eq!(first.topology.lumps[0].id.source_topology_id.len(), 69);
     assert_eq!(first.topology.lumps[0].solid_ids.len(), 1);
     assert_eq!(
         first.topology.lumps[0].solid_ids[0],

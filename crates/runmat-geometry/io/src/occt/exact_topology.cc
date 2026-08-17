@@ -1,4 +1,5 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
+#include "runmat-geometry-io/src/occt/exact_identity.hxx"
 #include "runmat-geometry-io/src/occt/exact_nesting.hxx"
 #include "runmat-geometry-io/src/occt/exact_topology.hxx"
 
@@ -69,6 +70,7 @@ std::uint64_t shape_key(const BRepTools_ShapeSet& shapes,
 void append_exact_topology(OcctExactShapePayload& result,
                            const TopoDS_Shape& root,
                            const BRepTools_ShapeSet& shape_set,
+                           ExactIdentityContext& identity_context,
                            std::uint64_t occurrence_index,
                            const OcctImportOptions& options) {
   std::set<std::uint64_t> vertex_keys;
@@ -82,6 +84,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     if (!vertex_keys.insert(payload.shape_key).second) {
       continue;
     }
+    identity_context.append(payload.identity_digest,
+                            shape_set.Shape(static_cast<Standard_Integer>(payload.shape_key)),
+                            payload.shape_key,
+                            options);
     payload.point_x = point.X();
     payload.point_y = point.Y();
     payload.point_z = point.Z();
@@ -110,6 +116,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     if (!edge_keys.insert(payload.shape_key).second) {
       continue;
     }
+    identity_context.append(payload.identity_digest, edge, payload.shape_key, options);
     payload.start_vertex_key = start.IsNull() ? 0 : shape_key(shape_set, start, "edge vertex");
     payload.end_vertex_key = end.IsNull() ? 0 : shape_key(shape_set, end, "edge vertex");
     payload.closed = closed;
@@ -139,6 +146,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     OcctExactFacePayload face_payload;
     face_payload.occurrence_index = occurrence_index;
     face_payload.shape_key = face_key;
+    identity_context.append(face_payload.identity_digest,
+                            shape_set.Shape(static_cast<Standard_Integer>(face_key)),
+                            face_key,
+                            options);
     face_payload.reversed = reversed_orientation(face, "face");
     face_payload.outer_wire_key = shape_key(shape_set, outer_wire, "outer wire");
     face_payload.periodic_u = periodic_u;
@@ -158,6 +169,10 @@ void append_exact_topology(OcctExactShapePayload& result,
       OcctExactWirePayload wire_payload;
       wire_payload.occurrence_index = occurrence_index;
       wire_payload.shape_key = wire_key;
+      identity_context.append(wire_payload.identity_digest,
+                              shape_set.Shape(static_cast<Standard_Integer>(wire_key)),
+                              wire_key,
+                              options);
       wire_payload.face_key = face_key;
       wire_payload.reversed = reversed_orientation(wire, "wire");
       std::unordered_map<std::uint64_t, std::uint8_t> seam_occurrences;
@@ -220,6 +235,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     if (!shell_keys.insert(payload.shape_key).second) {
       continue;
     }
+    identity_context.append(payload.identity_digest,
+                            shape_set.Shape(static_cast<Standard_Integer>(payload.shape_key)),
+                            payload.shape_key,
+                            options);
     payload.reversed = reversed_orientation(shell, "shell");
     for (TopoDS_Iterator faces(shell, Standard_False, Standard_True); faces.More(); faces.Next()) {
       if (faces.Value().ShapeType() != TopAbs_FACE) {
@@ -248,6 +267,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     if (!solid_keys.insert(payload.shape_key).second) {
       continue;
     }
+    identity_context.append(payload.identity_digest,
+                            shape_set.Shape(static_cast<Standard_Integer>(payload.shape_key)),
+                            payload.shape_key,
+                            options);
     payload.outer_shell_key = shape_key(shape_set, outer_shell, "solid outer shell");
     for (TopoDS_Iterator shells(solid, Standard_False, Standard_True); shells.More(); shells.Next()) {
       if (shells.Value().ShapeType() != TopAbs_SHELL || shells.Value().IsSame(outer_shell)) {
@@ -273,6 +296,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     if (!compsolid_keys.insert(payload.shape_key).second) {
       continue;
     }
+    identity_context.append(payload.identity_digest,
+                            shape_set.Shape(static_cast<Standard_Integer>(payload.shape_key)),
+                            payload.shape_key,
+                            options);
     for (TopExp_Explorer solids(compsolid, TopAbs_SOLID); solids.More(); solids.Next()) {
       const std::uint64_t solid_key = shape_key(shape_set, solids.Current(), "compsolid solid");
       if (!claimed_solids.insert(solid_key).second) {
@@ -295,6 +322,9 @@ void append_exact_topology(OcctExactShapePayload& result,
       payload.occurrence_index = occurrence_index;
       payload.shape_key = solid.shape_key;
       payload.from_compsolid = false;
+      for (const std::uint8_t byte : solid.identity_digest) {
+        payload.identity_digest.push_back(byte);
+      }
       payload.solid_keys.push_back(solid.shape_key);
       result.lumps.push_back(payload);
     }

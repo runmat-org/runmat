@@ -1,5 +1,6 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "runmat-geometry-io/src/occt/exact_assembly.hxx"
+#include "runmat-geometry-io/src/occt/exact_identity.hxx"
 #include "runmat-geometry-io/src/occt/exact_topology.hxx"
 
 #include <BRepTools.hxx>
@@ -114,6 +115,7 @@ void append_occurrence(
     std::unordered_map<std::string, std::uint64_t>& definition_indices,
     std::uint64_t& exact_byte_total,
     const BRepTools_ShapeSet& shape_set,
+    ExactIdentityContext& identity_context,
     std::uint32_t depth,
     const OcctImportOptions& options) {
   check_cancelled(options);
@@ -173,6 +175,7 @@ void append_occurrence(
                         definition_indices,
                         exact_byte_total,
                         shape_set,
+                        identity_context,
                         depth + 1,
                         options);
     }
@@ -198,6 +201,7 @@ void append_occurrence(
     append_exact_topology(result,
                           shape_set.Shape(body_shape_key),
                           shape_set,
+                          identity_context,
                           occurrence_index,
                           options);
   }
@@ -227,6 +231,7 @@ void append_exact_occurrences(OcctExactShapePayload& result,
                               const OcctImportOptions& options) {
   BRepTools_ShapeSet shape_set(Standard_False);
   shape_set.Add(root_shape);
+  ExactIdentityContext identity_context;
 
   OcctExactOccurrencePayload root;
   root.occurrence_index = 1;
@@ -241,7 +246,7 @@ void append_exact_occurrences(OcctExactShapePayload& result,
     if (body_shape_key <= 0) {
       throw std::runtime_error("OCCT exact root shape is absent from its B-rep shape table");
     }
-    append_exact_topology(result, root_shape, shape_set, 1, options);
+    append_exact_topology(result, root_shape, shape_set, identity_context, 1, options);
     return;
   }
 
@@ -260,6 +265,7 @@ void append_exact_occurrences(OcctExactShapePayload& result,
                       definition_indices,
                       exact_byte_total,
                       shape_set,
+                      identity_context,
                       0,
                       options);
   }
