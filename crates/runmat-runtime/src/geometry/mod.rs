@@ -2465,6 +2465,11 @@ fn map_geometry_load_error(
             OperationErrorType::Capacity,
             false,
         ),
+        GeometryImportError::HealingLimitExceeded { .. } => (
+            "RM.GEOMETRY.LOAD.HEALING_LIMIT_EXCEEDED",
+            OperationErrorType::Validation,
+            false,
+        ),
         GeometryImportError::InvalidGeometry(_) => (
             "RM.GEOMETRY.LOAD.INVALID_GEOMETRY",
             OperationErrorType::Validation,

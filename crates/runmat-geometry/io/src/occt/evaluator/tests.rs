@@ -17,6 +17,7 @@ const DISCONNECTED_SOLIDS: &[u8] =
     include_bytes!("../../../tests/fixtures/disconnected_solids.brep");
 const DISCONNECTED_SOLIDS_REVERSED: &[u8] =
     include_bytes!("../../../tests/fixtures/disconnected_solids_reversed.brep");
+const GAPPED_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/gapped_sheet.brep");
 const INVALID_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/invalid_cavity.brep");
 const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_solid_sheet.brep");
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
@@ -419,6 +420,81 @@ fn duplicate_consolidation_collapses_indistinguishable_compound_children() {
         ),
         Err(GeometryImportError::ExactValidationBudgetExceeded(reason))
             if reason.contains("persistent identity serialization")
+    ));
+}
+
+#[test]
+fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
+    let context = GeometryImportContext::new();
+    assert!(import_exact_cad(
+        "gapped_sheet.brep",
+        GAPPED_SHEET,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &context,
+    )
+    .is_err());
+
+    let mut options = ExactCadImportOptions::default();
+    options.analysis.healing.repair_tolerance_scale_gaps = true;
+    options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    let imported = import_exact_cad(
+        "gapped_sheet.brep",
+        GAPPED_SHEET,
+        GeometryFormat::Brep,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(imported.topology.bodies.len(), 1);
+    assert!(imported.topology.bodies[0].is_sheet_body);
+    assert_eq!(imported.topology.faces.len(), 2);
+    let report = imported.healing_report.as_ref().unwrap();
+    assert_eq!(report.operations.len(), 1);
+    assert_eq!(
+        report.operations[0].kind,
+        GeometryHealingOperationKind::RepairGap
+    );
+    assert!(report.operations[0].maximum_displacement_m > 0.0);
+    assert!(report.operations[0].maximum_displacement_m <= 1.0e-6);
+    assert!(report
+        .revision_map
+        .operations
+        .iter()
+        .any(|operation| matches!(
+            operation,
+            runmat_geometry_core::GeometryRevisionOperation::Merge { .. }
+        )));
+    assert!(imported.build_closure().unwrap().healing_bytes.is_some());
+
+    let mut sewing_options = ExactCadImportOptions::default();
+    sewing_options.analysis.healing.sew = true;
+    sewing_options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    let sewn = import_exact_cad(
+        "gapped_sheet.brep",
+        GAPPED_SHEET,
+        GeometryFormat::Brep,
+        &sewing_options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(sewn.topology, imported.topology);
+    assert_eq!(
+        sewn.healing_report.as_ref().unwrap().operations[0].kind,
+        GeometryHealingOperationKind::Sew
+    );
+
+    let mut too_small = options;
+    too_small.analysis.maximum_healing_displacement_m = 1.0e-8;
+    assert!(matches!(
+        import_exact_cad(
+            "gapped_sheet.brep",
+            GAPPED_SHEET,
+            GeometryFormat::Brep,
+            &too_small,
+            &context,
+        ),
+        Err(GeometryImportError::InvalidGeometry(_))
     ));
 }
 

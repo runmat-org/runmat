@@ -3,7 +3,7 @@ use runmat_geometry_core::{
 };
 use sha2::{Digest, Sha256};
 
-const ROOT_SCOPE: &str = "root";
+pub(super) const ROOT_SCOPE: &str = "root";
 
 pub(super) fn scoped_id(
     kind: PersistentEntityKind,

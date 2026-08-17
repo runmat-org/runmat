@@ -110,6 +110,10 @@ pub enum GeometryImportError {
     ExactEntityCapacityExceeded { limit: u64 },
     #[error("EXACT_VALIDATION_BUDGET_EXCEEDED: {0}")]
     ExactValidationBudgetExceeded(String),
+    #[error("GEOMETRY_HEALING_LIMIT_EXCEEDED: {failure:?}")]
+    HealingLimitExceeded {
+        failure: runmat_geometry_core::GeometryHealingFailure,
+    },
     #[error("GEOMETRY_IMPORT_OPTIONS_INVALID: {0}")]
     InvalidOptions(String),
     #[error("GEOMETRY_IMPORT_CANCELLED: geometry import cancelled")]

@@ -2,6 +2,8 @@
 #include "runmat-geometry-io/src/occt/exact_healing.hxx"
 
 #include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepTools.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <ShapeFix_Shape.hxx>
@@ -12,10 +14,15 @@
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Iterator.hxx>
+#include <TopoDS.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <gp_Pnt.hxx>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <map>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -100,6 +107,96 @@ bool preserves_persistent_inventory(const TopoDS_Shape& before,
   return true;
 }
 
+void append_relations(const TopoDS_Shape& before,
+                      const TopoDS_Shape& after,
+                      const TopAbs_ShapeEnum kind,
+                      const std::uint8_t relation_kind,
+                      const BRepBuilderAPI_Sewing& sewing,
+                      const OcctImportOptions& options,
+                      ExactHealingMutation& mutation) {
+  TopTools_IndexedMapOfShape target_shapes;
+  TopExp::MapShapes(after, kind, target_shapes);
+  std::map<ShapeDigest, TopoDS_Shape> targets;
+  for (Standard_Integer index = 1; index <= target_shapes.Extent(); ++index) {
+    const TopoDS_Shape& target = target_shapes(index);
+    targets.emplace(
+        persistent_digest(target, options, mutation.identity_work_bytes), target);
+  }
+
+  TopTools_IndexedMapOfShape source_shapes;
+  TopExp::MapShapes(before, kind, source_shapes);
+  for (Standard_Integer index = 1; index <= source_shapes.Extent(); ++index) {
+    const TopoDS_Shape& source = source_shapes(index);
+    ExactHealingMutation::Relation relation;
+    relation.kind = relation_kind;
+    relation.source_digest =
+        persistent_digest(source, options, mutation.identity_work_bytes);
+    TopoDS_Shape target;
+    if (sewing.IsModifiedSubShape(source)) {
+      target = sewing.ModifiedSubShape(source);
+    } else {
+      const auto existing = targets.find(relation.source_digest);
+      if (existing != targets.end()) {
+        target = existing->second;
+      }
+    }
+    if (!target.IsNull()) {
+      const ShapeDigest digest =
+          persistent_digest(target, options, mutation.identity_work_bytes);
+      if (targets.find(digest) != targets.end()) {
+        relation.target_digest = digest;
+      }
+    }
+    mutation.relations.push_back(relation);
+  }
+}
+
+std::vector<gp_Pnt> vertex_points(const TopoDS_Shape& shape) {
+  TopTools_IndexedMapOfShape vertices;
+  TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
+  std::vector<gp_Pnt> result;
+  result.reserve(static_cast<std::size_t>(vertices.Extent()));
+  for (Standard_Integer index = 1; index <= vertices.Extent(); ++index) {
+    result.push_back(BRep_Tool::Pnt(TopoDS::Vertex(vertices(index))));
+  }
+  return result;
+}
+
+void measure_vertex_displacement(const std::vector<gp_Pnt>& sources,
+                                 const std::vector<gp_Pnt>& targets,
+                                 ExactHealingMutation& mutation) {
+  // Sewing retains the underlying curves and surfaces while changing boundary
+  // topology and tolerances. The symmetric vertex Hausdorff distance therefore
+  // measures the only admitted geometric movement and supplies its witness.
+  if (sources.empty() || targets.empty()) {
+    throw std::runtime_error("OCCT sewing produced an empty vertex inventory");
+  }
+  const auto measure = [&mutation](const std::vector<gp_Pnt>& originals,
+                                   const std::vector<gp_Pnt>& proposed,
+                                   const bool reverse_witness) {
+    for (const gp_Pnt& original : originals) {
+      double nearest = std::numeric_limits<double>::infinity();
+      const gp_Pnt* nearest_point = nullptr;
+      for (const gp_Pnt& candidate : proposed) {
+        const double distance = original.Distance(candidate);
+        if (distance < nearest) {
+          nearest = distance;
+          nearest_point = &candidate;
+        }
+      }
+      if (nearest > mutation.maximum_displacement && nearest_point != nullptr) {
+        mutation.maximum_displacement = nearest;
+        const gp_Pnt& source = reverse_witness ? *nearest_point : original;
+        const gp_Pnt& target = reverse_witness ? original : *nearest_point;
+        mutation.displacement_original = {source.X(), source.Y(), source.Z()};
+        mutation.displacement_proposed = {target.X(), target.Y(), target.Z()};
+      }
+    }
+  };
+  measure(sources, targets, false);
+  measure(targets, sources, true);
+}
+
 } // namespace
 
 ExactHealingMutation consolidate_exact_duplicates(const TopoDS_Shape& shape,
@@ -176,6 +273,39 @@ ExactHealingMutation repair_exact_orientation(const TopoDS_Shape& shape,
   repair.shape = result;
   repair.changed = true;
   return repair;
+}
+
+ExactHealingMutation sew_exact_shape(const TopoDS_Shape& shape,
+                                    const OcctImportOptions& options,
+                                    const double tolerance,
+                                    const std::uint64_t initial_identity_work) {
+  if (!std::isfinite(tolerance) || tolerance <= 0.0) {
+    throw std::runtime_error("OCCT sewing requires a positive finite tolerance");
+  }
+  BRepBuilderAPI_Sewing sewing(tolerance, Standard_True, Standard_True, Standard_True,
+                               Standard_False);
+  sewing.SetMaxTolerance(tolerance);
+  sewing.SetNonManifoldMode(Standard_False);
+  sewing.Add(shape);
+  HealingProgress progress(options);
+  sewing.Perform(progress.Start());
+  if (options.cancel_token_id != 0 && occt_import_cancelled(options.cancel_token_id)) {
+    throw std::runtime_error("OCCT CAD import cancelled");
+  }
+  const TopoDS_Shape result = sewing.SewedShape();
+  if (result.IsNull()) {
+    throw std::runtime_error("OCCT sewing produced a null shape");
+  }
+
+  ExactHealingMutation mutation;
+  mutation.shape = result;
+  mutation.identity_work_bytes = initial_identity_work;
+  append_relations(shape, result, TopAbs_VERTEX, 0, sewing, options, mutation);
+  append_relations(shape, result, TopAbs_EDGE, 1, sewing, options, mutation);
+  append_relations(shape, result, TopAbs_FACE, 2, sewing, options, mutation);
+  measure_vertex_displacement(vertex_points(shape), vertex_points(result), mutation);
+  mutation.changed = true;
+  return mutation;
 }
 
 } // namespace occt_backend

@@ -1,24 +1,42 @@
 //! Projects successful native orientation repair into geometry-owned revision evidence.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use runmat_geometry_core::{
-    encode_exact_topology, GeometryDigest, GeometryHealingOperation, GeometryHealingOperationKind,
-    GeometryHealingReport, GeometryRevisionMap, GeometryRevisionOperation, GeometryTolerancePolicy,
-    PersistentEntityId, TopologyValidity, GEOMETRY_HEALING_REPORT_SCHEMA_VERSION,
-    GEOMETRY_REVISION_MAP_SCHEMA_VERSION,
+    encode_exact_topology, GeometryDigest, GeometryHealingFailure, GeometryHealingOperation,
+    GeometryHealingOperationKind, GeometryHealingReport, GeometryRevisionMap,
+    GeometryRevisionOperation, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind,
+    TopologyValidity, GEOMETRY_HEALING_REPORT_SCHEMA_VERSION, GEOMETRY_REVISION_MAP_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
+use super::{
+    exact_persistent_names::digest_name,
+    exact_projection_identity::{scoped_id, ROOT_SCOPE},
+    ffi::bridge,
+};
 use crate::{exact::ImportedExactCad, import::GeometryImportError};
 
+pub(super) struct NativeHealingEvidence<'a> {
+    pub original_digest: &'a [u8],
+    pub original_kernel_valid: bool,
+    pub post_duplicate_kernel_valid: bool,
+    pub duplicates_consolidated: bool,
+    pub orientation_repaired: bool,
+    pub sewn: bool,
+    pub gaps_repaired: bool,
+    pub post_sewing_kernel_valid: bool,
+    pub relations: &'a [bridge::OcctHealingRelationPayload],
+    pub maximum_displacement_m: f64,
+    pub displacement_original_m: [f64; 3],
+    pub displacement_proposed_m: [f64; 3],
+}
+
 pub(super) fn healing_report(
-    original_digest: &[u8],
-    original_kernel_valid: bool,
-    post_duplicate_kernel_valid: bool,
-    duplicates_consolidated: bool,
-    orientation_repaired: bool,
+    evidence: NativeHealingEvidence<'_>,
     imported: &ImportedExactCad,
 ) -> Result<GeometryHealingReport, GeometryImportError> {
-    let original_topology_digest = parse_digest(original_digest)?;
+    let original_topology_digest = parse_digest(evidence.original_digest)?;
     let topology_bytes =
         encode_exact_topology(&imported.topology, &imported.model).map_err(contract_failure)?;
     let healed_topology_digest = GeometryDigest::from_bytes(Sha256::digest(topology_bytes).into());
@@ -29,27 +47,26 @@ pub(super) fn healing_report(
     })?;
     target_revision.parent_document_digest = Some(original_topology_digest);
 
-    let all_entities = topology_entities(imported);
+    let lineage = if evidence.sewn || evidence.gaps_repaired {
+        project_relations(evidence.relations, imported)?
+    } else {
+        retained_lineage(topology_entities(imported))
+    };
     let revision_map = GeometryRevisionMap {
         schema_version: GEOMETRY_REVISION_MAP_SCHEMA_VERSION,
         source_geometry_digest: original_topology_digest,
         source_revision,
         target_geometry_digest: healed_topology_digest,
         target_revision,
-        operations: all_entities
-            .into_iter()
-            .map(|entity| GeometryRevisionOperation::Retain {
-                source: entity.clone(),
-                target: entity,
-            })
-            .collect(),
+        operations: lineage.operations.clone(),
     };
+    let has_sewing = evidence.sewn || evidence.gaps_repaired;
     let original_validity = TopologyValidity {
-        kernel_valid: original_kernel_valid,
-        incidence_consistent: true,
-        orientation_consistent: !orientation_repaired,
-        shells_closed: true,
-        nesting_consistent: !orientation_repaired,
+        kernel_valid: evidence.original_kernel_valid,
+        incidence_consistent: !has_sewing,
+        orientation_consistent: !evidence.orientation_repaired,
+        shells_closed: !has_sewing,
+        nesting_consistent: !evidence.orientation_repaired,
     };
     let healed_validity = TopologyValidity {
         kernel_valid: true,
@@ -72,13 +89,13 @@ pub(super) fn healing_report(
     };
     let mut operations = Vec::new();
     let mut prior_validity = original_validity;
-    if duplicates_consolidated {
+    if evidence.duplicates_consolidated {
         let duplicate_validity = TopologyValidity {
-            kernel_valid: post_duplicate_kernel_valid,
+            kernel_valid: evidence.post_duplicate_kernel_valid,
             incidence_consistent: true,
-            orientation_consistent: !orientation_repaired,
+            orientation_consistent: !evidence.orientation_repaired,
             shells_closed: true,
-            nesting_consistent: !orientation_repaired,
+            nesting_consistent: !evidence.orientation_repaired,
         };
         let affected = duplicate_entities(imported);
         operations.push(GeometryHealingOperation {
@@ -93,7 +110,49 @@ pub(super) fn healing_report(
         });
         prior_validity = duplicate_validity;
     }
-    if orientation_repaired {
+    if has_sewing {
+        let operation_kind = if evidence.gaps_repaired {
+            GeometryHealingOperationKind::RepairGap
+        } else {
+            GeometryHealingOperationKind::Sew
+        };
+        if evidence.maximum_displacement_m > tolerance.maximum_healing_displacement_m {
+            let failure = GeometryHealingFailure {
+                operation: operation_kind,
+                affected_entities: lineage.affected_before.clone(),
+                measured_displacement_m: evidence.maximum_displacement_m,
+                permitted_displacement_m: tolerance.maximum_healing_displacement_m,
+                original_point_m: evidence.displacement_original_m,
+                proposed_point_m: evidence.displacement_proposed_m,
+                reason: "OCCT sewing exceeded the admitted healing displacement".into(),
+            };
+            failure.validate().map_err(contract_failure)?;
+            return Err(GeometryImportError::HealingLimitExceeded { failure });
+        }
+        let sewing_validity = TopologyValidity {
+            kernel_valid: evidence.post_sewing_kernel_valid,
+            incidence_consistent: true,
+            orientation_consistent: !evidence.orientation_repaired,
+            shells_closed: true,
+            nesting_consistent: !evidence.orientation_repaired,
+        };
+        operations.push(GeometryHealingOperation {
+            sequence: operations.len() as u64,
+            kind: operation_kind,
+            affected_before: lineage.affected_before.clone(),
+            affected_after: lineage.affected_after.clone(),
+            maximum_displacement_m: evidence.maximum_displacement_m,
+            reason: if evidence.gaps_repaired {
+                "OCCT sewed tolerance-scale boundary gaps within the admitted displacement".into()
+            } else {
+                "OCCT sewed exact boundary uses without exceeding the admitted displacement".into()
+            },
+            before_validity: prior_validity,
+            after_validity: sewing_validity,
+        });
+        prior_validity = sewing_validity;
+    }
+    if evidence.orientation_repaired {
         let affected = orientation_entities(imported);
         operations.push(GeometryHealingOperation {
             sequence: operations.len() as u64,
@@ -120,6 +179,125 @@ pub(super) fn healing_report(
     };
     report.validate().map_err(contract_failure)?;
     Ok(report)
+}
+
+struct ProjectedLineage {
+    operations: Vec<GeometryRevisionOperation>,
+    affected_before: Vec<PersistentEntityId>,
+    affected_after: Vec<PersistentEntityId>,
+}
+
+fn retained_lineage(entities: Vec<PersistentEntityId>) -> ProjectedLineage {
+    ProjectedLineage {
+        operations: entities
+            .into_iter()
+            .map(|entity| GeometryRevisionOperation::Retain {
+                source: entity.clone(),
+                target: entity,
+            })
+            .collect(),
+        affected_before: Vec::new(),
+        affected_after: Vec::new(),
+    }
+}
+
+fn project_relations(
+    relations: &[bridge::OcctHealingRelationPayload],
+    imported: &ImportedExactCad,
+) -> Result<ProjectedLineage, GeometryImportError> {
+    if relations.is_empty() {
+        return Err(invalid("OCCT sewing returned no persistent lineage"));
+    }
+    let target_inventory = topology_entities(imported)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let path = vec![ROOT_SCOPE.to_string()];
+    let mut grouped = BTreeMap::<PersistentEntityId, Vec<PersistentEntityId>>::new();
+    let mut deleted = Vec::new();
+    let mut sources = BTreeSet::new();
+    for relation in relations {
+        let kind = match relation.kind {
+            bridge::OcctHealingEntityKind::Vertex => PersistentEntityKind::Vertex,
+            bridge::OcctHealingEntityKind::Edge => PersistentEntityKind::Edge,
+            bridge::OcctHealingEntityKind::Face => PersistentEntityKind::Face,
+            _ => return Err(invalid("OCCT healing relation has an invalid entity kind")),
+        };
+        let source = scoped_id(kind, &digest_name(&relation.source_digest)?, &path);
+        if !sources.insert(source.clone()) {
+            return Err(invalid(
+                "OCCT healing lineage contains a duplicate source identity",
+            ));
+        }
+        if relation.target_digest.is_empty() {
+            deleted.push(source);
+            continue;
+        }
+        let target = scoped_id(kind, &digest_name(&relation.target_digest)?, &path);
+        if !target_inventory.contains(&target) {
+            return Err(invalid("OCCT healing lineage targets absent topology"));
+        }
+        grouped.entry(target).or_default().push(source);
+    }
+
+    let mut ordered = Vec::new();
+    for (target, mut source_group) in grouped {
+        source_group.sort();
+        let primary = source_group[0].clone();
+        let operation = if source_group.len() > 1 {
+            GeometryRevisionOperation::Merge {
+                sources: source_group,
+                target,
+            }
+        } else {
+            let source = source_group.pop().expect("one source was checked");
+            if source == target {
+                GeometryRevisionOperation::Retain {
+                    source: source.clone(),
+                    target,
+                }
+            } else {
+                GeometryRevisionOperation::Replace {
+                    source: source.clone(),
+                    target,
+                }
+            }
+        };
+        ordered.push((primary, operation));
+    }
+    ordered.extend(
+        deleted
+            .into_iter()
+            .map(|source| (source.clone(), GeometryRevisionOperation::Delete { source })),
+    );
+    ordered.sort_by(|left, right| left.0.cmp(&right.0));
+    let operations = ordered
+        .into_iter()
+        .map(|(_, operation)| operation)
+        .collect::<Vec<_>>();
+    let mut affected_before = sources.into_iter().collect::<Vec<_>>();
+    affected_before.sort();
+    let mut affected_after = operations
+        .iter()
+        .flat_map(revision_targets)
+        .cloned()
+        .collect::<Vec<_>>();
+    affected_after.sort();
+    affected_after.dedup();
+    Ok(ProjectedLineage {
+        operations,
+        affected_before,
+        affected_after,
+    })
+}
+
+fn revision_targets(operation: &GeometryRevisionOperation) -> &[PersistentEntityId] {
+    match operation {
+        GeometryRevisionOperation::Retain { target, .. }
+        | GeometryRevisionOperation::Replace { target, .. }
+        | GeometryRevisionOperation::Merge { target, .. } => std::slice::from_ref(target),
+        GeometryRevisionOperation::Split { targets, .. } => targets,
+        GeometryRevisionOperation::Delete { .. } => &[],
+    }
 }
 
 fn parse_digest(bytes: &[u8]) -> Result<GeometryDigest, GeometryImportError> {
@@ -192,4 +370,8 @@ fn duplicate_entities(imported: &ImportedExactCad) -> Vec<PersistentEntityId> {
 
 fn contract_failure(error: runmat_geometry_core::GeometryContractError) -> GeometryImportError {
     GeometryImportError::InvalidGeometry(format!("invalid OCCT healing evidence: {error}"))
+}
+
+fn invalid(reason: impl Into<String>) -> GeometryImportError {
+    GeometryImportError::InvalidGeometry(reason.into())
 }

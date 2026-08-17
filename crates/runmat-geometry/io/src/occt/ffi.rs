@@ -15,6 +15,21 @@ pub(crate) mod bridge {
         Brep,
     }
 
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctHealingEntityKind {
+        Vertex,
+        Edge,
+        Face,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctHealingRelationPayload {
+        kind: OcctHealingEntityKind,
+        source_digest: Vec<u8>,
+        target_digest: Vec<u8>,
+    }
+
     #[derive(Debug, Clone, Copy)]
     struct OcctImportOptions {
         linear_deflection: f64,
@@ -30,6 +45,7 @@ pub(crate) mod bridge {
         heal_duplicates: bool,
         heal_gaps: bool,
         heal_short_edges_and_sliver_faces: bool,
+        maximum_healing_displacement: f64,
         cancel_token_id: u64,
     }
 
@@ -110,7 +126,18 @@ pub(crate) mod bridge {
         duplicates_consolidated: bool,
         original_kernel_valid: bool,
         post_duplicate_kernel_valid: bool,
+        post_sewing_kernel_valid: bool,
         healing_identity_work_bytes: u64,
+        sewn: bool,
+        gaps_repaired: bool,
+        healing_relations: Vec<OcctHealingRelationPayload>,
+        maximum_healing_displacement: f64,
+        displacement_original_x: f64,
+        displacement_original_y: f64,
+        displacement_original_z: f64,
+        displacement_proposed_x: f64,
+        displacement_proposed_y: f64,
+        displacement_proposed_z: f64,
         has_volume_properties: bool,
         volume: f64,
         surface_area: f64,

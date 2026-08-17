@@ -300,7 +300,7 @@ impl PersistentNameIndex {
     }
 }
 
-fn digest_name(digest: &[u8]) -> Result<String, GeometryImportError> {
+pub(super) fn digest_name(digest: &[u8]) -> Result<String, GeometryImportError> {
     if digest.len() != 32 || digest.iter().all(|byte| *byte == 0) {
         return Err(invalid("OCCT persistent shape digest is malformed"));
     }

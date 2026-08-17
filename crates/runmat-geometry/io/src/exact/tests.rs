@@ -21,7 +21,10 @@ fn exact_analysis_options_are_validated_before_kernel_dispatch() {
     ));
 
     let mut unsupported_healing = ExactCadImportOptions::default();
-    unsupported_healing.analysis.healing.sew = true;
+    unsupported_healing
+        .analysis
+        .healing
+        .simplify_short_edges_and_sliver_faces = true;
     assert!(matches!(
         import_exact_cad(
             "shape.brep",
@@ -31,7 +34,25 @@ fn exact_analysis_options_are_validated_before_kernel_dispatch() {
             &GeometryImportContext::new(),
         ),
         Err(GeometryImportError::InvalidOptions(reason))
-            if reason.contains("only explicit orientation repair")
+            if reason.contains("short-edge or sliver-face")
+    ));
+
+    let mut conflicting_healing = ExactCadImportOptions::default();
+    conflicting_healing.analysis.healing.sew = true;
+    conflicting_healing
+        .analysis
+        .healing
+        .repair_tolerance_scale_gaps = true;
+    assert!(matches!(
+        import_exact_cad(
+            "shape.brep",
+            b"not dispatched",
+            GeometryFormat::Brep,
+            &conflicting_healing,
+            &GeometryImportContext::new(),
+        ),
+        Err(GeometryImportError::InvalidOptions(reason))
+            if reason.contains("separate geometry revisions")
     ));
 
     let mut invalid_revision = ExactCadImportOptions::default();

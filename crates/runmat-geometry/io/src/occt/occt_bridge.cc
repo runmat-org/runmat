@@ -979,8 +979,7 @@ OcctExactShapePayload import_exact_cad_bytes(
   BRepTools::Clean(document.shape);
   check_cancelled(options);
 
-  if (options.heal_sew || options.heal_gaps ||
-      options.heal_short_edges_and_sliver_faces) {
+  if (options.heal_short_edges_and_sliver_faces) {
     throw std::runtime_error(
         "requested OCCT exact healing operation is not yet supported by this kernel adapter");
   }
@@ -990,8 +989,16 @@ OcctExactShapePayload import_exact_cad_bytes(
   std::uint64_t healing_identity_work_bytes = 0;
   bool duplicates_consolidated = false;
   bool post_duplicate_kernel_valid = false;
+  bool post_sewing_kernel_valid = false;
   bool orientation_repaired = false;
-  if (options.heal_orientation || options.heal_duplicates) {
+  bool sewn = false;
+  bool gaps_repaired = false;
+  double maximum_healing_displacement = 0.0;
+  std::array<double, 3> displacement_original{0.0, 0.0, 0.0};
+  std::array<double, 3> displacement_proposed{0.0, 0.0, 0.0};
+  std::vector<ExactHealingMutation::Relation> healing_relations;
+  if (options.heal_orientation || options.heal_duplicates || options.heal_sew ||
+      options.heal_gaps) {
     const std::string original_representation = serialize_exact_shape(document.shape, options);
     if (static_cast<std::uint64_t>(original_representation.size()) >
         options.max_exact_representation_bytes) {
@@ -1012,6 +1019,37 @@ OcctExactShapePayload import_exact_cad_bytes(
       duplicates_consolidated = consolidation.changed;
       const BRepCheck_Analyzer duplicate_analyzer(document.shape, Standard_True);
       post_duplicate_kernel_valid = duplicate_analyzer.IsValid();
+    }
+    if (options.heal_sew || options.heal_gaps) {
+      if (document.has_xcaf) {
+        throw std::runtime_error("OCCT sewing requires definition-aware XCAF mutation");
+      }
+      const std::string before_sewing = serialize_exact_shape(document.shape, options);
+      if (static_cast<std::uint64_t>(before_sewing.size()) >
+          options.max_exact_representation_bytes) {
+        throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+      }
+      ExactHealingMutation sewing = sew_exact_shape(
+          document.shape,
+          options,
+          options.maximum_healing_displacement,
+          healing_identity_work_bytes);
+      document.shape = sewing.shape;
+      healing_identity_work_bytes = sewing.identity_work_bytes;
+      maximum_healing_displacement = sewing.maximum_displacement;
+      displacement_original = sewing.displacement_original;
+      displacement_proposed = sewing.displacement_proposed;
+      healing_relations = sewing.relations;
+      const std::string after_sewing = serialize_exact_shape(document.shape, options);
+      if (static_cast<std::uint64_t>(after_sewing.size()) >
+          options.max_exact_representation_bytes) {
+        throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+      }
+      const bool changed = geometry_digest(before_sewing) != geometry_digest(after_sewing);
+      sewn = options.heal_sew && changed;
+      gaps_repaired = options.heal_gaps && changed;
+      const BRepCheck_Analyzer sewing_analyzer(document.shape, Standard_True);
+      post_sewing_kernel_valid = sewing_analyzer.IsValid();
     }
     if (options.heal_orientation) {
       const std::array<std::uint8_t, 32> before_orientation =
@@ -1041,7 +1079,47 @@ OcctExactShapePayload import_exact_cad_bytes(
   result.orientation_repaired = orientation_repaired;
   result.duplicates_consolidated = duplicates_consolidated;
   result.post_duplicate_kernel_valid = post_duplicate_kernel_valid;
-  if (result.orientation_repaired || result.duplicates_consolidated) {
+  result.post_sewing_kernel_valid = post_sewing_kernel_valid;
+  result.sewn = sewn;
+  result.gaps_repaired = gaps_repaired;
+  result.maximum_healing_displacement = maximum_healing_displacement;
+  result.displacement_original_x = displacement_original[0];
+  result.displacement_original_y = displacement_original[1];
+  result.displacement_original_z = displacement_original[2];
+  result.displacement_proposed_x = displacement_proposed[0];
+  result.displacement_proposed_y = displacement_proposed[1];
+  result.displacement_proposed_z = displacement_proposed[2];
+  for (const ExactHealingMutation::Relation& relation : healing_relations) {
+    OcctHealingRelationPayload payload;
+    switch (relation.kind) {
+      case 0:
+        payload.kind = OcctHealingEntityKind::Vertex;
+        break;
+      case 1:
+        payload.kind = OcctHealingEntityKind::Edge;
+        break;
+      case 2:
+        payload.kind = OcctHealingEntityKind::Face;
+        break;
+      default:
+        throw std::runtime_error("OCCT healing relation has an invalid entity kind");
+    }
+    for (const std::uint8_t byte : relation.source_digest) {
+      payload.source_digest.push_back(byte);
+    }
+    const bool has_target = std::any_of(
+        relation.target_digest.begin(), relation.target_digest.end(), [](const auto byte) {
+          return byte != 0;
+        });
+    if (has_target) {
+      for (const std::uint8_t byte : relation.target_digest) {
+        payload.target_digest.push_back(byte);
+      }
+    }
+    result.healing_relations.push_back(payload);
+  }
+  if (result.orientation_repaired || result.duplicates_consolidated || result.sewn ||
+      result.gaps_repaired) {
     for (const std::uint8_t byte : original_geometry_digest) {
       result.original_geometry_digest.push_back(byte);
     }

@@ -57,7 +57,7 @@ pub(crate) fn import_exact_cad_shape(
         path,
         bytes,
         ffi_format(format),
-        ffi_exact_import_options(options, cancel_token.id()),
+        ffi_exact_import_options(options, cancel_token.id(), meters_per_source_unit),
     )
     .map_err(|err| exact_bridge_error(err, options))?;
     context.check_cancelled()?;
@@ -130,6 +130,24 @@ pub(crate) fn import_exact_cad_shape(
     let original_geometry_digest = payload.original_geometry_digest.clone();
     let original_kernel_valid = payload.original_kernel_valid;
     let post_duplicate_kernel_valid = payload.post_duplicate_kernel_valid;
+    let post_sewing_kernel_valid = payload.post_sewing_kernel_valid;
+    let sewn = payload.sewn;
+    let gaps_repaired = payload.gaps_repaired;
+    let healing_relations = payload.healing_relations.clone();
+    let maximum_healing_displacement_m =
+        payload.maximum_healing_displacement * meters_per_source_unit;
+    let displacement_original_m = [
+        payload.displacement_original_x,
+        payload.displacement_original_y,
+        payload.displacement_original_z,
+    ]
+    .map(|coordinate| coordinate * meters_per_source_unit);
+    let displacement_proposed_m = [
+        payload.displacement_proposed_x,
+        payload.displacement_proposed_y,
+        payload.displacement_proposed_z,
+    ]
+    .map(|coordinate| coordinate * meters_per_source_unit);
     let mut imported = ImportedExactCad {
         source_digest: GeometryDigest::from_bytes(Sha256::digest(bytes).into()),
         source_format: match format {
@@ -164,13 +182,22 @@ pub(crate) fn import_exact_cad_shape(
             &import_validation::ImportEvaluationControl::new(context, options),
         )
         .map_err(import_validation::map_validation_error)?;
-    if orientation_repaired || duplicates_consolidated {
+    if orientation_repaired || duplicates_consolidated || sewn || gaps_repaired {
         let report = exact_healing_projection::healing_report(
-            &original_geometry_digest,
-            original_kernel_valid,
-            post_duplicate_kernel_valid,
-            duplicates_consolidated,
-            orientation_repaired,
+            exact_healing_projection::NativeHealingEvidence {
+                original_digest: &original_geometry_digest,
+                original_kernel_valid,
+                post_duplicate_kernel_valid,
+                duplicates_consolidated,
+                orientation_repaired,
+                sewn,
+                gaps_repaired,
+                post_sewing_kernel_valid,
+                relations: &healing_relations,
+                maximum_displacement_m: maximum_healing_displacement_m,
+                displacement_original_m,
+                displacement_proposed_m,
+            },
             &imported,
         )?;
         imported.analysis.revision = report.revision_map.target_revision.clone();
@@ -388,6 +415,7 @@ fn ffi_import_options(
         heal_duplicates: false,
         heal_gaps: false,
         heal_short_edges_and_sliver_faces: false,
+        maximum_healing_displacement: 0.0,
         cancel_token_id,
     }
 }
@@ -395,6 +423,7 @@ fn ffi_import_options(
 fn ffi_exact_import_options(
     options: &ExactCadImportOptions,
     cancel_token_id: u64,
+    meters_per_source_unit: f64,
 ) -> ffi::bridge::OcctImportOptions {
     ffi::bridge::OcctImportOptions {
         linear_deflection: DEFAULT_LINEAR_DEFLECTION,
@@ -413,6 +442,8 @@ fn ffi_exact_import_options(
             .analysis
             .healing
             .simplify_short_edges_and_sliver_faces,
+        maximum_healing_displacement: options.analysis.maximum_healing_displacement_m
+            / meters_per_source_unit,
         cancel_token_id,
     }
 }

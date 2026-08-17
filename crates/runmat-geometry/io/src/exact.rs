@@ -208,15 +208,29 @@ pub fn import_exact_cad(
         .healing
         .validate()
         .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
-    if options.analysis.healing.sew
-        || options.analysis.healing.repair_tolerance_scale_gaps
-        || options
-            .analysis
-            .healing
-            .simplify_short_edges_and_sliver_faces
+    if options
+        .analysis
+        .healing
+        .simplify_short_edges_and_sliver_faces
     {
         return Err(GeometryImportError::InvalidOptions(
-            "this OCCT adapter currently supports only explicit orientation repair and duplicate consolidation".into(),
+            "this OCCT adapter does not yet support short-edge or sliver-face simplification"
+                .into(),
+        ));
+    }
+    let topology_changing_modes = u8::from(options.analysis.healing.sew)
+        + u8::from(options.analysis.healing.consolidate_duplicates)
+        + u8::from(options.analysis.healing.repair_tolerance_scale_gaps);
+    if topology_changing_modes > 1 {
+        return Err(GeometryImportError::InvalidOptions(
+            "sewing, duplicate consolidation, and gap repair must be requested as separate geometry revisions".into(),
+        ));
+    }
+    if options.analysis.healing.repair_tolerance_scale_gaps
+        && options.analysis.maximum_healing_displacement_m <= 0.0
+    {
+        return Err(GeometryImportError::InvalidOptions(
+            "gap repair requires a positive maximum healing displacement".into(),
         ));
     }
     if options.analysis.revision.revision == 0
