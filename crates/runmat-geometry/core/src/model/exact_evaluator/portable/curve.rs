@@ -5,7 +5,7 @@ use super::super::{
     GeometryEvaluationErrorKind, ParameterRange,
 };
 use super::integration::adaptive_arc_length;
-use super::projection::{project_curve, uniform_seeds};
+use super::projection::{charge_seed_allocation, project_curve, uniform_seeds};
 use super::spline::rational_derivatives;
 use super::vector::{add_scaled, cross, distance, dot, norm, normalize, subtract};
 use super::{invalid_result, kernel_owned, outside_domain, PortableExactEvaluator};
@@ -160,6 +160,7 @@ impl ExactCurveEvaluator for PortableExactEvaluator<'_> {
             });
         }
         let seeds = projection_seeds(definition, range)?;
+        charge_seed_allocation(seeds.len(), std::mem::size_of::<f64>(), control)?;
         project_curve(
             range,
             point_m,

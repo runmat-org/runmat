@@ -113,12 +113,14 @@ impl std::fmt::Display for GeometryEvaluationError {
 
 impl std::error::Error for GeometryEvaluationError {}
 
-/// Execution supplies this narrow authority so iterative or kernel-backed
-/// evaluation remains cancellable and bounded without geometry owning jobs.
+/// Execution supplies this narrow authority so iterative, allocating, or
+/// kernel-backed evaluation remains cancellable and bounded without geometry
+/// owning jobs.
 pub trait GeometryEvaluationControl: Send + Sync {
     fn checkpoint(&self) -> Result<(), GeometryEvaluationError>;
     fn consume_iterations(&self, count: u64) -> Result<(), GeometryEvaluationError>;
     fn consume_search_work(&self, count: u64) -> Result<(), GeometryEvaluationError>;
+    fn consume_allocation_bytes(&self, count: u64) -> Result<(), GeometryEvaluationError>;
 }
 
 pub trait ExactCurveEvaluator: Send + Sync {

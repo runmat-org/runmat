@@ -3,13 +3,17 @@ mod integration;
 mod pcurve;
 mod projection;
 mod spline;
+mod surface;
+mod surface_curvature;
+mod surface_projection;
+mod surface_spline;
 mod vector;
 
 use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError};
 use super::{
     CurveEvaluatorId, ExactCurveEvaluatorRecord, ExactEvaluatorRegistry,
-    ExactPcurveEvaluatorRecord, GeometryEvaluationError, GeometryEvaluationErrorKind,
-    PcurveEvaluatorId,
+    ExactPcurveEvaluatorRecord, ExactSurfaceEvaluatorRecord, GeometryEvaluationError,
+    GeometryEvaluationErrorKind, PcurveEvaluatorId, SurfaceEvaluatorId,
 };
 
 /// Portable evaluator for analytic and NURBS definitions. Construction performs
@@ -49,6 +53,17 @@ impl<'a> PortableExactEvaluator<'a> {
             .map(|index| &self.registry.pcurves[index])
             .map_err(|_| unknown("pcurve", id.as_str()))
     }
+
+    fn surface_record(
+        &self,
+        id: &SurfaceEvaluatorId,
+    ) -> Result<&ExactSurfaceEvaluatorRecord, GeometryEvaluationError> {
+        self.registry
+            .surfaces
+            .binary_search_by(|record| record.id.cmp(id))
+            .map(|index| &self.registry.surfaces[index])
+            .map_err(|_| unknown("surface", id.as_str()))
+    }
 }
 
 fn unknown(kind: &str, id: &str) -> GeometryEvaluationError {
@@ -73,5 +88,7 @@ fn outside_domain(reason: impl Into<String>) -> GeometryEvaluationError {
     GeometryEvaluationError::new(GeometryEvaluationErrorKind::ParameterOutsideDomain, reason)
 }
 
+#[cfg(test)]
+mod surface_tests;
 #[cfg(test)]
 mod tests;

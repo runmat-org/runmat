@@ -2,6 +2,7 @@ use super::super::{
     CurveDerivatives, CurveProjection, GeometryEvaluationControl, GeometryEvaluationError,
     GeometryEvaluationErrorKind, ParameterRange,
 };
+use super::invalid_result;
 use super::vector::{distance, dot, norm, subtract};
 
 const MAX_NEWTON_ITERATIONS: usize = 64;
@@ -35,6 +36,7 @@ pub(super) fn project_curve(
                     "curve projection exceeds its hard seed bound",
                 ));
             }
+            charge_seed_allocation(1, std::mem::size_of::<f64>(), control)?;
             candidates.push(seed);
         }
     }
@@ -153,6 +155,21 @@ pub(super) fn uniform_seeds(range: ParameterRange, interval_count: usize) -> Vec
     (0..=interval_count)
         .map(|index| range.start + (range.end - range.start) * index as f64 / interval_count as f64)
         .collect()
+}
+
+pub(super) fn charge_seed_allocation(
+    count: usize,
+    bytes_per_seed: usize,
+    control: &dyn GeometryEvaluationControl,
+) -> Result<(), GeometryEvaluationError> {
+    let bytes = count
+        .checked_mul(bytes_per_seed)
+        .ok_or_else(|| invalid_result("projection seed allocation-byte count overflow"))?;
+    control.consume_allocation_bytes(
+        u64::try_from(bytes).map_err(|_| {
+            invalid_result("projection seed allocation-byte count does not fit u64")
+        })?,
+    )
 }
 
 fn invalid(reason: &str) -> GeometryEvaluationError {

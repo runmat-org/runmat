@@ -187,7 +187,9 @@ pub struct NurbsSurface3 {
     pub v_knots: Vec<f64>,
     pub u_control_count: u32,
     pub v_control_count: u32,
+    /// U-major tensor grid: `control_points_m[u * v_control_count + v]`.
     pub control_points_m: Vec<[f64; 3]>,
+    /// Uses the same U-major tensor-grid order as `control_points_m`.
     pub weights: Vec<f64>,
     pub domains: [ParameterRange; 2],
     pub periodic_u: bool,

@@ -9,6 +9,7 @@ struct BudgetControl {
     cancelled: AtomicBool,
     iterations: AtomicU64,
     search_work: AtomicU64,
+    allocation_bytes: AtomicU64,
 }
 
 impl BudgetControl {
@@ -17,6 +18,7 @@ impl BudgetControl {
             cancelled: AtomicBool::new(false),
             iterations: AtomicU64::new(iterations),
             search_work: AtomicU64::new(search_work),
+            allocation_bytes: AtomicU64::new(u64::MAX),
         }
     }
 
@@ -24,6 +26,15 @@ impl BudgetControl {
         let control = Self::new(u64::MAX, u64::MAX);
         control.cancelled.store(true, Ordering::Relaxed);
         control
+    }
+
+    fn allocation_limited(allocation_bytes: u64) -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+            iterations: AtomicU64::new(u64::MAX),
+            search_work: AtomicU64::new(u64::MAX),
+            allocation_bytes: AtomicU64::new(allocation_bytes),
+        }
     }
 
     fn consume(remaining: &AtomicU64, count: u64) -> Result<(), GeometryEvaluationError> {
@@ -58,6 +69,10 @@ impl GeometryEvaluationControl for BudgetControl {
 
     fn consume_search_work(&self, count: u64) -> Result<(), GeometryEvaluationError> {
         Self::consume(&self.search_work, count)
+    }
+
+    fn consume_allocation_bytes(&self, count: u64) -> Result<(), GeometryEvaluationError> {
+        Self::consume(&self.allocation_bytes, count)
     }
 }
 
@@ -237,6 +252,14 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
             &BudgetControl::new(5, u64::MAX),
         )
         .unwrap_err();
+    assert_eq!(error.kind, GeometryEvaluationErrorKind::BudgetExceeded);
+    let error = ExactCurveEvaluator::derivatives(
+        &evaluator,
+        &id,
+        0.5,
+        &BudgetControl::allocation_limited(0),
+    )
+    .unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::BudgetExceeded);
 }
 

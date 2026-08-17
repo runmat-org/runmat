@@ -16,6 +16,12 @@ struct DerivativePolygon {
     controls: Vec<Vec<f64>>,
 }
 
+pub(super) struct HomogeneousDerivatives {
+    pub value: Vec<f64>,
+    pub first: Vec<f64>,
+    pub second: Vec<f64>,
+}
+
 pub(super) fn rational_derivatives<const N: usize>(
     degree: u8,
     knots: &[f64],
@@ -25,6 +31,7 @@ pub(super) fn rational_derivatives<const N: usize>(
     control: &dyn GeometryEvaluationControl,
 ) -> Result<RationalDerivatives<N>, GeometryEvaluationError> {
     control.checkpoint()?;
+    charge_spline_allocation(control_points.len(), N + 1, 3, control)?;
     let degree = usize::from(degree);
     let work = (degree + 1).saturating_mul(degree + 1).saturating_mul(3);
     let work = u64::try_from(work)
@@ -41,8 +48,38 @@ pub(super) fn rational_derivatives<const N: usize>(
             value
         })
         .collect::<Vec<_>>();
-    let value = de_boor(degree, knots, &homogeneous, parameter)?;
-    let first_polygon = derivative_polygon(degree, knots, &homogeneous)?;
+    let homogeneous = homogeneous_derivatives(degree, knots, &homogeneous, parameter)?;
+    rationalize(&homogeneous)
+}
+
+pub(super) fn charge_spline_allocation(
+    control_count: usize,
+    coordinate_count: usize,
+    conservative_copies: usize,
+    control: &dyn GeometryEvaluationControl,
+) -> Result<(), GeometryEvaluationError> {
+    let bytes_per_control = coordinate_count
+        .checked_mul(std::mem::size_of::<f64>())
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Vec<f64>>()))
+        .ok_or_else(|| invalid_result("spline allocation-byte count overflow"))?;
+    let bytes = control_count
+        .checked_mul(bytes_per_control)
+        .and_then(|bytes| bytes.checked_mul(conservative_copies))
+        .ok_or_else(|| invalid_result("spline allocation-byte count overflow"))?;
+    control.consume_allocation_bytes(
+        u64::try_from(bytes)
+            .map_err(|_| invalid_result("spline allocation-byte count does not fit u64"))?,
+    )
+}
+
+pub(super) fn homogeneous_derivatives(
+    degree: usize,
+    knots: &[f64],
+    controls: &[Vec<f64>],
+    parameter: f64,
+) -> Result<HomogeneousDerivatives, GeometryEvaluationError> {
+    let value = de_boor(degree, knots, controls, parameter)?;
+    let first_polygon = derivative_polygon(degree, knots, controls)?;
     let first = de_boor(
         first_polygon.degree,
         &first_polygon.knots,
@@ -50,7 +87,7 @@ pub(super) fn rational_derivatives<const N: usize>(
         parameter,
     )?;
     let second = if first_polygon.degree == 0 {
-        vec![0.0; N + 1]
+        vec![0.0; value.len()]
     } else {
         let second_polygon = derivative_polygon(
             first_polygon.degree,
@@ -65,6 +102,19 @@ pub(super) fn rational_derivatives<const N: usize>(
         )?
     };
 
+    Ok(HomogeneousDerivatives {
+        value,
+        first,
+        second,
+    })
+}
+
+fn rationalize<const N: usize>(
+    homogeneous: &HomogeneousDerivatives,
+) -> Result<RationalDerivatives<N>, GeometryEvaluationError> {
+    let value = &homogeneous.value;
+    let first = &homogeneous.first;
+    let second = &homogeneous.second;
     let weight = value[N];
     if !weight.is_finite() || weight <= 0.0 {
         return Err(invalid_result(
