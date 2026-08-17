@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{
     ExactBRepTopology, ExactCoedge, ExactEdge, PersistentEntityId, PersistentEntityKind,
 };
+use runmat_meshing_core::MetricSourceKind;
 
 use super::{
     shared_curve_node_id, CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve,
@@ -102,6 +103,7 @@ fn validate_curve(
         ));
     }
     validate_resolution(curve.requested, curve.achieved)?;
+    validate_metric_resolution(curve)?;
     let mut node_ids = BTreeSet::new();
     for (index, node) in curve.nodes.iter().enumerate() {
         if !node_ids.insert(node.node_id)
@@ -170,6 +172,43 @@ fn validate_curve(
         }
     }
     Ok(())
+}
+
+fn validate_metric_resolution(curve: &SharedCurve) -> Result<(), SharedCurveValidationError> {
+    let evidence = &curve.metric_resolution;
+    if evidence.active_sources.is_empty()
+        || evidence.evaluation_count < curve.nodes.len() as u64
+        || !evidence.minimum_tangent_target_size_m.is_finite()
+        || evidence.minimum_tangent_target_size_m <= 0.0
+        || !evidence.maximum_tangent_target_size_m.is_finite()
+        || evidence.minimum_tangent_target_size_m > evidence.maximum_tangent_target_size_m
+        || evidence
+            .active_sources
+            .windows(2)
+            .any(|pair| metric_source_rank(pair[0]) >= metric_source_rank(pair[1]))
+    {
+        return Err(invalid(
+            "shared curve metric resolution",
+            "sources, evaluation count, and tangent target range must be canonical",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) const fn metric_source_rank(source: MetricSourceKind) -> u8 {
+    match source {
+        MetricSourceKind::Global => 0,
+        MetricSourceKind::Region => 1,
+        MetricSourceKind::Point => 2,
+        MetricSourceKind::Curve => 3,
+        MetricSourceKind::Face => 4,
+        MetricSourceKind::Volume => 5,
+        MetricSourceKind::Proximity => 6,
+        MetricSourceKind::Feature => 7,
+        MetricSourceKind::Load => 8,
+        MetricSourceKind::Contact => 9,
+        MetricSourceKind::SolutionIndicator => 10,
+    }
 }
 
 fn validate_resolution(

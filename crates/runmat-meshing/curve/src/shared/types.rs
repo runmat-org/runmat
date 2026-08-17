@@ -1,5 +1,5 @@
 use runmat_geometry_core::{ParameterRange, PersistentEntityId, TopologicalOrientation};
-use runmat_meshing_core::StableDigest;
+use runmat_meshing_core::{MetricSourceKind, StableDigest};
 use serde::{Deserialize, Serialize};
 
 use super::SharedCurveValidationError;
@@ -31,6 +31,7 @@ pub struct SharedCurve {
     pub face_uses: Vec<SharedCurveFaceUse>,
     pub requested: CurveResolutionPolicy,
     pub achieved: CurveResolutionEvidence,
+    pub metric_resolution: CurveMetricResolutionEvidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,4 +71,17 @@ pub struct CurveResolutionEvidence {
     pub maximum_tangent_change_rad: f64,
     pub minimum_metric_edge_length: f64,
     pub maximum_metric_edge_length: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CurveMetricResolutionEvidence {
+    /// Canonical union of metric sources active at every constructive sample.
+    pub active_sources: Vec<MetricSourceKind>,
+    pub evaluation_count: u64,
+    pub minimum_tangent_target_size_m: f64,
+    pub maximum_tangent_target_size_m: f64,
+    /// Evaluation-weighted contribution counts reported by the metric authority.
+    pub clipped_contribution_count: u32,
+    pub rejected_contribution_count: u32,
 }
