@@ -136,6 +136,10 @@ pub async fn run_driver() -> std::process::ExitCode {
                         return std::process::ExitCode::SUCCESS;
                     }
                 }
+                WorkerResponse::ExternalizedSuccess { .. } => Err(
+                    "batch result uses externalized objects unsupported by the legacy batch sink"
+                        .into(),
+                ),
                 WorkerResponse::Failure { message } => Err(message),
             }
         }

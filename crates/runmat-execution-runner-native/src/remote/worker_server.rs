@@ -342,6 +342,13 @@ async fn run_worker_loop(
                                 },
                             }
                         }
+                        runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
+                            ..
+                        } => AttemptReport::Failed {
+                            kind: AttemptFailureKind::Rejected,
+                            message: "remote externalized results require verified artifact transfer"
+                                .into(),
+                        },
                         runmat_execution_artifact::ProgramExecutionResponse::Failure {
                             message,
                         } => AttemptReport::Failed {

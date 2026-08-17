@@ -117,6 +117,24 @@ impl MeshingHostResponseV2 {
         }
     }
 
+    pub fn program_response(&self) -> runmat_execution_artifact::ProgramExecutionResponse {
+        match self {
+            Self::Validated {
+                root,
+                result_objects,
+                ..
+            } => runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
+                outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
+                result_objects: result_objects.clone(),
+            },
+            Self::Failed { failure, .. } => {
+                runmat_execution_artifact::ProgramExecutionResponse::Failure {
+                    message: failure.to_string(),
+                }
+            }
+        }
+    }
+
     fn validate_standalone(&self) -> MeshingExecutionResult<()> {
         match self {
             Self::Validated {

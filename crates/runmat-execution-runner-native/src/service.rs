@@ -237,8 +237,19 @@ impl RuntimeExecutionServices for NativeExecutionService {
             return Ok(AwaitAction::Pending(original));
         };
         let result = completion
-            .and_then(|payload| {
-                runmat_runtime::execution::value_codec::decode_inline_value(&payload)
+            .and_then(|success| {
+                let [payload] = success.outputs.as_slice() else {
+                    return Err(
+                        "native runtime call did not return exactly one output value".into(),
+                    );
+                };
+                if !success.result_objects.is_empty() {
+                    return Err(
+                        "native runtime call returned externalized objects without an artifact consumer"
+                            .into(),
+                    );
+                }
+                runmat_runtime::execution::value_codec::decode_inline_value(payload)
                     .map_err(|error| error.to_string())
             })
             .map_err(ExecutionServiceError::Failed);

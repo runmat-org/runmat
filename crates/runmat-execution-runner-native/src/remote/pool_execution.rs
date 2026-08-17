@@ -159,12 +159,24 @@ pub(super) async fn execute(
         tokio::select! {
             result = &mut completion => {
                 return match result {
-                    Ok(success) => match success.outputs.into_iter().next() {
-                        Some(value) => Ok(RemotePoolExecutionOutcome::Completed(
-                            ProgramExecutionResponse::Success { value },
-                        )),
-                        None => Err(protocol("remote worker returned no root output")),
-                    },
+                    Ok(success) if success.result_objects.is_empty() => {
+                        match success.outputs.as_slice() {
+                            [value] => Ok(RemotePoolExecutionOutcome::Completed(
+                                ProgramExecutionResponse::Success {
+                                    value: value.clone(),
+                                },
+                            )),
+                            _ => Err(protocol(
+                                "remote worker returned an invalid inline output count",
+                            )),
+                        }
+                    }
+                    Ok(success) => Ok(RemotePoolExecutionOutcome::Completed(
+                        ProgramExecutionResponse::ExternalizedSuccess {
+                            outputs: success.outputs,
+                            result_objects: success.result_objects,
+                        },
+                    )),
                     Err(message) => {
                         let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
                         if state == Some(TaskState::Indeterminate) {

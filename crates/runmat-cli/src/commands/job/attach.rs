@@ -184,6 +184,9 @@ async fn print_terminal(
                 ProgramExecutionResponse::Success { value } => {
                     println!("{}", serde_json::to_string_pretty(&value)?);
                 }
+                ProgramExecutionResponse::ExternalizedSuccess { .. } => {
+                    bail!("remote result requires an artifact-aware consumer")
+                }
                 ProgramExecutionResponse::Failure { message } => bail!("{message}"),
             }
         }

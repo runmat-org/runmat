@@ -228,6 +228,10 @@ impl WorkerBackend for RemoteTestBackend {
                 ProgramExecutionResponse::Success { value } => {
                     decode_execution(&value).map_err(protocol)
                 }
+                ProgramExecutionResponse::ExternalizedSuccess { .. } => Err(BackendError::new(
+                    BackendErrorKind::Crashed,
+                    "test execution returned unsupported externalized result objects",
+                )),
                 ProgramExecutionResponse::Failure { message } => {
                     Err(BackendError::new(BackendErrorKind::Crashed, message))
                 }

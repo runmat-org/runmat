@@ -206,6 +206,16 @@ impl BrowserExecutionService {
                 };
                 (self.future_id(attempt.task_id), decoded, report)
             }
+            Ok(ProgramExecutionResponse::ExternalizedSuccess { .. }) => {
+                let message =
+                    "browser execution host cannot consume native externalized results".into();
+                let result = Err(ExecutionServiceError::Failed(message.clone()));
+                let report = AttemptReport::Failed {
+                    kind: AttemptFailureKind::Rejected,
+                    message,
+                };
+                (self.future_id(attempt.task_id), result, report)
+            }
             Ok(ProgramExecutionResponse::Failure { message }) => {
                 let result = Err(ExecutionServiceError::Failed(message.clone()));
                 let report = AttemptReport::Failed {

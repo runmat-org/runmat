@@ -158,6 +158,10 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
     let decoded = MeshingHostResponseV2::canonical_decode(&encoded).unwrap();
     decoded.validate_against(&fixture.host).unwrap();
     assert_eq!(decoded.attempt_success(), Some(completed.attempt_success()));
+    decoded
+        .program_response()
+        .validate_against(&fixture.program)
+        .unwrap();
     assert_eq!(
         completed
             .publication()

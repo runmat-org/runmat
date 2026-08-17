@@ -331,6 +331,28 @@ async fn commit_response(
             )
             .await
         }
+        ProgramExecutionResponse::ExternalizedSuccess { .. } => {
+            let message = "remote externalized results require verified artifact transfer";
+            let diagnostic = store_encrypted(
+                control,
+                config,
+                run_key,
+                DriverArtifactKind::Diagnostic,
+                EncryptionPurpose::DetailedEvent,
+                message.as_bytes(),
+                None,
+            )
+            .await?;
+            transition(
+                control,
+                config,
+                DriverRunTarget::Failed,
+                Some("artifact-transfer-unavailable"),
+                None,
+                Some(diagnostic),
+            )
+            .await
+        }
         ProgramExecutionResponse::Failure { message } => {
             let diagnostic = store_encrypted(
                 control,

@@ -28,7 +28,7 @@ use crate::protocol::{
 };
 use crate::{NativeExecutionConfig, NativeExecutionError, NativeExecutionResult};
 
-pub(crate) type TransferResult = Result<ValuePayload, String>;
+pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
 pub(crate) struct TaskCompletion {
     value: Mutex<Option<TransferResult>>,
@@ -254,11 +254,8 @@ impl LocalDriver {
                 .expect("scheduled task has completion");
             let result = execute_attempt(&this, &request, &completion);
             let report = match &result {
-                Ok(value) => AttemptReport::Succeeded {
-                    result: AttemptSuccess {
-                        outputs: vec![value.clone()],
-                        result_objects: Vec::new(),
-                    },
+                Ok(success) => AttemptReport::Succeeded {
+                    result: success.clone(),
                 },
                 Err(_) if completion.cancelled.load(Ordering::Acquire) => AttemptReport::Cancelled,
                 Err(message) => AttemptReport::Failed {
@@ -384,8 +381,21 @@ async fn run_process(
     let response: WorkerResponse =
         serde_json::from_slice(&payload).map_err(|error| error.to_string())?;
     let _ = child.wait().await;
+    response
+        .validate_against(&request)
+        .map_err(|error| error.to_string())?;
     match response {
-        WorkerResponse::Success { value } => Ok(value),
+        WorkerResponse::Success { value } => Ok(AttemptSuccess {
+            outputs: vec![value],
+            result_objects: Vec::new(),
+        }),
+        WorkerResponse::ExternalizedSuccess {
+            outputs,
+            result_objects,
+        } => Ok(AttemptSuccess {
+            outputs,
+            result_objects,
+        }),
         WorkerResponse::Failure { message } => Err(message),
     }
 }

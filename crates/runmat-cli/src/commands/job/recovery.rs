@@ -284,6 +284,9 @@ async fn recover(
                 ProgramExecutionResponse::Success { value } => {
                     println!("{}", serde_json::to_string_pretty(&value)?);
                 }
+                ProgramExecutionResponse::ExternalizedSuccess { .. } => {
+                    bail!("recovered result requires an artifact-aware consumer")
+                }
                 ProgramExecutionResponse::Failure { message } => bail!("{message}"),
             }
         }

@@ -1,4 +1,6 @@
-use runmat_execution::value::{ValueLimits, ValuePayload};
+use std::collections::BTreeSet;
+
+use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
@@ -6,6 +8,7 @@ use crate::{ArtifactError, ArtifactResult};
 
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V1: u16 = 1;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
+pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -155,12 +158,99 @@ fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProgramExecutionResponse {
-    Success { value: ValuePayload },
-    Failure { message: String },
+    Success {
+        value: ValuePayload,
+    },
+    ExternalizedSuccess {
+        outputs: Vec<ValuePayload>,
+        result_objects: Vec<ValueRef>,
+    },
+    Failure {
+        message: String,
+    },
+}
+
+impl ProgramExecutionResponse {
+    pub fn validate_against(&self, request: &ProgramExecutionRequest) -> ArtifactResult<()> {
+        request.validate()?;
+        match self {
+            Self::Success { value } => {
+                if request.requested_outputs != 1 {
+                    return Err(ArtifactError::Invalid(
+                        "single-value response differs from its output contract".into(),
+                    ));
+                }
+                value
+                    .validate(ValueLimits::default())
+                    .map_err(|error| ArtifactError::Invalid(error.to_string()))
+            }
+            Self::ExternalizedSuccess {
+                outputs,
+                result_objects,
+            } => validate_externalized_success(request, outputs, result_objects),
+            Self::Failure { message } => {
+                if message.is_empty() || message.len() > 1024 * 1024 {
+                    return Err(ArtifactError::Limit(
+                        "program failure message is empty or exceeds its byte bound".into(),
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn validate_externalized_success(
+    request: &ProgramExecutionRequest,
+    outputs: &[ValuePayload],
+    result_objects: &[ValueRef],
+) -> ArtifactResult<()> {
+    if outputs.len() != usize::from(request.requested_outputs)
+        || result_objects.is_empty()
+        || result_objects.len() > MAX_PROGRAM_EXECUTION_RESULT_OBJECTS
+    {
+        return Err(ArtifactError::Limit(
+            "externalized program response exceeds its output or object inventory contract".into(),
+        ));
+    }
+    for output in outputs {
+        output
+            .validate(ValueLimits::default())
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+    }
+    let mut value_ids = BTreeSet::new();
+    let mut logical_digests = BTreeSet::new();
+    for object in result_objects {
+        ValuePayload::Object(Box::new(object.clone()))
+            .validate(ValueLimits::default())
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        if object.kind != ValueRefKind::ResultObject
+            || object.resident_fence.is_some()
+            || !value_ids.insert(object.id)
+            || !logical_digests.insert(object.logical_digest)
+        {
+            return Err(ArtifactError::Invalid(
+                "externalized program response inventory is invalid or duplicated".into(),
+            ));
+        }
+    }
+    if outputs.iter().any(|output| match output {
+        ValuePayload::Object(reference) if reference.kind == ValueRefKind::ResultObject => {
+            !result_objects.contains(reference.as_ref())
+        }
+        _ => false,
+    }) {
+        return Err(ArtifactError::Invalid(
+            "externalized program response inventory omits a result root".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use runmat_execution::identity::ValueId;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
     use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
 
     use super::*;
@@ -210,6 +300,22 @@ mod tests {
         }
     }
 
+    fn result_reference(bytes: &[u8]) -> ValueRef {
+        let logical_digest = Digest::sha256(bytes);
+        ValueRef {
+            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            id: ValueId::derive(&[b"program-response-test", logical_digest.bytes()]),
+            logical_digest,
+            encoded_length: bytes.len() as u64,
+            media_type: "application/vnd.runmat.test-object".into(),
+            value_schema: "runmat.test-object.v1".into(),
+            encryption_context: Digest::sha256(b"test-encryption-context"),
+            kind: ValueRefKind::ResultObject,
+            authorization_scope: "test-scope".into(),
+            resident_fence: None,
+        }
+    }
+
     #[test]
     fn exact_program_request_validates_every_identity_boundary() {
         request().validate().unwrap();
@@ -249,5 +355,28 @@ mod tests {
                 runmat_execution::value::InlineValue::String("unexpected".into()),
             )));
         assert!(script.validate().is_err());
+    }
+
+    #[test]
+    fn externalized_response_requires_a_complete_unique_result_inventory() {
+        let request = request();
+        let root = result_reference(b"root");
+        let response = ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
+            result_objects: vec![root.clone(), result_reference(b"chunk")],
+        };
+        response.validate_against(&request).unwrap();
+
+        let missing_root = ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
+            result_objects: vec![result_reference(b"chunk")],
+        };
+        assert!(missing_root.validate_against(&request).is_err());
+
+        let duplicate = ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
+            result_objects: vec![root.clone(), root],
+        };
+        assert!(duplicate.validate_against(&request).is_err());
     }
 }
