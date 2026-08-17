@@ -1,9 +1,11 @@
+use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactError, LogicalObject, ObjectNamespace};
 
-use crate::{MeshingExecutionError, MeshingExecutionResult};
+use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 pub(crate) fn logical_object(
     logical_prefix: &str,
@@ -72,6 +74,53 @@ pub(crate) fn add_inventory_bytes(
         .ok_or_else(|| ArtifactError::Limit(format!("{domain} object inventory size overflow")))?;
     if *total > limits.max_total_bytes {
         return Err(ArtifactError::Limit(format!("{domain} object inventory is too large")).into());
+    }
+    Ok(())
+}
+
+pub(crate) fn input_object_reference(
+    object: &LogicalObject,
+    access: &MeshingArtifactAccess,
+    value_schema: &str,
+    domain: &'static str,
+) -> MeshingExecutionResult<ValueRef> {
+    object.validate()?;
+    let reference = ValueRef {
+        schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+        id: access.value_id(object.descriptor.digest),
+        logical_digest: object.descriptor.digest,
+        encoded_length: object.descriptor.encoded_length,
+        media_type: object.descriptor.media_type.clone(),
+        value_schema: value_schema.into(),
+        encryption_context: access.encryption_context,
+        kind: ValueRefKind::DriverObject,
+        authorization_scope: access.authorization_scope.clone(),
+        resident_fence: None,
+    };
+    ValuePayload::Object(Box::new(reference.clone()))
+        .validate(ValueLimits::default())
+        .map_err(|_| MeshingExecutionError::Identity(domain))?;
+    Ok(reference)
+}
+
+pub(crate) fn validate_input_root(
+    root: &ValueRef,
+    access: &MeshingArtifactAccess,
+    media_type: &str,
+    value_schema: &str,
+    domain: &'static str,
+) -> MeshingExecutionResult<()> {
+    ValuePayload::Object(Box::new(root.clone()))
+        .validate(ValueLimits::default())
+        .map_err(|_| MeshingExecutionError::Identity(domain))?;
+    if root.kind != ValueRefKind::DriverObject
+        || root.authorization_scope != access.authorization_scope
+        || root.encryption_context != access.encryption_context
+        || root.media_type != media_type
+        || root.value_schema != value_schema
+        || root.id != access.value_id(root.logical_digest)
+    {
+        return Err(MeshingExecutionError::Identity(domain));
     }
     Ok(())
 }

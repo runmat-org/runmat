@@ -184,6 +184,10 @@ fn input_kind_is_authoritative_and_duplicate_roots_are_rejected() {
         kind: MeshingInputKind::ExactGeometry,
         digest: stage_artifact.digest,
     };
+    let faceted_geometry = MeshingInputRef {
+        kind: MeshingInputKind::FacetedGeometry,
+        digest: stage_artifact.digest,
+    };
     let mut artifact_identity = stage_identity();
     artifact_identity.prerequisites = vec![stage_artifact.clone()];
     let mut geometry_identity = artifact_identity.clone();
@@ -191,6 +195,12 @@ fn input_kind_is_authoritative_and_duplicate_roots_are_rejected() {
     assert_ne!(
         artifact_identity.canonical_digest().unwrap(),
         geometry_identity.canonical_digest().unwrap()
+    );
+    let mut faceted_identity = artifact_identity.clone();
+    faceted_identity.prerequisites = vec![faceted_geometry];
+    assert_ne!(
+        geometry_identity.canonical_digest().unwrap(),
+        faceted_identity.canonical_digest().unwrap()
     );
 
     let mut identity = stage_identity();

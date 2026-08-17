@@ -5,6 +5,7 @@
 
 mod budget;
 mod error;
+mod faceted_geometry_objects;
 mod geometry_objects;
 mod host;
 mod object_support;
@@ -14,6 +15,8 @@ mod response;
 mod serial;
 mod task;
 
+#[cfg(test)]
+mod faceted_geometry_object_tests;
 #[cfg(test)]
 mod geometry_object_tests;
 #[cfg(test)]
@@ -31,6 +34,11 @@ pub use budget::{
     MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl, NoopMeshingProgress,
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
+pub use faceted_geometry_objects::{
+    import_faceted_geometry_input, import_faceted_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, FacetedGeometryObjectRoot, PreparedFacetedGeometryInput,
+    PreparedFacetedGeometryObjects,
+};
 pub use geometry_objects::{
     import_exact_geometry_input, import_exact_geometry_objects, prepare_exact_geometry_input,
     prepare_exact_geometry_objects, ExactGeometryObjectRoot, PreparedExactGeometryInput,

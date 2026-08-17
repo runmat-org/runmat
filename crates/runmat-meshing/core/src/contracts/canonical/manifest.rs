@@ -18,6 +18,7 @@ const MAX_MANIFEST_PREREQUISITES: usize = 64;
 pub enum MeshingChunkMediaType {
     GeometrySource,
     ExactGeometry,
+    FacetedGeometry,
     MetricField,
     CurvePartitions,
     SurfacePartitions,
@@ -37,6 +38,7 @@ impl MeshingChunkMediaType {
         match self {
             Self::GeometrySource => "application/vnd.runmat.geometry-source.v2",
             Self::ExactGeometry => "application/vnd.runmat.exact-geometry.v2",
+            Self::FacetedGeometry => "application/vnd.runmat.faceted-solid.v2",
             Self::MetricField => "application/vnd.runmat.metric-field.v2",
             Self::CurvePartitions => "application/vnd.runmat.mesh-curves.v2",
             Self::SurfacePartitions => "application/vnd.runmat.mesh-surfaces.v2",
@@ -56,6 +58,7 @@ impl MeshingChunkMediaType {
         [
             Self::GeometrySource,
             Self::ExactGeometry,
+            Self::FacetedGeometry,
             Self::MetricField,
             Self::CurvePartitions,
             Self::SurfacePartitions,

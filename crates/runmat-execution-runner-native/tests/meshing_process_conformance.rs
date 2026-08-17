@@ -31,7 +31,8 @@ use runmat_meshing_core::{
 };
 use runmat_meshing_execution::{
     build_task_submission, import_result_publication, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
+    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
     MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
     MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
     ValidatedMeshingStageOutput,
@@ -45,6 +46,8 @@ use runmat_execution_runner_native::{
 
 #[path = "meshing_process_conformance/exact_input.rs"]
 mod exact_input;
+#[path = "meshing_process_conformance/faceted_input.rs"]
+mod faceted_input;
 #[path = "meshing_process_conformance/remote_recovery.rs"]
 mod remote_recovery;
 
@@ -83,6 +86,8 @@ struct SearchBudgetKernel;
 
 struct ExactInputKernel;
 
+struct FacetedInputKernel;
+
 impl MeshingStageKernel for ExactInputKernel {
     fn execute(
         &self,
@@ -90,6 +95,26 @@ impl MeshingStageKernel for ExactInputKernel {
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
         assert_eq!(invocation.inputs.len(), 1);
         assert!(invocation.inputs[0].exact_geometry().is_some());
+        self.execute_surface(invocation)
+    }
+}
+
+impl MeshingStageKernel for FacetedInputKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        assert_eq!(invocation.inputs.len(), 1);
+        assert!(invocation.inputs[0].faceted_geometry().is_some());
+        ExactInputKernel.execute_surface(invocation)
+    }
+}
+
+impl ExactInputKernel {
+    fn execute_surface(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
         let checkpoint = MeshingStageCheckpoint {
             completed_work: 1,
             estimated_work: 1,
@@ -188,6 +213,10 @@ fn main() {
             run_child(ExactInputKernel, Path::new(&root));
             return;
         }
+        if mode == "--faceted-child" {
+            run_child(FacetedInputKernel, Path::new(&root));
+            return;
+        }
     }
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -282,6 +311,7 @@ async fn parent() {
     assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
 
     exact_input::native_conformance().await;
+    faceted_input::native_conformance().await;
 
     let cancellation_directory = tempfile::tempdir().unwrap();
     let (cancel_host, cancel_request) = fixture();

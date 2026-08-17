@@ -27,6 +27,7 @@ use crate::{
 pub const MESHING_EXECUTION_CALLABLE_OWNER: &str = "runmat.meshing.v2";
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
 const EXACT_GEOMETRY_SCHEMA: &str = "runmat.geometry.exact-manifest.v2";
+const FACETED_GEOMETRY_SCHEMA: &str = "runmat.geometry.faceted-solid.v2";
 const MAX_REVIEWED_ATTEMPTS: u16 = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -167,6 +168,11 @@ pub(crate) fn validate_inputs(
                 root.kind == ValueRefKind::DriverObject
                     && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
                     && root.value_schema == EXACT_GEOMETRY_SCHEMA
+            }
+            MeshingInputKind::FacetedGeometry => {
+                root.kind == ValueRefKind::DriverObject
+                    && root.media_type == runmat_geometry_core::FACETED_SOLID_MEDIA_TYPE
+                    && root.value_schema == FACETED_GEOMETRY_SCHEMA
             }
         };
         if root.logical_digest.bytes() != input.digest.bytes()

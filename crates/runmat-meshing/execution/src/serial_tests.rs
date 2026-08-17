@@ -4,8 +4,9 @@ use std::task::{Context, Poll, Waker};
 
 use crate::{
     build_task_submission, prepare_exact_geometry_input, prepare_exact_geometry_objects,
-    prepare_result_publication, prepare_stage_objects, MeshingArtifactAccess,
-    MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload, MeshingTaskEffectPolicy,
+    prepare_faceted_geometry_input, prepare_faceted_geometry_objects, prepare_result_publication,
+    prepare_stage_objects, MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse,
+    MeshingHostWorkload, MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
@@ -122,6 +123,20 @@ impl MeshingStageKernel for ExactSurfaceKernel {
     }
 }
 
+struct FacetedSurfaceKernel;
+
+impl MeshingStageKernel for FacetedSurfaceKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        assert!(invocation.inputs[0].faceted_geometry().is_some());
+        assert!(invocation.inputs[0].exact_geometry().is_none());
+        assert!(invocation.inputs[0].stage_artifact().is_none());
+        SurfaceKernel.execute(invocation)
+    }
+}
+
 struct SearchBudgetKernel;
 
 impl MeshingStageKernel for SearchBudgetKernel {
@@ -208,6 +223,21 @@ fn serial_stage_imports_and_revalidates_authoritative_exact_geometry() {
         &fixture.program,
         &mut fixture.store,
         &ExactSurfaceKernel,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1024),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn serial_stage_imports_and_revalidates_authoritative_faceted_geometry() {
+    let mut fixture = Fixture::with_faceted_geometry();
+    execute_serial_stage(
+        &fixture.program,
+        &mut fixture.store,
+        &FacetedSurfaceKernel,
         &NeverCancelled,
         &mut Progress::default(),
         chunk_policy(1024),
@@ -679,6 +709,86 @@ impl Fixture {
                 },
                 MeshingCapabilityRequirement::ExactCadKernel {
                     abi: model.kernel_abi.clone(),
+                },
+                MeshingCapabilityRequirement::MeshingAlgorithm {
+                    version: "surface/v2".into(),
+                },
+                MeshingCapabilityRequirement::ElementOrder {
+                    order: ElementOrder::Tet4,
+                },
+                MeshingCapabilityRequirement::DeterministicPlatformCohort {
+                    cohort: "native-cohort-v1".into(),
+                },
+            ],
+        };
+        let host =
+            MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
+        let program = host
+            .program_request(revision(), std::slice::from_ref(input.root_input()))
+            .unwrap();
+        Self {
+            host,
+            program,
+            store,
+        }
+    }
+
+    fn with_faceted_geometry() -> Self {
+        let access = MeshingArtifactAccess {
+            authorization_scope: "serial-faceted-geometry-run".into(),
+            encryption_context: Digest::sha256(b"serial-faceted-geometry-context"),
+        };
+        let (document, solid) = runmat_geometry_fixtures::faceted_tetrahedron();
+        let objects =
+            prepare_faceted_geometry_objects(document, solid, ObjectInventoryLimits::default())
+                .unwrap();
+        let document = objects.document.clone();
+        let input = prepare_faceted_geometry_input(
+            objects,
+            access.clone(),
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let mut store = MemoryStore::default();
+        for object in &input.geometry_objects().objects {
+            store.write_verified(object).unwrap();
+        }
+        let mut request = request();
+        request.tolerance = document.tolerance;
+        let faceted_input = MeshingInputRef {
+            kind: MeshingInputKind::FacetedGeometry,
+            digest: StableDigest::from_bytes(*input.root_input().logical_digest.bytes()),
+        };
+        let identity = MeshingStageIdentity {
+            schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
+            stage: MeshingStageKind::SurfaceMesh,
+            geometry: GeometryRevisionRef {
+                source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
+                geometry_revision: document.revision.revision,
+                persistent_mapping_version: document.revision.persistent_mapping_version,
+            },
+            resolved_request_digest: request.canonical_digest().unwrap(),
+            tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
+            metric_policy_digest: request.metric.canonical_digest().unwrap(),
+            algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
+            deterministic_seed: request.deterministic_seed,
+            prerequisites: vec![faceted_input.clone()],
+            capability_cohort: Some("native-cohort-v1".into()),
+        };
+        let workload = MeshingWorkloadRequest {
+            schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
+            stage: MeshingStageKind::SurfaceMesh,
+            stage_identity_digest: identity.canonical_digest().unwrap(),
+            partition: MeshingPartitionDescriptor {
+                kind: MeshingPartitionKind::WholeStage,
+                partition_index: 0,
+                partition_count: 1,
+                entity_range: None,
+            },
+            inputs: vec![faceted_input],
+            required_capabilities: vec![
+                MeshingCapabilityRequirement::HostWorkload {
+                    abi: "host-v2".into(),
                 },
                 MeshingCapabilityRequirement::MeshingAlgorithm {
                     version: "surface/v2".into(),

@@ -154,6 +154,31 @@ fn exact_geometry_inputs_use_the_authoritative_geometry_object_shape() {
 }
 
 #[test]
+fn faceted_geometry_inputs_use_the_authoritative_geometry_object_shape() {
+    let mut fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
+    fixture.identity.prerequisites[0].kind = MeshingInputKind::FacetedGeometry;
+    fixture.workload.inputs = fixture.identity.prerequisites.clone();
+    fixture.workload.stage_identity_digest = fixture.identity.canonical_digest().unwrap();
+    fixture.input.kind = ValueRefKind::DriverObject;
+    fixture.input.media_type = runmat_geometry_core::FACETED_SOLID_MEDIA_TYPE.into();
+    fixture.input.value_schema = "runmat.geometry.faceted-solid.v2".into();
+
+    fixture.submit(MeshingTaskEffectPolicy::UnknownEffect);
+
+    fixture.input.media_type = runmat_geometry_core::EXACT_BREP_MEDIA_TYPE.into();
+    assert!(build_task_submission(
+        &fixture.workload,
+        &fixture.identity,
+        &fixture.request,
+        std::slice::from_ref(&fixture.input),
+        BTreeSet::new(),
+        &fixture.context,
+        MeshingTaskEffectPolicy::UnknownEffect,
+    )
+    .is_err());
+}
+
+#[test]
 fn incomplete_or_inconsistent_capability_declarations_are_rejected() {
     let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let mut missing_host = fixture.workload.clone();
@@ -422,6 +447,38 @@ impl Fixture {
                 *abi = model.kernel_abi.clone();
             }
         }
+        self.input = input;
+    }
+
+    pub(crate) fn bind_faceted_geometry(
+        &mut self,
+        document: &runmat_geometry_core::GeometryDocument,
+        input: ValueRef,
+    ) {
+        assert!(matches!(
+            document.model,
+            runmat_geometry_core::GeometryModel::FacetedSolid { .. }
+        ));
+        self.request.tolerance = document.tolerance;
+        self.identity.geometry.source_digest =
+            StableDigest::from_bytes(*document.source.content_digest.bytes());
+        self.identity.geometry.geometry_revision = document.revision.revision;
+        self.identity.geometry.persistent_mapping_version =
+            document.revision.persistent_mapping_version;
+        self.identity.resolved_request_digest = self.request.canonical_digest().unwrap();
+        self.identity.tolerance_policy_digest = self.request.tolerance.canonical_digest().unwrap();
+        self.identity.prerequisites = vec![MeshingInputRef {
+            kind: MeshingInputKind::FacetedGeometry,
+            digest: StableDigest::from_bytes(*input.logical_digest.bytes()),
+        }];
+        self.workload.inputs = self.identity.prerequisites.clone();
+        self.workload.stage_identity_digest = self.identity.canonical_digest().unwrap();
+        self.workload.required_capabilities.retain(|capability| {
+            !matches!(
+                capability,
+                MeshingCapabilityRequirement::ExactCadKernel { .. }
+            )
+        });
         self.input = input;
     }
 }

@@ -1,5 +1,4 @@
-use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
-use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
+use runmat_execution::value::ValueRef;
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::{validate_inventory, ObjectInventoryLimits};
@@ -14,7 +13,8 @@ use runmat_geometry_core::{
 };
 
 use crate::object_support::{
-    add_inventory_bytes, enforce_object_length, logical_object, read_exact,
+    add_inventory_bytes, enforce_object_length, input_object_reference, logical_object, read_exact,
+    validate_input_root,
 };
 use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
@@ -324,7 +324,7 @@ pub fn import_exact_geometry_objects(
     Ok(prepared)
 }
 
-fn geometry_object(
+pub(crate) fn geometry_object(
     logical_prefix: &str,
     media_type: &str,
     bytes: Vec<u8>,
@@ -346,7 +346,7 @@ fn geometry_reference(object: &LogicalObject) -> GeometryObjectRef {
     }
 }
 
-fn validate_geometry_reference(
+pub(crate) fn validate_geometry_reference(
     object: &LogicalObject,
     reference: &GeometryObjectRef,
 ) -> MeshingExecutionResult<()> {
@@ -363,7 +363,6 @@ fn exact_object_reference(
     root: &ObjectDescriptor,
     access: &MeshingArtifactAccess,
 ) -> MeshingExecutionResult<ValueRef> {
-    object.validate()?;
     let value_schema = if object.descriptor.digest == root.digest {
         EXACT_MANIFEST_SCHEMA
     } else {
@@ -379,43 +378,25 @@ fn exact_object_reference(
             }
         }
     };
-    let reference = ValueRef {
-        schema_version: VALUE_PAYLOAD_SCHEMA_V1,
-        id: access.value_id(object.descriptor.digest),
-        logical_digest: object.descriptor.digest,
-        encoded_length: object.descriptor.encoded_length,
-        media_type: object.descriptor.media_type.clone(),
-        value_schema: value_schema.into(),
-        encryption_context: access.encryption_context,
-        kind: ValueRefKind::DriverObject,
-        authorization_scope: access.authorization_scope.clone(),
-        resident_fence: None,
-    };
-    ValuePayload::Object(Box::new(reference.clone()))
-        .validate(ValueLimits::default())
-        .map_err(|_| MeshingExecutionError::Identity("invalid exact geometry input reference"))?;
-    Ok(reference)
+    input_object_reference(
+        object,
+        access,
+        value_schema,
+        "invalid exact geometry input reference",
+    )
 }
 
 fn validate_exact_root(
     root: &ValueRef,
     access: &MeshingArtifactAccess,
 ) -> MeshingExecutionResult<()> {
-    ValuePayload::Object(Box::new(root.clone()))
-        .validate(ValueLimits::default())
-        .map_err(|_| MeshingExecutionError::Identity("invalid exact geometry root reference"))?;
-    if root.kind != ValueRefKind::DriverObject
-        || root.authorization_scope != access.authorization_scope
-        || root.encryption_context != access.encryption_context
-        || root.media_type != EXACT_BREP_MEDIA_TYPE
-        || root.value_schema != EXACT_MANIFEST_SCHEMA
-        || root.id != access.value_id(root.logical_digest)
-    {
-        return Err(MeshingExecutionError::Identity(
-            "exact geometry root is outside input artifact authority",
-        ));
-    }
-    Ok(())
+    validate_input_root(
+        root,
+        access,
+        EXACT_BREP_MEDIA_TYPE,
+        EXACT_MANIFEST_SCHEMA,
+        "exact geometry root is outside input artifact authority",
+    )
 }
 
 fn read_component(

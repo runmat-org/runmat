@@ -50,6 +50,7 @@ pub struct GeometryRevisionRef {
 #[serde(rename_all = "snake_case")]
 pub enum MeshingInputKind {
     ExactGeometry,
+    FacetedGeometry,
     StageArtifact,
 }
 

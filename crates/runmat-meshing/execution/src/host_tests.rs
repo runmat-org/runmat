@@ -5,8 +5,8 @@ use runmat_meshing_core::MeshingStageKind;
 
 use crate::task_tests::Fixture;
 use crate::{
-    prepare_exact_geometry_input, prepare_exact_geometry_objects, MeshingHostWorkload,
-    MESHING_HOST_TARGET_PROFILE,
+    prepare_exact_geometry_input, prepare_exact_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, MeshingHostWorkload, MESHING_HOST_TARGET_PROFILE,
 };
 
 #[test]
@@ -147,6 +147,51 @@ fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
         fixture.request,
         fixture.context.artifact_access,
         Some(wrong_document),
+    )
+    .is_err());
+}
+
+#[test]
+fn faceted_geometry_document_binds_without_exact_kernel_capability() {
+    let (document, solid) = runmat_geometry_fixtures::faceted_tetrahedron();
+    let objects =
+        prepare_faceted_geometry_objects(document, solid, ObjectInventoryLimits::default())
+            .unwrap();
+    let document = objects.document.clone();
+    let access = crate::MeshingArtifactAccess {
+        authorization_scope: "faceted-host-run".into(),
+        encryption_context: Digest::sha256(b"faceted-host-context"),
+    };
+    let input =
+        prepare_faceted_geometry_input(objects, access.clone(), ObjectInventoryLimits::default())
+            .unwrap();
+    let mut fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
+    fixture.context.artifact_access = access.clone();
+    fixture.bind_faceted_geometry(&document, input.root_input().clone());
+    let host = MeshingHostWorkload::new(
+        fixture.workload.clone(),
+        fixture.identity.clone(),
+        fixture.request.clone(),
+        access,
+        Some(document.clone()),
+    )
+    .unwrap();
+    let bytes = host.canonical_bytes().unwrap();
+    assert_eq!(
+        MeshingHostWorkload::from_canonical_bytes(&bytes).unwrap(),
+        host
+    );
+    host.program_request(revision(), std::slice::from_ref(input.root_input()))
+        .unwrap();
+
+    let mut wrong_kind = document;
+    wrong_kind.model = runmat_geometry_fixtures::exact_circle().0.model;
+    assert!(MeshingHostWorkload::new(
+        fixture.workload,
+        fixture.identity,
+        fixture.request,
+        fixture.context.artifact_access,
+        Some(wrong_kind),
     )
     .is_err());
 }

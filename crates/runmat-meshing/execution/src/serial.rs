@@ -1,7 +1,7 @@
 use crate::{
-    import_exact_geometry_input, import_result_publication, prepare_result_publication,
-    prepare_stage_objects, MeshingExecutionError, MeshingHostWorkload, PreparedExactGeometryInput,
-    PreparedMeshingResultPublication,
+    import_exact_geometry_input, import_faceted_geometry_input, import_result_publication,
+    prepare_result_publication, prepare_stage_objects, MeshingExecutionError, MeshingHostWorkload,
+    PreparedExactGeometryInput, PreparedFacetedGeometryInput, PreparedMeshingResultPublication,
 };
 use runmat_execution::value::ValuePayload;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
@@ -18,6 +18,7 @@ use runmat_meshing_core::{
 #[derive(Clone, Debug, PartialEq)]
 pub enum PreparedMeshingInput {
     ExactGeometry(Box<PreparedExactGeometryInput>),
+    FacetedGeometry(Box<PreparedFacetedGeometryInput>),
     StageArtifact(Box<PreparedMeshingResultPublication>),
 }
 
@@ -25,13 +26,20 @@ impl PreparedMeshingInput {
     pub const fn exact_geometry(&self) -> Option<&PreparedExactGeometryInput> {
         match self {
             Self::ExactGeometry(input) => Some(input),
-            Self::StageArtifact(_) => None,
+            Self::FacetedGeometry(_) | Self::StageArtifact(_) => None,
+        }
+    }
+
+    pub const fn faceted_geometry(&self) -> Option<&PreparedFacetedGeometryInput> {
+        match self {
+            Self::FacetedGeometry(input) => Some(input),
+            Self::ExactGeometry(_) | Self::StageArtifact(_) => None,
         }
     }
 
     pub const fn stage_artifact(&self) -> Option<&PreparedMeshingResultPublication> {
         match self {
-            Self::ExactGeometry(_) => None,
+            Self::ExactGeometry(_) | Self::FacetedGeometry(_) => None,
             Self::StageArtifact(input) => Some(input),
         }
     }
@@ -39,6 +47,7 @@ impl PreparedMeshingInput {
     fn objects(&self) -> &[runmat_execution_artifact::LogicalObject] {
         match self {
             Self::ExactGeometry(input) => &input.geometry_objects().objects,
+            Self::FacetedGeometry(input) => &input.geometry_objects().objects,
             Self::StageArtifact(input) => &input.stage_objects().objects,
         }
     }
@@ -140,7 +149,7 @@ where
         .map(|(input, root)| match input.kind {
             MeshingInputKind::ExactGeometry => import_exact_geometry_input(
                 store,
-                host.exact_geometry_document.clone().ok_or_else(|| {
+                host.geometry_document.clone().ok_or_else(|| {
                     MeshingExecutionError::Invalid(
                         "exact geometry input is missing its host document".into(),
                     )
@@ -151,6 +160,19 @@ where
             )
             .map(Box::new)
             .map(PreparedMeshingInput::ExactGeometry),
+            MeshingInputKind::FacetedGeometry => import_faceted_geometry_input(
+                store,
+                host.geometry_document.clone().ok_or_else(|| {
+                    MeshingExecutionError::Invalid(
+                        "faceted geometry input is missing its host document".into(),
+                    )
+                })?,
+                root,
+                host.artifact_access.clone(),
+                limits,
+            )
+            .map(Box::new)
+            .map(PreparedMeshingInput::FacetedGeometry),
             MeshingInputKind::StageArtifact => {
                 import_result_publication(store, root, host.artifact_access.clone(), limits)
                     .map(Box::new)
@@ -240,7 +262,10 @@ fn validate_stage_streams(
 ) -> Result<(), MeshingSerialExecutionError> {
     let legal = |media| match stage {
         MeshingStageKind::GeometryAdmission | MeshingStageKind::Healing => {
-            matches!(media, MeshingChunkMediaType::ExactGeometry)
+            matches!(
+                media,
+                MeshingChunkMediaType::ExactGeometry | MeshingChunkMediaType::FacetedGeometry
+            )
         }
         MeshingStageKind::Sizing => matches!(media, MeshingChunkMediaType::MetricField),
         MeshingStageKind::CurveMesh => matches!(media, MeshingChunkMediaType::CurvePartitions),
