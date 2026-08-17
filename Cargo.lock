@@ -6493,6 +6493,8 @@ dependencies = [
  "runmat-execution-artifact",
  "runmat-execution-runner",
  "runmat-execution-transport-native",
+ "runmat-meshing-core",
+ "runmat-meshing-execution",
  "runmat-package",
  "runmat-process-host",
  "runmat-runtime",

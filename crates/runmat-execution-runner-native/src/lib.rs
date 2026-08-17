@@ -6,6 +6,8 @@ mod durable;
 mod error;
 mod local_store;
 mod materialized_project;
+mod meshing_host;
+mod object_store;
 mod protocol;
 mod remote;
 mod service;
@@ -15,6 +17,10 @@ mod worker;
 
 pub use config::NativeExecutionConfig;
 pub use error::{NativeExecutionError, NativeExecutionResult};
+pub use meshing_host::{
+    execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
+};
+pub use object_store::NativeObjectStore;
 pub use protocol::WorkerResponse;
 pub use remote::{
     run_remote_driver_from_env, run_remote_worker_from_env, run_remote_worker_quic,

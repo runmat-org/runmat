@@ -16,6 +16,8 @@ runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
 runmat-execution-transport-native = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-meshing-execution = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-package = { workspace = true }
 runmat-runtime = { workspace = true }
@@ -41,3 +43,8 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 rcgen = "0.14"
 runmat-test = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[[test]]
+name = "meshing_process_conformance"
+path = "tests/meshing_process_conformance.rs"
+harness = false
