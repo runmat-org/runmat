@@ -91,6 +91,16 @@ pub struct GeometryHealingPolicy {
     pub simplify_short_edges_and_sliver_faces: bool,
 }
 
+impl GeometryHealingPolicy {
+    pub fn validate(&self) -> Result<(), GeometryContractError> {
+        super::analysis_identity::validate_token(
+            "geometry healing algorithm version",
+            &self.algorithm_version,
+            128,
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryDocument {

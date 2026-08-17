@@ -128,7 +128,7 @@ impl PersistentEntityId {
     }
 }
 
-fn validate_token(
+pub(crate) fn validate_token(
     field: &str,
     value: &str,
     maximum_bytes: usize,

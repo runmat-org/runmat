@@ -8,6 +8,7 @@ mod exact_topology_validation;
 mod exact_topology_validation_support;
 mod field;
 mod geometry;
+mod healing;
 mod material_evidence;
 mod mesh;
 mod regions;
@@ -26,6 +27,7 @@ pub use exact_evaluator::*;
 pub use exact_topology::*;
 pub use field::{FieldLocation, FieldValueKind};
 pub use geometry::{GeometryAsset, GeometrySource};
+pub use healing::*;
 pub use material_evidence::{MaterialEvidence, MaterialEvidenceConfidence};
 pub use mesh::{MeshDescriptor, MeshKind, SurfaceMesh};
 pub use regions::{

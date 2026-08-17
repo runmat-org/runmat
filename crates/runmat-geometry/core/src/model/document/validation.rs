@@ -42,11 +42,7 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
         parent.validate_nonzero("parent geometry document digest")?;
     }
     document.tolerance.validate()?;
-    validate_token(
-        "geometry healing algorithm version",
-        &document.healing.algorithm_version,
-        128,
-    )?;
+    document.healing.validate()?;
 
     match &document.model {
         GeometryModel::ExactBRep { model } => {

@@ -71,7 +71,7 @@ impl GeometryRevisionMap {
 }
 
 impl GeometryRevisionOperation {
-    pub(super) fn sources(&self) -> &[PersistentEntityId] {
+    pub(crate) fn sources(&self) -> &[PersistentEntityId] {
         match self {
             Self::Retain { source, .. }
             | Self::Replace { source, .. }
@@ -81,7 +81,7 @@ impl GeometryRevisionOperation {
         }
     }
 
-    pub(super) fn targets(&self) -> &[PersistentEntityId] {
+    pub(crate) fn targets(&self) -> &[PersistentEntityId] {
         match self {
             Self::Retain { target, .. }
             | Self::Replace { target, .. }
