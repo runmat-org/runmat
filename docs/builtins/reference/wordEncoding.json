@@ -26,14 +26,15 @@
     "unit": "builtins::strings::text_analytics::encoding::tests",
     "integration": null
   },
-  "description": "`wordEncoding(documents)` creates a RunMat `wordEncoding` compatibility object from tokenized documents. `wordEncoding(words)` creates one from a word vector.",
+  "description": "`wordEncoding(documents)` creates a `wordEncoding` object from tokenized documents. `wordEncoding(words)` creates one from a word vector.",
   "behaviors": [
-    "`documents` must be a RunMat `tokenizedDocument` compatibility object.",
+    "`documents` must be a `tokenizedDocument` object.",
     "`words` may be a string scalar, string array, character vector, character matrix, or cell array of scalar text. A character vector is treated as one word.",
     "The returned object exposes `NumWords` and `Vocabulary`. `Vocabulary` is a 1-by-NumWords string array.",
     "`Order` accepts `\"first-seen\"` and `\"frequency\"` for tokenizedDocument input. The default is first-seen order.",
     "For frequency ordering, RunMat sorts by descending total count and uses first-seen order as a deterministic tie-breaker.",
-    "`MaxNumWords` accepts a positive integer or `Inf` for tokenizedDocument input. The option is applied after ordering.",
+    "`MaxNumWords` accepts a positive integer-valued double or `Inf` for tokenizedDocument input. The option is applied after ordering.",
+    "A native integer scalar for `MaxNumWords` is a RunMat language extension. It is accepted in `runmat` mode and decoded exactly as a positive structural count.",
     "RunMat rejects `Order` and `MaxNumWords` when the first input is a word vector, matching the documented MATLAB syntax.",
     "First-class MATLAB object-array identity semantics are not required for this scalar model object and remain covered by the broader object infrastructure work."
   ],
@@ -61,6 +62,10 @@
   ],
   "links": [
     {
+      "label": "MATLAB language extensions",
+      "url": "/docs/runtime/getting-started/matlab-language-extensions"
+    },
+    {
       "label": "word2ind",
       "url": "./word2ind"
     },
@@ -85,16 +90,16 @@
     "example": {
       "description": "Supported forms",
       "input": "enc = wordEncoding(documents)\nenc = wordEncoding(words)\nenc = wordEncoding(documents, Name, Value)",
-      "output": "`enc` is a `wordEncoding` compatibility object."
+      "output": "`enc` is a `wordEncoding` object."
     },
     "points": [
       "`Order` must be `\"first-seen\"` or `\"frequency\"` and is only accepted for tokenizedDocument input.",
-      "`MaxNumWords` must be a positive integer or `Inf` and is only accepted for tokenizedDocument input."
+      "`MaxNumWords` must be a positive integer-valued double or `Inf` and is only accepted for tokenizedDocument input. Native integer storage for this option requires `runmat` mode."
     ]
   },
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs"
   },
-  "gpu_residency": "`wordEncoding` is host text/object metadata construction with no provider kernel."
+  "gpu_residency": "`wordEncoding` constructs host text and object metadata and does not launch provider kernels."
 }

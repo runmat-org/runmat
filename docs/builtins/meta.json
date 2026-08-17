@@ -170451,7 +170451,11 @@
           "when": "Inputs do not match a supported word2ind form.",
           "message": "word2ind received invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "word2ind accepts a wordEncoding object, textual words, and a logical IgnoreCase option. It returns double indices or NaN; integer and resident numeric word/control inputs are invalid and reject before provider access."
+      }
     },
     {
       "name": "word2vec",
@@ -170529,7 +170533,11 @@
           "when": "Inputs do not match a supported word2vec form.",
           "message": "word2vec received invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "word2vec accepts a wordEmbedding object, textual words, and a logical IgnoreCase option and returns floating embedding rows. Integer and resident numeric word/control inputs are invalid and reject before provider access."
+      }
     },
     {
       "name": "wordEncoding",
@@ -170613,6 +170621,43 @@
           "identifier": "RunMat:wordEncoding:InvalidInput",
           "when": "Inputs do not match a supported wordEncoding form.",
           "message": "wordEncoding received invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "wordencoding-integer-max-num-words",
+          "mode": "RunMatOnly",
+          "description": "wordEncoding with a typed-integer MaxNumWords value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WordEncodingIntegerMaxNumWordsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "enc = wordEncoding(documents, 'MaxNumWords', integer_n)",
+          "inputs": [
+            {
+              "name": "MaxNumWords",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public reference specifies a positive integer value or Inf without publishing native integer storage classes. RunMat mode decodes a typed scalar exactly as a bounded vocabulary length."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact positive count truncates the ranked host vocabulary and does not enter floating arithmetic. Ordinary positive integer-valued double and positive Inf retain their documented behavior."
         }
       ]
     },
@@ -170824,6 +170869,130 @@
           "when": "Internal plotting state update fails while creating or mutating a word cloud.",
           "message": "wordcloud: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "wordcloud-integer-properties",
+          "mode": "RunMatOnly",
+          "description": "wordcloud with typed-integer chart property values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WordcloudIntegerPropertiesExtension"
+        },
+        {
+          "id": "wordcloud-numeric-parent",
+          "mode": "RunMatOnly",
+          "description": "wordcloud with a numeric parent handle is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WordcloudNumericParentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "wc = wordcloud(words, integer_sizeData) or wordcloud(table_with_integer_sizes, ___)",
+          "inputs": [
+            {
+              "name": "sizeData or selected table size variable",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The public datatype table explicitly lists every integer class. Native storage remains authoritative until values enter the chart's floating size/layout domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "All eight documented integer classes contribute nonnegative chart weights. Conversion occurs only at the explicit floating chart-size and renderer boundary."
+        },
+        {
+          "form": "wc = wordcloud(tbl, integer_wordVar, integer_sizeVar)",
+          "inputs": [
+            {
+              "name": "wordVar or sizeVar",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public datatype table explicitly lists every integer class for numeric table-variable indices. RunMat validates the exact one-based selector against the bounded variable count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Integer selectors are exact one-based indices and never enter chart arithmetic."
+        },
+        {
+          "form": "wc = wordcloud(___, property, integer_value)",
+          "inputs": [
+            {
+              "name": "numeric chart property",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public property descriptions specify numeric or integer values without publishing native integer storage classes. RunMat gates typed property storage before chart selection or mutation."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed properties are independently gated. Structural counts use exact storage; colors, positions, and SizePower cross their explicit floating chart boundary."
+        },
+        {
+          "form": "wc = wordcloud(integer_parent, ___)",
+          "inputs": [
+            {
+              "name": "parent",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public parent form uses graphics container objects. RunMat numeric registry aliases are independently gated and decoded exactly before plot-state selection."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "A positive typed scalar is an exact alias into RunMat's figure registry only in RunMat mode; documented graphics-object parents remain unaffected."
+        }
       ]
     },
     {
@@ -170880,7 +171049,7 @@
               "name": "datatype",
               "ty": "StringScalar",
               "arity": "Optional",
-              "default": "\"uint8\"",
+              "default": "class(data)",
               "description": "Data type label (for example \"uint8\", \"double\", \"char\", \"string\")."
             }
           ],
@@ -170944,6 +171113,142 @@
           "when": "Internal socket/control-flow conversion fails.",
           "message": "write: internal socket error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "write-explicit-gpu-data",
+          "mode": "RunMatOnly",
+          "description": "write with explicit gpuArray data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WriteExplicitGpuDataExtension"
+        },
+        {
+          "id": "write-nonvector-data",
+          "mode": "RunMatOnly",
+          "description": "write with matrix or multidimensional numeric data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WriteNonvectorDataExtension"
+        },
+        {
+          "id": "write-sparse-data",
+          "mode": "RunMatOnly",
+          "description": "write with sparse numeric data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WriteSparseDataExtension"
+        },
+        {
+          "id": "write-logical-data",
+          "mode": "RunMatOnly",
+          "description": "write with logical data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WriteLogicalDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "write(client, integer_vector, datatype?)",
+          "inputs": [
+            {
+              "name": "data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The public datatype table explicitly lists all eight integer classes for real row or column vectors. Without a datatype override, the native input datatype selects the wire representation."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Same-class writes emit exact native bytes with client byte order. An explicit integer datatype performs one exact saturating cast; single/double overrides are deliberate floating wire boundaries."
+        },
+        {
+          "form": "write(client, integer_matrix, datatype?)",
+          "inputs": [
+            {
+              "name": "matrix or multidimensional data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat can serialize nonvector integer arrays in column-major order, but the public interactive contract documents row or column vectors."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat mode traverses nonvector payloads in column-major storage order after the independent shape gate."
+        },
+        {
+          "form": "write(client, sparse_integer_data, datatype?)",
+          "inputs": [
+            {
+              "name": "sparse data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Sparse payloads are a RunMat-only host convenience and are densified from authoritative integer CSC storage before byte encoding."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat mode expands sparse integer storage exactly before the selected wire cast; the sparse extension gate precedes socket access."
+        },
+        {
+          "form": "write(client, explicit_gpu_integer_data, datatype?)",
+          "inputs": [
+            {
+              "name": "explicit gpuArray data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public page lists GPU code generation rather than interactive gpuArray input. RunMat gates explicit device intent before gather while leaving automatic residency transparent."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Explicit gpuArray data is available only in RunMat mode and gathers through its owner before host socket encoding."
+        }
       ]
     },
     {
@@ -170985,7 +171290,11 @@
           "when": "The requested word embedding file cannot be written.",
           "message": "Unable to write word embedding file"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "writeWordEmbedding accepts a wordEmbedding object and a host text filename. Numeric and resident filename values are invalid and reject before provider or filesystem access; numeric vector properties inside the embedding object are model data, not public numeric inputs."
+      }
     },
     {
       "name": "writecell",
@@ -171135,6 +171444,70 @@
           "when": "The destination file cannot be opened or written.",
           "message": "writecell: file write failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "writecell-explicit-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "writecell with explicit gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:WritecellExplicitGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "writecell(cell_with_integer_scalars, filename, ___)",
+          "inputs": [
+            {
+              "name": "integer scalar cell contents",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Cell arrays may contain scalar values from every native integer class. RunMat reads authoritative integer storage when formatting delimited text or spreadsheet cells."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer cells retain their decimal value through text and spreadsheet serialization without an intermediate floating conversion."
+        },
+        {
+          "form": "writecell(C, filename, 'Sheet', integer_index)",
+          "inputs": [
+            {
+              "name": "Sheet",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A numeric sheet selector may use any native integer class. RunMat decodes it exactly as a positive one-based structural index."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The exact selector is range-checked before conversion to the host index used by the spreadsheet writer."
+        }
       ]
     },
     {
@@ -171171,7 +171544,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "writelines accepts textual lines, a host text filename, and text-valued options. Integer and resident numeric values are invalid and reject before provider or filesystem access."
+      }
     },
     {
       "name": "writematrix",

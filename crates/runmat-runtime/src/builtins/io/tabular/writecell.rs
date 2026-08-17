@@ -7,7 +7,11 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 
 use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, IntValue, Value,
 };
@@ -175,6 +179,54 @@ pub const WRITECELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &WRITECELL_ERRORS,
 };
 
+const WRITECELL_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "writecell-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "writecell with explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WritecellExplicitGpuInputExtension"),
+};
+pub const WRITECELL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [WRITECELL_EXPLICIT_GPU_EXTENSION];
+
+const WRITECELL_INTEGER_CONTENT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer scalar cell contents",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Cell arrays may contain scalar values from every native integer class. RunMat reads authoritative integer storage when formatting delimited text or spreadsheet cells.",
+    }];
+const WRITECELL_INTEGER_SHEET_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Sheet",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A numeric sheet selector may use any native integer class. RunMat decodes it exactly as a positive one-based structural index.",
+    }];
+pub const WRITECELL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "writecell(cell_with_integer_scalars, filename, ___)",
+        inputs: &WRITECELL_INTEGER_CONTENT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer cells retain their decimal value through text and spreadsheet serialization without an intermediate floating conversion.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "writecell(C, filename, 'Sheet', integer_index)",
+        inputs: &WRITECELL_INTEGER_SHEET_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The exact selector is range-checked before conversion to the host index used by the spreadsheet writer.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::writecell")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "writecell",
@@ -188,8 +240,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Runs entirely on the host; gpuArray values inside cells are gathered before serialisation.",
+    notes: "Runs entirely on the host. Automatically resident values gather transparently; explicit gpuArray input is accepted only in RunMat mode.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::writecell")]
@@ -255,11 +306,23 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::tabular::writecell::WRITECELL_DESCRIPTOR),
+    extensions(crate::builtins::io::tabular::writecell::WRITECELL_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::tabular::writecell::WRITECELL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::tabular::writecell"
 )]
 async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(writecell_error(&WRITECELL_ERROR_ARG_CONFIG));
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&data)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITECELL_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
 
     let filename_value = gather_if_needed_async(&rest[0])
@@ -1715,6 +1778,25 @@ mod tests {
             }
             Err(_) => assert!(parsed.is_err()),
         }
+    }
+
+    #[test]
+    fn writecell_explicit_gpu_input_is_gated_before_filesystem_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 469,
+        };
+        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data = cell(vec![Value::GpuTensor(handle)], 1, 1);
+
+        let error = block_on(writecell_builtin(data, vec![Value::from("unused.csv")]))
+            .expect_err("strict mode rejects explicit GPU input before gather or file access");
+        assert_eq!(
+            error.identifier(),
+            WRITECELL_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -2,7 +2,11 @@
 
 use glam::{Vec3, Vec4};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
@@ -164,6 +168,99 @@ pub const WORDCLOUD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const WORDCLOUD_INTEGER_PROPERTIES_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "wordcloud-integer-properties",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "wordcloud with typed-integer chart property values is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:WordcloudIntegerPropertiesExtension"),
+    };
+const WORDCLOUD_NUMERIC_PARENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "wordcloud-numeric-parent",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "wordcloud with a numeric parent handle is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WordcloudNumericParentExtension"),
+};
+pub const WORDCLOUD_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    WORDCLOUD_INTEGER_PROPERTIES_EXTENSION,
+    WORDCLOUD_NUMERIC_PARENT_EXTENSION,
+];
+
+const WORDCLOUD_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sizeData or selected table size variable",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public datatype table explicitly lists every integer class. Native storage remains authoritative until values enter the chart's floating size/layout domain.",
+    }];
+const WORDCLOUD_SELECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "wordVar or sizeVar",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public datatype table explicitly lists every integer class for numeric table-variable indices. RunMat validates the exact one-based selector against the bounded variable count.",
+    }];
+const WORDCLOUD_PROPERTY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numeric chart property",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public property descriptions specify numeric or integer values without publishing native integer storage classes. RunMat gates typed property storage before chart selection or mutation.",
+    }];
+const WORDCLOUD_PARENT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "parent",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public parent form uses graphics container objects. RunMat numeric registry aliases are independently gated and decoded exactly before plot-state selection.",
+    }];
+pub const WORDCLOUD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "wc = wordcloud(words, integer_sizeData) or wordcloud(table_with_integer_sizes, ___)",
+        inputs: &WORDCLOUD_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All eight documented integer classes contribute nonnegative chart weights. Conversion occurs only at the explicit floating chart-size and renderer boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "wc = wordcloud(tbl, integer_wordVar, integer_sizeVar)",
+        inputs: &WORDCLOUD_SELECTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer selectors are exact one-based indices and never enter chart arithmetic.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "wc = wordcloud(___, property, integer_value)",
+        inputs: &WORDCLOUD_PROPERTY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only typed properties are independently gated. Structural counts use exact storage; colors, positions, and SizePower cross their explicit floating chart boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "wc = wordcloud(integer_parent, ___)",
+        inputs: &WORDCLOUD_PARENT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "A positive typed scalar is an exact alias into RunMat's figure registry only in RunMat mode; documented graphics-object parents remain unaffected.",
+    },
+];
+
 #[derive(Clone)]
 struct WordCloudOptions {
     max_display_words: usize,
@@ -223,14 +320,48 @@ struct WordCloudData {
     suppress_auto_output = true,
     type_resolver(crate::builtins::plotting::type_resolvers::handle_scalar_type),
     descriptor(crate::builtins::plotting::wordcloud::WORDCLOUD_DESCRIPTOR),
+    extensions(crate::builtins::plotting::wordcloud::WORDCLOUD_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::wordcloud::WORDCLOUD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::wordcloud"
 )]
 pub fn wordcloud_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    ensure_wordcloud_extensions(&args)?;
     let rest = split_leading_parent_handle(args)?;
     let (data_args, options) = split_options(rest)?;
     let data = parse_data(data_args)?;
     validate_options_for_data(&options, &data)?;
     render_wordcloud(data, options)
+}
+
+fn ensure_wordcloud_extensions(args: &[Value]) -> BuiltinResult<()> {
+    if args.len() >= 2 && numeric_figure_parent(&args[0]).is_some() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WORDCLOUD_NUMERIC_PARENT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let mut start = args.len();
+    while start >= 2 {
+        let Some(name) = value_as_string(&args[start - 2]) else {
+            break;
+        };
+        if !is_option_key(&canonical_key(&name)) {
+            break;
+        }
+        if is_typed_integer_value(&args[start - 1]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &WORDCLOUD_INTEGER_PROPERTIES_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        start -= 2;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 fn split_leading_parent_handle(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -943,6 +1074,12 @@ pub(crate) fn apply_wordcloud_property(
     value: &Value,
     _builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if is_typed_integer_value(value) && is_option_key(&canonical_key(key)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WORDCLOUD_INTEGER_PROPERTIES_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot(handle) {
         Ok(crate::builtins::plotting::state::PlotChildHandleState::WordCloud(current)) => current,
         _ => state.clone(),
@@ -1550,7 +1687,7 @@ mod tests {
     }
 
     #[test]
-    fn wordcloud_integer_options_read_all_typed_storage_classes_with_poisoned_f64_mirrors() {
+    fn wordcloud_integer_options_read_all_typed_storage_classes_exactly() {
         for storage in integer_scalar_storages(2) {
             let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer option");
             let value = Value::Tensor(tensor);
@@ -1564,7 +1701,7 @@ mod tests {
     }
 
     #[test]
-    fn wordcloud_parent_reads_all_typed_storage_classes_with_poisoned_f64_mirrors() {
+    fn wordcloud_parent_reads_all_typed_storage_classes_exactly() {
         for storage in integer_scalar_storages(1) {
             let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer parent");
             assert_eq!(
@@ -1572,6 +1709,29 @@ mod tests {
                 Some(FigureHandle::from(1))
             );
         }
+    }
+
+    #[test]
+    fn wordcloud_runmat_extensions_are_gated_before_chart_selection() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let parent_error =
+            wordcloud_builtin(vec![Value::Num(1.0), str_array(&["alpha"], vec![1, 1])])
+                .expect_err("numeric parent is a gated extension");
+        assert_eq!(
+            parent_error.identifier(),
+            WORDCLOUD_NUMERIC_PARENT_EXTENSION.error_identifier
+        );
+
+        let property_error = wordcloud_builtin(vec![
+            str_array(&["alpha"], vec![1, 1]),
+            Value::String("MaxDisplayWords".into()),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .expect_err("typed integer property is a gated extension");
+        assert_eq!(
+            property_error.identifier(),
+            WORDCLOUD_INTEGER_PROPERTIES_EXTENSION.error_identifier
+        );
     }
 
     #[test]
@@ -1670,6 +1830,7 @@ mod tests {
     #[test]
     fn wordcloud_accepts_figure_parent_and_chart_properties() {
         let _guard = setup();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let parent = crate::builtins::plotting::current_figure_handle();
         let handle = wordcloud_builtin(vec![
             Value::Num(parent.as_u32() as f64),
@@ -1800,6 +1961,27 @@ mod tests {
         );
         let figure = clone_figure(crate::builtins::plotting::current_figure_handle()).unwrap();
         assert!(!figure.axes_text_annotations(0)[0].style.visible);
+    }
+
+    #[test]
+    fn wordcloud_set_gates_typed_integer_properties_before_mutation() {
+        let _guard = setup();
+        let handle = wordcloud_builtin(vec![
+            str_array(&["alpha", "beta"], vec![1, 2]),
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+        ])
+        .unwrap();
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = set_builtin(vec![
+            Value::Num(handle),
+            Value::String("MaxDisplayWords".into()),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .expect_err("typed integer set value is a gated extension");
+        assert_eq!(
+            error.identifier(),
+            WORDCLOUD_INTEGER_PROPERTIES_EXTENSION.error_identifier
+        );
     }
 
     #[test]

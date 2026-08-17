@@ -1636,6 +1636,14 @@ mod tests {
             ("webread", "webread-explicit-gpu-input"),
             ("websave", "websave-explicit-gpu-input"),
             ("webwrite", "webwrite-explicit-gpu-input"),
+            ("wordEncoding", "wordencoding-integer-max-num-words"),
+            ("wordcloud", "wordcloud-integer-properties"),
+            ("wordcloud", "wordcloud-numeric-parent"),
+            ("write", "write-explicit-gpu-data"),
+            ("write", "write-logical-data"),
+            ("write", "write-nonvector-data"),
+            ("write", "write-sparse-data"),
+            ("writecell", "writecell-explicit-gpu-input"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2247,6 +2255,10 @@ mod tests {
                 "verLessThan",
                 "version",
                 "what",
+                "word2ind",
+                "word2vec",
+                "writeWordEmbedding",
+                "writelines",
             ]
         );
         for (name, audit) in audited {

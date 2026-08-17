@@ -377,6 +377,12 @@ pub const WRITE_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &WRITE_ERRORS,
 };
+pub const WRITE_WORD_EMBEDDING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "writeWordEmbedding accepts a wordEmbedding object and a host text filename. Numeric and resident filename values are invalid and reject before provider or filesystem access; numeric vector properties inside the embedding object are model data, not public numeric inputs.",
+    };
 
 pub const FASTTEXT_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -405,6 +411,11 @@ pub const WORD2VEC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &WORD2VEC_ERRORS,
+};
+pub const WORD2VEC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "word2vec accepts a wordEmbedding object, textual words, and a logical IgnoreCase option and returns floating embedding rows. Integer and resident numeric word/control inputs are invalid and reject before provider access.",
 };
 
 pub const VEC2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -678,9 +689,18 @@ async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
     descriptor(
         crate::builtins::strings::text_analytics::embeddings::WRITE_WORD_EMBEDDING_DESCRIPTOR
     ),
+    integer_audit(
+        crate::builtins::strings::text_analytics::embeddings::WRITE_WORD_EMBEDDING_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn write_word_embedding_builtin(emb: Value, filename: Value) -> BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&filename) {
+        return Err(embedding_error(
+            "writeWordEmbedding",
+            "writeWordEmbedding: filename must be a host text scalar",
+        ));
+    }
     let emb = gather_if_needed_async(&emb)
         .await
         .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
@@ -837,9 +857,19 @@ async fn doc2sequence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::embeddings::WORD2VEC_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::text_analytics::embeddings::WORD2VEC_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn word2vec_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().skip(1).any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || crate::value_contains_gpu(value)
+    }) {
+        return Err(embedding_error(
+            "word2vec",
+            "word2vec: words and option names must be host text and IgnoreCase must be logical",
+        ));
+    }
     let gathered = gather_args(args, "word2vec").await?;
     let (object, words, options) = parse_word2vec_args(gathered)?;
     let embedding = embedding_from_object(&object, "word2vec")?;
@@ -2895,7 +2925,7 @@ fn embedding_error_with_source(
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, IntegerStorage};
+    use runmat_builtins::{CellArray, IntValue, IntegerStorage};
     use std::fs::File as StdFile;
     use std::io::Write;
     use tempfile::tempdir;
@@ -3807,6 +3837,30 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0]);
+    }
+
+    #[tokio::test]
+    async fn word2vec_rejects_integer_words_before_object_validation() {
+        let error = word2vec_builtin(vec![
+            Value::String("not an object".into()),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .await
+        .expect_err("integer words are outside the text-only surface");
+        assert!(error.message().contains("must be host text"));
+    }
+
+    #[tokio::test]
+    async fn write_word_embedding_rejects_integer_filename_before_object_validation() {
+        let error = write_word_embedding_builtin(
+            Value::String("not an object".into()),
+            Value::Int(IntValue::U8(1)),
+        )
+        .await
+        .expect_err("integer filename is outside the text-only surface");
+        assert!(error
+            .message()
+            .contains("filename must be a host text scalar"));
     }
 
     #[tokio::test]

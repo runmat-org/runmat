@@ -28,6 +28,35 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 pub const WORD_ENCODING_CLASS: &str = "wordEncoding";
 
+const WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "wordencoding-integer-max-num-words",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "wordEncoding with a typed-integer MaxNumWords value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:WordEncodingIntegerMaxNumWordsExtension"),
+    };
+pub const WORD_ENCODING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION];
+const WORD_ENCODING_INTEGER_MAX_WORDS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "MaxNumWords",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public reference specifies a positive integer value or Inf without publishing native integer storage classes. RunMat mode decodes a typed scalar exactly as a bounded vocabulary length.",
+    }];
+pub const WORD_ENCODING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "enc = wordEncoding(documents, 'MaxNumWords', integer_n)",
+        inputs: &WORD_ENCODING_INTEGER_MAX_WORDS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact positive count truncates the ranked host vocabulary and does not enter floating arithmetic. Ordinary positive integer-valued double and positive Inf retain their documented behavior.",
+    }];
+
 const IND2WORD_TYPED_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "ind2word-typed-integer-indices",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -310,6 +339,11 @@ pub const WORD2IND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &WORD2IND_ERRORS,
 };
+pub const WORD2IND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "word2ind accepts a wordEncoding object, textual words, and a logical IgnoreCase option. It returns double indices or NaN; integer and resident numeric word/control inputs are invalid and reject before provider access.",
+};
 
 pub const IND2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -359,9 +393,24 @@ pub const IS_VOCABULARY_WORD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::WORD_ENCODING_DESCRIPTOR),
+    extensions(crate::builtins::strings::text_analytics::encoding::WORD_ENCODING_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::encoding::WORD_ENCODING_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn word_encoding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    for pair in args.windows(2) {
+        if scalar_text(&pair[0], "wordEncoding")
+            .is_ok_and(|name| name.eq_ignore_ascii_case("MaxNumWords"))
+            && is_typed_integer_value(&pair[1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION,
+                "wordEncoding",
+            )?;
+        }
+    }
     let gathered = gather_args(args, "wordEncoding").await?;
     let (source, options) = parse_word_encoding_args(gathered)?;
     word_encoding_object(build_word_encoding(source, options)?)
@@ -375,9 +424,19 @@ async fn word_encoding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::WORD2IND_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::text_analytics::encoding::WORD2IND_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn word2ind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().skip(1).any(|value| {
+        crate::builtins::common::validation::value_contains_native_integer_class(value)
+            || value_contains_resident(value)
+    }) {
+        return Err(encoding_error(
+            "word2ind",
+            "word2ind: words and option names must be host text and IgnoreCase must be logical",
+        ));
+    }
     let gathered = gather_args(args, "word2ind").await?;
     let (object, words, options) = parse_word2ind_args(gathered)?;
     let encoding = word_encoding_from_object(&object, "word2ind")?;
@@ -1006,6 +1065,37 @@ fn positive_index(value: NumericIndex, len: usize, fn_name: &str) -> BuiltinResu
 }
 
 fn parse_max_num_words(value: &Value) -> BuiltinResult<Option<usize>> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value >= 1)
+            .map(Some)
+            .ok_or_else(|| {
+                encoding_error(
+                    "wordEncoding",
+                    "wordEncoding: MaxNumWords must be a positive integer or Inf",
+                )
+            });
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor_utils::is_scalar_tensor(tensor) {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return value
+                    .try_to_usize()
+                    .filter(|value| *value >= 1)
+                    .map(Some)
+                    .ok_or_else(|| {
+                        encoding_error(
+                            "wordEncoding",
+                            "wordEncoding: MaxNumWords must be a positive integer or Inf",
+                        )
+                    });
+            }
+        }
+    }
     let n = numeric_scalar(value, "wordEncoding", "MaxNumWords")?;
     if n.is_infinite() && n.is_sign_positive() {
         return Ok(None);
@@ -1237,6 +1327,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn word_encoding_typed_maximum_is_a_gated_exact_control() {
+        let documents = Value::Object(tokenized_document_object(vec![vec!["alpha", "beta"]]));
+        let args = vec![
+            documents,
+            Value::String("MaxNumWords".into()),
+            Value::Int(IntValue::U64(1)),
+        ];
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = word_encoding_builtin(args.clone())
+            .await
+            .expect_err("typed MaxNumWords is gated in strict mode");
+        assert_eq!(
+            error.identifier(),
+            WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION.error_identifier
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let value = word_encoding_builtin(args)
+            .await
+            .expect("RunMat mode accepts typed MaxNumWords");
+        let Value::Object(object) = value else {
+            panic!("expected wordEncoding object");
+        };
+        assert_eq!(
+            word_encoding_from_object(&object, "test")
+                .unwrap()
+                .vocabulary,
+            vec!["alpha"]
+        );
+    }
+
+    #[tokio::test]
     async fn word2ind_preserves_shape_and_supports_ignore_case() {
         let enc = word_encoding_builtin(vec![Value::StringArray(
             StringArray::new(vec!["Alpha".into(), "beta".into()], vec![1, 2]).unwrap(),
@@ -1271,6 +1394,17 @@ mod tests {
         assert!(indices.materialize_f64()[1].is_nan());
         assert_eq!(indices.materialize_f64()[2], 1.0);
         assert_eq!(indices.materialize_f64()[3], 1.0);
+    }
+
+    #[tokio::test]
+    async fn word2ind_rejects_integer_words_before_object_validation() {
+        let error = word2ind_builtin(vec![
+            Value::String("not an object".into()),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .await
+        .expect_err("integer words are outside the text-only surface");
+        assert!(error.message().contains("must be host text"));
     }
 
     #[tokio::test]
