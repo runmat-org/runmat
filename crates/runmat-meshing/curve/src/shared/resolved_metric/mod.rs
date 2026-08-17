@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use incidence::TopologyIncidence;
 use runmat_geometry_core::{ExactBRepTopology, PersistentEntityId};
 use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
+use runmat_meshing_size::grading::grade_metric_evaluations;
 use runmat_meshing_size::metric::{ResolvedMetricEvaluation, ResolvedMetricField};
 
 use super::{
@@ -57,6 +58,14 @@ impl ResolvedCurveMetricField {
             })?;
             by_edge.insert(edge.id.clone(), resolved);
         }
+        grade_metric_evaluations(
+            request.maximum_grading_ratio,
+            &TopologyIncidence::edge_adjacency(topology),
+            &mut by_edge,
+        )
+        .map_err(|error| {
+            SharedCurveError::invalid_request("resolved curve metric grading", error.to_string())
+        })?;
         Ok(Self { by_edge })
     }
 }

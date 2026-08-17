@@ -517,6 +517,41 @@ fn resolved_curve_metric_combines_all_incident_typed_sources() {
 }
 
 #[test]
+fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency() {
+    let (_, base, _) = runmat_geometry_fixtures::exact_circle();
+    let topology = repeated_circle_topology(&base, 2);
+    let request = runmat_meshing_core::MetricFieldRequest {
+        combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
+        maximum_grading_ratio: 2.0,
+        contributions: vec![runmat_meshing_core::MetricContribution {
+            source: runmat_meshing_core::MetricSourceKind::Curve,
+            scope: runmat_meshing_core::MetricContributionScope::Entity {
+                entity_id: topology.edges[0].id.clone(),
+            },
+            metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(0.1).unwrap(),
+        }],
+    };
+    let metric = ResolvedCurveMetricField::new(&topology, &request).unwrap();
+    let evaluation = metric
+        .evaluate(CurveMetricQuery {
+            edge_id: &topology.edges[1].id,
+            parameter: 0.0,
+            point_m: [1.0, 0.0, 0.0],
+            unit_tangent: [0.0, 1.0, 0.0],
+        })
+        .unwrap();
+
+    assert!(evaluation.metric.xx > 25.0);
+    assert_eq!(
+        evaluation.active_sources,
+        vec![runmat_meshing_core::MetricSourceKind::Global]
+    );
+    assert_eq!(evaluation.applied_contribution_count, 0);
+    assert_eq!(evaluation.clipped_contribution_count, 1);
+}
+
+#[test]
 fn canonical_edge_batches_join_independently_of_layout_and_completion_order() {
     let (document, base_topology, registry) = runmat_geometry_fixtures::exact_circle();
     let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {

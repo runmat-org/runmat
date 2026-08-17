@@ -132,6 +132,35 @@ impl TopologyIncidence {
         entities
     }
 
+    pub fn edge_adjacency(
+        topology: &ExactBRepTopology,
+    ) -> BTreeMap<PersistentEntityId, BTreeSet<PersistentEntityId>> {
+        let mut adjacency = topology
+            .edges
+            .iter()
+            .map(|edge| (edge.id.clone(), BTreeSet::new()))
+            .collect::<BTreeMap<_, _>>();
+        let mut edges_by_vertex =
+            BTreeMap::<PersistentEntityId, BTreeSet<PersistentEntityId>>::new();
+        for edge in &topology.edges {
+            for vertex in edge.start_vertex_id.iter().chain(&edge.end_vertex_id) {
+                edges_by_vertex
+                    .entry(vertex.clone())
+                    .or_default()
+                    .insert(edge.id.clone());
+            }
+        }
+        for edges in edges_by_vertex.into_values() {
+            for edge in &edges {
+                adjacency
+                    .get_mut(edge)
+                    .expect("topology edge inventory")
+                    .extend(edges.iter().filter(|neighbor| *neighbor != edge).cloned());
+            }
+        }
+        adjacency
+    }
+
     fn collect_known(&mut self, topology: &ExactBRepTopology) {
         self.known_entities
             .insert(topology.root_assembly_id.clone());
