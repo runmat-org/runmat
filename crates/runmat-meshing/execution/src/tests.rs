@@ -24,6 +24,10 @@ impl MemoryCache {
                 .insert(object.descriptor.digest, object.bytes.clone());
         }
     }
+
+    pub(crate) fn replace(&mut self, digest: Digest, bytes: Vec<u8>) {
+        self.objects.insert(digest, bytes);
+    }
 }
 
 impl CacheImport for MemoryCache {

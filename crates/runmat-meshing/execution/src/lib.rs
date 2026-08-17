@@ -5,13 +5,17 @@
 
 mod budget;
 mod error;
+mod geometry_objects;
 mod host;
+mod object_support;
 mod objects;
 mod publication;
 mod response;
 mod serial;
 mod task;
 
+#[cfg(test)]
+mod geometry_object_tests;
 #[cfg(test)]
 mod host_tests;
 #[cfg(test)]
@@ -27,6 +31,10 @@ pub use budget::{
     MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl, NoopMeshingProgress,
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
+pub use geometry_objects::{
+    import_exact_geometry_objects, prepare_exact_geometry_objects, ExactGeometryObjectRoot,
+    PreparedExactGeometryObjects,
+};
 pub use host::{
     MeshingHostWorkload, MESHING_HOST_EXECUTION_MODE, MESHING_HOST_TARGET_PROFILE,
     MESHING_HOST_WORKLOAD_SCHEMA_VERSION,

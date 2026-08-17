@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
+runmat-geometry-core = { workspace = true }
 runmat-meshing-core = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }

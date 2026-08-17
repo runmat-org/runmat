@@ -6818,6 +6818,7 @@ dependencies = [
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
+ "runmat-geometry-core",
  "runmat-meshing-core",
  "serde",
  "thiserror 1.0.69",

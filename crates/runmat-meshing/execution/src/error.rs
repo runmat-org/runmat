@@ -2,6 +2,8 @@ use runmat_execution::Digest;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MeshingExecutionError {
+    #[error("geometry contract rejected execution artifact: {0}")]
+    Geometry(#[from] runmat_geometry_core::GeometryContractError),
     #[error("meshing contract rejected execution artifact: {0}")]
     Meshing(#[from] runmat_meshing_core::MeshingContractError),
     #[error("shared execution artifact rejected meshing object: {0}")]

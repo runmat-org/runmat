@@ -7,6 +7,9 @@ use runmat_meshing_core::{
     MeshingStageManifest, MeshingStageResultIdentity, StableDigest,
 };
 
+use crate::object_support::{
+    add_inventory_bytes, enforce_object_length, logical_object, read_exact, read_verified,
+};
 use crate::{MeshingExecutionError, MeshingExecutionResult};
 
 pub const MESHING_STAGE_MANIFEST_MEDIA_TYPE: &str =
@@ -76,14 +79,14 @@ pub fn prepare_stage_objects(
     let mut objects = Vec::with_capacity(chunks.len() + 2);
     let identity_bytes = result_identity.canonical_encode()?;
     objects.push(logical_object(
-        "identities",
+        "meshing/v2/identities",
         ObjectNamespace::ResultValue,
         MESHING_RESULT_IDENTITY_MEDIA_TYPE,
         identity_bytes,
     )?);
     for chunk in chunks {
         let object = logical_object(
-            "chunks",
+            "meshing/v2/chunks",
             ObjectNamespace::ResultValue,
             chunk.descriptor.media_type.media_type(),
             chunk.bytes,
@@ -99,7 +102,7 @@ pub fn prepare_stage_objects(
     }
     let manifest_bytes = manifest.canonical_encode()?;
     let manifest_object = logical_object(
-        "manifests",
+        "meshing/v2/manifests",
         ObjectNamespace::ResultValue,
         MESHING_STAGE_MANIFEST_MEDIA_TYPE,
         manifest_bytes,
@@ -131,9 +134,18 @@ pub fn import_stage_objects(
     }
     let mut total_bytes = root.encoded_length;
     let identity_digest = execution_digest(manifest.logical_result_identity);
-    let identity_bytes = read_unbounded(source, identity_digest)?;
-    enforce_object_length("result identity", identity_bytes.len() as u64, limits)?;
-    add_inventory_bytes(&mut total_bytes, identity_bytes.len() as u64, limits)?;
+    let identity_bytes = read_verified(source, identity_digest)?;
+    enforce_object_length(
+        "meshing result identity",
+        identity_bytes.len() as u64,
+        limits,
+    )?;
+    add_inventory_bytes(
+        "meshing stage",
+        &mut total_bytes,
+        identity_bytes.len() as u64,
+        limits,
+    )?;
     let result_identity = MeshingStageResultIdentity::canonical_decode(&identity_bytes)?;
     if result_identity.canonical_digest()? != manifest.logical_result_identity {
         return Err(MeshingExecutionError::Identity(
@@ -143,8 +155,13 @@ pub fn import_stage_objects(
 
     let mut chunks = Vec::with_capacity(manifest.chunks.len());
     for descriptor in &manifest.chunks {
-        enforce_object_length("chunk", descriptor.encoded_length, limits)?;
-        add_inventory_bytes(&mut total_bytes, descriptor.encoded_length, limits)?;
+        enforce_object_length("meshing chunk", descriptor.encoded_length, limits)?;
+        add_inventory_bytes(
+            "meshing stage",
+            &mut total_bytes,
+            descriptor.encoded_length,
+            limits,
+        )?;
         let digest = execution_digest(descriptor.digest);
         let bytes = read_exact(source, digest, descriptor.encoded_length)?;
         chunks.push(EncodedMeshingChunk {
@@ -161,87 +178,10 @@ pub fn import_stage_objects(
     Ok(prepared)
 }
 
-fn logical_object(
-    class: &str,
-    namespace: ObjectNamespace,
-    media_type: &str,
-    bytes: Vec<u8>,
-) -> MeshingExecutionResult<LogicalObject> {
-    let digest = Digest::sha256(&bytes);
-    LogicalObject::new(
-        namespace,
-        format!("meshing/v2/{class}/{}", digest_hex(digest)),
-        media_type,
-        bytes,
-    )
-    .map_err(Into::into)
-}
-
-fn read_exact(
-    source: &impl CacheImport,
-    digest: Digest,
-    encoded_length: u64,
-) -> MeshingExecutionResult<Vec<u8>> {
-    let bytes = read_unbounded(source, digest)?;
-    if bytes.len() as u64 != encoded_length {
-        return Err(MeshingExecutionError::Identity(
-            "object length differs from its descriptor",
-        ));
-    }
-    Ok(bytes)
-}
-
-fn read_unbounded(source: &impl CacheImport, digest: Digest) -> MeshingExecutionResult<Vec<u8>> {
-    let bytes = source
-        .read_verified(digest)?
-        .ok_or(MeshingExecutionError::MissingObject(digest))?;
-    if Digest::sha256(&bytes) != digest {
-        return Err(MeshingExecutionError::Identity(
-            "cache returned bytes under the wrong digest",
-        ));
-    }
-    Ok(bytes)
-}
-
-fn enforce_object_length(
-    class: &str,
-    encoded_length: u64,
-    limits: ObjectInventoryLimits,
-) -> MeshingExecutionResult<()> {
-    if encoded_length > limits.max_object_bytes {
-        return Err(ArtifactError::Limit(format!("meshing {class} object is too large")).into());
-    }
-    Ok(())
-}
-
-fn add_inventory_bytes(
-    total: &mut u64,
-    encoded_length: u64,
-    limits: ObjectInventoryLimits,
-) -> MeshingExecutionResult<()> {
-    *total = total.checked_add(encoded_length).ok_or_else(|| {
-        ArtifactError::Limit("meshing stage object inventory size overflow".into())
-    })?;
-    if *total > limits.max_total_bytes {
-        return Err(
-            ArtifactError::Limit("meshing stage object inventory is too large".into()).into(),
-        );
-    }
-    Ok(())
-}
-
 fn execution_digest(digest: StableDigest) -> Digest {
     Digest::from_bytes(*digest.bytes())
 }
 
 fn stable_digest(digest: Digest) -> StableDigest {
     StableDigest::from_bytes(*digest.bytes())
-}
-
-fn digest_hex(digest: Digest) -> String {
-    digest
-        .bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
