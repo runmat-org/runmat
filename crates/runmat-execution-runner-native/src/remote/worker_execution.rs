@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionRequest, ProgramExecutionResponse,
@@ -46,24 +46,39 @@ pub(super) async fn execute(
     meshing_host: Option<RemoteMeshingHost>,
     mut objects: RemoteObjectStore,
     cancellation: Arc<AttemptCancellation>,
+    progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
     if program.artifact.form == ExecutableForm::MeshingWorkloadV2 {
         let Some(host) = meshing_host else {
             return failure("remote worker has no meshing host capability");
         };
         return tokio::task::spawn_blocking(move || {
-            crate::execute_meshing_program_request(
+            let progress_error = Arc::new(Mutex::new(None));
+            let mut progress = ChannelProgress {
+                sender: progress_sender,
+                error: Arc::clone(&progress_error),
+            };
+            let response = crate::execute_meshing_program_request(
                 &program,
                 &mut objects,
                 host.kernel.as_ref(),
                 cancellation.as_ref(),
-                &mut NoProgress,
+                &mut progress,
                 host.limits,
-            )
+            );
+            let progress_error = progress_error
+                .lock()
+                .expect("remote progress error poisoned")
+                .take();
+            match progress_error {
+                Some(error) => failure(&error),
+                None => response,
+            }
         })
         .await
         .unwrap_or_else(|error| failure(&error.to_string()));
     }
+    drop(progress_sender);
     crate::execute_host_program_request_with_project(
         program,
         project
@@ -97,10 +112,22 @@ pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {
     }
 }
 
-struct NoProgress;
+struct ChannelProgress {
+    sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
+    error: Arc<Mutex<Option<String>>>,
+}
 
-impl MeshingProgressSink for NoProgress {
-    fn record(&mut self, _progress: &MeshingProgressV2) {}
+impl MeshingProgressSink for ChannelProgress {
+    fn record(&mut self, progress: &MeshingProgressV2) {
+        let result = crate::meshing_host::encode_meshing_progress(progress).and_then(|progress| {
+            self.sender
+                .blocking_send(progress)
+                .map_err(|_| "remote progress receiver closed".to_string())
+        });
+        if let Err(error) = result {
+            *self.error.lock().expect("remote progress error poisoned") = Some(error);
+        }
+    }
 }
 
 fn failure(message: &str) -> ProgramExecutionResponse {

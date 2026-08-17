@@ -391,6 +391,24 @@ async fn remote_conformance() {
                 request.clone(),
             )
             .unwrap();
+        let remote_progress = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let progress = completion.drain_progress();
+                if !progress.is_empty() {
+                    break progress;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("remote meshing progress timeout");
+        let decoded_remote_progress = remote_progress
+            .iter()
+            .map(|progress| MeshingProgressV2::canonical_decode(&progress.payload).unwrap())
+            .collect::<Vec<_>>();
+        assert!(decoded_remote_progress
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence));
         let success = tokio::time::timeout(Duration::from_secs(10), completion.wait())
             .await
             .expect("remote meshing completion timeout")
@@ -454,7 +472,20 @@ async fn remote_conformance() {
                 request,
             )
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        let live_remote_progress = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let progress = cancelled.drain_progress();
+                if !progress.is_empty() {
+                    break progress;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("live remote meshing progress timeout");
+        assert!(live_remote_progress
+            .iter()
+            .all(|progress| MeshingProgressV2::canonical_decode(&progress.payload).is_ok()));
         cancel_pool
             .cancel(runmat_execution::CancellationReason::User)
             .unwrap();

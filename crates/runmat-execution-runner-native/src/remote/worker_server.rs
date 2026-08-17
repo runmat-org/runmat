@@ -10,9 +10,12 @@ use tokio::sync::Mutex;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V2,
+    REMOTE_WORKER_PROTOCOL_V3,
 };
 use super::route::RemoteFrameRoute;
+use super::worker_protocol::{
+    acknowledged, command_frame_kind, rejected, reply, reply_kind, reply_progress,
+};
 use super::RemoteAttempt;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -112,7 +115,7 @@ pub(super) async fn run_worker_loop(
                 "remote worker command used the wrong encrypted frame kind",
             ));
         }
-        if request.schema_version != REMOTE_WORKER_PROTOCOL_V2
+        if request.schema_version != REMOTE_WORKER_PROTOCOL_V3
             || request.driver_fence != driver_fence
         {
             reply_kind(
@@ -151,7 +154,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -180,7 +183,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -219,7 +222,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -274,21 +277,53 @@ pub(super) async fn run_worker_loop(
                             .map(|value| super::value_transfer::materialize(value, &state.values))
                             .collect::<NativeExecutionResult<Vec<_>>>()
                     };
-                    let response = match materialized {
-                        Ok(arguments) => {
-                            program.arguments = arguments;
-                            super::worker_execution::execute(
-                                program,
-                                materialized_project,
-                                meshing_host,
-                                objects,
-                                cancellation_for_task,
-                            )
-                            .await
+                    let (progress_sender, mut progress_receiver) = tokio::sync::mpsc::channel(256);
+                    let execution = async {
+                        match materialized {
+                            Ok(arguments) => {
+                                program.arguments = arguments;
+                                super::worker_execution::execute(
+                                    program,
+                                    materialized_project,
+                                    meshing_host,
+                                    objects,
+                                    cancellation_for_task,
+                                    progress_sender,
+                                )
+                                .await
+                            }
+                            Err(error) => ProgramExecutionResponse::Failure {
+                                message: error.to_string(),
+                            },
                         }
-                        Err(error) => ProgramExecutionResponse::Failure {
-                            message: error.to_string(),
-                        },
+                    };
+                    tokio::pin!(execution);
+                    let response = loop {
+                        tokio::select! {
+                            Some(progress) = progress_receiver.recv() => {
+                                let _ = reply_progress(
+                                    connection.as_ref(),
+                                    &sender,
+                                    limits,
+                                    &correlation_id,
+                                    attempt_id,
+                                    progress,
+                                ).await;
+                            }
+                            response = &mut execution => {
+                                while let Ok(progress) = progress_receiver.try_recv() {
+                                    let _ = reply_progress(
+                                        connection.as_ref(),
+                                        &sender,
+                                        limits,
+                                        &correlation_id,
+                                        attempt_id,
+                                        progress,
+                                    ).await;
+                                }
+                                break response;
+                            }
+                        }
                     };
                     let report = super::worker_execution::report(response);
                     let _ = reply(
@@ -296,7 +331,7 @@ pub(super) async fn run_worker_loop(
                         &sender,
                         limits,
                         RemoteWorkerReply {
-                            schema_version: REMOTE_WORKER_PROTOCOL_V2,
+                            schema_version: REMOTE_WORKER_PROTOCOL_V3,
                             correlation_id,
                             outcome: RemoteWorkerOutcome::Attempt { report },
                         },
@@ -367,7 +402,7 @@ pub(super) async fn run_worker_loop(
                     limits,
                     FrameKind::Artifact,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V2,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -410,58 +445,6 @@ async fn validate_attempt(
         return Some("attempt program is not authorized by the installed bundle".into());
     }
     None
-}
-
-async fn reply(
-    connection: &dyn RemoteFrameRoute,
-    sender: &Mutex<EncryptedFrameSession>,
-    limits: FrameLimits,
-    reply: RemoteWorkerReply,
-) -> NativeExecutionResult<()> {
-    reply_kind(connection, sender, limits, FrameKind::Control, reply).await
-}
-
-async fn reply_kind(
-    connection: &dyn RemoteFrameRoute,
-    sender: &Mutex<EncryptedFrameSession>,
-    limits: FrameLimits,
-    kind: FrameKind,
-    reply: RemoteWorkerReply,
-) -> NativeExecutionResult<()> {
-    let plaintext = serde_json::to_vec(&reply).map_err(protocol)?;
-    let frame = sender
-        .lock()
-        .await
-        .seal(kind, &plaintext, limits)
-        .map_err(protocol)?;
-    connection.send(frame).await
-}
-
-fn command_frame_kind(command: &RemoteWorkerCommand) -> FrameKind {
-    match command {
-        RemoteWorkerCommand::ProbeObject { .. }
-        | RemoteWorkerCommand::PutObjectChunk { .. }
-        | RemoteWorkerCommand::GetObjectChunk { .. } => FrameKind::Artifact,
-        _ => FrameKind::Control,
-    }
-}
-
-fn acknowledged(correlation_id: String) -> RemoteWorkerReply {
-    RemoteWorkerReply {
-        schema_version: REMOTE_WORKER_PROTOCOL_V2,
-        correlation_id,
-        outcome: RemoteWorkerOutcome::Acknowledged,
-    }
-}
-
-fn rejected(correlation_id: String, message: impl Into<String>) -> RemoteWorkerReply {
-    RemoteWorkerReply {
-        schema_version: REMOTE_WORKER_PROTOCOL_V2,
-        correlation_id,
-        outcome: RemoteWorkerOutcome::Rejected {
-            message: message.into(),
-        },
-    }
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

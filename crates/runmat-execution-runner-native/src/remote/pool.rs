@@ -13,25 +13,13 @@ use runmat_execution_runner::{
 };
 use tokio::sync::{oneshot, Mutex as AsyncMutex, RwLock};
 
+use super::pool_progress::RemoteTaskCompletion;
 use super::{RemoteAttempt, RemoteWorkerChannel};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 type CompletionResult = Result<AttemptSuccess, String>;
 
-pub struct RemoteTaskCompletion {
-    receiver: oneshot::Receiver<CompletionResult>,
-}
-
-impl RemoteTaskCompletion {
-    pub async fn wait(self) -> CompletionResult {
-        self.receiver
-            .await
-            .unwrap_or_else(|_| Err("remote task completion channel closed".into()))
-    }
-}
-
-/// Native composition of the portable scheduler with allocation-scoped remote
-/// worker routes. Server remains unaware of tasks and attempts.
+/// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
     scope_id: ExecutionScopeId,
     pool_id: PoolId,
@@ -47,6 +35,7 @@ pub struct RemotePoolDriver {
     execution_objects: super::pool_objects::RemoteObjectCatalog,
     programs: Mutex<HashMap<TaskId, ProgramExecutionRequest>>,
     completions: Mutex<HashMap<TaskId, oneshot::Sender<CompletionResult>>>,
+    progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
 }
 
 impl RemotePoolDriver {
@@ -98,6 +87,7 @@ impl RemotePoolDriver {
             execution_objects: super::pool_objects::RemoteObjectCatalog::default(),
             programs: Mutex::new(HashMap::new()),
             completions: Mutex::new(HashMap::new()),
+            progress: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -187,6 +177,7 @@ impl RemotePoolDriver {
         })?;
         let task_id = submission.request.id;
         let (sender, receiver) = oneshot::channel();
+        let progress = Arc::new(super::pool_progress::RemoteProgressBuffer::default());
         self.programs
             .lock()
             .expect("remote program catalog poisoned")
@@ -195,13 +186,17 @@ impl RemotePoolDriver {
             .lock()
             .expect("remote completion registry poisoned")
             .insert(task_id, sender);
+        self.progress
+            .lock()
+            .expect("remote progress registry poisoned")
+            .insert(task_id, Arc::clone(&progress));
         let actions = self
             .driver
             .lock()
             .expect("remote driver poisoned")
             .handle(DriverCommand::Submit(Box::new(submission)))?;
         self.dispatch(actions);
-        Ok(RemoteTaskCompletion { receiver })
+        Ok(RemoteTaskCompletion::new(receiver, progress))
     }
 
     pub fn resize(self: &Arc<Self>, desired_workers: u32) -> NativeExecutionResult<()> {
@@ -309,6 +304,12 @@ impl RemotePoolDriver {
                 .expect("remote program catalog poisoned")
                 .get(&request.task_id)
                 .cloned();
+            let progress = this
+                .progress
+                .lock()
+                .expect("remote progress registry poisoned")
+                .get(&request.task_id)
+                .cloned();
             let report = match (channel, program) {
                 (Some(channel), Some(mut program)) => {
                     program.arguments = request.task.inputs.clone();
@@ -329,12 +330,15 @@ impl RemotePoolDriver {
                             kind: AttemptFailureKind::Rejected,
                             message: error.to_string(),
                         },
-                        Ok(()) => match channel
-                            .execute(RemoteAttempt {
+                        Ok(()) => match super::pool_progress::execute(
+                            channel.as_ref(),
+                            RemoteAttempt {
                                 scheduling: request.clone(),
                                 program,
-                            })
-                            .await
+                            },
+                            progress.as_deref(),
+                        )
+                        .await
                         {
                             Ok(AttemptReport::Succeeded { result }) => {
                                 match this
@@ -427,6 +431,10 @@ impl RemotePoolDriver {
                 .lock()
                 .expect("remote program catalog poisoned")
                 .remove(&task_id);
+            self.progress
+                .lock()
+                .expect("remote progress registry poisoned")
+                .remove(&task_id);
         }
     }
 
@@ -461,6 +469,10 @@ impl RemotePoolDriver {
                 let _ = sender.send(Err(message));
                 programs.remove(&task_id);
             }
+            self.progress
+                .lock()
+                .expect("remote progress registry poisoned")
+                .remove(&task_id);
         }
     }
 }

@@ -8,7 +8,7 @@ use runmat_execution_transport_native::transfer::ObjectChunk;
 
 use super::{RemoteAttempt, RemoteBundleReceipt};
 
-pub const REMOTE_WORKER_PROTOCOL_V2: u16 = 2;
+pub const REMOTE_WORKER_PROTOCOL_V3: u16 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -65,11 +65,28 @@ pub struct RemoteWorkerReply {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteWorkerOutcome {
-    BundleStored { receipt: RemoteBundleReceipt },
-    ValueStored { receipt: super::RemoteValueReceipt },
-    ObjectPosition { receipt: super::RemoteObjectReceipt },
-    ObjectChunk { chunk: ObjectChunk, complete: bool },
-    Attempt { report: AttemptReport },
+    BundleStored {
+        receipt: RemoteBundleReceipt,
+    },
+    ValueStored {
+        receipt: super::RemoteValueReceipt,
+    },
+    ObjectPosition {
+        receipt: super::RemoteObjectReceipt,
+    },
+    ObjectChunk {
+        chunk: ObjectChunk,
+        complete: bool,
+    },
+    Progress {
+        attempt_id: AttemptId,
+        progress: crate::ProgramProgress,
+    },
+    Attempt {
+        report: AttemptReport,
+    },
     Acknowledged,
-    Rejected { message: String },
+    Rejected {
+        message: String,
+    },
 }

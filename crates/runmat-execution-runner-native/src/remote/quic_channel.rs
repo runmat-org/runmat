@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V2,
+    REMOTE_WORKER_PROTOCOL_V3,
 };
 use super::route::{QuicFrameRoute, RemoteFrameRoute};
 use super::{
@@ -26,7 +26,12 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_OBJECT_CHUNK_BYTES: usize = 256 * 1024;
-type PendingReply = (FrameKind, oneshot::Sender<RemoteWorkerReply>);
+const MAX_BUFFERED_PROGRESS: usize = 256;
+struct PendingReply {
+    frame_kind: FrameKind,
+    attempt_id: Option<runmat_execution::identity::AttemptId>,
+    sender: oneshot::Sender<RemoteWorkerReply>,
+}
 
 pub struct QuicRemoteWorkerChannel {
     node_identity: String,
@@ -36,6 +41,9 @@ pub struct QuicRemoteWorkerChannel {
     route: Arc<dyn RemoteFrameRoute>,
     sender: AsyncMutex<EncryptedFrameSession>,
     pending: Arc<Mutex<HashMap<String, PendingReply>>>,
+    progress: Arc<
+        Mutex<HashMap<runmat_execution::identity::AttemptId, VecDeque<crate::ProgramProgress>>>,
+    >,
 }
 
 pub struct RemoteWorkerChannelConfig {
@@ -76,6 +84,7 @@ impl QuicRemoteWorkerChannel {
             limits,
         } = config;
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        let progress = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
         let channel = Arc::new(Self {
             node_identity,
             worker,
@@ -93,11 +102,13 @@ impl QuicRemoteWorkerChannel {
                 .map_err(protocol)?,
             ),
             pending: Arc::clone(&pending),
+            progress: Arc::clone(&progress),
         });
         let mut receiver =
             EncryptedFrameSession::new(run_identity, session_id, "worker-to-driver", 1, run_key)
                 .map_err(protocol)?;
         tokio::spawn(async move {
+            let mut progress_sequences = HashMap::new();
             loop {
                 let frame = match route.receive().await {
                     Ok(frame) => frame,
@@ -109,18 +120,41 @@ impl QuicRemoteWorkerChannel {
                 };
                 let reply: RemoteWorkerReply =
                     match serde_json::from_slice::<RemoteWorkerReply>(&plaintext) {
-                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V2 => reply,
+                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V3 => reply,
                         _ => break,
                     };
-                if let Some((expected_kind, sender)) = pending
+                if let RemoteWorkerOutcome::Progress {
+                    attempt_id,
+                    progress: event,
+                } = &reply.outcome
+                {
+                    if event.validate().is_err()
+                        || progress_sequences
+                            .insert(*attempt_id, event.sequence)
+                            .is_some_and(|previous| event.sequence <= previous)
+                    {
+                        break;
+                    }
+                    let mut queues = progress.lock().expect("remote progress registry poisoned");
+                    let queue = queues.entry(*attempt_id).or_default();
+                    if queue.len() == MAX_BUFFERED_PROGRESS {
+                        queue.pop_front();
+                    }
+                    queue.push_back(event.clone());
+                    continue;
+                }
+                if let Some(pending) = pending
                     .lock()
                     .expect("remote reply registry poisoned")
                     .remove(&reply.correlation_id)
                 {
-                    if frame.kind != expected_kind {
+                    if frame.kind != pending.frame_kind {
                         break;
                     }
-                    let _ = sender.send(reply);
+                    if let Some(attempt_id) = pending.attempt_id {
+                        progress_sequences.remove(&attempt_id);
+                    }
+                    let _ = pending.sender.send(reply);
                 }
             }
             pending
@@ -137,8 +171,12 @@ impl QuicRemoteWorkerChannel {
         command: RemoteWorkerCommand,
     ) -> NativeExecutionResult<RemoteWorkerOutcome> {
         let correlation_id = Uuid::new_v4().to_string();
+        let attempt_id = match &command {
+            RemoteWorkerCommand::Execute { attempt } => Some(attempt.scheduling.id),
+            _ => None,
+        };
         let request = RemoteWorkerRequest {
-            schema_version: REMOTE_WORKER_PROTOCOL_V2,
+            schema_version: REMOTE_WORKER_PROTOCOL_V3,
             correlation_id: correlation_id.clone(),
             driver_fence: self.driver_fence,
             command,
@@ -147,7 +185,14 @@ impl QuicRemoteWorkerChannel {
         self.pending
             .lock()
             .expect("remote reply registry poisoned")
-            .insert(correlation_id.clone(), (kind, sender));
+            .insert(
+                correlation_id.clone(),
+                PendingReply {
+                    frame_kind: kind,
+                    attempt_id,
+                    sender,
+                },
+            );
         let plaintext = serde_json::to_vec(&request).map_err(protocol)?;
         let frame = self
             .sender
@@ -218,6 +263,19 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
             RemoteWorkerOutcome::Attempt { report } => Ok(report),
             _ => Err(protocol("remote worker returned the wrong attempt reply")),
         }
+    }
+
+    fn drain_progress(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<crate::ProgramProgress> {
+        self.progress
+            .lock()
+            .expect("remote progress registry poisoned")
+            .remove(&attempt_id)
+            .map(VecDeque::into_iter)
+            .map(Iterator::collect)
+            .unwrap_or_default()
     }
 
     async fn activate_bundle(

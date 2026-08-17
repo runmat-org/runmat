@@ -60,6 +60,13 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.execute(attempt).await
     }
 
+    fn drain_progress(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<crate::ProgramProgress> {
+        self.protocol.drain_progress(attempt_id)
+    }
+
     async fn activate_bundle(
         &self,
         bundle_digest: Digest,

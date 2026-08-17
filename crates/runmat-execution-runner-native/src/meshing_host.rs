@@ -186,18 +186,7 @@ struct ChannelProgress {
 
 impl MeshingProgressSink for ChannelProgress {
     fn record(&mut self, progress: &MeshingProgressV2) {
-        let encoded = progress
-            .canonical_encode()
-            .map_err(|error| error.to_string());
-        let message = encoded.and_then(|payload| {
-            let progress = ProgramProgress {
-                schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V1,
-                sequence: progress.sequence,
-                media_type: MESHING_PROGRESS_MEDIA_TYPE.into(),
-                value_schema: MESHING_PROGRESS_VALUE_SCHEMA.into(),
-                payload,
-            };
-            progress.validate()?;
+        let message = encode_meshing_progress(progress).and_then(|progress| {
             self.sender
                 .blocking_send(progress)
                 .map_err(|_| "native progress receiver closed".to_string())
@@ -206,6 +195,22 @@ impl MeshingProgressSink for ChannelProgress {
             *self.error.lock().expect("meshing progress error poisoned") = Some(error);
         }
     }
+}
+
+pub(crate) fn encode_meshing_progress(
+    progress: &MeshingProgressV2,
+) -> Result<ProgramProgress, String> {
+    let encoded = ProgramProgress {
+        schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V1,
+        sequence: progress.sequence,
+        media_type: MESHING_PROGRESS_MEDIA_TYPE.into(),
+        value_schema: MESHING_PROGRESS_VALUE_SCHEMA.into(),
+        payload: progress
+            .canonical_encode()
+            .map_err(|error| error.to_string())?,
+    };
+    encoded.validate()?;
+    Ok(encoded)
 }
 
 async fn write_message(

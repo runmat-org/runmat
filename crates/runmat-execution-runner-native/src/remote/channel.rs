@@ -6,6 +6,7 @@ use runmat_execution_artifact::ProjectRevisionRecord;
 use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
 
 use crate::NativeExecutionResult;
+use crate::ProgramProgress;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RemoteObjectReceipt {
@@ -78,6 +79,13 @@ pub trait RemoteWorkerChannel: Send + Sync {
     }
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport>;
+
+    fn drain_progress(
+        &self,
+        _attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<ProgramProgress> {
+        Vec::new()
+    }
 
     async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()>;
 
