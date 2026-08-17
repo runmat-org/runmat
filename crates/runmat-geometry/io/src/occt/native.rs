@@ -131,8 +131,11 @@ pub(crate) fn import_exact_cad_shape(
     let original_kernel_valid = payload.original_kernel_valid;
     let post_duplicate_kernel_valid = payload.post_duplicate_kernel_valid;
     let post_sewing_kernel_valid = payload.post_sewing_kernel_valid;
+    let post_small_topology_kernel_valid = payload.post_small_topology_kernel_valid;
     let sewn = payload.sewn;
     let gaps_repaired = payload.gaps_repaired;
+    let short_edges_simplified = payload.short_edges_simplified;
+    let sliver_faces_simplified = payload.sliver_faces_simplified;
     let healing_relations = payload.healing_relations.clone();
     let maximum_healing_displacement_m =
         payload.maximum_healing_displacement * meters_per_source_unit;
@@ -182,7 +185,13 @@ pub(crate) fn import_exact_cad_shape(
             &import_validation::ImportEvaluationControl::new(context, options),
         )
         .map_err(import_validation::map_validation_error)?;
-    if orientation_repaired || duplicates_consolidated || sewn || gaps_repaired {
+    if orientation_repaired
+        || duplicates_consolidated
+        || sewn
+        || gaps_repaired
+        || short_edges_simplified
+        || sliver_faces_simplified
+    {
         let report = exact_healing_projection::healing_report(
             exact_healing_projection::NativeHealingEvidence {
                 original_digest: &original_geometry_digest,
@@ -193,6 +202,9 @@ pub(crate) fn import_exact_cad_shape(
                 sewn,
                 gaps_repaired,
                 post_sewing_kernel_valid,
+                short_edges_simplified,
+                sliver_faces_simplified,
+                post_small_topology_kernel_valid,
                 relations: &healing_relations,
                 maximum_displacement_m: maximum_healing_displacement_m,
                 displacement_original_m,

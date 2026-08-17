@@ -6,6 +6,7 @@
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepTools.hxx>
 #include <Message_ProgressIndicator.hxx>
+#include <ShapeBuild_ReShape.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <ShapeFix_Shell.hxx>
 #include <ShapeFix_Solid.hxx>
@@ -151,6 +152,64 @@ void append_relations(const TopoDS_Shape& before,
   }
 }
 
+void append_context_relations(const TopoDS_Shape& before,
+                              const TopoDS_Shape& after,
+                              const TopAbs_ShapeEnum kind,
+                              const std::uint8_t relation_kind,
+                              const Handle(ShapeBuild_ReShape)& context,
+                              const OcctImportOptions& options,
+                              ExactHealingMutation& mutation) {
+  TopTools_IndexedMapOfShape target_shapes;
+  TopExp::MapShapes(after, kind, target_shapes);
+  std::map<ShapeDigest, TopoDS_Shape> targets;
+  for (Standard_Integer index = 1; index <= target_shapes.Extent(); ++index) {
+    const TopoDS_Shape& target = target_shapes(index);
+    targets.emplace(
+        persistent_digest(target, options, mutation.identity_work_bytes), target);
+  }
+
+  TopTools_IndexedMapOfShape source_shapes;
+  TopExp::MapShapes(before, kind, source_shapes);
+  for (Standard_Integer index = 1; index <= source_shapes.Extent(); ++index) {
+    const TopoDS_Shape& source = source_shapes(index);
+    ExactHealingMutation::Relation relation;
+    relation.kind = relation_kind;
+    relation.source_digest =
+        persistent_digest(source, options, mutation.identity_work_bytes);
+    TopoDS_Shape replacement;
+    const Standard_Integer status = context->Status(source, replacement, Standard_True);
+    if (status > 0 && !replacement.IsNull()) {
+      TopTools_IndexedMapOfShape mapped;
+      TopExp::MapShapes(replacement, kind, mapped);
+      if (replacement.ShapeType() == kind) {
+        mapped.Add(replacement);
+      }
+      TopoDS_Shape admitted;
+      for (Standard_Integer mapped_index = 1; mapped_index <= mapped.Extent(); ++mapped_index) {
+        const ShapeDigest digest = persistent_digest(
+            mapped(mapped_index), options, mutation.identity_work_bytes);
+        if (targets.find(digest) != targets.end()) {
+          if (!admitted.IsNull()) {
+            throw std::runtime_error(
+                "OCCT small-topology repair produced unsupported split lineage");
+          }
+          admitted = mapped(mapped_index);
+        }
+      }
+      if (!admitted.IsNull()) {
+        relation.target_digest =
+            persistent_digest(admitted, options, mutation.identity_work_bytes);
+      }
+    } else if (status == 0) {
+      const auto existing = targets.find(relation.source_digest);
+      if (existing != targets.end()) {
+        relation.target_digest = relation.source_digest;
+      }
+    }
+    mutation.relations.push_back(relation);
+  }
+}
+
 std::vector<gp_Pnt> vertex_points(const TopoDS_Shape& shape) {
   TopTools_IndexedMapOfShape vertices;
   TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
@@ -165,9 +224,9 @@ std::vector<gp_Pnt> vertex_points(const TopoDS_Shape& shape) {
 void measure_vertex_displacement(const std::vector<gp_Pnt>& sources,
                                  const std::vector<gp_Pnt>& targets,
                                  ExactHealingMutation& mutation) {
-  // Sewing retains the underlying curves and surfaces while changing boundary
-  // topology and tolerances. The symmetric vertex Hausdorff distance therefore
-  // measures the only admitted geometric movement and supplies its witness.
+  // These healing operations retain the underlying curves and surfaces while
+  // changing boundary topology and tolerances. The symmetric vertex Hausdorff
+  // distance therefore measures the only admitted movement and supplies its witness.
   if (sources.empty() || targets.empty()) {
     throw std::runtime_error("OCCT sewing produced an empty vertex inventory");
   }
@@ -306,6 +365,24 @@ ExactHealingMutation sew_exact_shape(const TopoDS_Shape& shape,
   measure_vertex_displacement(vertex_points(shape), vertex_points(result), mutation);
   mutation.changed = true;
   return mutation;
+}
+
+void append_small_topology_relations(
+    const TopoDS_Shape& before,
+    const TopoDS_Shape& after,
+    const Handle(ShapeBuild_ReShape)& context,
+    const OcctImportOptions& options,
+    ExactHealingMutation& mutation) {
+  append_context_relations(
+      before, after, TopAbs_VERTEX, 0, context, options, mutation);
+  append_context_relations(before, after, TopAbs_EDGE, 1, context, options, mutation);
+  append_context_relations(before, after, TopAbs_FACE, 2, context, options, mutation);
+}
+
+void measure_healing_vertex_displacement(const TopoDS_Shape& before,
+                                         const TopoDS_Shape& after,
+                                         ExactHealingMutation& mutation) {
+  measure_vertex_displacement(vertex_points(before), vertex_points(after), mutation);
 }
 
 } // namespace occt_backend

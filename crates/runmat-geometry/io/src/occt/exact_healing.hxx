@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ShapeBuild_ReShape.hxx>
 #include <TopoDS_Shape.hxx>
 
 #include <array>
@@ -38,6 +39,25 @@ ExactHealingMutation sew_exact_shape(const TopoDS_Shape& shape,
                                     const OcctImportOptions& options,
                                     double tolerance,
                                     std::uint64_t initial_identity_work);
+
+void append_small_topology_relations(
+    const TopoDS_Shape& before,
+    const TopoDS_Shape& after,
+    const Handle(ShapeBuild_ReShape)& context,
+    const OcctImportOptions& options,
+    ExactHealingMutation& mutation);
+
+void measure_healing_vertex_displacement(const TopoDS_Shape& before,
+                                         const TopoDS_Shape& after,
+                                         ExactHealingMutation& mutation);
+
+ExactHealingMutation simplify_exact_small_topology(
+    const TopoDS_Shape& shape,
+    const OcctImportOptions& options,
+    double tolerance,
+    std::uint64_t initial_identity_work,
+    bool& short_edges_simplified,
+    bool& sliver_faces_simplified);
 
 } // namespace occt_backend
 } // namespace runmat_geometry_io

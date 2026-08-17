@@ -26,6 +26,9 @@ pub(super) struct NativeHealingEvidence<'a> {
     pub sewn: bool,
     pub gaps_repaired: bool,
     pub post_sewing_kernel_valid: bool,
+    pub short_edges_simplified: bool,
+    pub sliver_faces_simplified: bool,
+    pub post_small_topology_kernel_valid: bool,
     pub relations: &'a [bridge::OcctHealingRelationPayload],
     pub maximum_displacement_m: f64,
     pub displacement_original_m: [f64; 3],
@@ -47,7 +50,10 @@ pub(super) fn healing_report(
     })?;
     target_revision.parent_document_digest = Some(original_topology_digest);
 
-    let lineage = if evidence.sewn || evidence.gaps_repaired {
+    let has_sewing = evidence.sewn || evidence.gaps_repaired;
+    let has_small_topology = evidence.short_edges_simplified || evidence.sliver_faces_simplified;
+    let has_lineage_mutation = has_sewing || has_small_topology;
+    let lineage = if has_lineage_mutation {
         project_relations(evidence.relations, imported)?
     } else {
         retained_lineage(topology_entities(imported))
@@ -60,7 +66,6 @@ pub(super) fn healing_report(
         target_revision,
         operations: lineage.operations.clone(),
     };
-    let has_sewing = evidence.sewn || evidence.gaps_repaired;
     let original_validity = TopologyValidity {
         kernel_valid: evidence.original_kernel_valid,
         incidence_consistent: !has_sewing,
@@ -89,6 +94,30 @@ pub(super) fn healing_report(
     };
     let mut operations = Vec::new();
     let mut prior_validity = original_validity;
+    if has_lineage_mutation
+        && evidence.maximum_displacement_m > tolerance.maximum_healing_displacement_m
+    {
+        let operation = if evidence.gaps_repaired {
+            GeometryHealingOperationKind::RepairGap
+        } else if evidence.sewn {
+            GeometryHealingOperationKind::Sew
+        } else if evidence.sliver_faces_simplified {
+            GeometryHealingOperationKind::SimplifySliverFace
+        } else {
+            GeometryHealingOperationKind::SimplifyShortEdge
+        };
+        let failure = GeometryHealingFailure {
+            operation,
+            affected_entities: lineage.affected_before.clone(),
+            measured_displacement_m: evidence.maximum_displacement_m,
+            permitted_displacement_m: tolerance.maximum_healing_displacement_m,
+            original_point_m: evidence.displacement_original_m,
+            proposed_point_m: evidence.displacement_proposed_m,
+            reason: "OCCT topology repair exceeded the admitted healing displacement".into(),
+        };
+        failure.validate().map_err(contract_failure)?;
+        return Err(GeometryImportError::HealingLimitExceeded { failure });
+    }
     if evidence.duplicates_consolidated {
         let duplicate_validity = TopologyValidity {
             kernel_valid: evidence.post_duplicate_kernel_valid,
@@ -116,19 +145,6 @@ pub(super) fn healing_report(
         } else {
             GeometryHealingOperationKind::Sew
         };
-        if evidence.maximum_displacement_m > tolerance.maximum_healing_displacement_m {
-            let failure = GeometryHealingFailure {
-                operation: operation_kind,
-                affected_entities: lineage.affected_before.clone(),
-                measured_displacement_m: evidence.maximum_displacement_m,
-                permitted_displacement_m: tolerance.maximum_healing_displacement_m,
-                original_point_m: evidence.displacement_original_m,
-                proposed_point_m: evidence.displacement_proposed_m,
-                reason: "OCCT sewing exceeded the admitted healing displacement".into(),
-            };
-            failure.validate().map_err(contract_failure)?;
-            return Err(GeometryImportError::HealingLimitExceeded { failure });
-        }
         let sewing_validity = TopologyValidity {
             kernel_valid: evidence.post_sewing_kernel_valid,
             incidence_consistent: true,
@@ -151,6 +167,41 @@ pub(super) fn healing_report(
             after_validity: sewing_validity,
         });
         prior_validity = sewing_validity;
+    }
+    if has_small_topology {
+        let small_topology_validity = TopologyValidity {
+            kernel_valid: evidence.post_small_topology_kernel_valid,
+            incidence_consistent: true,
+            orientation_consistent: !evidence.orientation_repaired,
+            shells_closed: true,
+            nesting_consistent: !evidence.orientation_repaired,
+        };
+        if evidence.short_edges_simplified {
+            operations.push(GeometryHealingOperation {
+                sequence: operations.len() as u64,
+                kind: GeometryHealingOperationKind::SimplifyShortEdge,
+                affected_before: lineage.affected_before.clone(),
+                affected_after: lineage.affected_after.clone(),
+                maximum_displacement_m: evidence.maximum_displacement_m,
+                reason: "OCCT merged tolerance-scale short edges without dropping isolated boundary uses".into(),
+                before_validity: prior_validity,
+                after_validity: small_topology_validity,
+            });
+            prior_validity = small_topology_validity;
+        }
+        if evidence.sliver_faces_simplified {
+            operations.push(GeometryHealingOperation {
+                sequence: operations.len() as u64,
+                kind: GeometryHealingOperationKind::SimplifySliverFace,
+                affected_before: lineage.affected_before.clone(),
+                affected_after: lineage.affected_after.clone(),
+                maximum_displacement_m: evidence.maximum_displacement_m,
+                reason: "OCCT removed tolerance-scale spot or strip faces within the admitted displacement".into(),
+                before_validity: prior_validity,
+                after_validity: small_topology_validity,
+            });
+            prior_validity = small_topology_validity;
+        }
     }
     if evidence.orientation_repaired {
         let affected = orientation_entities(imported);

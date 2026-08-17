@@ -20,21 +20,24 @@ fn exact_analysis_options_are_validated_before_kernel_dispatch() {
             if reason.contains("requested_deviation_m")
     ));
 
-    let mut unsupported_healing = ExactCadImportOptions::default();
-    unsupported_healing
+    let mut invalid_healing_limit = ExactCadImportOptions::default();
+    invalid_healing_limit
         .analysis
         .healing
         .simplify_short_edges_and_sliver_faces = true;
+    invalid_healing_limit
+        .analysis
+        .maximum_healing_displacement_m = 0.0;
     assert!(matches!(
         import_exact_cad(
             "shape.brep",
             b"not dispatched",
             GeometryFormat::Brep,
-            &unsupported_healing,
+            &invalid_healing_limit,
             &GeometryImportContext::new(),
         ),
         Err(GeometryImportError::InvalidOptions(reason))
-            if reason.contains("short-edge or sliver-face")
+            if reason.contains("positive maximum healing displacement")
     ));
 
     let mut conflicting_healing = ExactCadImportOptions::default();

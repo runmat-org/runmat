@@ -979,26 +979,24 @@ OcctExactShapePayload import_exact_cad_bytes(
   BRepTools::Clean(document.shape);
   check_cancelled(options);
 
-  if (options.heal_short_edges_and_sliver_faces) {
-    throw std::runtime_error(
-        "requested OCCT exact healing operation is not yet supported by this kernel adapter");
-  }
-
   std::array<std::uint8_t, 32> original_geometry_digest{};
   bool original_kernel_valid = false;
   std::uint64_t healing_identity_work_bytes = 0;
   bool duplicates_consolidated = false;
   bool post_duplicate_kernel_valid = false;
   bool post_sewing_kernel_valid = false;
+  bool post_small_topology_kernel_valid = false;
   bool orientation_repaired = false;
   bool sewn = false;
   bool gaps_repaired = false;
+  bool short_edges_simplified = false;
+  bool sliver_faces_simplified = false;
   double maximum_healing_displacement = 0.0;
   std::array<double, 3> displacement_original{0.0, 0.0, 0.0};
   std::array<double, 3> displacement_proposed{0.0, 0.0, 0.0};
   std::vector<ExactHealingMutation::Relation> healing_relations;
   if (options.heal_orientation || options.heal_duplicates || options.heal_sew ||
-      options.heal_gaps) {
+      options.heal_gaps || options.heal_short_edges_and_sliver_faces) {
     const std::string original_representation = serialize_exact_shape(document.shape, options);
     if (static_cast<std::uint64_t>(original_representation.size()) >
         options.max_exact_representation_bytes) {
@@ -1051,6 +1049,45 @@ OcctExactShapePayload import_exact_cad_bytes(
       const BRepCheck_Analyzer sewing_analyzer(document.shape, Standard_True);
       post_sewing_kernel_valid = sewing_analyzer.IsValid();
     }
+    if (options.heal_short_edges_and_sliver_faces) {
+      if (document.has_xcaf) {
+        throw std::runtime_error(
+            "OCCT small-topology repair requires definition-aware XCAF mutation");
+      }
+      const std::string before_small_topology =
+          serialize_exact_shape(document.shape, options);
+      if (static_cast<std::uint64_t>(before_small_topology.size()) >
+          options.max_exact_representation_bytes) {
+        throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+      }
+      ExactHealingMutation small_topology = simplify_exact_small_topology(
+          document.shape,
+          options,
+          options.maximum_healing_displacement,
+          healing_identity_work_bytes,
+          short_edges_simplified,
+          sliver_faces_simplified);
+      document.shape = small_topology.shape;
+      healing_identity_work_bytes = small_topology.identity_work_bytes;
+      maximum_healing_displacement = small_topology.maximum_displacement;
+      displacement_original = small_topology.displacement_original;
+      displacement_proposed = small_topology.displacement_proposed;
+      healing_relations = small_topology.relations;
+      const std::string after_small_topology =
+          serialize_exact_shape(document.shape, options);
+      if (static_cast<std::uint64_t>(after_small_topology.size()) >
+          options.max_exact_representation_bytes) {
+        throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+      }
+      const bool changed =
+          geometry_digest(before_small_topology) != geometry_digest(after_small_topology);
+      if (changed != (short_edges_simplified || sliver_faces_simplified)) {
+        throw std::runtime_error(
+            "OCCT small-topology repair produced unclassified topology mutation");
+      }
+      const BRepCheck_Analyzer small_topology_analyzer(document.shape, Standard_True);
+      post_small_topology_kernel_valid = small_topology_analyzer.IsValid();
+    }
     if (options.heal_orientation) {
       const std::array<std::uint8_t, 32> before_orientation =
           geometry_digest(serialize_exact_shape(document.shape, options));
@@ -1080,8 +1117,11 @@ OcctExactShapePayload import_exact_cad_bytes(
   result.duplicates_consolidated = duplicates_consolidated;
   result.post_duplicate_kernel_valid = post_duplicate_kernel_valid;
   result.post_sewing_kernel_valid = post_sewing_kernel_valid;
+  result.post_small_topology_kernel_valid = post_small_topology_kernel_valid;
   result.sewn = sewn;
   result.gaps_repaired = gaps_repaired;
+  result.short_edges_simplified = short_edges_simplified;
+  result.sliver_faces_simplified = sliver_faces_simplified;
   result.maximum_healing_displacement = maximum_healing_displacement;
   result.displacement_original_x = displacement_original[0];
   result.displacement_original_y = displacement_original[1];
@@ -1119,7 +1159,8 @@ OcctExactShapePayload import_exact_cad_bytes(
     result.healing_relations.push_back(payload);
   }
   if (result.orientation_repaired || result.duplicates_consolidated || result.sewn ||
-      result.gaps_repaired) {
+      result.gaps_repaired || result.short_edges_simplified ||
+      result.sliver_faces_simplified) {
     for (const std::uint8_t byte : original_geometry_digest) {
       result.original_geometry_digest.push_back(byte);
     }

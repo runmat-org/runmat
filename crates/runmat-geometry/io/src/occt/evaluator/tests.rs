@@ -20,6 +20,8 @@ const DISCONNECTED_SOLIDS_REVERSED: &[u8] =
 const GAPPED_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/gapped_sheet.brep");
 const INVALID_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/invalid_cavity.brep");
 const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_solid_sheet.brep");
+const SHORT_EDGE_FACE: &[u8] = include_bytes!("../../../tests/fixtures/short_edge_face.brep");
+const SLIVER_FACE_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/sliver_face_sheet.brep");
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
 
 struct Unlimited;
@@ -495,6 +497,141 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
             &context,
         ),
         Err(GeometryImportError::InvalidGeometry(_))
+    ));
+}
+
+#[test]
+fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
+    let context = GeometryImportContext::new();
+    let original_short_edge = import_exact_cad(
+        "short_edge_face.brep",
+        SHORT_EDGE_FACE,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &context,
+    )
+    .unwrap();
+    assert_eq!(original_short_edge.topology.edges.len(), 5);
+
+    let mut options = ExactCadImportOptions::default();
+    options
+        .analysis
+        .healing
+        .simplify_short_edges_and_sliver_faces = true;
+    options.analysis.maximum_healing_displacement_m = 1.0e-6;
+    let repaired_short_edge = import_exact_cad(
+        "short_edge_face.brep",
+        SHORT_EDGE_FACE,
+        GeometryFormat::Brep,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(repaired_short_edge.topology.edges.len(), 4);
+    let short_edge_report = repaired_short_edge.healing_report.as_ref().unwrap();
+    assert_eq!(short_edge_report.operations.len(), 1);
+    assert_eq!(
+        short_edge_report.operations[0].kind,
+        GeometryHealingOperationKind::SimplifyShortEdge
+    );
+    assert!(short_edge_report.operations[0].maximum_displacement_m > 0.0);
+    assert!(short_edge_report.operations[0].maximum_displacement_m <= 1.0e-6);
+    assert!(short_edge_report
+        .revision_map
+        .operations
+        .iter()
+        .any(|operation| matches!(
+            operation,
+            runmat_geometry_core::GeometryRevisionOperation::Delete { .. }
+                | runmat_geometry_core::GeometryRevisionOperation::Replace { .. }
+        )));
+    assert!(repaired_short_edge
+        .build_closure()
+        .unwrap()
+        .healing_bytes
+        .is_some());
+    let repeated_short_edge = import_exact_cad(
+        "short_edge_face.brep",
+        SHORT_EDGE_FACE,
+        GeometryFormat::Brep,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(repeated_short_edge.topology, repaired_short_edge.topology);
+    assert_eq!(
+        repeated_short_edge.healing_report,
+        repaired_short_edge.healing_report
+    );
+
+    let original_sliver = import_exact_cad(
+        "sliver_face_sheet.brep",
+        SLIVER_FACE_SHEET,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &context,
+    )
+    .unwrap();
+    assert_eq!(original_sliver.topology.faces.len(), 3);
+    let repaired_sliver = import_exact_cad(
+        "sliver_face_sheet.brep",
+        SLIVER_FACE_SHEET,
+        GeometryFormat::Brep,
+        &options,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(repaired_sliver.topology.faces.len(), 2);
+    let sliver_report = repaired_sliver.healing_report.as_ref().unwrap();
+    assert!(sliver_report
+        .operations
+        .iter()
+        .any(|operation| { operation.kind == GeometryHealingOperationKind::SimplifySliverFace }));
+    assert!(sliver_report
+        .operations
+        .iter()
+        .any(|operation| operation.maximum_displacement_m > 0.0));
+    assert!(sliver_report
+        .operations
+        .iter()
+        .all(|operation| operation.maximum_displacement_m <= 1.0e-6));
+    assert!(sliver_report
+        .revision_map
+        .operations
+        .iter()
+        .any(|operation| matches!(
+            operation,
+            runmat_geometry_core::GeometryRevisionOperation::Delete { .. }
+        )));
+    assert!(repaired_sliver
+        .build_closure()
+        .unwrap()
+        .healing_bytes
+        .is_some());
+
+    let mut too_small = options.clone();
+    too_small.analysis.maximum_healing_displacement_m = 1.0e-8;
+    let unchanged = import_exact_cad(
+        "short_edge_face.brep",
+        SHORT_EDGE_FACE,
+        GeometryFormat::Brep,
+        &too_small,
+        &context,
+    )
+    .unwrap();
+    assert_eq!(unchanged.topology.edges.len(), 5);
+    assert!(unchanged.healing_report.is_none());
+
+    assert!(matches!(
+        import_exact_cad(
+            "two_box_assembly.step",
+            TWO_BOX_ASSEMBLY,
+            GeometryFormat::Step,
+            &options,
+            &context,
+        ),
+        Err(GeometryImportError::BackendUnavailable(reason))
+            if reason.contains("definition-aware XCAF mutation")
     ));
 }
 
