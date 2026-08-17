@@ -245,7 +245,7 @@ impl<'a> EvaluationCache<'a> {
             rejected_contribution_count =
                 rejected_contribution_count.saturating_add(sample.rejected_contribution_count);
         }
-        Ok(CurveMetricResolutionEvidence {
+        Ok(CurveMetricResolutionEvidence::Evaluated {
             active_sources: (0..16)
                 .filter(|rank| source_mask & (1u16 << rank) != 0)
                 .map(|rank| self.source_by_rank[&rank])

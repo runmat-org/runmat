@@ -1,3 +1,4 @@
+mod degenerate;
 mod sampler;
 
 use std::collections::BTreeMap;
@@ -14,6 +15,7 @@ use super::{
     },
     SharedCurve, SharedCurveError, SharedCurveErrorKind, SharedCurveMesh,
 };
+use degenerate::validate_degenerate_geometry;
 use sampler::{validate_interval, ValidationSampler};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +97,17 @@ fn validate_curve(
         .map_err(|error| mismatch(edge, "edge occurrence transform", error.to_string()))?;
     validate_nodes(curve, edge, curves, control, transform, options)?;
     validate_pcurves(curve, edge, topology, pcurves, control, options)?;
+    if edge.is_degenerate {
+        validate_degenerate_geometry(
+            curve,
+            edge,
+            curves,
+            control,
+            transform,
+            options.geometry_absolute_error_m,
+        )?;
+        return Ok(0);
+    }
 
     let mut sampler = ValidationSampler::new(edge, curves, metric_field, control, transform);
     let mut maximum_chordal_deviation_m: f64 = 0.0;
@@ -224,7 +237,7 @@ fn length(vector: [f64; 3]) -> f64 {
     (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt()
 }
 
-fn mismatch(
+pub(super) fn mismatch(
     edge: &ExactEdge,
     field: impl Into<String>,
     reason: impl Into<String>,

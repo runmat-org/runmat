@@ -15,7 +15,7 @@ pub use error::{SharedCurveError, SharedCurveErrorKind};
 pub use geometric_validation::{
     validate_shared_curve_geometry, SharedCurveGeometryValidationReport,
 };
-pub use identity::shared_curve_node_id;
+pub use identity::{shared_curve_node_id, shared_degenerate_curve_node_id};
 pub use types::{
     CurveMetricResolutionEvidence, CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve,
     SharedCurveFaceUse, SharedCurveMesh, SharedCurveNode, SHARED_CURVE_MESH_SCHEMA_VERSION,

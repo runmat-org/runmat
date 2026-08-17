@@ -11,7 +11,7 @@ use super::super::{
         point_segment_distance, sub, tangent_angle, CurveMetricField, CurveMetricQuery,
     },
     validation::metric_source_rank,
-    SharedCurve, SharedCurveError, SharedCurveErrorKind,
+    CurveMetricResolutionEvidence, SharedCurve, SharedCurveError, SharedCurveErrorKind,
 };
 
 #[derive(Clone, Copy)]
@@ -135,13 +135,27 @@ impl<'a> ValidationSampler<'a> {
 
     pub fn validate_metric_evidence(&self, curve: &SharedCurve) -> Result<(), SharedCurveError> {
         let sources = self.sources.values().copied().collect::<Vec<_>>();
-        let evidence = &curve.metric_resolution;
-        if evidence.active_sources != sources
-            || evidence.evaluation_count != self.samples.len() as u64
-            || (evidence.minimum_tangent_target_size_m - self.minimum_target_size_m).abs() > 1.0e-12
-            || (evidence.maximum_tangent_target_size_m - self.maximum_target_size_m).abs() > 1.0e-12
-            || evidence.clipped_contribution_count != self.clipped_count
-            || evidence.rejected_contribution_count != self.rejected_count
+        let CurveMetricResolutionEvidence::Evaluated {
+            active_sources,
+            evaluation_count,
+            minimum_tangent_target_size_m,
+            maximum_tangent_target_size_m,
+            clipped_contribution_count,
+            rejected_contribution_count,
+        } = &curve.metric_resolution
+        else {
+            return Err(mismatch(
+                self.edge,
+                "curve metric resolution evidence",
+                "a nondegenerate edge requires evaluated tangent metric evidence",
+            ));
+        };
+        if *active_sources != sources
+            || *evaluation_count != self.samples.len() as u64
+            || (*minimum_tangent_target_size_m - self.minimum_target_size_m).abs() > 1.0e-12
+            || (*maximum_tangent_target_size_m - self.maximum_target_size_m).abs() > 1.0e-12
+            || *clipped_contribution_count != self.clipped_count
+            || *rejected_contribution_count != self.rejected_count
         {
             return Err(mismatch(
                 self.edge,

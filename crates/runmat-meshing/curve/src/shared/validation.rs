@@ -6,8 +6,9 @@ use runmat_geometry_core::{
 use runmat_meshing_core::MetricSourceKind;
 
 use super::{
-    shared_curve_node_id, CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve,
-    SharedCurveError, SharedCurveMesh, SHARED_CURVE_MESH_SCHEMA_VERSION,
+    shared_curve_node_id, shared_degenerate_curve_node_id, CurveMetricResolutionEvidence,
+    CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve, SharedCurveError, SharedCurveMesh,
+    SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
 const MAX_CURVE_NODES: usize = 20_000_000;
@@ -88,12 +89,17 @@ fn validate_curve(
             "edge kind, parameter range, or node inventory is invalid",
         ));
     }
-    validate_resolution(curve.requested, curve.achieved)?;
-    validate_metric_resolution(curve)?;
+    validate_resolution(curve.requested, curve.achieved, edge.is_degenerate)?;
+    validate_metric_resolution(curve, edge.is_degenerate)?;
     let mut node_ids = BTreeSet::new();
     for (index, node) in curve.nodes.iter().enumerate() {
-        if !node_ids.insert(node.node_id)
-            || node.node_id != shared_curve_node_id(&curve.source_edge_id, node.parameter)
+        let expected_node_id = if edge.is_degenerate {
+            shared_degenerate_curve_node_id(&curve.source_edge_id)
+        } else {
+            shared_curve_node_id(&curve.source_edge_id, node.parameter)
+        };
+        if (!edge.is_degenerate && !node_ids.insert(node.node_id))
+            || node.node_id != expected_node_id
             || !node.parameter.is_finite()
             || !node.arc_length_m.is_finite()
             || node.arc_length_m < 0.0
@@ -106,13 +112,29 @@ fn validate_curve(
         }
         if index > 0
             && (curve.nodes[index - 1].parameter >= node.parameter
-                || curve.nodes[index - 1].arc_length_m >= node.arc_length_m)
+                || (!edge.is_degenerate
+                    && curve.nodes[index - 1].arc_length_m >= node.arc_length_m))
         {
             return Err(invalid(
                 "shared curve node order",
                 "parameters and arc length must increase strictly",
             ));
         }
+    }
+    if edge.is_degenerate
+        && curve.nodes.iter().any(|node| {
+            node.arc_length_m.to_bits() != 0
+                || node
+                    .coordinates_m
+                    .iter()
+                    .zip(curve.nodes[0].coordinates_m)
+                    .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+        })
+    {
+        return Err(invalid(
+            "degenerate shared curve",
+            "all parameter samples must identify one coordinate with zero arc length",
+        ));
     }
     let first = &curve.nodes[0];
     let last = curve.nodes.last().expect("node count checked");
@@ -160,25 +182,36 @@ fn validate_curve(
     Ok(())
 }
 
-fn validate_metric_resolution(curve: &SharedCurve) -> Result<(), SharedCurveError> {
-    let evidence = &curve.metric_resolution;
-    if evidence.active_sources.is_empty()
-        || evidence.evaluation_count < curve.nodes.len() as u64
-        || !evidence.minimum_tangent_target_size_m.is_finite()
-        || evidence.minimum_tangent_target_size_m <= 0.0
-        || !evidence.maximum_tangent_target_size_m.is_finite()
-        || evidence.minimum_tangent_target_size_m > evidence.maximum_tangent_target_size_m
-        || evidence
-            .active_sources
-            .windows(2)
-            .any(|pair| metric_source_rank(pair[0]) >= metric_source_rank(pair[1]))
-    {
-        return Err(invalid(
+fn validate_metric_resolution(
+    curve: &SharedCurve,
+    is_degenerate: bool,
+) -> Result<(), SharedCurveError> {
+    match &curve.metric_resolution {
+        CurveMetricResolutionEvidence::DegenerateTopologicalCollapse if is_degenerate => Ok(()),
+        CurveMetricResolutionEvidence::Evaluated {
+            active_sources,
+            evaluation_count,
+            minimum_tangent_target_size_m,
+            maximum_tangent_target_size_m,
+            ..
+        } if !is_degenerate
+            && !active_sources.is_empty()
+            && *evaluation_count >= curve.nodes.len() as u64
+            && minimum_tangent_target_size_m.is_finite()
+            && *minimum_tangent_target_size_m > 0.0
+            && maximum_tangent_target_size_m.is_finite()
+            && minimum_tangent_target_size_m <= maximum_tangent_target_size_m
+            && !active_sources
+                .windows(2)
+                .any(|pair| metric_source_rank(pair[0]) >= metric_source_rank(pair[1])) =>
+        {
+            Ok(())
+        }
+        _ => Err(invalid(
             "shared curve metric resolution",
-            "sources, evaluation count, and tangent target range must be canonical",
-        ));
+            "evidence kind, sources, count, and tangent target range must match edge topology",
+        )),
     }
-    Ok(())
 }
 
 pub(super) const fn metric_source_rank(source: MetricSourceKind) -> u8 {
@@ -200,6 +233,7 @@ pub(super) const fn metric_source_rank(source: MetricSourceKind) -> u8 {
 fn validate_resolution(
     requested: CurveResolutionPolicy,
     achieved: CurveResolutionEvidence,
+    is_degenerate: bool,
 ) -> Result<(), SharedCurveError> {
     let requested_values = [
         requested.maximum_chordal_deviation_m,
@@ -216,10 +250,26 @@ fn validate_resolution(
     if requested_values
         .iter()
         .any(|value| !value.is_finite() || *value <= 0.0)
-        || achieved_values
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0)
         || requested.minimum_metric_edge_length > requested.maximum_metric_edge_length
+    {
+        return Err(invalid(
+            "shared curve resolution",
+            "requested bounds must be finite, positive, and ordered",
+        ));
+    }
+    if is_degenerate {
+        return if achieved_values.iter().all(|value| value.to_bits() == 0) {
+            Ok(())
+        } else {
+            Err(invalid(
+                "shared curve resolution",
+                "degenerate edges must record zero achieved geometric and metric extent",
+            ))
+        };
+    }
+    if achieved_values
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
         || achieved.minimum_metric_edge_length <= 0.0
         || achieved.minimum_metric_edge_length > achieved.maximum_metric_edge_length
         || achieved.minimum_metric_edge_length < requested.minimum_metric_edge_length

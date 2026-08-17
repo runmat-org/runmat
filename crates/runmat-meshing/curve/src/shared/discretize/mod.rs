@@ -1,7 +1,9 @@
 mod arc_length;
+mod degenerate;
 mod error;
 mod generate;
 mod math;
+mod pcurves;
 mod sampling;
 mod types;
 

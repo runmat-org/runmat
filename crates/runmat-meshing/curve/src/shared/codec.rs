@@ -3,8 +3,8 @@ use runmat_geometry_core::ExactBRepTopology;
 
 use super::{SharedCurveError, SharedCurveMesh};
 
-const CODEC_PREFIX: &[u8] = b"runmat-meshing-curve-canonical-cbor/v1\0";
-const CONTRACT_DOMAIN: &str = "shared-curve-mesh/v1";
+const CODEC_PREFIX: &[u8] = b"runmat-meshing-curve-canonical-cbor/v2\0";
+const CONTRACT_DOMAIN: &str = "shared-curve-mesh/v2";
 const CONTRACT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 1024 * 1024, 64);
 

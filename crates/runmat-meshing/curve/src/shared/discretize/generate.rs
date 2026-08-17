@@ -5,13 +5,14 @@ use runmat_geometry_core::{
 
 use crate::shared::{
     shared_curve_node_id, CurveResolutionEvidence, SharedCurve, SharedCurveError,
-    SharedCurveErrorKind, SharedCurveFaceUse, SharedCurveMesh, SharedCurveNode,
-    SHARED_CURVE_MESH_SCHEMA_VERSION,
+    SharedCurveErrorKind, SharedCurveMesh, SharedCurveNode, SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
 use super::{
     arc_length::world_arc_length,
+    degenerate::discretize_degenerate_edge,
     error::{edge_error, geometry_error, require_parameter_range, validate_options},
+    pcurves::face_uses_for_parameters,
     sampling::{interval_evidence, EvaluatedPoint, EvaluationCache},
     types::{CurveMetricField, SharedCurveDiscretizationOptions},
 };
@@ -65,12 +66,7 @@ fn discretize_edge(
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurve, SharedCurveError> {
     if edge.is_degenerate {
-        return Err(edge_error(
-            edge,
-            SharedCurveErrorKind::UnsatisfiedConstraint,
-            "degenerate exact edge",
-            "zero-length exact edges require singular-boundary discretization",
-        ));
+        return discretize_degenerate_edge(topology, edge, curves, pcurves, control, options);
     }
     let parameter_range = curves
         .parameter_range(&edge.curve_evaluator_id)
@@ -133,41 +129,18 @@ fn discretize_edge(
         });
     }
 
-    let mut coedges = topology
-        .coedges
+    let parameters = samples
         .iter()
-        .filter(|coedge| coedge.edge_id == edge.id)
+        .map(|sample| sample.parameter)
         .collect::<Vec<_>>();
-    coedges.sort_by(|left, right| left.id.cmp(&right.id));
-    let mut face_uses = Vec::with_capacity(coedges.len());
-    for coedge in coedges {
-        let pcurve_range = pcurves
-            .parameter_range(&coedge.pcurve_evaluator_id)
-            .map_err(|error| geometry_error(edge, error))?;
-        if pcurve_range != parameter_range {
-            return Err(edge_error(
-                edge,
-                SharedCurveErrorKind::GeometricMismatch,
-                "pcurve parameter range",
-                "edge and coedge evaluator ranges differ",
-            ));
-        }
-        let node_uv = samples
-            .iter()
-            .map(|sample| {
-                pcurves
-                    .point(&coedge.pcurve_evaluator_id, sample.parameter, control)
-                    .map_err(|error| geometry_error(edge, error))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        face_uses.push(SharedCurveFaceUse {
-            coedge_id: coedge.id.clone(),
-            face_id: coedge.face_id.clone(),
-            orientation: coedge.orientation,
-            seam_image: coedge.seam_image,
-            node_uv,
-        });
-    }
+    let face_uses = face_uses_for_parameters(
+        topology,
+        edge,
+        pcurves,
+        control,
+        parameter_range,
+        &parameters,
+    )?;
 
     Ok(SharedCurve {
         source_edge_id: edge.id.clone(),

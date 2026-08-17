@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SharedCurveError;
 
-pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 1;
+pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,14 +74,18 @@ pub struct CurveResolutionEvidence {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CurveMetricResolutionEvidence {
-    /// Canonical union of metric sources active at every constructive sample.
-    pub active_sources: Vec<MetricSourceKind>,
-    pub evaluation_count: u64,
-    pub minimum_tangent_target_size_m: f64,
-    pub maximum_tangent_target_size_m: f64,
-    /// Evaluation-weighted contribution counts reported by the metric authority.
-    pub clipped_contribution_count: u32,
-    pub rejected_contribution_count: u32,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CurveMetricResolutionEvidence {
+    Evaluated {
+        /// Canonical union of metric sources active at every constructive sample.
+        active_sources: Vec<MetricSourceKind>,
+        evaluation_count: u64,
+        minimum_tangent_target_size_m: f64,
+        maximum_tangent_target_size_m: f64,
+        /// Evaluation-weighted contribution counts reported by the metric authority.
+        clipped_contribution_count: u32,
+        rejected_contribution_count: u32,
+    },
+    /// No tangent metric exists because the exact edge collapses to one 3D point.
+    DegenerateTopologicalCollapse,
 }

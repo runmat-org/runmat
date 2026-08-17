@@ -1,4 +1,5 @@
 use std::f64::consts::{PI, TAU};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_geometry_core::ParameterRange;
 
@@ -116,10 +117,13 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
     .unwrap();
     assert_eq!(report.edge_count, 1);
     assert_eq!(report.node_count, curve.nodes.len() as u64);
-    assert_eq!(
-        report.metric_evaluation_count,
-        curve.metric_resolution.evaluation_count
-    );
+    let CurveMetricResolutionEvidence::Evaluated {
+        evaluation_count, ..
+    } = curve.metric_resolution
+    else {
+        panic!("ordinary edge must retain evaluated metric evidence")
+    };
+    assert_eq!(report.metric_evaluation_count, evaluation_count);
 }
 
 #[test]
@@ -199,8 +203,12 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
     );
 
     let mut false_source = mesh;
-    false_source.edges[0].metric_resolution.active_sources =
-        vec![runmat_meshing_core::MetricSourceKind::Feature];
+    let CurveMetricResolutionEvidence::Evaluated { active_sources, .. } =
+        &mut false_source.edges[0].metric_resolution
+    else {
+        panic!("ordinary edge must retain evaluated metric evidence")
+    };
+    *active_sources = vec![runmat_meshing_core::MetricSourceKind::Feature];
     assert_eq!(
         validate(&false_source).unwrap_err().kind,
         SharedCurveErrorKind::GeometricMismatch
@@ -332,6 +340,95 @@ fn constructive_curves_preserve_typed_evaluator_cancellation() {
     );
 }
 
+#[test]
+fn singular_edge_preserves_pcurve_interval_as_one_collapsed_mesh_node() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_singular_edge();
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact");
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let metric = CountingMetric::new();
+    let options = shared_options();
+    let mesh = discretize_shared_curves(
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &UnlimitedControl,
+        options,
+    )
+    .unwrap();
+    let curve = &mesh.edges[0];
+    assert_eq!(curve.nodes.len(), 2);
+    assert_eq!(curve.nodes[0].node_id, curve.nodes[1].node_id);
+    assert_eq!(curve.nodes[0].coordinates_m, [0.0, 0.0, 1.0]);
+    assert_eq!(curve.nodes[0].coordinates_m, curve.nodes[1].coordinates_m);
+    assert_eq!(curve.nodes[0].arc_length_m, 0.0);
+    assert_eq!(curve.nodes[1].arc_length_m, 0.0);
+    assert_eq!(curve.face_uses[0].node_uv[0], [0.0, PI / 2.0]);
+    assert_eq!(curve.face_uses[0].node_uv[1], [TAU, PI / 2.0]);
+    assert_eq!(
+        curve.metric_resolution,
+        CurveMetricResolutionEvidence::DegenerateTopologicalCollapse
+    );
+    assert_eq!(metric.calls.load(Ordering::Relaxed), 0);
+
+    let encoded = encode_shared_curve_mesh(&mesh, &topology).unwrap();
+    assert_eq!(decode_shared_curve_mesh(&encoded, &topology).unwrap(), mesh);
+    let report = validate_shared_curve_geometry(
+        &mesh,
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &UnlimitedControl,
+        options,
+    )
+    .unwrap();
+    assert_eq!(report.metric_evaluation_count, 0);
+    assert_eq!(metric.calls.load(Ordering::Relaxed), 0);
+
+    let mut fabricated_metric = mesh.clone();
+    fabricated_metric.edges[0].metric_resolution = CurveMetricResolutionEvidence::Evaluated {
+        active_sources: vec![runmat_meshing_core::MetricSourceKind::Global],
+        evaluation_count: 2,
+        minimum_tangent_target_size_m: 1.0,
+        maximum_tangent_target_size_m: 1.0,
+        clipped_contribution_count: 0,
+        rejected_contribution_count: 0,
+    };
+    assert!(fabricated_metric.validate_against(&topology).is_err());
+
+    let mut fabricated_length = mesh;
+    fabricated_length.edges[0].nodes[1].arc_length_m = -0.0;
+    assert!(fabricated_length.validate_against(&topology).is_err());
+}
+
+#[test]
+fn declared_degenerate_edge_must_geometrically_collapse() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact");
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let mut false_topology = topology.clone();
+    false_topology.edges[0].is_degenerate = true;
+    false_topology.edges[0].is_periodic = false;
+    let error = discretize_shared_curves(
+        &false_topology,
+        &evaluator,
+        &evaluator,
+        &CountingMetric::new(),
+        &UnlimitedControl,
+        shared_options(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, SharedCurveErrorKind::GeometricMismatch);
+    assert_eq!(error.field, "degenerate exact edge");
+}
+
 fn shared_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
@@ -349,6 +446,28 @@ fn shared_options() -> SharedCurveDiscretizationOptions {
 }
 
 struct UnlimitedControl;
+
+struct CountingMetric {
+    calls: AtomicU64,
+}
+
+impl CountingMetric {
+    fn new() -> Self {
+        Self {
+            calls: AtomicU64::new(0),
+        }
+    }
+}
+
+impl CurveMetricField for CountingMetric {
+    fn evaluate(
+        &self,
+        _query: CurveMetricQuery<'_>,
+    ) -> Result<CurveMetricEvaluation, SharedCurveError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        panic!("a degenerate edge must not request a tangent metric")
+    }
+}
 
 impl runmat_geometry_core::GeometryEvaluationControl for UnlimitedControl {
     fn checkpoint(&self) -> Result<(), runmat_geometry_core::GeometryEvaluationError> {
@@ -457,7 +576,7 @@ fn circle_mesh(topology: &runmat_geometry_core::ExactBRepTopology) -> SharedCurv
                 minimum_metric_edge_length: 2.0,
                 maximum_metric_edge_length: 2.0,
             },
-            metric_resolution: CurveMetricResolutionEvidence {
+            metric_resolution: CurveMetricResolutionEvidence::Evaluated {
                 active_sources: vec![runmat_meshing_core::MetricSourceKind::Global],
                 evaluation_count: 3,
                 minimum_tangent_target_size_m: 1.0,
