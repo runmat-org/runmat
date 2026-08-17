@@ -22,6 +22,70 @@ const KSTEST_NAME: &str = "kstest";
 const MAX_SUPPORTED_DIM: usize = 1024;
 const SQRT_2: f64 = std::f64::consts::SQRT_2;
 
+const TTEST2_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ttest2-integer-sample",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ttest2 with native-class integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ttest2IntegerSampleExtension"),
+};
+const TTEST2_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ttest2-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ttest2 with native-class integer numeric options is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ttest2IntegerOptionExtension"),
+};
+pub const TTEST2_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TTEST2_INTEGER_SAMPLE_EXTENSION,
+    TTEST2_INTEGER_OPTION_EXTENSION,
+];
+
+const TTEST2_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer samples are gated before gather and checked for exact binary64 representation.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer samples are gated before gather and checked for exact binary64 representation.",
+    },
+];
+const TTEST2_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Alpha or Dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Native integer numeric options are independently gated and checked before scalar conversion.",
+    }];
+pub const TTEST2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = ttest2(integer_x, integer_y, ___)",
+        inputs: &TTEST2_INTEGER_SAMPLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "h is logical and the remaining outputs are floating point. Lossy integer sample conversion rejects.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = ttest2(x, y, Alpha or Dim, integer_value)",
+        inputs: &TTEST2_INTEGER_OPTION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Dim is decoded as a checked structural selector; Alpha crosses one checked binary64 boundary.",
+    },
+];
+
 const KSTEST_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "kstest-integer-sample",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -395,11 +459,16 @@ struct KstestEvaluation {
     keywords = "ttest2,t-test,hypothesis test,welch,equal variance,statistics",
     type_resolver(ttest2_type),
     descriptor(crate::builtins::stats::summary::hypothesis::TTEST2_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::hypothesis::TTEST2_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::hypothesis::TTEST2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::hypothesis"
 )]
 pub(crate) async fn ttest2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_ttest2_extensions(&x, &y, &rest)?;
     let x = gathered_tensor(x).await?;
     let y = gathered_tensor(y).await?;
+    ensure_exact_ttest2_integer_tensor(&x, "sample x")?;
+    ensure_exact_ttest2_integer_tensor(&y, "sample y")?;
     let rest = gather_values(rest).await?;
     let options = parse_options(rest)?;
     let eval = evaluate(&x, &y, options)?;
@@ -909,6 +978,73 @@ async fn gathered_tensor(value: Value) -> BuiltinResult<Tensor> {
     tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(invalid_argument)
 }
 
+fn ttest2_is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn ttest2_plain_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        _ => None,
+    }
+}
+
+fn ensure_ttest2_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if ttest2_is_typed_integer(x) || ttest2_is_typed_integer(y) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TTEST2_INTEGER_SAMPLE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    for pair in rest.chunks_exact(2) {
+        if ttest2_plain_text(&pair[0])
+            .is_some_and(|name| matches!(name.to_ascii_lowercase().as_str(), "alpha" | "dim"))
+            && ttest2_is_typed_integer(&pair[1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &TTEST2_INTEGER_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_exact_ttest2_integer_tensor(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
+    if let Some(storage) = tensor.integer_storage() {
+        for integer in storage.exact_values() {
+            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+                return Err(invalid_argument(format!(
+                    "ttest2: integer {role} values must be exactly representable as double"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_exact_ttest2_integer_scalar(value: &Value, role: &str) -> BuiltinResult<()> {
+    match value {
+        Value::Int(integer) => {
+            if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(integer) {
+                Ok(())
+            } else {
+                Err(invalid_argument(format!(
+                    "ttest2: integer {role} must be exactly representable as double"
+                )))
+            }
+        }
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            ensure_exact_ttest2_integer_tensor(tensor, role)
+        }
+        _ => Ok(()),
+    }
+}
+
 async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
@@ -936,6 +1072,7 @@ fn parse_options(rest: Vec<Value>) -> BuiltinResult<Options> {
         idx += 1;
         match name.to_ascii_lowercase().as_str() {
             "alpha" => {
+                ensure_exact_ttest2_integer_scalar(value, "Alpha")?;
                 let alpha = scalar_number(value)
                     .ok_or_else(|| invalid_argument("ttest2: Alpha must be numeric"))?;
                 if !(alpha.is_finite() && alpha > 0.0 && alpha < 1.0) {
@@ -946,17 +1083,17 @@ fn parse_options(rest: Vec<Value>) -> BuiltinResult<Options> {
                 options.alpha = alpha;
             }
             "dim" => {
-                let dim = scalar_number(value)
-                    .ok_or_else(|| invalid_argument("ttest2: Dim must be numeric"))?;
-                if !(dim.is_finite() && dim >= 1.0 && dim.fract() == 0.0) {
+                let dim = scalar_usize(value)
+                    .ok_or_else(|| invalid_argument("ttest2: Dim must be a positive integer"))?;
+                if dim == 0 {
                     return Err(invalid_argument("ttest2: Dim must be a positive integer"));
                 }
-                if dim > MAX_SUPPORTED_DIM as f64 {
+                if dim > MAX_SUPPORTED_DIM {
                     return Err(invalid_argument(format!(
                         "ttest2: Dim exceeds the supported maximum of {MAX_SUPPORTED_DIM}"
                     )));
                 }
-                options.dim = Some(dim as usize - 1);
+                options.dim = Some(dim - 1);
             }
             "tail" => {
                 let tail = scalar_text(value, "Tail")?;
@@ -1013,6 +1150,34 @@ fn scalar_number(value: &Value) -> Option<f64> {
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             tensor::tensor_values_f64(tensor).first().copied()
         }
+        _ => None,
+    }
+}
+
+fn scalar_usize(value: &Value) -> Option<usize> {
+    match value {
+        Value::Int(value) => value.try_to_usize(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage.value_at(0)?.try_to_usize()
+            } else {
+                let value = tensor::tensor_values_f64(tensor).first().copied()?;
+                (value.is_finite()
+                    && value >= 0.0
+                    && value.fract() == 0.0
+                    && value < usize::MAX as f64)
+                    .then_some(value as usize)
+            }
+        }
+        Value::Num(value)
+            if value.is_finite()
+                && *value >= 0.0
+                && value.fract() == 0.0
+                && *value < usize::MAX as f64 =>
+        {
+            Some(*value as usize)
+        }
+        Value::Bool(value) => Some(usize::from(*value)),
         _ => None,
     }
 }
@@ -1521,6 +1686,7 @@ mod tests {
 
     #[test]
     fn ttest2_numeric_options_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
         let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap());
         let out = block_on(ttest2_builtin(
@@ -1550,10 +1716,40 @@ mod tests {
 
     #[test]
     fn ttest2_sample_values_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = poisoned_integer_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![4, 1]);
         let y = poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 4, 8]), vec![4, 1]);
         let out = block_on(ttest2_builtin(x, y, Vec::new())).unwrap();
         assert_eq!(out, Value::Bool(false));
+    }
+
+    #[test]
+    fn ttest2_gates_integer_roles_and_rejects_lossy_boundaries() {
+        let integer = poisoned_integer_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = ensure_ttest2_extensions(&integer, &Value::Num(1.0), &[])
+            .expect_err("integer sample must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:Ttest2IntegerSampleExtension")
+        );
+        let error = ensure_ttest2_extensions(
+            &Value::Num(1.0),
+            &Value::Num(1.0),
+            &[Value::from("Dim"), integer],
+        )
+        .expect_err("integer option must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:Ttest2IntegerOptionExtension")
+        );
+        drop(_strict);
+
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+            .expect("wide integer");
+        let error = ensure_exact_ttest2_integer_tensor(&wide, "sample x")
+            .expect_err("lossy sample must reject");
+        assert!(error.message().contains("exactly representable"));
     }
 
     #[test]

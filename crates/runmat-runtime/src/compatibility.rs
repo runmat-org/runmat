@@ -145,6 +145,7 @@ mod tests {
     fn compatibility_release_label_is_centralized_in_documentation() {
         let docs_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
         let canonical_policy = docs_root.join("development/backwards-compat.md");
+        let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
         let mut pending = vec![docs_root];
         while let Some(directory) = pending.pop() {
             for entry in std::fs::read_dir(&directory).expect("read documentation directory") {
@@ -158,7 +159,7 @@ mod tests {
                 {
                     let contents = std::fs::read_to_string(&path).expect("read documentation file");
                     assert!(
-                        !contents.contains(MATLAB_COMPATIBILITY_RELEASE),
+                        !contents.to_ascii_lowercase().contains(&release_label),
                         "the compatibility release label must be documented only in {}: {}",
                         canonical_policy.display(),
                         path.display()
@@ -1427,12 +1428,22 @@ mod tests {
             ("ss", "ss-integer-sample-time"),
             ("trapz", "trapz-integer-data"),
             ("trapz", "trapz-integer-spacing"),
+            ("triu", "triu-paged-input"),
             ("triplot", "triplot-gpu-input"),
             ("triplot", "triplot-integer-connectivity"),
             ("triplot", "triplot-integer-coordinates"),
             ("tripuls", "tripuls-gpu-input"),
             ("tripuls", "tripuls-integer-controls"),
             ("tripuls", "tripuls-integer-sample-times"),
+            ("true", "true-implicit-prototype"),
+            ("true", "true-logical-class-option"),
+            ("true", "true-resident-size-input"),
+            ("true", "true-single-size-input"),
+            ("tsne", "tsne-integer-data"),
+            ("tsne", "tsne-integer-option"),
+            ("tsne", "tsne-resident-input"),
+            ("ttest2", "ttest2-integer-option"),
+            ("ttest2", "ttest2-integer-sample"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2011,6 +2022,7 @@ mod tests {
                 "saveobj",
                 "splitlines",
                 "strip",
+                "uigetfile",
                 "upper",
             ]
         );

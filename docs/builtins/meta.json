@@ -161757,6 +161757,70 @@
           "when": "Internal masking/upload path fails.",
           "message": "triu: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "triu-paged-input",
+          "mode": "RunMatOnly",
+          "description": "triu on paged arrays is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TriuPagedInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = triu(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented matrix inputs and preserve their class when the lower triangle is replaced by typed zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Host masking works directly on native storage. Resident integer input uses exact owner-aware fallback when the provider's floating kernel is not applicable."
+        },
+        {
+          "form": "B = triu(A, integer_k)",
+          "inputs": [
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The diagonal selector is an integer-valued scalar. Native integer storage is decoded exactly and must fit the runtime index range."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The offset is classified and range-checked before masking; automatic residency gathers transparently when needed."
+        }
       ]
     },
     {
@@ -162107,6 +162171,115 @@
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "true: dimension arguments must be numeric and nonnegative"
         }
+      ],
+      "extensions": [
+        {
+          "id": "true-implicit-prototype",
+          "mode": "RunMatOnly",
+          "description": "true(A) implicit size-prototype syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TrueImplicitPrototypeExtension"
+        },
+        {
+          "id": "true-logical-class-option",
+          "mode": "RunMatOnly",
+          "description": "true(...,'logical') is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TrueLogicalOptionExtension"
+        },
+        {
+          "id": "true-single-size-input",
+          "mode": "RunMatOnly",
+          "description": "single-precision true size controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TrueSingleSizeExtension"
+        },
+        {
+          "id": "true-resident-size-input",
+          "mode": "RunMatOnly",
+          "description": "resident true size controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TrueResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = true(integer_n or integer_sz1,...,integer_szN)",
+          "inputs": [
+            {
+              "name": "n/sz/szN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls. Negative signed values clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Exact integer dimensions determine shape only; output is always logical."
+        },
+        {
+          "form": "T = true(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz/szN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls. Negative signed values clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The documented row size vector is decoded exactly from every supported integer class."
+        },
+        {
+          "form": "T = true(..., like=integer_p)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer prototype selects applicable sparsity and residency; true output remains logical and the prototype never supplies shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The logical output preserves applicable sparse or owning-provider residency but not the integer prototype class."
+        }
       ]
     },
     {
@@ -162211,6 +162384,82 @@
           "identifier": "RunMat:tsne:Internal",
           "when": "RunMat cannot allocate or construct the t-SNE result.",
           "message": "tsne: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "tsne-integer-data",
+          "mode": "RunMatOnly",
+          "description": "tsne with native-class integer observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TsneIntegerDataExtension"
+        },
+        {
+          "id": "tsne-integer-option",
+          "mode": "RunMatOnly",
+          "description": "tsne with native-class integer numeric option values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TsneIntegerOptionExtension"
+        },
+        {
+          "id": "tsne-resident-input",
+          "mode": "RunMatOnly",
+          "description": "tsne host fallback for explicit gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TsneResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = tsne(integer_X, ___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer observations are gated before gather and must be exactly representable at the binary64 optimization boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The embedding and loss remain floating-point results; lossy integer observation conversion rejects."
+        },
+        {
+          "form": "Y = tsne(X, Name, integer_Value)",
+          "inputs": [
+            {
+              "name": "numeric option value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Native integer InitialY and numeric controls are independently gated and checked before conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer-valued structural controls are decoded exactly; numeric optimization values cross one checked binary64 boundary."
         }
       ]
     },
@@ -162393,6 +162642,92 @@
           "identifier": "RunMat:ttest2:Internal",
           "when": "RunMat cannot construct ttest2 outputs.",
           "message": "ttest2: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ttest2-integer-sample",
+          "mode": "RunMatOnly",
+          "description": "ttest2 with native-class integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ttest2IntegerSampleExtension"
+        },
+        {
+          "id": "ttest2-integer-option",
+          "mode": "RunMatOnly",
+          "description": "ttest2 with native-class integer numeric options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ttest2IntegerOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = ttest2(integer_x, integer_y, ___)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer samples are gated before gather and checked for exact binary64 representation."
+            },
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Native integer samples are gated before gather and checked for exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "h is logical and the remaining outputs are floating point. Lossy integer sample conversion rejects."
+        },
+        {
+          "form": "h = ttest2(x, y, Alpha or Dim, integer_value)",
+          "inputs": [
+            {
+              "name": "Alpha or Dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Native integer numeric options are independently gated and checked before scalar conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Dim is decoded as a checked structural selector; Alpha crosses one checked binary64 boundary."
         }
       ]
     },
@@ -162608,7 +162943,11 @@
           "when": "The active filesystem provider returns a malformed or internally inconsistent file selection.",
           "message": "uigetfile: invalid file selection"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "uigetfile accepts textual filter, title, path, and option inputs. Its filter-index output is an integer-valued double scalar, not a native integer-class boundary."
+      }
     },
     {
       "name": "uint16",
@@ -162655,6 +162994,35 @@
           "identifier": "RunMat:uint16:Internal",
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "uint16: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = uint16(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative uint16 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native uint16 device storage; complex-input preservation is implemented on host, while paired complex-integer device storage remains an architecture gap."
         }
       ]
     },
@@ -162844,6 +163212,35 @@
           "identifier": "RunMat:uint32:Internal",
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "uint32: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = uint32(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative uint32 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native uint32 device storage; complex-input preservation is implemented on host, while paired complex-integer device storage remains an architecture gap."
         }
       ]
     },
@@ -163174,6 +163571,35 @@
           "identifier": "RunMat:uint8:Internal",
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "uint8: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = uint8(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative uint8 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host conversion is exact and saturating. Real gpuArray conversion uses native uint8 device storage; complex-input preservation is implemented on host, while paired complex-integer device storage remains an architecture gap."
         }
       ]
     },

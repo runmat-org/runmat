@@ -182,12 +182,12 @@ mod tests {
             Value::Bool(true)
         );
         assert_eq!(
-            ver_less_than_builtin(Value::from("matlab"), Value::from("26.1")).unwrap(),
+            ver_less_than_builtin(
+                Value::from("matlab"),
+                Value::from(crate::compatibility::MATLAB_COMPATIBILITY_VERSION),
+            )
+            .unwrap(),
             Value::Bool(false)
-        );
-        assert_eq!(
-            ver_less_than_builtin(Value::from("matlab"), Value::from("26.2")).unwrap(),
-            Value::Bool(true)
         );
         assert_eq!(
             ver_less_than_builtin(Value::from("simulink"), Value::from("99.0")).unwrap(),

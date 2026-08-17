@@ -184,45 +184,6 @@ define_integer_cast_builtin!(
     "RM.INT64.INTERNAL"
 );
 define_integer_cast_builtin!(
-    uint8,
-    uint8_builtin,
-    "uint8",
-    IntegerTarget::U8,
-    "Convert scalars and arrays to uint8 using MATLAB saturating rounding.",
-    "uint8,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::uint8::DESCRIPTOR,
-    "crate::builtins::math::elementwise::integer_cast_builtins::uint8",
-    "RM.UINT8.INVALID_ARGUMENT",
-    "RM.UINT8.INVALID_INPUT",
-    "RM.UINT8.INTERNAL"
-);
-define_integer_cast_builtin!(
-    uint16,
-    uint16_builtin,
-    "uint16",
-    IntegerTarget::U16,
-    "Convert scalars and arrays to uint16 using MATLAB saturating rounding.",
-    "uint16,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::uint16::DESCRIPTOR,
-    "crate::builtins::math::elementwise::integer_cast_builtins::uint16",
-    "RM.UINT16.INVALID_ARGUMENT",
-    "RM.UINT16.INVALID_INPUT",
-    "RM.UINT16.INTERNAL"
-);
-define_integer_cast_builtin!(
-    uint32,
-    uint32_builtin,
-    "uint32",
-    IntegerTarget::U32,
-    "Convert scalars and arrays to uint32 using MATLAB saturating rounding.",
-    "uint32,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::uint32::DESCRIPTOR,
-    "crate::builtins::math::elementwise::integer_cast_builtins::uint32",
-    "RM.UINT32.INVALID_ARGUMENT",
-    "RM.UINT32.INVALID_INPUT",
-    "RM.UINT32.INTERNAL"
-);
-define_integer_cast_builtin!(
     uint64,
     uint64_builtin,
     "uint64",

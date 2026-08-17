@@ -18,15 +18,16 @@
   },
   "description": "`ttest2(x,y)` tests whether two independent samples have equal means. It supports the default equal-variance test and Welch's unequal-variance test through `\"Vartype\",\"unequal\"`.",
   "behaviors": [
-    "`x` and `y` may be numeric or logical vectors, matrices, or N-D arrays.",
+    "`x` and `y` may be single- or double-precision vectors, matrices, or N-D arrays.",
     "Vector inputs are treated as single samples and may have different lengths.",
     "Array inputs are tested along the first nonsingleton dimension by default, or along `Dim` when specified.",
     "Array inputs must have the same size along all dimensions except the test dimension.",
     "`NaN` values are omitted independently from each sample before each test.",
-    "`gpuArray` inputs are accepted through the host-gather compatibility path; outputs are host values.",
+    "`gpuArray` inputs are accepted through the current host-compute path; preserving output residency remains an implementation gap.",
     "`Tail` accepts `\"both\"`, `\"right\"`, or `\"left\"`; `\"larger\"` and `\"smaller\"` are accepted as compatibility aliases.",
     "`Alpha` must be a scalar in the open interval `(0,1)`.",
-    "The fourth output is a struct with `tstat`, `df`, and `sd` fields."
+    "The fourth output is a struct with `tstat`, `df`, and `sd` fields.",
+    "Native integer samples and native integer `Alpha` or `Dim` values are independently controlled RunMat language extensions and must cross the statistical binary64 boundary exactly."
   ],
   "examples": [
     {

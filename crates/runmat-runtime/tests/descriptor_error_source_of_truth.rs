@@ -2,6 +2,26 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[test]
+fn public_integer_cast_descriptors_are_unique() {
+    let _ = runmat_runtime::object_property_getter_name("__descriptor_registry_probe");
+    for name in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let count = runmat_builtins::builtin_functions()
+            .into_iter()
+            .filter(|builtin| {
+                builtin.name == name
+                    && builtin.descriptor.is_some_and(|descriptor| {
+                        descriptor.completion_policy
+                            == runmat_builtins::BuiltinCompletionPolicy::Public
+                    })
+            })
+            .count();
+        assert_eq!(count, 1, "expected exactly one public {name} descriptor");
+    }
+}
+
 fn collect_rs_files(root: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(root) else {
         return;

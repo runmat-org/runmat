@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. t-SNE runs on CPU because it is iterative, dense, and metadata-heavy."
+    "notes": "t-SNE runs on the host. Explicit gpuArray input is available only when RunMat language extensions are enabled; automatic residency may gather transparently."
   },
   "fusion": {
     "elementwise": false,
@@ -30,7 +30,7 @@
   },
   "description": "`tsne(X)` embeds the rows of a numeric observation matrix into a lower-dimensional numeric matrix. `[Y,loss] = tsne(...)` also returns the final Kullback-Leibler divergence.",
   "behaviors": [
-    "`X` must be a real numeric vector or 2-D matrix. Matrix rows are observations; a column vector has one predictor per row, while a row vector is one observation with multiple predictors.",
+    "`X` must be a real single- or double-precision vector or 2-D matrix. Matrix rows are observations; a column vector has one predictor per row, while a row vector is one observation with multiple predictors.",
     "Rows containing `NaN` are omitted before fitting. `Inf` values are rejected.",
     "`NumDimensions` selects the output dimension and defaults to 2. `InitialY` can match either all input rows or the complete rows that remain after `NaN` omission.",
     "`Algorithm` accepts `\"barneshut\"` and `\"exact\"`. RunMat computes a bounded exact CPU embedding for both modes so scripts receive compatible outputs without silent shape changes.",
@@ -38,7 +38,8 @@
     "`Standardize` centers and scales each predictor column before distance computation. `NumPCAComponents` applies PCA before pairwise distance computation when it is positive and smaller than the predictor count.",
     "`Perplexity`, `Exaggeration`, `LearnRate`, `Theta`, `Verbose`, `NumPrint`, and `CacheSize` are parsed and validated for MATLAB-style script compatibility. `Theta`, `Verbose`, `NumPrint`, and `CacheSize` do not affect the exact CPU optimizer.",
     "`Options` accepts a statset-style struct with `MaxIter`, `TolFun`, and empty `OutputFcn`. Nonempty `OutputFcn` is rejected because RunMat does not invoke iteration callbacks from builtins yet.",
-    "RunMat rejects very large dense exact workloads before allocation to avoid unbounded pairwise, PCA, and Mahalanobis memory use."
+    "RunMat rejects very large dense exact workloads before allocation to avoid unbounded pairwise, PCA, and Mahalanobis memory use.",
+    "Native integer observation data and numeric option values are RunMat language extensions. Each integer value must be exactly representable at the binary64 optimization boundary."
   ],
   "examples": [
     {
