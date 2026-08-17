@@ -25,10 +25,15 @@ pub struct ExactGeometryCapabilitiesV2 {
     pub curve_curvature: bool,
     pub curve_arc_length: bool,
     pub curve_inverse_projection: bool,
+    pub pcurve_point: bool,
+    pub pcurve_derivatives: bool,
     pub surface_point: bool,
-    pub surface_derivatives: bool,
+    pub surface_first_derivatives: bool,
+    pub surface_second_derivatives: bool,
     pub surface_normal: bool,
     pub surface_principal_curvature: bool,
+    pub surface_uv_bounds: bool,
+    pub surface_periodicity: bool,
     pub surface_closest_point: bool,
     pub trim_domain_classification: bool,
     pub mass_properties: bool,
@@ -41,10 +46,15 @@ impl ExactGeometryCapabilitiesV2 {
             && self.curve_curvature
             && self.curve_arc_length
             && self.curve_inverse_projection
+            && self.pcurve_point
+            && self.pcurve_derivatives
             && self.surface_point
-            && self.surface_derivatives
+            && self.surface_first_derivatives
+            && self.surface_second_derivatives
             && self.surface_normal
             && self.surface_principal_curvature
+            && self.surface_uv_bounds
+            && self.surface_periodicity
             && self.surface_closest_point
             && self.trim_domain_classification
             && self.mass_properties
@@ -59,10 +69,17 @@ pub struct ExactBRepModelV2 {
     pub capabilities: ExactGeometryCapabilitiesV2,
     pub assembly_count: u64,
     pub instance_count: u64,
+    pub body_count: u64,
+    pub lump_count: u64,
     pub solid_count: u64,
+    pub shell_count: u64,
     pub face_count: u64,
+    pub wire_count: u64,
+    pub coedge_count: u64,
     pub edge_count: u64,
     pub vertex_count: u64,
+    pub interface_count: u64,
+    pub contact_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

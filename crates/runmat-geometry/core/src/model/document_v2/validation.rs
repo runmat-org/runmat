@@ -69,15 +69,17 @@ pub(super) fn validate_document(
                 ));
             }
             if model.assembly_count == 0
-                || model.instance_count == 0
-                || model.solid_count == 0
+                || model.body_count == 0
+                || model.shell_count == 0
                 || model.face_count == 0
+                || model.wire_count == 0
+                || model.coedge_count == 0
                 || model.edge_count == 0
                 || model.vertex_count == 0
             {
                 return Err(invalid(
                     "exact geometry topology counts",
-                    "an exact solid model must expose non-empty assembly and B-rep topology",
+                    "an exact model must expose non-empty assembly, body, shell, and boundary topology",
                 ));
             }
         }

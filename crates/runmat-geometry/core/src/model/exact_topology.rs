@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::PersistentEntityId;
+use super::{
+    CurveEvaluatorIdV2, MassPropertiesEvaluatorIdV2, PcurveEvaluatorIdV2, PersistentEntityId,
+    SurfaceEvaluatorIdV2, TrimClassifierIdV2,
+};
 
 pub const EXACT_BREP_TOPOLOGY_SCHEMA_VERSION: u16 = 2;
 
@@ -61,6 +64,7 @@ pub struct ExactInstanceV2 {
 #[serde(deny_unknown_fields)]
 pub struct ExactBodyV2 {
     pub id: PersistentEntityId,
+    pub mass_properties_evaluator_id: MassPropertiesEvaluatorIdV2,
     pub lump_ids: Vec<PersistentEntityId>,
     pub is_sheet_body: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -96,7 +100,8 @@ pub struct ExactShellV2 {
 pub struct ExactFaceV2 {
     pub id: PersistentEntityId,
     pub orientation: TopologicalOrientationV2,
-    pub surface_evaluator_id: String,
+    pub surface_evaluator_id: SurfaceEvaluatorIdV2,
+    pub trim_classifier_id: TrimClassifierIdV2,
     pub outer_wire_id: PersistentEntityId,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inner_wire_ids: Vec<PersistentEntityId>,
@@ -120,7 +125,7 @@ pub struct ExactCoedgeV2 {
     pub face_id: PersistentEntityId,
     pub edge_id: PersistentEntityId,
     pub orientation: TopologicalOrientationV2,
-    pub pcurve_evaluator_id: String,
+    pub pcurve_evaluator_id: PcurveEvaluatorIdV2,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seam_image: Option<u8>,
 }
@@ -129,7 +134,7 @@ pub struct ExactCoedgeV2 {
 #[serde(deny_unknown_fields)]
 pub struct ExactEdgeV2 {
     pub id: PersistentEntityId,
-    pub curve_evaluator_id: String,
+    pub curve_evaluator_id: CurveEvaluatorIdV2,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_vertex_id: Option<PersistentEntityId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

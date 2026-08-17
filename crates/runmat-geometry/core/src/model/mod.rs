@@ -1,6 +1,7 @@
 mod analysis_identity;
 mod assembly;
 mod document_v2;
+mod exact_evaluator;
 mod exact_topology;
 mod exact_topology_assembly_validation;
 mod exact_topology_validation;
@@ -20,6 +21,7 @@ pub use analysis_identity::{
 };
 pub use assembly::AssemblyNode;
 pub use document_v2::*;
+pub use exact_evaluator::*;
 pub use exact_topology::*;
 pub use field::{FieldLocation, FieldValueKind};
 pub use geometry::{GeometryAsset, GeometrySource};

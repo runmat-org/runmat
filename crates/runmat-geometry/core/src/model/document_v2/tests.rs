@@ -20,10 +20,15 @@ fn complete_capabilities() -> ExactGeometryCapabilitiesV2 {
         curve_curvature: true,
         curve_arc_length: true,
         curve_inverse_projection: true,
+        pcurve_point: true,
+        pcurve_derivatives: true,
         surface_point: true,
-        surface_derivatives: true,
+        surface_first_derivatives: true,
+        surface_second_derivatives: true,
         surface_normal: true,
         surface_principal_curvature: true,
+        surface_uv_bounds: true,
+        surface_periodicity: true,
         surface_closest_point: true,
         trim_domain_classification: true,
         mass_properties: true,
@@ -68,10 +73,17 @@ fn exact_document() -> GeometryDocumentV2 {
                 capabilities: complete_capabilities(),
                 assembly_count: 1,
                 instance_count: 1,
+                body_count: 1,
+                lump_count: 1,
                 solid_count: 1,
+                shell_count: 1,
                 face_count: 6,
+                wire_count: 6,
+                coedge_count: 24,
                 edge_count: 12,
                 vertex_count: 8,
+                interface_count: 0,
+                contact_count: 0,
             },
         },
         display_tessellations: vec![DisplayTessellationRefV2 {
@@ -121,11 +133,27 @@ fn faceted_sources_cannot_claim_exact_capability() {
 #[test]
 fn exact_admission_requires_complete_evaluators() {
     let mut document = exact_document();
+    if let GeometryModelV2::ExactBRep { model } = &mut document.model {
+        model.capabilities.trim_domain_classification = false;
+    }
+    assert!(document.validate().is_err());
+    if let GeometryModelV2::ExactBRep { model } = &mut document.model {
+        model.capabilities.trim_domain_classification = true;
+        model.capabilities.pcurve_derivatives = false;
+    }
+    assert!(document.validate().is_err());
+}
+
+#[test]
+fn exact_root_parts_and_sheet_models_do_not_require_fake_instances_or_solids() {
+    let mut document = exact_document();
     let GeometryModelV2::ExactBRep { model } = &mut document.model else {
         unreachable!()
     };
-    model.capabilities.trim_domain_classification = false;
-    assert!(document.validate().is_err());
+    model.instance_count = 0;
+    model.lump_count = 0;
+    model.solid_count = 0;
+    document.validate().unwrap();
 }
 
 #[test]

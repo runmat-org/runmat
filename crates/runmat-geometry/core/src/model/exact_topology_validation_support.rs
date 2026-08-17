@@ -216,18 +216,6 @@ pub(super) fn require_count(
     Ok(())
 }
 
-pub(super) fn validate_token(field: &str, value: &str) -> Result<(), GeometryContractError> {
-    if value.is_empty()
-        || value.len() > 512
-        || !value.is_ascii()
-        || value.chars().any(char::is_control)
-        || value.trim() != value
-    {
-        return Err(invalid(field, "must be a bounded printable ASCII token"));
-    }
-    Ok(())
-}
-
 pub(super) fn validate_transform(transform: &[f64; 16]) -> Result<(), GeometryContractError> {
     let determinant = transform[0] * (transform[5] * transform[10] - transform[6] * transform[9])
         - transform[1] * (transform[4] * transform[10] - transform[6] * transform[8])

@@ -78,10 +78,17 @@ impl ExactBRepTopologyV2 {
         }
         require_count("assembly", self.assemblies.len(), model.assembly_count)?;
         require_count("instance", self.instances.len(), model.instance_count)?;
+        require_count("body", self.bodies.len(), model.body_count)?;
+        require_count("lump", self.lumps.len(), model.lump_count)?;
         require_count("solid", self.solids.len(), model.solid_count)?;
+        require_count("shell", self.shells.len(), model.shell_count)?;
         require_count("face", self.faces.len(), model.face_count)?;
+        require_count("wire", self.wires.len(), model.wire_count)?;
+        require_count("coedge", self.coedges.len(), model.coedge_count)?;
         require_count("edge", self.edges.len(), model.edge_count)?;
         require_count("vertex", self.vertices.len(), model.vertex_count)?;
+        require_count("interface", self.interfaces.len(), model.interface_count)?;
+        require_count("contact", self.contacts.len(), model.contact_count)?;
 
         let assemblies = collect_ids(
             "assemblies",
@@ -153,6 +160,7 @@ impl ExactBRepTopologyV2 {
         let mut claimed_lumps = BTreeSet::new();
         let mut claimed_sheet_shells = BTreeSet::new();
         for body in &self.bodies {
+            body.mass_properties_evaluator_id.validate()?;
             if body.is_sheet_body == body.sheet_shell_ids.is_empty()
                 || (body.is_sheet_body && !body.lump_ids.is_empty())
             {
@@ -281,7 +289,8 @@ impl ExactBRepTopologyV2 {
 
         let mut wire_owners = BTreeMap::new();
         for face in &self.faces {
-            validate_token("surface evaluator id", &face.surface_evaluator_id)?;
+            face.surface_evaluator_id.validate()?;
+            face.trim_classifier_id.validate()?;
             require_reference(
                 "face outer wire",
                 &face.outer_wire_id,
@@ -359,7 +368,7 @@ impl ExactBRepTopologyV2 {
                 &edges,
             )?;
             require_same_scope("coedge edge", &coedge.id, std::iter::once(&coedge.edge_id))?;
-            validate_token("pcurve evaluator id", &coedge.pcurve_evaluator_id)?;
+            coedge.pcurve_evaluator_id.validate()?;
             if coedge.seam_image.is_some_and(|image| image > 1) {
                 return Err(invalid(
                     "coedge seam image",
@@ -378,7 +387,7 @@ impl ExactBRepTopologyV2 {
             }
         }
         for edge in &self.edges {
-            validate_token("curve evaluator id", &edge.curve_evaluator_id)?;
+            edge.curve_evaluator_id.validate()?;
             for vertex in [&edge.start_vertex_id, &edge.end_vertex_id]
                 .into_iter()
                 .flatten()
