@@ -11,6 +11,9 @@ enum class OcctCadFormat : std::uint8_t;
 struct OcctImportOptions;
 struct OcctImportPayload;
 struct OcctExactShapePayload;
+struct OcctCurveRangePayload;
+struct OcctCurveDerivativesPayload;
+struct OcctCurveProjectionPayload;
 struct OcctPreviewSessionChunkOptions;
 struct OcctPreviewSessionChunkPayload;
 struct OcctPreviewSessionStartPayload;
@@ -33,6 +36,25 @@ OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
     std::uint64_t session_id,
     OcctPreviewSessionChunkOptions options);
 void close_cad_preview_session(std::uint64_t session_id);
+std::uint64_t start_exact_evaluator_session(
+    rust::Slice<const std::uint8_t> representation,
+    double meters_per_source_unit);
+OcctCurveRangePayload exact_curve_range(std::uint64_t session_id,
+                                        std::uint64_t shape_key);
+OcctCurveDerivativesPayload exact_curve_derivatives(std::uint64_t session_id,
+                                                    std::uint64_t shape_key,
+                                                    double parameter);
+double exact_curve_arc_length(std::uint64_t session_id,
+                              std::uint64_t shape_key,
+                              double start,
+                              double end,
+                              double absolute_error_m);
+OcctCurveProjectionPayload exact_curve_inverse_project(
+    std::uint64_t session_id,
+    std::uint64_t shape_key,
+    rust::Slice<const double> point_m,
+    double absolute_error_m);
+void close_exact_evaluator_session(std::uint64_t session_id);
 
 } // namespace occt_backend
 } // namespace runmat_geometry_io

@@ -126,6 +126,7 @@ pub(crate) fn import_exact_cad_shape(
     )?;
     Ok(ImportedExactCad {
         kernel_version: payload.kernel_version,
+        meters_per_source_unit,
         representation: payload.representation,
         topology,
         evaluators,

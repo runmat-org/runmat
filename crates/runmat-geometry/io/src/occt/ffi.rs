@@ -183,6 +183,34 @@ pub(crate) mod bridge {
         void_shell_keys: Vec<u64>,
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct OcctCurveRangePayload {
+        start: f64,
+        end: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctCurveDerivativesPayload {
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        first_x: f64,
+        first_y: f64,
+        first_z: f64,
+        second_x: f64,
+        second_y: f64,
+        second_z: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctCurveProjectionPayload {
+        parameter: f64,
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        distance: f64,
+    }
+
     #[derive(Debug, Clone)]
     struct OcctPreviewSessionStartPayload {
         session_id: u64,
@@ -221,6 +249,36 @@ pub(crate) mod bridge {
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctExactShapePayload>;
+
+        fn start_exact_evaluator_session(
+            representation: &[u8],
+            meters_per_source_unit: f64,
+        ) -> Result<u64>;
+
+        fn exact_curve_range(session_id: u64, shape_key: u64) -> Result<OcctCurveRangePayload>;
+
+        fn exact_curve_derivatives(
+            session_id: u64,
+            shape_key: u64,
+            parameter: f64,
+        ) -> Result<OcctCurveDerivativesPayload>;
+
+        fn exact_curve_arc_length(
+            session_id: u64,
+            shape_key: u64,
+            start: f64,
+            end: f64,
+            absolute_error_m: f64,
+        ) -> Result<f64>;
+
+        fn exact_curve_inverse_project(
+            session_id: u64,
+            shape_key: u64,
+            point_m: &[f64],
+            absolute_error_m: f64,
+        ) -> Result<OcctCurveProjectionPayload>;
+
+        fn close_exact_evaluator_session(session_id: u64);
 
         fn start_cad_preview_session(
             path: &str,

@@ -2,6 +2,7 @@
 //! it never exposes or consumes display tessellation.
 
 use runmat_geometry_core::{ExactBRepTopology, ExactEvaluatorRegistry, UnitSystem};
+use sha2::{Digest, Sha256};
 
 use crate::{
     import::{GeometryImportContext, GeometryImportError},
@@ -12,12 +13,23 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedExactCad {
     pub kernel_version: String,
+    pub meters_per_source_unit: f64,
     /// Canonical OCCT B-rep with all derived polygonal caches removed.
     pub representation: Vec<u8>,
     /// Authoritative topology extracted directly from the kernel B-rep.
     pub topology: ExactBRepTopology,
     /// Exact evaluator bindings into `representation`; no display samples are admitted.
     pub evaluators: ExactEvaluatorRegistry,
+}
+
+impl ImportedExactCad {
+    pub fn representation_digest(&self) -> [u8; 32] {
+        exact_representation_digest(&self.representation)
+    }
+}
+
+pub(crate) fn exact_representation_digest(representation: &[u8]) -> [u8; 32] {
+    Sha256::digest(representation).into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

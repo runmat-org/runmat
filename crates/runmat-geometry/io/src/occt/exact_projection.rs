@@ -16,7 +16,7 @@ use runmat_geometry_core::{
 use sha2::{Digest, Sha256};
 
 use super::ffi::bridge;
-use crate::import::GeometryImportError;
+use crate::{exact::exact_representation_digest, import::GeometryImportError};
 
 const ROOT_SCOPE: &str = "root";
 
@@ -25,10 +25,7 @@ pub(super) fn project_exact_contracts(
     meters_per_source_unit: f64,
     solid_mass_properties: Option<&BodyMassProperties>,
 ) -> Result<(ExactBRepTopology, ExactEvaluatorRegistry), GeometryImportError> {
-    let representation_digest = digest(
-        b"runmat.exact-geometry.occt-representation\0",
-        [payload.representation.as_slice()],
-    );
+    let representation_digest = exact_representation_digest(&payload.representation);
     validate_projection_shape(payload)?;
 
     let root_assembly_id = fixed_id(PersistentEntityKind::Assembly, "assembly:root");

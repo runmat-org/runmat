@@ -55,6 +55,7 @@ fn build_occt_backend() {
     build
         .file("src/occt/occt_bridge.cc")
         .file("src/occt/exact_topology.cc")
+        .file("src/occt/exact_evaluator.cc")
         .include(&occt_include)
         .std("c++17")
         .flag_if_supported("-Wno-deprecated-declarations")
@@ -74,6 +75,7 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_evaluator.cc");
 }
 
 #[cfg(not(feature = "occt-native"))]
