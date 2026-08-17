@@ -27,7 +27,7 @@ pub(super) struct PcurveKey {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum MassPropertiesBinding {
-    Kernel,
+    Kernel(u64),
     Validated(BodyMassProperties),
 }
 
@@ -171,14 +171,12 @@ impl EvaluatorBindings {
         for record in &imported.evaluators.mass_properties {
             let binding = match &record.implementation {
                 ExactMassPropertiesImplementation::Kernel { reference } => {
-                    if reference.representation_digest != representation_digest
-                        || reference.entity_token != "body:root"
-                    {
-                        return Err(inconsistent(
-                            "OCCT mass-properties evaluator has an invalid representation binding",
-                        ));
-                    }
-                    MassPropertiesBinding::Kernel
+                    require_digest(
+                        reference.representation_digest,
+                        representation_digest,
+                        "mass-properties",
+                    )?;
+                    MassPropertiesBinding::Kernel(parse_body_token(&reference.entity_token)?)
                 }
                 ExactMassPropertiesImplementation::KernelValidated {
                     properties,
@@ -289,6 +287,14 @@ fn parse_face_token(token: &str, role: &str) -> Result<u64, GeometryEvaluationEr
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|key| *key != 0 && format!("face:{key:020}") == token)
         .ok_or_else(|| inconsistent(format!("OCCT {role} has an invalid face token")))
+}
+
+fn parse_body_token(token: &str) -> Result<u64, GeometryEvaluationError> {
+    token
+        .strip_prefix("body:")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|key| *key != 0 && format!("body:{key:020}") == token)
+        .ok_or_else(|| inconsistent("OCCT mass-properties evaluator has an invalid body token"))
 }
 
 fn inconsistent(reason: impl Into<String>) -> GeometryEvaluationError {

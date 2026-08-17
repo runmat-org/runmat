@@ -1,5 +1,5 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_topology.hxx"
+#include "runmat-geometry-io/src/occt/exact_assembly.hxx"
 
 #include <BRep_Builder.hxx>
 #include <BRepAdaptor_Curve.hxx>
@@ -11,7 +11,6 @@
 #include <BRep_Tool.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
-#include <BRepTools_ShapeSet.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <Geom2d_Curve.hxx>
 #include <IGESControl_Reader.hxx>
@@ -150,13 +149,13 @@ private:
     if (document.IsNull()) {
       return;
     }
-    Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
-    app->Close(document);
-    document.Nullify();
     shape_tool.Nullify();
     color_tool.Nullify();
     layer_tool.Nullify();
     material_tool.Nullify();
+    Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
+    app->Close(document);
+    document.Nullify();
     has_xcaf = false;
   }
 };
@@ -190,6 +189,8 @@ void check_cancelled(const OcctImportOptions& options) {
     throw std::runtime_error("OCCT CAD import cancelled");
   }
 }
+
+std::string label_entry(const TDF_Label& label);
 
 IMeshTools_Parameters mesh_parameters_from_options(const OcctImportOptions& options) {
   IMeshTools_Parameters mesh_parameters;
@@ -964,14 +965,7 @@ OcctExactShapePayload import_exact_cad_bytes(
   BRepTools::Clean(document.shape);
   check_cancelled(options);
 
-  std::ostringstream representation_stream;
-  RunmatCancelProgressIndicator write_progress(options);
-  BRepTools::Write(document.shape, representation_stream, write_progress.Start());
-  check_cancelled(options);
-  const std::string representation = representation_stream.str();
-  if (representation.empty()) {
-    throw std::runtime_error("OCCT exact representation serialization produced no bytes");
-  }
+  const std::string representation = serialize_exact_shape(document.shape, options);
   if (static_cast<std::uint64_t>(representation.size()) >
       options.max_exact_representation_bytes) {
     throw std::runtime_error("OCCT exact representation exceeded its byte budget");
@@ -981,12 +975,8 @@ OcctExactShapePayload import_exact_cad_bytes(
   result.kernel_version = OCC_VERSION_COMPLETE;
   result.kernel_abi = std::string("occt/") + OCC_VERSION_COMPLETE + "/brep-v3";
   result.representation.reserve(representation.size());
-  for (std::size_t index = 0; index < representation.size(); ++index) {
-    if ((index & 0xffff) == 0) {
-      check_cancelled(options);
-    }
-    result.representation.push_back(
-        static_cast<std::uint8_t>(static_cast<unsigned char>(representation[index])));
+  for (const unsigned char byte : representation) {
+    result.representation.push_back(static_cast<std::uint8_t>(byte));
   }
 
   const std::pair<TopAbs_ShapeEnum, std::uint64_t*> inventories[] = {
@@ -1009,15 +999,31 @@ OcctExactShapePayload import_exact_cad_bytes(
     }
   }
 
-  append_exact_topology(result, document.shape, options);
-  if (result.vertices.size() != result.vertex_count ||
-      result.edges.size() != result.edge_count ||
-      result.faces.size() != result.face_count ||
-      result.wires.size() != result.wire_count ||
-      result.shells.size() != result.shell_count ||
-      result.solids.size() != result.solid_count) {
-    throw std::runtime_error("OCCT exact topology extraction did not cover its entity inventory");
+  append_exact_occurrences(result,
+                           document.shape,
+                           document.shape_tool,
+                           document.has_xcaf,
+                           representation,
+                           options);
+  const std::uint64_t projected_entity_count =
+      static_cast<std::uint64_t>(result.occurrences.size()) +
+      static_cast<std::uint64_t>(result.vertices.size()) +
+      static_cast<std::uint64_t>(result.edges.size()) +
+      static_cast<std::uint64_t>(result.faces.size()) +
+      static_cast<std::uint64_t>(result.wires.size()) +
+      static_cast<std::uint64_t>(result.coedges.size()) +
+      static_cast<std::uint64_t>(result.shells.size()) +
+      static_cast<std::uint64_t>(result.solids.size()) +
+      static_cast<std::uint64_t>(result.lumps.size());
+  if (projected_entity_count > options.max_exact_entities) {
+    throw std::runtime_error("OCCT exact topology exceeded its occurrence entity budget");
   }
+  result.vertex_count = static_cast<std::uint64_t>(result.vertices.size());
+  result.edge_count = static_cast<std::uint64_t>(result.edges.size());
+  result.face_count = static_cast<std::uint64_t>(result.faces.size());
+  result.wire_count = static_cast<std::uint64_t>(result.wires.size());
+  result.shell_count = static_cast<std::uint64_t>(result.shells.size());
+  result.solid_count = static_cast<std::uint64_t>(result.solids.size());
 
   BRepCheck_Analyzer analyzer(document.shape, Standard_True);
   result.kernel_valid = analyzer.IsValid();

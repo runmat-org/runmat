@@ -118,10 +118,29 @@ pub(crate) mod bridge {
         shells: Vec<OcctExactShellPayload>,
         solids: Vec<OcctExactSolidPayload>,
         lumps: Vec<OcctExactLumpPayload>,
+        definitions: Vec<OcctExactDefinitionPayload>,
+        occurrences: Vec<OcctExactOccurrencePayload>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactDefinitionPayload {
+        definition_index: u64,
+        representation: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctExactOccurrencePayload {
+        occurrence_index: u64,
+        parent_occurrence_index: u64,
+        path_segments: Vec<String>,
+        definition_index: u64,
+        transform: Vec<f64>,
+        body_shape_key: u64,
     }
 
     #[derive(Debug, Clone)]
     struct OcctExactVertexPayload {
+        occurrence_index: u64,
         shape_key: u64,
         point_x: f64,
         point_y: f64,
@@ -131,6 +150,7 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone)]
     struct OcctExactEdgePayload {
+        occurrence_index: u64,
         shape_key: u64,
         start_vertex_key: u64,
         end_vertex_key: u64,
@@ -141,6 +161,7 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone)]
     struct OcctExactFacePayload {
+        occurrence_index: u64,
         shape_key: u64,
         reversed: bool,
         outer_wire_key: u64,
@@ -152,6 +173,7 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone)]
     struct OcctExactWirePayload {
+        occurrence_index: u64,
         shape_key: u64,
         face_key: u64,
         reversed: bool,
@@ -160,6 +182,7 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone)]
     struct OcctExactCoedgePayload {
+        occurrence_index: u64,
         coedge_key: u64,
         face_key: u64,
         wire_key: u64,
@@ -171,6 +194,7 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone)]
     struct OcctExactShellPayload {
+        occurrence_index: u64,
         shape_key: u64,
         reversed: bool,
         face_keys: Vec<u64>,
@@ -179,6 +203,7 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone)]
     struct OcctExactSolidPayload {
+        occurrence_index: u64,
         shape_key: u64,
         outer_shell_key: u64,
         void_shell_keys: Vec<u64>,
@@ -186,6 +211,7 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone)]
     struct OcctExactLumpPayload {
+        occurrence_index: u64,
         shape_key: u64,
         from_compsolid: bool,
         solid_keys: Vec<u64>,
@@ -401,7 +427,10 @@ pub(crate) mod bridge {
             absolute_error_m: f64,
         ) -> Result<OcctSurfaceProjectionPayload>;
 
-        fn exact_mass_properties(session_id: u64) -> Result<OcctMassPropertiesPayload>;
+        fn exact_mass_properties(
+            session_id: u64,
+            shape_key: u64,
+        ) -> Result<OcctMassPropertiesPayload>;
 
         fn close_exact_evaluator_session(session_id: u64);
 

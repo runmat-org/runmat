@@ -67,18 +67,16 @@ std::uint64_t shape_key(const BRepTools_ShapeSet& shapes,
 
 void append_exact_topology(OcctExactShapePayload& result,
                            const TopoDS_Shape& root,
+                           const BRepTools_ShapeSet& shape_set,
+                           std::uint64_t occurrence_index,
                            const OcctImportOptions& options) {
-  // These indices are the TShape/location indices serialized by BRepTools itself. They are
-  // therefore tied to the canonical representation, rather than to a second import traversal.
-  BRepTools_ShapeSet shape_set(Standard_False);
-  shape_set.Add(root);
-
   std::set<std::uint64_t> vertex_keys;
   for (TopExp_Explorer explorer(root, TopAbs_VERTEX); explorer.More(); explorer.Next()) {
     check_cancelled(options);
     const TopoDS_Vertex vertex = TopoDS::Vertex(explorer.Current());
     const gp_Pnt point = BRep_Tool::Pnt(vertex);
     OcctExactVertexPayload payload;
+    payload.occurrence_index = occurrence_index;
     payload.shape_key = shape_key(shape_set, vertex, "vertex");
     if (!vertex_keys.insert(payload.shape_key).second) {
       continue;
@@ -106,6 +104,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     const bool closed = BRep_Tool::IsClosed(edge);
     BRepAdaptor_Curve curve(edge);
     OcctExactEdgePayload payload;
+    payload.occurrence_index = occurrence_index;
     payload.shape_key = edge_key;
     if (!edge_keys.insert(payload.shape_key).second) {
       continue;
@@ -137,6 +136,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     }
 
     OcctExactFacePayload face_payload;
+    face_payload.occurrence_index = occurrence_index;
     face_payload.shape_key = face_key;
     face_payload.reversed = reversed_orientation(face, "face");
     face_payload.outer_wire_key = shape_key(shape_set, outer_wire, "outer wire");
@@ -155,6 +155,7 @@ void append_exact_topology(OcctExactShapePayload& result,
       }
 
       OcctExactWirePayload wire_payload;
+      wire_payload.occurrence_index = occurrence_index;
       wire_payload.shape_key = wire_key;
       wire_payload.face_key = face_key;
       wire_payload.reversed = reversed_orientation(wire, "wire");
@@ -168,6 +169,7 @@ void append_exact_topology(OcctExactShapePayload& result,
         const Handle(Geom2d_Curve) pcurve = BRep_Tool::CurveOnSurface(edge, face, first, last);
 
         OcctExactCoedgePayload coedge_payload;
+        coedge_payload.occurrence_index = occurrence_index;
         coedge_payload.coedge_key =
             static_cast<std::uint64_t>(wire_payload.coedge_keys.size()) + 1;
         coedge_payload.face_key = face_key;
@@ -212,6 +214,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     check_cancelled(options);
     const TopoDS_Shell shell = TopoDS::Shell(explorer.Current());
     OcctExactShellPayload payload;
+    payload.occurrence_index = occurrence_index;
     payload.shape_key = shape_key(shape_set, shell, "shell");
     if (!shell_keys.insert(payload.shape_key).second) {
       continue;
@@ -238,6 +241,7 @@ void append_exact_topology(OcctExactShapePayload& result,
       throw std::runtime_error("OCCT exact solid has no outer shell");
     }
     OcctExactSolidPayload payload;
+    payload.occurrence_index = occurrence_index;
     payload.shape_key = shape_key(shape_set, solid, "solid");
     if (!solid_keys.insert(payload.shape_key).second) {
       continue;
@@ -261,6 +265,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     check_cancelled(options);
     const TopoDS_CompSolid compsolid = TopoDS::CompSolid(explorer.Current());
     OcctExactLumpPayload payload;
+    payload.occurrence_index = occurrence_index;
     payload.shape_key = shape_key(shape_set, compsolid, "compsolid");
     payload.from_compsolid = true;
     if (!compsolid_keys.insert(payload.shape_key).second) {
@@ -280,8 +285,12 @@ void append_exact_topology(OcctExactShapePayload& result,
     result.lumps.push_back(payload);
   }
   for (const auto& solid : result.solids) {
+    if (solid.occurrence_index != occurrence_index) {
+      continue;
+    }
     if (claimed_solids.insert(solid.shape_key).second) {
       OcctExactLumpPayload payload;
+      payload.occurrence_index = occurrence_index;
       payload.shape_key = solid.shape_key;
       payload.from_compsolid = false;
       payload.solid_keys.push_back(solid.shape_key);
@@ -294,7 +303,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     }
     return left.shape_key < right.shape_key;
   });
-  if (claimed_solids.size() != result.solids.size()) {
+  if (claimed_solids.size() != solid_keys.size()) {
     throw std::runtime_error("OCCT exact lump extraction did not cover every solid");
   }
 }

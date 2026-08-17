@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
-    import::GeometryImportContext, import_exact_cad, ExactCadImportOptions, GeometryFormat,
+    import::{GeometryImportContext, GeometryImportError},
+    import_exact_cad, ExactCadImportOptions, GeometryFormat,
 };
 use runmat_geometry_core::{
     GeometryEvaluationError, MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
@@ -9,6 +10,7 @@ use runmat_geometry_core::{
 use sha2::Digest as _;
 
 const BOX: &[u8] = include_bytes!("../../../tests/fixtures/box.brep");
+const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
 
 struct Unlimited;
 
@@ -28,6 +30,117 @@ impl GeometryEvaluationControl for Unlimited {
     fn consume_allocation_bytes(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
         Ok(())
     }
+}
+
+#[test]
+fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() {
+    let imported = import_exact_cad(
+        "two_box_assembly.step",
+        TWO_BOX_ASSEMBLY,
+        GeometryFormat::Step,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let reimported = import_exact_cad(
+        "renamed-assembly.step",
+        TWO_BOX_ASSEMBLY,
+        GeometryFormat::Step,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert_eq!(imported, reimported);
+
+    assert_eq!(imported.topology.assemblies.len(), 4);
+    assert_eq!(imported.topology.instances.len(), 3);
+    assert_eq!(imported.topology.bodies.len(), 2);
+    assert_eq!(imported.topology.solids.len(), 2);
+    assert_eq!(imported.topology.faces.len(), 12);
+    let body_assemblies = imported
+        .topology
+        .assemblies
+        .iter()
+        .filter(|assembly| !assembly.body_ids.is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(body_assemblies.len(), 2);
+    assert_eq!(
+        body_assemblies[0].definition_digest,
+        body_assemblies[1].definition_digest
+    );
+    assert_ne!(body_assemblies[0].id, body_assemblies[1].id);
+
+    let translated = imported
+        .topology
+        .instances
+        .iter()
+        .find(|instance| instance.transform.0[3] == 10.0)
+        .expect("one part occurrence must retain its translation");
+    assert_eq!(translated.transform.0[7], 0.0);
+    assert_eq!(translated.transform.0[11], 0.0);
+    assert_eq!(
+        imported
+            .topology
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.id.assembly_path == translated.id.assembly_path)
+            .map(|vertex| vertex.point_m[0])
+            .max_by(f64::total_cmp),
+        Some(1.0),
+        "definition-local geometry must not absorb occurrence placement",
+    );
+
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let centroids = imported
+        .topology
+        .bodies
+        .iter()
+        .map(|body| {
+            runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+                &evaluator,
+                &body.mass_properties_evaluator_id,
+                &Unlimited,
+            )
+            .unwrap()
+            .centroid_m
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(centroids, vec![[0.5, 1.0, 1.5], [0.5, 1.0, 1.5]]);
+
+    let definition_limited = ExactCadImportOptions {
+        max_representation_bytes: imported.representation.len() as u64,
+        ..ExactCadImportOptions::default()
+    };
+    let definition_error = import_exact_cad(
+        "two_box_assembly.step",
+        TWO_BOX_ASSEMBLY,
+        GeometryFormat::Step,
+        &definition_limited,
+        &GeometryImportContext::new(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            definition_error,
+            GeometryImportError::ExactRepresentationCapacityExceeded { .. }
+        ),
+        "unexpected definition budget error: {definition_error:?}",
+    );
+
+    let occurrence_limited = ExactCadImportOptions {
+        max_entities: 50,
+        ..ExactCadImportOptions::default()
+    };
+    assert!(matches!(
+        import_exact_cad(
+            "two_box_assembly.step",
+            TWO_BOX_ASSEMBLY,
+            GeometryFormat::Step,
+            &occurrence_limited,
+            &GeometryImportContext::new(),
+        ),
+        Err(GeometryImportError::ExactEntityCapacityExceeded { limit: 50 })
+    ));
 }
 
 struct Cancelled;

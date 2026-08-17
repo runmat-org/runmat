@@ -89,12 +89,12 @@ TopoDS_Face face(const ExactEvaluatorSession& session, std::uint64_t shape_key) 
   if (shape_key == 0 || shape_key > static_cast<std::uint64_t>(session.shapes.NbShapes())) {
     throw std::runtime_error("OCCT exact face token is outside the B-rep shape table");
   }
-  for (TopExp_Explorer faces(session.root, TopAbs_FACE); faces.More(); faces.Next()) {
-    if (static_cast<std::uint64_t>(session.shapes.Index(faces.Current())) == shape_key) {
-      return TopoDS::Face(faces.Current());
-    }
+  const TopoDS_Shape& shape =
+      session.shapes.Shape(static_cast<Standard_Integer>(shape_key));
+  if (shape.ShapeType() == TopAbs_FACE) {
+    return TopoDS::Face(shape);
   }
-  throw std::runtime_error("OCCT exact face token does not identify a face use");
+  throw std::runtime_error("OCCT exact face token does not identify a face");
 }
 
 void require_finite(double value, const char* role) {
@@ -404,20 +404,26 @@ std::int8_t exact_trim_classify(std::uint64_t session_id,
   }
 }
 
-OcctMassPropertiesPayload exact_mass_properties(std::uint64_t session_id) {
+OcctMassPropertiesPayload exact_mass_properties(std::uint64_t session_id,
+                                                std::uint64_t shape_key) {
   const auto value = session(session_id);
+  if (shape_key == 0 || shape_key > static_cast<std::uint64_t>(value->shapes.NbShapes())) {
+    throw std::runtime_error("OCCT exact body token is outside the B-rep shape table");
+  }
+  const TopoDS_Shape& body =
+      value->shapes.Shape(static_cast<Standard_Integer>(shape_key));
   GProp_GProps surface_properties;
-  BRepGProp::SurfaceProperties(value->root, surface_properties);
+  BRepGProp::SurfaceProperties(body, surface_properties);
   const double surface_area = surface_properties.Mass();
   require_finite(surface_area, "surface area");
   if (surface_area <= 0.0) {
     throw std::runtime_error("OCCT exact body surface area must be positive");
   }
 
-  const bool has_solid = TopExp_Explorer(value->root, TopAbs_SOLID).More();
+  const bool has_solid = TopExp_Explorer(body, TopAbs_SOLID).More();
   GProp_GProps volume_properties;
   if (has_solid) {
-    BRepGProp::VolumeProperties(value->root, volume_properties);
+    BRepGProp::VolumeProperties(body, volume_properties);
     require_finite(volume_properties.Mass(), "volume");
     if (volume_properties.Mass() <= 0.0) {
       throw std::runtime_error("OCCT exact solid volume must be positive");

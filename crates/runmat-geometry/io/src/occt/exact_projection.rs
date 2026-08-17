@@ -1,19 +1,20 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    BodyMassProperties, ExactAssembly, ExactBRepModel, ExactBRepTopology, ExactBody, ExactCoedge,
-    ExactCurveEvaluatorRecord, ExactCurveImplementation, ExactEdge, ExactEvaluatorRegistry,
-    ExactFace, ExactGeometryCapabilities, ExactLump, ExactMassPropertiesImplementation,
-    ExactMassPropertiesRecord, ExactPcurveEvaluatorRecord, ExactPcurveImplementation, ExactShell,
-    ExactSolid, ExactSurfaceEvaluatorRecord, ExactSurfaceImplementation,
+    BodyMassProperties, ExactBRepModel, ExactBRepTopology, ExactCoedge, ExactCurveEvaluatorRecord,
+    ExactCurveImplementation, ExactEdge, ExactEvaluatorRegistry, ExactFace,
+    ExactGeometryCapabilities, ExactLump, ExactPcurveEvaluatorRecord, ExactPcurveImplementation,
+    ExactShell, ExactSolid, ExactSurfaceEvaluatorRecord, ExactSurfaceImplementation,
     ExactTrimClassifierImplementation, ExactTrimClassifierRecord, ExactVertex, ExactWire,
-    GeometryDigest, GeometryObjectRef, MassPropertiesEvaluatorId, OrientedEntityUse,
-    PersistentEntityKind, EXACT_BREP_MEDIA_TYPE, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
+    GeometryDigest, GeometryObjectRef, OrientedEntityUse, PersistentEntityKind,
+    EXACT_BREP_MEDIA_TYPE, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
     EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
-use super::{exact_projection_identity::*, ffi::bridge};
+use super::{
+    exact_projection_identity::*, exact_projection_occurrence::OccurrenceIndex, ffi::bridge,
+};
 use crate::{exact::exact_representation_digest, import::GeometryImportError};
 
 pub(super) fn project_exact_contracts(
@@ -23,25 +24,14 @@ pub(super) fn project_exact_contracts(
 ) -> Result<(ExactBRepTopology, ExactEvaluatorRegistry, ExactBRepModel), GeometryImportError> {
     let representation_digest = exact_representation_digest(&payload.representation);
     validate_projection_shape(payload)?;
-
-    let root_assembly_id = fixed_id(PersistentEntityKind::Assembly, "assembly:root");
-    let body_id = fixed_id(PersistentEntityKind::Body, "body:root");
-    let mass_id = MassPropertiesEvaluatorId::new("mass:body:root")
-        .map_err(|error| invalid_contract("mass-properties identity", error))?;
+    let occurrences = OccurrenceIndex::new(payload, representation_digest)?;
+    let assembly_projection = occurrences.project_assemblies()?;
 
     let mut topology = ExactBRepTopology {
         schema_version: EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
-        root_assembly_id: root_assembly_id.clone(),
-        assemblies: vec![ExactAssembly {
-            id: root_assembly_id,
-            definition_digest: digest(
-                b"runmat.exact-geometry.occt-assembly-definition\0",
-                [representation_digest.as_slice()],
-            ),
-            body_ids: vec![body_id.clone()],
-            child_instance_ids: Vec::new(),
-        }],
-        instances: Vec::new(),
+        root_assembly_id: assembly_projection.root_id,
+        assemblies: assembly_projection.assemblies,
+        instances: assembly_projection.instances,
         bodies: Vec::new(),
         lumps: Vec::new(),
         solids: Vec::new(),
@@ -58,13 +48,16 @@ pub(super) fn project_exact_contracts(
     topology.vertices = payload
         .vertices
         .iter()
-        .map(|vertex| ExactVertex {
-            id: shape_id(PersistentEntityKind::Vertex, vertex.shape_key),
-            point_m: [vertex.point_x, vertex.point_y, vertex.point_z]
-                .map(|coordinate| coordinate * meters_per_source_unit),
-            tolerance_m: vertex.tolerance * meters_per_source_unit,
+        .map(|vertex| {
+            let path = occurrences.path(vertex.occurrence_index)?;
+            Ok(ExactVertex {
+                id: shape_id(PersistentEntityKind::Vertex, vertex.shape_key, path),
+                point_m: [vertex.point_x, vertex.point_y, vertex.point_z]
+                    .map(|coordinate| coordinate * meters_per_source_unit),
+                tolerance_m: vertex.tolerance * meters_per_source_unit,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, GeometryImportError>>()?;
     topology
         .vertices
         .sort_by(|left, right| left.id.cmp(&right.id));
@@ -72,45 +65,60 @@ pub(super) fn project_exact_contracts(
     topology.edges = payload
         .edges
         .iter()
-        .map(|edge| ExactEdge {
-            id: shape_id(PersistentEntityKind::Edge, edge.shape_key),
-            curve_evaluator_id: curve_id(edge.shape_key),
-            start_vertex_id: optional_shape_id(PersistentEntityKind::Vertex, edge.start_vertex_key),
-            end_vertex_id: optional_shape_id(PersistentEntityKind::Vertex, edge.end_vertex_key),
-            is_closed: edge.closed,
-            is_periodic: edge.periodic,
-            is_degenerate: edge.degenerate,
+        .map(|edge| {
+            let path = occurrences.path(edge.occurrence_index)?;
+            Ok(ExactEdge {
+                id: shape_id(PersistentEntityKind::Edge, edge.shape_key, path),
+                curve_evaluator_id: curve_id(edge.shape_key),
+                start_vertex_id: optional_shape_id(
+                    PersistentEntityKind::Vertex,
+                    edge.start_vertex_key,
+                    path,
+                ),
+                end_vertex_id: optional_shape_id(
+                    PersistentEntityKind::Vertex,
+                    edge.end_vertex_key,
+                    path,
+                ),
+                is_closed: edge.closed,
+                is_periodic: edge.periodic,
+                is_degenerate: edge.degenerate,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, GeometryImportError>>()?;
     topology.edges.sort_by(|left, right| left.id.cmp(&right.id));
 
     let coedges_by_wire = payload.coedges.iter().fold(
-        BTreeMap::<u64, Vec<&bridge::OcctExactCoedgePayload>>::new(),
+        BTreeMap::<(u64, u64), Vec<&bridge::OcctExactCoedgePayload>>::new(),
         |mut index, coedge| {
-            index.entry(coedge.wire_key).or_default().push(coedge);
+            index
+                .entry((coedge.occurrence_index, coedge.wire_key))
+                .or_default()
+                .push(coedge);
             index
         },
     );
     for wire in &payload.wires {
+        let path = occurrences.path(wire.occurrence_index)?;
         let mut coedges = coedges_by_wire
-            .get(&wire.shape_key)
+            .get(&(wire.occurrence_index, wire.shape_key))
             .cloned()
             .unwrap_or_default();
         coedges.sort_by_key(|coedge| coedge.coedge_key);
         topology.wires.push(ExactWire {
-            id: shape_id(PersistentEntityKind::Wire, wire.shape_key),
+            id: shape_id(PersistentEntityKind::Wire, wire.shape_key, path),
             orientation: orientation(wire.reversed),
             coedge_ids: coedges
                 .iter()
-                .map(|coedge| coedge_id(wire.shape_key, coedge.coedge_key))
+                .map(|coedge| coedge_id(wire.shape_key, coedge.coedge_key, path))
                 .collect(),
         });
         topology
             .coedges
             .extend(coedges.into_iter().map(|coedge| ExactCoedge {
-                id: coedge_id(wire.shape_key, coedge.coedge_key),
-                face_id: shape_id(PersistentEntityKind::Face, coedge.face_key),
-                edge_id: shape_id(PersistentEntityKind::Edge, coedge.edge_key),
+                id: coedge_id(wire.shape_key, coedge.coedge_key, path),
+                face_id: shape_id(PersistentEntityKind::Face, coedge.face_key, path),
+                edge_id: shape_id(PersistentEntityKind::Edge, coedge.edge_key, path),
                 orientation: orientation(coedge.reversed),
                 pcurve_evaluator_id: pcurve_id(wire.shape_key, coedge.coedge_key),
                 seam_image: u8::try_from(coedge.seam_image).ok(),
@@ -124,49 +132,51 @@ pub(super) fn project_exact_contracts(
     topology.faces = payload
         .faces
         .iter()
-        .map(|face| {
+        .map(|face| -> Result<ExactFace, GeometryImportError> {
+            let path = occurrences.path(face.occurrence_index)?;
             let mut inner_wire_ids = face
                 .inner_wire_keys
                 .iter()
-                .map(|key| shape_id(PersistentEntityKind::Wire, *key))
+                .map(|key| shape_id(PersistentEntityKind::Wire, *key, path))
                 .collect::<Vec<_>>();
             inner_wire_ids.sort();
-            ExactFace {
-                id: shape_id(PersistentEntityKind::Face, face.shape_key),
+            Ok(ExactFace {
+                id: shape_id(PersistentEntityKind::Face, face.shape_key, path),
                 orientation: orientation(face.reversed),
                 surface_evaluator_id: surface_id(face.shape_key),
                 trim_classifier_id: trim_id(face.shape_key),
-                outer_wire_id: shape_id(PersistentEntityKind::Wire, face.outer_wire_key),
+                outer_wire_id: shape_id(PersistentEntityKind::Wire, face.outer_wire_key, path),
                 inner_wire_ids,
                 periodic_u: face.periodic_u,
                 periodic_v: face.periodic_v,
                 has_singularity: face.singular,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     topology.faces.sort_by(|left, right| left.id.cmp(&right.id));
 
     topology.shells = payload
         .shells
         .iter()
-        .map(|shell| {
+        .map(|shell| -> Result<ExactShell, GeometryImportError> {
+            let path = occurrences.path(shell.occurrence_index)?;
             let mut face_uses = shell
                 .face_keys
                 .iter()
                 .zip(&shell.face_reversed)
                 .map(|(key, reversed)| OrientedEntityUse {
-                    entity_id: shape_id(PersistentEntityKind::Face, *key),
+                    entity_id: shape_id(PersistentEntityKind::Face, *key, path),
                     orientation: orientation(*reversed),
                 })
                 .collect::<Vec<_>>();
             face_uses.sort_by(|left, right| left.entity_id.cmp(&right.entity_id));
-            ExactShell {
-                id: shape_id(PersistentEntityKind::Shell, shell.shape_key),
+            Ok(ExactShell {
+                id: shape_id(PersistentEntityKind::Shell, shell.shape_key, path),
                 orientation: orientation(shell.reversed),
                 face_uses,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     topology
         .shells
         .sort_by(|left, right| left.id.cmp(&right.id));
@@ -174,55 +184,44 @@ pub(super) fn project_exact_contracts(
     topology.solids = payload
         .solids
         .iter()
-        .map(|solid| {
+        .map(|solid| -> Result<ExactSolid, GeometryImportError> {
+            let path = occurrences.path(solid.occurrence_index)?;
             let mut void_shell_ids = solid
                 .void_shell_keys
                 .iter()
-                .map(|key| shape_id(PersistentEntityKind::Shell, *key))
+                .map(|key| shape_id(PersistentEntityKind::Shell, *key, path))
                 .collect::<Vec<_>>();
             void_shell_ids.sort();
-            ExactSolid {
-                id: shape_id(PersistentEntityKind::Solid, solid.shape_key),
-                outer_shell_id: shape_id(PersistentEntityKind::Shell, solid.outer_shell_key),
+            Ok(ExactSolid {
+                id: shape_id(PersistentEntityKind::Solid, solid.shape_key, path),
+                outer_shell_id: shape_id(PersistentEntityKind::Shell, solid.outer_shell_key, path),
                 void_shell_ids,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     topology
         .solids
         .sort_by(|left, right| left.id.cmp(&right.id));
 
-    let is_sheet_body = topology.solids.is_empty();
     topology.lumps = payload
         .lumps
         .iter()
-        .map(|lump| ExactLump {
-            id: exact_lump_id(lump),
-            solid_ids: lump
-                .solid_keys
-                .iter()
-                .map(|key| shape_id(PersistentEntityKind::Solid, *key))
-                .collect(),
+        .map(|lump| {
+            let path = occurrences.path(lump.occurrence_index)?;
+            Ok(ExactLump {
+                id: exact_lump_id(lump, path),
+                solid_ids: lump
+                    .solid_keys
+                    .iter()
+                    .map(|key| shape_id(PersistentEntityKind::Solid, *key, path))
+                    .collect(),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, GeometryImportError>>()?;
     topology.lumps.sort_by(|left, right| left.id.cmp(&right.id));
-    let mut sheet_shell_ids = if is_sheet_body {
-        topology
-            .shells
-            .iter()
-            .map(|shell| shell.id.clone())
-            .collect()
-    } else {
-        Vec::new()
-    };
-    sheet_shell_ids.sort();
-    topology.bodies.push(ExactBody {
-        id: body_id,
-        mass_properties_evaluator_id: mass_id.clone(),
-        lump_ids: topology.lumps.iter().map(|lump| lump.id.clone()).collect(),
-        is_sheet_body,
-        sheet_shell_ids,
-    });
+    let (bodies, mass_properties) =
+        occurrences.project_bodies(payload, solid_mass_properties, representation_digest)?;
+    topology.bodies = bodies;
 
     let evaluator_ref = |entity_token: String| runmat_geometry_core::KernelEvaluatorRef {
         entity_token,
@@ -240,6 +239,9 @@ pub(super) fn project_exact_contracts(
                     reference: evaluator_ref(format!("edge:{:020}", edge.shape_key)),
                 },
             })
+            .map(|record| (record.id.clone(), record))
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
             .collect(),
         pcurves: payload
             .coedges
@@ -253,6 +255,9 @@ pub(super) fn project_exact_contracts(
                     )),
                 },
             })
+            .map(|record| (record.id.clone(), record))
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
             .collect(),
         surfaces: payload
             .faces
@@ -263,6 +268,9 @@ pub(super) fn project_exact_contracts(
                     reference: evaluator_ref(format!("face:{:020}", face.shape_key)),
                 },
             })
+            .map(|record| (record.id.clone(), record))
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
             .collect(),
         trim_classifiers: payload
             .faces
@@ -273,19 +281,11 @@ pub(super) fn project_exact_contracts(
                     reference: evaluator_ref(format!("face:{:020}", face.shape_key)),
                 },
             })
+            .map(|record| (record.id.clone(), record))
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
             .collect(),
-        mass_properties: vec![ExactMassPropertiesRecord {
-            id: mass_id,
-            implementation: match solid_mass_properties {
-                Some(properties) => ExactMassPropertiesImplementation::KernelValidated {
-                    properties: *properties,
-                    validation_digest: mass_validation_digest(representation_digest, properties),
-                },
-                None => ExactMassPropertiesImplementation::Kernel {
-                    reference: evaluator_ref("body:root".into()),
-                },
-            },
-        }],
+        mass_properties,
     };
     evaluators
         .curves
@@ -325,18 +325,6 @@ fn validate_projection_shape(
     {
         return Err(GeometryImportError::InvalidGeometry(
             "OCCT exact shell incidence is incomplete".into(),
-        ));
-    }
-    let owned_shells = payload
-        .solids
-        .iter()
-        .flat_map(|solid| {
-            std::iter::once(solid.outer_shell_key).chain(solid.void_shell_keys.iter().copied())
-        })
-        .collect::<BTreeSet<_>>();
-    if !payload.solids.is_empty() && owned_shells.len() != payload.shells.len() {
-        return Err(GeometryImportError::InvalidGeometry(
-            "mixed solid and sheet topology requires separate exact bodies".into(),
         ));
     }
     Ok(())
@@ -403,16 +391,6 @@ pub(super) fn mass_validation_digest(
         .chain(properties.inertia_about_centroid_m5)
     {
         hasher.update(value.to_bits().to_be_bytes());
-    }
-    hasher.finalize().into()
-}
-
-fn digest<'a>(domain: &[u8], parts: impl IntoIterator<Item = &'a [u8]>) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(domain);
-    for part in parts {
-        hasher.update((part.len() as u64).to_be_bytes());
-        hasher.update(part);
     }
     hasher.finalize().into()
 }

@@ -87,7 +87,8 @@ OcctSurfaceProjectionPayload exact_surface_closest_point(
     std::uint64_t face_key,
     rust::Slice<const double> point_m,
     double absolute_error_m);
-OcctMassPropertiesPayload exact_mass_properties(std::uint64_t session_id);
+OcctMassPropertiesPayload exact_mass_properties(std::uint64_t session_id,
+                                                std::uint64_t shape_key);
 void close_exact_evaluator_session(std::uint64_t session_id);
 
 } // namespace occt_backend

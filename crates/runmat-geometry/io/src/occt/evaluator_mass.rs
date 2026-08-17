@@ -26,8 +26,8 @@ impl ExactMassPropertiesEvaluator for OcctExactEvaluator {
         control.consume_iterations(1)?;
         let properties = match binding {
             MassPropertiesBinding::Validated(properties) => properties,
-            MassPropertiesBinding::Kernel => {
-                let value = ffi::bridge::exact_mass_properties(self.session_id)
+            MassPropertiesBinding::Kernel(shape_key) => {
+                let value = ffi::bridge::exact_mass_properties(self.session_id, shape_key)
                     .map_err(|error| kernel(error.to_string()))?;
                 BodyMassProperties {
                     volume_m3: value.volume,

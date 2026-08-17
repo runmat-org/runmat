@@ -97,9 +97,10 @@ pub(crate) fn exact_representation_digest(representation: &[u8]) -> [u8; 32] {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExactCadImportOptions {
     pub source_units: UnitSystem,
-    /// Hard bound applied before the kernel representation crosses the FFI boundary.
+    /// Hard aggregate bound for the kernel representation and unique assembly-definition
+    /// identity evidence before either crosses the FFI boundary.
     pub max_representation_bytes: u64,
-    /// Hard per-kind bound for compounds, solids, shells, faces, wires, edges, and vertices.
+    /// Hard per-kind and expanded-occurrence aggregate topology bound.
     pub max_entities: u64,
     /// Hard work bounds for independent exact-incidence admission after kernel import.
     pub max_validation_iterations: u64,
