@@ -36,6 +36,7 @@ fn build_occt_backend() {
     build
         .file("src/occt/occt_bridge.cc")
         .file("src/occt/exact_assembly.cc")
+        .file("src/occt/exact_nesting.cc")
         .file("src/occt/exact_topology.cc")
         .file("src/occt/exact_evaluator.cc")
         .file("src/occt/exact_surface_evaluator.cc")
@@ -84,6 +85,8 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_assembly.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_assembly.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_nesting.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_nesting.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator.cc");

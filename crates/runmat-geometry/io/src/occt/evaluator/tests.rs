@@ -10,8 +10,10 @@ use runmat_geometry_core::{
 use sha2::Digest as _;
 
 const BOX: &[u8] = include_bytes!("../../../tests/fixtures/box.brep");
+const BOX_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/box_cavity.brep");
 const DISCONNECTED_SOLIDS: &[u8] =
     include_bytes!("../../../tests/fixtures/disconnected_solids.brep");
+const INVALID_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/invalid_cavity.brep");
 const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_solid_sheet.brep");
 const TWO_BOX_ASSEMBLY: &[u8] = include_bytes!("../../../tests/fixtures/two_box_assembly.step");
 
@@ -255,6 +257,58 @@ fn disconnected_solids_share_one_body_with_aggregate_mass_properties() {
     assert_eq!(mass.volume_m3, 12.0);
     assert_eq!(mass.surface_area_m2, 44.0);
     assert_eq!(mass.centroid_m, [5.5, 1.0, 1.5]);
+}
+
+#[test]
+fn cavity_import_preserves_outer_and_void_shell_nesting() {
+    let imported = import_exact_cad(
+        "box_cavity.brep",
+        BOX_CAVITY,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert_eq!(imported.topology.bodies.len(), 1);
+    assert_eq!(imported.topology.lumps.len(), 1);
+    assert_eq!(imported.topology.solids.len(), 1);
+    assert_eq!(imported.topology.shells.len(), 2);
+    assert_eq!(imported.topology.faces.len(), 12);
+    assert_eq!(imported.topology.edges.len(), 24);
+    assert_eq!(imported.topology.vertices.len(), 16);
+    assert_eq!(imported.topology.solids[0].void_shell_ids.len(), 1);
+
+    let body = &imported.topology.bodies[0];
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let mass = runmat_geometry_core::ExactMassPropertiesEvaluator::mass_properties(
+        &evaluator,
+        &body.mass_properties_evaluator_id,
+        &Unlimited,
+    )
+    .unwrap();
+    assert!((mass.volume_m3 - 992.0).abs() < 1.0e-10);
+    assert!((mass.surface_area_m2 - 624.0).abs() < 1.0e-10);
+    assert!(mass
+        .centroid_m
+        .iter()
+        .all(|coordinate| (coordinate - 5.0).abs() < 1.0e-12));
+}
+
+#[test]
+fn cavity_import_rejects_a_void_shell_outside_its_outer_shell() {
+    let error = import_exact_cad(
+        "invalid_cavity.brep",
+        INVALID_CAVITY,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        GeometryImportError::InvalidGeometry(reason)
+            if reason.contains("void shell is not nested inside its outer shell")
+    ));
 }
 
 struct Cancelled;

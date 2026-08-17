@@ -1,4 +1,5 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
+#include "runmat-geometry-io/src/occt/exact_nesting.hxx"
 #include "runmat-geometry-io/src/occt/exact_topology.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -240,6 +241,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     if (outer_shell.IsNull()) {
       throw std::runtime_error("OCCT exact solid has no outer shell");
     }
+    validate_exact_solid_nesting(solid, outer_shell, options);
     OcctExactSolidPayload payload;
     payload.occurrence_index = occurrence_index;
     payload.shape_key = shape_key(shape_set, solid, "solid");

@@ -252,6 +252,11 @@ fn exact_bridge_error(
         GeometryImportError::ExactEntityCapacityExceeded {
             limit: options.max_entities,
         }
+    } else if message.contains("OCCT exact outer shell")
+        || message.contains("OCCT exact void shell")
+        || message.contains("OCCT exact solid shell has no nesting witness")
+    {
+        GeometryImportError::InvalidGeometry(message)
     } else {
         GeometryImportError::ParseFailed(format!("OCCT exact CAD import failed: {message}"))
     }
