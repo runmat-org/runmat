@@ -108,3 +108,15 @@ count_metric \
   crates \
   'HostNumericTensorOwned' \
   crates
+
+count_metric \
+  simple_provider_split_registry_declarations \
+  crates/runmat-accelerate/src/simple_provider.rs \
+  'static (REGISTRY|INTEGER_REGISTRY)[^[:alnum:]_]' \
+  crates/runmat-accelerate/src/simple_provider.rs
+
+count_metric \
+  simple_provider_unified_registry_declaration \
+  crates/runmat-accelerate/src/simple_provider.rs \
+  'static NUMERIC_REGISTRY[^[:alnum:]_]' \
+  crates/runmat-accelerate/src/simple_provider.rs

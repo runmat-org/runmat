@@ -4,11 +4,13 @@ use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelIntegerDownloadFuture, AccelProvider, AccelProviderFuture,
-    CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
-    GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned,
-    HostIntegerTensorView, HostTensorOwned, HostTensorView, ImfilterOptions, IntegerElementType,
-    PagefunRequest, ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
+    AccelDownloadFuture, AccelIntegerDownloadFuture, AccelNumericDownloadFuture, AccelProvider,
+    AccelProviderFuture, CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest,
+    GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
+    HostIntegerTensorOwned, HostIntegerTensorView, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned, HostTensorView,
+    ImfilterOptions, IntegerElementType, NumericElementType, PagefunRequest,
+    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
     ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
@@ -57,22 +59,162 @@ use runmat_runtime::builtins::math::reduction::{
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{LockResult, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
-static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
-static INTEGER_REGISTRY: OnceCell<Mutex<HashMap<u64, HostIntegerDataOwned>>> = OnceCell::new();
-static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
-
-fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
-    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Debug, Clone, PartialEq)]
+enum InProcessNumericData {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    Integer(HostIntegerDataOwned),
 }
 
-fn integer_registry() -> &'static Mutex<HashMap<u64, HostIntegerDataOwned>> {
-    INTEGER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+impl InProcessNumericData {
+    fn from_view(data: HostNumericDataView<'_>) -> Self {
+        match data {
+            HostNumericDataView::F64(values) => Self::F64(values.to_vec()),
+            HostNumericDataView::F32(values) => Self::F32(values.to_vec()),
+            HostNumericDataView::I8(values) => {
+                Self::Integer(HostIntegerDataOwned::I8(values.to_vec()))
+            }
+            HostNumericDataView::I16(values) => {
+                Self::Integer(HostIntegerDataOwned::I16(values.to_vec()))
+            }
+            HostNumericDataView::I32(values) => {
+                Self::Integer(HostIntegerDataOwned::I32(values.to_vec()))
+            }
+            HostNumericDataView::I64(values) => {
+                Self::Integer(HostIntegerDataOwned::I64(values.to_vec()))
+            }
+            HostNumericDataView::U8(values) => {
+                Self::Integer(HostIntegerDataOwned::U8(values.to_vec()))
+            }
+            HostNumericDataView::U16(values) => {
+                Self::Integer(HostIntegerDataOwned::U16(values.to_vec()))
+            }
+            HostNumericDataView::U32(values) => {
+                Self::Integer(HostIntegerDataOwned::U32(values.to_vec()))
+            }
+            HostNumericDataView::U64(values) => {
+                Self::Integer(HostIntegerDataOwned::U64(values.to_vec()))
+            }
+        }
+    }
+
+    fn into_host_numeric(self) -> HostNumericDataOwned {
+        match self {
+            Self::F64(values) => HostNumericDataOwned::F64(values),
+            Self::F32(values) => HostNumericDataOwned::F32(values),
+            Self::Integer(values) => values.into(),
+        }
+    }
+
+    fn byte_len(&self) -> u64 {
+        match self {
+            Self::F64(values) => std::mem::size_of_val(values.as_slice()) as u64,
+            Self::F32(values) => std::mem::size_of_val(values.as_slice()) as u64,
+            Self::Integer(values) => integer_data_bytes(values),
+        }
+    }
+}
+
+static NUMERIC_REGISTRY: OnceCell<Mutex<HashMap<u64, InProcessNumericData>>> = OnceCell::new();
+static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
+
+fn numeric_registry() -> &'static Mutex<HashMap<u64, InProcessNumericData>> {
+    NUMERIC_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct F64Registry;
+
+struct F64RegistryGuard<'a>(MutexGuard<'a, HashMap<u64, InProcessNumericData>>);
+
+impl F64Registry {
+    fn lock(&self) -> LockResult<F64RegistryGuard<'_>> {
+        numeric_registry()
+            .lock()
+            .map(F64RegistryGuard)
+            .map_err(|error| PoisonError::new(F64RegistryGuard(error.into_inner())))
+    }
+}
+
+impl F64RegistryGuard<'_> {
+    fn get(&self, id: &u64) -> Option<&Vec<f64>> {
+        match self.0.get(id) {
+            Some(InProcessNumericData::F64(values)) => Some(values),
+            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
+        }
+    }
+
+    fn get_mut(&mut self, id: &u64) -> Option<&mut Vec<f64>> {
+        match self.0.get_mut(id) {
+            Some(InProcessNumericData::F64(values)) => Some(values),
+            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
+        }
+    }
+
+    fn insert(&mut self, id: u64, values: Vec<f64>) -> Option<Vec<f64>> {
+        match self.0.insert(id, InProcessNumericData::F64(values)) {
+            Some(InProcessNumericData::F64(previous)) => Some(previous),
+            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn contains_key(&self, id: &u64) -> bool {
+        matches!(self.0.get(id), Some(InProcessNumericData::F64(_)))
+    }
+}
+
+static F64_REGISTRY_VIEW: F64Registry = F64Registry;
+
+fn registry() -> &'static F64Registry {
+    &F64_REGISTRY_VIEW
+}
+
+struct IntegerRegistry;
+
+struct IntegerRegistryGuard<'a>(MutexGuard<'a, HashMap<u64, InProcessNumericData>>);
+
+impl IntegerRegistry {
+    fn lock(&self) -> LockResult<IntegerRegistryGuard<'_>> {
+        numeric_registry()
+            .lock()
+            .map(IntegerRegistryGuard)
+            .map_err(|error| PoisonError::new(IntegerRegistryGuard(error.into_inner())))
+    }
+}
+
+impl IntegerRegistryGuard<'_> {
+    fn get(&self, id: &u64) -> Option<&HostIntegerDataOwned> {
+        match self.0.get(id) {
+            Some(InProcessNumericData::Integer(values)) => Some(values),
+            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
+        }
+    }
+
+    fn get_mut(&mut self, id: &u64) -> Option<&mut HostIntegerDataOwned> {
+        match self.0.get_mut(id) {
+            Some(InProcessNumericData::Integer(values)) => Some(values),
+            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
+        }
+    }
+
+    fn insert(&mut self, id: u64, values: HostIntegerDataOwned) -> Option<HostIntegerDataOwned> {
+        match self.0.insert(id, InProcessNumericData::Integer(values)) {
+            Some(InProcessNumericData::Integer(previous)) => Some(previous),
+            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
+        }
+    }
+}
+
+static INTEGER_REGISTRY_VIEW: IntegerRegistry = IntegerRegistry;
+
+fn integer_registry() -> &'static IntegerRegistry {
+    &INTEGER_REGISTRY_VIEW
 }
 
 fn owned_integer_data(data: HostIntegerDataView<'_>) -> HostIntegerDataOwned {
@@ -3918,6 +4060,72 @@ impl AccelProvider for InProcessProvider {
         ProviderPrecision::F64
     }
 
+    fn upload_numeric(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
+        host.validate()?;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let data = InProcessNumericData::from_view(host.data);
+        self.telemetry.record_upload_bytes(data.byte_len());
+        numeric_registry()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(id, data);
+        let handle = GpuTensorHandle {
+            shape: host.shape.to_vec(),
+            device_id: self.device_id,
+            buffer_id: id,
+        };
+        let element_type = host.element_type();
+        match element_type {
+            NumericElementType::F64 => {
+                runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
+            }
+            NumericElementType::F32 => {
+                runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
+            }
+            NumericElementType::I8
+            | NumericElementType::I16
+            | NumericElementType::I32
+            | NumericElementType::I64
+            | NumericElementType::U8
+            | NumericElementType::U16
+            | NumericElementType::U32
+            | NumericElementType::U64 => {
+                runmat_accelerate_api::set_handle_integer_type(
+                    &handle,
+                    element_type
+                        .integer_type()
+                        .expect("integer numeric element type"),
+                );
+            }
+        }
+        runmat_accelerate_api::set_handle_class_name(&handle, element_type.class_name());
+        runmat_accelerate_api::set_handle_storage(&handle, host.storage);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        Ok(handle)
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            let data = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("numeric buffer not found: {}", handle.buffer_id))?;
+            self.telemetry.record_download_bytes(data.byte_len());
+            let output = HostNumericTensorOwned {
+                data: data.into_host_numeric(),
+                shape: handle.shape.clone(),
+                storage: runmat_accelerate_api::handle_storage(handle),
+            };
+            output.validate()?;
+            Ok(output)
+        })
+    }
+
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
@@ -3937,18 +4145,34 @@ impl AccelProvider for InProcessProvider {
 
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
-            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(buf) = guard.get(&h.buffer_id) {
-                let bytes = (buf.len() * std::mem::size_of::<f64>()) as u64;
-                self.telemetry.record_download_bytes(bytes);
-                Ok(HostTensorOwned {
-                    data: buf.clone(),
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            } else {
-                Err(anyhow::anyhow!("buffer not found: {}", h.buffer_id))
-            }
+            let data = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&h.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("buffer not found: {}", h.buffer_id))?;
+            let (data, bytes) = match data {
+                InProcessNumericData::F64(values) => {
+                    let bytes = std::mem::size_of_val(values.as_slice()) as u64;
+                    (values, bytes)
+                }
+                InProcessNumericData::F32(values) => {
+                    let bytes = std::mem::size_of_val(values.as_slice()) as u64;
+                    (values.into_iter().map(f64::from).collect(), bytes)
+                }
+                InProcessNumericData::Integer(_) => {
+                    return Err(anyhow!(
+                        "integer buffer {} requires download_integer or download_numeric",
+                        h.buffer_id
+                    ));
+                }
+            };
+            self.telemetry.record_download_bytes(bytes);
+            Ok(HostTensorOwned {
+                data,
+                shape: h.shape.clone(),
+                storage: runmat_accelerate_api::handle_storage(h),
+            })
         })
     }
 
@@ -3990,11 +4214,9 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
-        let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
-        guard.remove(&h.buffer_id);
-        integer_registry()
+        numeric_registry()
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(|error| error.into_inner())
             .remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_metadata(h);
         Ok(())
@@ -10171,6 +10393,101 @@ mod tests {
         IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
     use runmat_builtins::{IntValue, IntegerStorage};
+
+    #[test]
+    fn shared_numeric_registry_round_trips_every_native_class_and_layout() {
+        let provider = InProcessProvider::new();
+        let cases = vec![
+            HostNumericDataOwned::F64(vec![1.0, 2.0, 3.0, 4.0]),
+            HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0]),
+            HostNumericDataOwned::I8(vec![i8::MIN, -1, 1, i8::MAX]),
+            HostNumericDataOwned::I16(vec![i16::MIN, -1, 1, i16::MAX]),
+            HostNumericDataOwned::I32(vec![i32::MIN, -1, 1, i32::MAX]),
+            HostNumericDataOwned::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            HostNumericDataOwned::U8(vec![0, 1, 2, u8::MAX]),
+            HostNumericDataOwned::U16(vec![0, 1, 2, u16::MAX]),
+            HostNumericDataOwned::U32(vec![0, 1, 2, u32::MAX]),
+            HostNumericDataOwned::U64(vec![0, 1, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for data in cases {
+            for (shape, storage) in [
+                (vec![1, 4], GpuTensorStorage::Real),
+                (vec![1, 2], GpuTensorStorage::ComplexInterleaved),
+            ] {
+                let expected_type = data.element_type();
+                let transfer = HostNumericTensorView {
+                    data: data.as_view(),
+                    shape: &shape,
+                    storage,
+                };
+                let handle = provider
+                    .upload_numeric(&transfer)
+                    .expect("shared native upload");
+                assert_eq!(runmat_accelerate_api::handle_storage(&handle), storage);
+                assert_eq!(
+                    runmat_accelerate_api::handle_class_name(&handle).as_deref(),
+                    Some(expected_type.class_name())
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(&handle),
+                    expected_type.precision()
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&handle),
+                    expected_type.integer_type()
+                );
+
+                let downloaded =
+                    block_on(provider.download_numeric(&handle)).expect("shared native download");
+                assert_eq!(downloaded.data, data);
+                assert_eq!(downloaded.shape, shape);
+                assert_eq!(downloaded.storage, storage);
+
+                provider.free(&handle).expect("free shared numeric buffer");
+                assert!(!numeric_registry()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .contains_key(&handle.buffer_id));
+            }
+        }
+    }
+
+    #[test]
+    fn old_download_projects_native_single_without_storing_an_f64_mirror() {
+        let provider = InProcessProvider::new();
+        let values = [1.25_f32, -2.5, f32::MAX];
+        let handle = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&values),
+                shape: &[1, 3],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("native single upload");
+
+        {
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            assert_eq!(
+                guard.get(&handle.buffer_id),
+                Some(&InProcessNumericData::F32(values.to_vec()))
+            );
+        }
+        let projected = block_on(provider.download(&handle)).expect("old single projection");
+        assert_eq!(
+            projected.data,
+            values.into_iter().map(f64::from).collect::<Vec<_>>()
+        );
+        assert!(matches!(
+            numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&handle.buffer_id),
+            Some(InProcessNumericData::F32(_))
+        ));
+        provider.free(&handle).expect("free native single buffer");
+    }
 
     #[test]
     fn conv1d_valid_empty_kernel_returns_signal_length_zeros() {
