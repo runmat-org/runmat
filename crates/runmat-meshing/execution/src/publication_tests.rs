@@ -99,8 +99,7 @@ fn incomplete_object_set_cannot_become_an_attempt_success() {
 #[test]
 fn diagnostic_only_manifest_cannot_satisfy_a_dependency() {
     let mut objects = fixture(vec![vec![1; 200]], 1024);
-    objects.manifest.disposition =
-        runmat_meshing_core::MeshingManifestDispositionV2::DiagnosticOnly;
+    objects.manifest.disposition = runmat_meshing_core::MeshingManifestDisposition::DiagnosticOnly;
     let manifest = objects.manifest.clone();
     let identity = objects.result_identity.clone();
     let chunks = manifest
@@ -112,7 +111,7 @@ fn diagnostic_only_manifest_cannot_satisfy_a_dependency() {
                 .iter()
                 .find(|object| object.descriptor.digest.bytes() == descriptor.digest.bytes())
                 .unwrap();
-            runmat_meshing_core::EncodedMeshingChunkV2 {
+            runmat_meshing_core::EncodedMeshingChunk {
                 descriptor: descriptor.clone(),
                 bytes: object.bytes.clone(),
             }

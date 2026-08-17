@@ -254,8 +254,7 @@ pub(super) async fn run_worker_loop(
                         state.objects.clone(),
                     )
                 };
-                let cooperative =
-                    attempt.program.artifact.form == ExecutableForm::MeshingWorkloadV2;
+                let cooperative = attempt.program.artifact.form == ExecutableForm::MeshingWorkload;
                 let cancellation =
                     Arc::new(super::worker_execution::AttemptCancellation::default());
                 let cancellation_for_task = Arc::clone(&cancellation);

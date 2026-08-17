@@ -32,11 +32,11 @@ macro_rules! evaluator_id {
     };
 }
 
-evaluator_id!(CurveEvaluatorIdV2, "curve evaluator id");
-evaluator_id!(PcurveEvaluatorIdV2, "pcurve evaluator id");
-evaluator_id!(SurfaceEvaluatorIdV2, "surface evaluator id");
-evaluator_id!(TrimClassifierIdV2, "trim classifier id");
-evaluator_id!(MassPropertiesEvaluatorIdV2, "mass-properties evaluator id");
+evaluator_id!(CurveEvaluatorId, "curve evaluator id");
+evaluator_id!(PcurveEvaluatorId, "pcurve evaluator id");
+evaluator_id!(SurfaceEvaluatorId, "surface evaluator id");
+evaluator_id!(TrimClassifierId, "trim classifier id");
+evaluator_id!(MassPropertiesEvaluatorId, "mass-properties evaluator id");
 
 fn validate_evaluator_id(field: &str, value: &str) -> Result<(), GeometryContractError> {
     if value.is_empty()

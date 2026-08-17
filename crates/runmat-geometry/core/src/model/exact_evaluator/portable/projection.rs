@@ -1,6 +1,6 @@
 use super::super::{
-    CurveDerivativesV2, CurveProjectionV2, GeometryEvaluationControl, GeometryEvaluationError,
-    GeometryEvaluationErrorKind, ParameterRangeV2,
+    CurveDerivatives, CurveProjection, GeometryEvaluationControl, GeometryEvaluationError,
+    GeometryEvaluationErrorKind, ParameterRange,
 };
 use super::vector::{distance, dot, norm, subtract};
 
@@ -8,13 +8,13 @@ const MAX_NEWTON_ITERATIONS: usize = 64;
 const MAX_PROJECTION_SEEDS: usize = 1_000_000;
 
 pub(super) fn project_curve(
-    range: ParameterRangeV2,
+    range: ParameterRange,
     point_m: [f64; 3],
     absolute_error_m: f64,
     seeds: impl IntoIterator<Item = f64>,
     control: &dyn GeometryEvaluationControl,
-    mut evaluate: impl FnMut(f64) -> Result<CurveDerivativesV2, GeometryEvaluationError>,
-) -> Result<CurveProjectionV2, GeometryEvaluationError> {
+    mut evaluate: impl FnMut(f64) -> Result<CurveDerivatives, GeometryEvaluationError>,
+) -> Result<CurveProjection, GeometryEvaluationError> {
     // Callers seed every analytic interval or nonzero NURBS knot span in
     // parameter order. We refine each seed independently and resolve equal
     // distances by the lowest parameter, so search order cannot change output.
@@ -79,7 +79,7 @@ fn endpoint_is_optimal(
     is_start: bool,
     point_m: &[f64; 3],
     absolute_error_m: f64,
-    evaluate: &mut impl FnMut(f64) -> Result<CurveDerivativesV2, GeometryEvaluationError>,
+    evaluate: &mut impl FnMut(f64) -> Result<CurveDerivatives, GeometryEvaluationError>,
 ) -> Result<bool, GeometryEvaluationError> {
     let value = evaluate(parameter)?;
     let gradient = dot(&subtract(&value.point_m, point_m), &value.first_m);
@@ -94,11 +94,11 @@ fn endpoint_is_optimal(
 fn consider(
     parameter: f64,
     point_m: &[f64; 3],
-    best: &mut Option<CurveProjectionV2>,
-    evaluate: &mut impl FnMut(f64) -> Result<CurveDerivativesV2, GeometryEvaluationError>,
+    best: &mut Option<CurveProjection>,
+    evaluate: &mut impl FnMut(f64) -> Result<CurveDerivatives, GeometryEvaluationError>,
 ) -> Result<(), GeometryEvaluationError> {
     let evaluation = evaluate(parameter)?;
-    let candidate = CurveProjectionV2 {
+    let candidate = CurveProjection {
         parameter,
         point_m: evaluation.point_m,
         distance_m: distance(&evaluation.point_m, point_m),
@@ -118,11 +118,11 @@ fn consider(
 
 fn refine_stationary_point(
     seed: f64,
-    range: ParameterRangeV2,
+    range: ParameterRange,
     point_m: &[f64; 3],
     absolute_error_m: f64,
     control: &dyn GeometryEvaluationControl,
-    evaluate: &mut impl FnMut(f64) -> Result<CurveDerivativesV2, GeometryEvaluationError>,
+    evaluate: &mut impl FnMut(f64) -> Result<CurveDerivatives, GeometryEvaluationError>,
 ) -> Result<Option<f64>, GeometryEvaluationError> {
     let mut parameter = seed;
     for _ in 0..MAX_NEWTON_ITERATIONS {
@@ -148,7 +148,7 @@ fn refine_stationary_point(
     Ok(None)
 }
 
-pub(super) fn uniform_seeds(range: ParameterRangeV2, interval_count: usize) -> Vec<f64> {
+pub(super) fn uniform_seeds(range: ParameterRange, interval_count: usize) -> Vec<f64> {
     let interval_count = interval_count.clamp(1, MAX_PROJECTION_SEEDS - 1);
     (0..=interval_count)
         .map(|index| range.start + (range.end - range.start) * index as f64 / interval_count as f64)

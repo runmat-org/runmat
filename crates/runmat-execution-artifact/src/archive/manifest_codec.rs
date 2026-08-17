@@ -413,7 +413,7 @@ fn decode_form(value: u8) -> ArtifactResult<ExecutableForm> {
         2 => Ok(ExecutableForm::TestAttemptV1),
         3 => Ok(ExecutableForm::ExecutableUnitV3),
         4 => Ok(ExecutableForm::NativeObjectV1),
-        5 => Ok(ExecutableForm::MeshingWorkloadV2),
+        5 => Ok(ExecutableForm::MeshingWorkload),
         _ => Err(ArtifactError::Invalid("invalid executable form".into())),
     }
 }

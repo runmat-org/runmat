@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{ExactBRepTopologyV2, GeometryContractError, PersistentEntityId, PersistentEntityKind};
+use super::{ExactBRepTopology, GeometryContractError, PersistentEntityId, PersistentEntityKind};
 
 pub(super) fn validate_interfaces(
-    topology: &ExactBRepTopologyV2,
+    topology: &ExactBRepTopology,
     faces: &BTreeSet<PersistentEntityId>,
 ) -> Result<(), GeometryContractError> {
     let mut ordered = None;
@@ -44,7 +44,7 @@ pub(super) fn validate_interfaces(
 }
 
 pub(super) fn validate_contacts(
-    topology: &ExactBRepTopologyV2,
+    topology: &ExactBRepTopology,
     faces: &BTreeSet<PersistentEntityId>,
 ) -> Result<(), GeometryContractError> {
     let interface_faces = topology

@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    identity::validate_digest_list, validate_token, MeshElementOrderV2, MeshingContractError,
-    MeshingFailure, MeshingPartitionDescriptorV2, MeshingStageV2, StableDigest,
+    identity::validate_digest_list, validate_token, ElementOrder, MeshingContractError,
+    MeshingFailure, MeshingPartitionDescriptor, MeshingStageKind, StableDigest,
 };
 
 pub const MESHING_WORKLOAD_SCHEMA_VERSION: u16 = 2;
@@ -21,15 +21,15 @@ const MAX_PROGRESS_COUNTS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum MeshingCapabilityRequirementV2 {
+pub enum MeshingCapabilityRequirement {
     HostWorkload { abi: String },
     ExactCadKernel { abi: String },
     MeshingAlgorithm { version: String },
-    ElementOrder { order: MeshElementOrderV2 },
+    ElementOrder { order: ElementOrder },
     DeterministicPlatformCohort { cohort: String },
 }
 
-impl MeshingCapabilityRequirementV2 {
+impl MeshingCapabilityRequirement {
     fn validate(&self) -> Result<(), MeshingContractError> {
         match self {
             Self::HostWorkload { abi } => validate_token("meshing host ABI", abi, 128),
@@ -47,16 +47,16 @@ impl MeshingCapabilityRequirementV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingWorkloadRequestV2 {
+pub struct MeshingWorkloadRequest {
     pub schema_version: u16,
-    pub stage: MeshingStageV2,
+    pub stage: MeshingStageKind,
     pub stage_identity_digest: StableDigest,
-    pub partition: MeshingPartitionDescriptorV2,
+    pub partition: MeshingPartitionDescriptor,
     pub input_manifest_digests: Vec<StableDigest>,
-    pub required_capabilities: Vec<MeshingCapabilityRequirementV2>,
+    pub required_capabilities: Vec<MeshingCapabilityRequirement>,
 }
 
-impl MeshingWorkloadRequestV2 {
+impl MeshingWorkloadRequest {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != MESHING_WORKLOAD_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
@@ -69,10 +69,10 @@ impl MeshingWorkloadRequestV2 {
         self.partition.validate()?;
         if matches!(
             self.partition.kind,
-            super::MeshingPartitionKindV2::CanonicalEntityBatch
+            super::MeshingPartitionKind::CanonicalEntityBatch
         ) && !matches!(
             self.stage,
-            MeshingStageV2::Sizing | MeshingStageV2::CurveMesh | MeshingStageV2::SurfaceMesh
+            MeshingStageKind::Sizing | MeshingStageKind::CurveMesh | MeshingStageKind::SurfaceMesh
         ) {
             return Err(MeshingContractError::invalid(
                 "meshing workload partition",
@@ -85,7 +85,8 @@ impl MeshingWorkloadRequestV2 {
             MAX_INPUT_MANIFESTS,
             true,
         )?;
-        if self.stage != MeshingStageV2::GeometryAdmission && self.input_manifest_digests.is_empty()
+        if self.stage != MeshingStageKind::GeometryAdmission
+            && self.input_manifest_digests.is_empty()
         {
             return Err(MeshingContractError::invalid(
                 "workload input manifests",
@@ -112,12 +113,12 @@ impl MeshingWorkloadRequestV2 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
-pub enum MeshingWorkloadResultV2 {
+pub enum MeshingWorkloadResult {
     Validated { stage_manifest_digest: StableDigest },
     Failed { failure: MeshingFailure },
 }
 
-impl MeshingWorkloadResultV2 {
+impl MeshingWorkloadResult {
     pub(super) fn validate_standalone(&self) -> Result<(), MeshingContractError> {
         match self {
             Self::Validated {
@@ -129,7 +130,7 @@ impl MeshingWorkloadResultV2 {
 
     pub fn validate_against(
         &self,
-        request: &MeshingWorkloadRequestV2,
+        request: &MeshingWorkloadRequest,
     ) -> Result<(), MeshingContractError> {
         request.validate()?;
         self.validate_standalone()?;
@@ -150,9 +151,9 @@ impl MeshingWorkloadResultV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingProgressV2 {
+pub struct MeshingProgress {
     pub schema_version: u16,
-    pub stage: MeshingStageV2,
+    pub stage: MeshingStageKind,
     pub partition_index: u32,
     pub sequence: u64,
     pub completed_work: u64,
@@ -164,7 +165,7 @@ pub struct MeshingProgressV2 {
     pub cancellation_checkpoint: u64,
 }
 
-impl MeshingProgressV2 {
+impl MeshingProgress {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != MESHING_PROGRESS_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(

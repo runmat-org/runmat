@@ -1,23 +1,23 @@
 use super::{
-    codec, logical_content_digest, validate_streams, EncodedMeshingChunkV2, MeshingChunkStreamV2,
-    MeshingChunkedPayloadV2,
+    codec, logical_content_digest, validate_streams, EncodedMeshingChunk, MeshingChunkStream,
+    MeshingChunkedPayload,
 };
-use crate::contracts::v2::{
-    CanonicalMeshingContract, MeshingContractError, MeshingManifestDispositionV2,
-    MeshingStageManifestV2, MeshingStageResultIdentityV2, MeshingStageResultKindV2, MeshingStageV2,
-    StableDigest, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_STAGE_MANIFEST_SCHEMA_VERSION,
+use crate::contracts::canonical::{
+    CanonicalMeshingContract, MeshingContractError, MeshingManifestDisposition, MeshingStageKind,
+    MeshingStageManifest, MeshingStageResultIdentity, MeshingStageResultKind, StableDigest,
+    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_STAGE_MANIFEST_SCHEMA_VERSION,
 };
 
 pub fn build_closed_stage_manifest(
-    stage: MeshingStageV2,
-    result_kind: MeshingStageResultKindV2,
+    stage: MeshingStageKind,
+    result_kind: MeshingStageResultKind,
     producer_identity_digest: StableDigest,
     invariant_summary_digest: StableDigest,
     prerequisite_manifest_digests: Vec<StableDigest>,
-    disposition: MeshingManifestDispositionV2,
-    payload: &MeshingChunkedPayloadV2,
-) -> Result<(MeshingStageResultIdentityV2, MeshingStageManifestV2), MeshingContractError> {
-    let result_identity = MeshingStageResultIdentityV2 {
+    disposition: MeshingManifestDisposition,
+    payload: &MeshingChunkedPayload,
+) -> Result<(MeshingStageResultIdentity, MeshingStageManifest), MeshingContractError> {
+    let result_identity = MeshingStageResultIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage,
         result_kind,
@@ -27,7 +27,7 @@ pub fn build_closed_stage_manifest(
         invariant_summary_digest,
     };
     result_identity.validate()?;
-    let manifest = MeshingStageManifestV2 {
+    let manifest = MeshingStageManifest {
         schema_version: MESHING_STAGE_MANIFEST_SCHEMA_VERSION,
         stage,
         result_kind,
@@ -48,9 +48,9 @@ pub fn build_closed_stage_manifest(
 }
 
 pub fn verify_stage_manifest_closure(
-    manifest: &MeshingStageManifestV2,
-    result_identity: &MeshingStageResultIdentityV2,
-    chunks: &[EncodedMeshingChunkV2],
+    manifest: &MeshingStageManifest,
+    result_identity: &MeshingStageResultIdentity,
+    chunks: &[EncodedMeshingChunk],
 ) -> Result<(), MeshingContractError> {
     manifest.validate()?;
     result_identity.validate()?;
@@ -66,7 +66,7 @@ pub fn verify_stage_manifest_closure(
         ));
     }
 
-    let mut streams = Vec::<MeshingChunkStreamV2>::new();
+    let mut streams = Vec::<MeshingChunkStream>::new();
     let mut logical_entity_count = 0_u64;
     let mut total_encoded_length = 0_u64;
     for (expected, chunk) in manifest.chunks.iter().zip(chunks) {
@@ -100,7 +100,7 @@ pub fn verify_stage_manifest_closure(
             {
                 stream.records.extend(decoded.records);
             }
-            _ => streams.push(MeshingChunkStreamV2 {
+            _ => streams.push(MeshingChunkStream {
                 media_type: decoded.media_type,
                 schema_version: decoded.schema_version,
                 records: decoded.records,

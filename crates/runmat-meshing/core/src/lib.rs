@@ -15,6 +15,32 @@ pub use contracts::artifact::{
 };
 pub use contracts::backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshTriangle};
+pub use contracts::canonical::{
+    build_chunked_stage_payload, build_closed_stage_manifest, verify_stage_manifest_closure,
+    AlgorithmVersionSet, BoundaryFaceRole, BoundaryTriangleOrder, CacheAdmissionDecision,
+    CancellationPolicy, CanonicalEntityRange, CanonicalMeshingContract, ContactPair, ElementOrder,
+    EncodedMeshingChunk, ErrorDistribution, FieldTopologyLocation, FieldTopologyMap,
+    GeometricWitness, GeometryRevisionRef, GeometryTolerancePolicy, InvariantEvidence,
+    MaterialInterface, MeshNeighbor, MeshRegion, MeshingCancellationSignal, MeshingCanonicalLimits,
+    MeshingCapabilityRequirement, MeshingChunkDescriptor, MeshingChunkMediaType,
+    MeshingChunkPolicy, MeshingChunkStream, MeshingChunkedPayload, MeshingContractError,
+    MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingEvidence, MeshingFailure,
+    MeshingFailureCategory, MeshingJoinIdentity, MeshingManifestDisposition, MeshingOperation,
+    MeshingPartitionDescriptor, MeshingPartitionIdentity, MeshingPartitionKind,
+    MeshingPartitionResultRef, MeshingProgress, MeshingQualityTargets, MeshingRequest,
+    MeshingResourceBudget, MeshingResourceUsage, MeshingStageEvidence, MeshingStageIdentity,
+    MeshingStageKind, MeshingStageManifest, MeshingStageResultIdentity, MeshingStageResultKind,
+    MeshingValidationIdentity, MeshingWorkloadRequest, MeshingWorkloadResult,
+    MetricCombinationRule, MetricContribution, MetricContributionScope, MetricFieldRequest,
+    MetricSourceKind, MetricTensor3, NeverCancelled, PersistentEntityId, PersistentEntityKind,
+    PlatformBuildIdentity, SizingResolutionEvidence, SolverBoundaryEdge, SolverBoundaryFace,
+    SolverMeshArtifact, SolverMeshNode, SolverMeshTopology, SolverVolumeElement, StableDigest,
+    SurfaceQualityTargets, VolumeQualityTargets, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    MESHING_EVIDENCE_SCHEMA_VERSION, MESHING_FAILURE_SCHEMA_VERSION,
+    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
+    MESHING_REQUEST_SCHEMA_VERSION, MESHING_STAGE_MANIFEST_SCHEMA_VERSION,
+    MESHING_WORKLOAD_SCHEMA_VERSION,
+};
 pub use contracts::options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
@@ -23,33 +49,6 @@ pub use contracts::options::{
 };
 pub use contracts::provenance::{AnalysisMeshProvenance, MeshEntityProvenance, SourceEntityKind};
 pub use contracts::topology::{BoundaryElementKind, VolumeElementKind};
-pub use contracts::v2::{
-    build_chunked_stage_payload, build_closed_stage_manifest, verify_stage_manifest_closure,
-    AlgorithmVersionSet, AnalysisBoundaryEdgeV2, AnalysisBoundaryFaceV2, AnalysisMeshArtifactV2,
-    AnalysisMeshNodeV2, AnalysisMeshTopologyV2, AnalysisVolumeElementV2, BoundaryFaceRoleV2,
-    BoundaryTriangleOrderV2, CacheAdmissionDecisionV2, CancellationPolicyV2,
-    CanonicalEntityRangeV2, CanonicalMeshingContract, ContactPairV2, EncodedMeshingChunkV2,
-    ErrorDistributionV2, FieldTopologyLocationV2, FieldTopologyMapV2, GeometricWitness,
-    GeometryRevisionRef, GeometryTolerancePolicy, InvariantEvidenceV2, MaterialInterfaceV2,
-    MeshElementOrderV2, MeshNeighborV2, MeshRegionV2, MeshingCancellationSignal,
-    MeshingCanonicalLimits, MeshingCapabilityRequirementV2, MeshingChunkDescriptorV2,
-    MeshingChunkMediaTypeV2, MeshingChunkPolicyV2, MeshingChunkStreamV2, MeshingChunkedPayloadV2,
-    MeshingContractError, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingEvidenceV2,
-    MeshingFailure, MeshingFailureCategory, MeshingJoinIdentityV2, MeshingManifestDispositionV2,
-    MeshingOperationV2, MeshingPartitionDescriptorV2, MeshingPartitionIdentityV2,
-    MeshingPartitionKindV2, MeshingPartitionResultRefV2, MeshingProgressV2,
-    MeshingQualityTargetsV2, MeshingRequestV2, MeshingResourceBudgetV2, MeshingResourceUsageV2,
-    MeshingStageIdentityV2, MeshingStageManifestV2, MeshingStageResultIdentityV2,
-    MeshingStageResultKindV2, MeshingStageV2, MeshingValidationIdentityV2,
-    MeshingWorkloadRequestV2, MeshingWorkloadResultV2, MetricCombinationRule, MetricContribution,
-    MetricContributionScope, MetricFieldRequestV2, MetricSourceKind, MetricTensor3, NeverCancelled,
-    PersistentEntityId, PersistentEntityKind, PlatformBuildIdentityV2, SizingResolutionEvidenceV2,
-    StableDigest, StageEvidenceV2, SurfaceQualityTargetsV2, VolumeQualityTargetsV2,
-    ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION, MESHING_EVIDENCE_SCHEMA_VERSION,
-    MESHING_FAILURE_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
-    MESHING_PROGRESS_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
-    MESHING_STAGE_MANIFEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
-};
 pub use contracts::{
     validate_meshing_stage_order, CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract,
     CadModel, CadShellContract, CadVertexContract, CadVolumeContract, CurveMesh, CurveMeshElement,

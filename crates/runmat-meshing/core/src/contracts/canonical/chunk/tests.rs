@@ -1,30 +1,29 @@
 use super::*;
-use crate::contracts::v2::{
-    CanonicalMeshingContract, MeshingManifestDispositionV2, MeshingStageResultKindV2,
-    MeshingStageV2,
+use crate::contracts::canonical::{
+    CanonicalMeshingContract, MeshingManifestDisposition, MeshingStageKind, MeshingStageResultKind,
 };
 
 fn digest(byte: u8) -> StableDigest {
     StableDigest::from_bytes([byte; 32])
 }
 
-fn streams() -> Vec<MeshingChunkStreamV2> {
+fn streams() -> Vec<MeshingChunkStream> {
     vec![
-        MeshingChunkStreamV2 {
-            media_type: MeshingChunkMediaTypeV2::MeshNodes,
+        MeshingChunkStream {
+            media_type: MeshingChunkMediaType::MeshNodes,
             schema_version: 2,
             records: (0_u8..10).map(|value| vec![value; 80]).collect(),
         },
-        MeshingChunkStreamV2 {
-            media_type: MeshingChunkMediaTypeV2::MeshElements,
+        MeshingChunkStream {
+            media_type: MeshingChunkMediaType::MeshElements,
             schema_version: 2,
             records: (10_u8..15).map(|value| vec![value; 120]).collect(),
         },
     ]
 }
 
-fn policy(maximum_chunk_bytes: u64, maximum_records_per_chunk: u32) -> MeshingChunkPolicyV2 {
-    MeshingChunkPolicyV2 {
+fn policy(maximum_chunk_bytes: u64, maximum_records_per_chunk: u32) -> MeshingChunkPolicy {
+    MeshingChunkPolicy {
         maximum_chunk_bytes,
         maximum_records_per_chunk,
         maximum_total_encoded_bytes: 64 * 1024,
@@ -40,22 +39,22 @@ fn logical_identity_is_independent_of_deterministic_chunk_policy() {
     assert_eq!(fine.logical_content_digest, coarse.logical_content_digest);
 
     let (fine_identity, fine_manifest) = build_closed_stage_manifest(
-        MeshingStageV2::Serialization,
-        MeshingStageResultKindV2::WholeStage,
+        MeshingStageKind::Serialization,
+        MeshingStageResultKind::WholeStage,
         digest(1),
         digest(2),
         vec![digest(3)],
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &fine,
     )
     .unwrap();
     let (coarse_identity, coarse_manifest) = build_closed_stage_manifest(
-        MeshingStageV2::Serialization,
-        MeshingStageResultKindV2::WholeStage,
+        MeshingStageKind::Serialization,
+        MeshingStageResultKind::WholeStage,
         digest(1),
         digest(2),
         vec![digest(3)],
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &coarse,
     )
     .unwrap();
@@ -75,12 +74,12 @@ fn logical_identity_is_independent_of_deterministic_chunk_policy() {
 fn closure_rejects_corruption_truncation_and_reordering() {
     let payload = build_chunked_stage_payload(&streams(), policy(512, 2)).unwrap();
     let (identity, manifest) = build_closed_stage_manifest(
-        MeshingStageV2::Serialization,
-        MeshingStageResultKindV2::WholeStage,
+        MeshingStageKind::Serialization,
+        MeshingStageResultKind::WholeStage,
         digest(1),
         digest(2),
         Vec::new(),
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )
     .unwrap();
@@ -119,8 +118,8 @@ fn chunk_builder_enforces_stream_and_hard_byte_bounds() {
         "meshing chunk streams"
     );
 
-    let oversized_record = vec![MeshingChunkStreamV2 {
-        media_type: MeshingChunkMediaTypeV2::MeshNodes,
+    let oversized_record = vec![MeshingChunkStream {
+        media_type: MeshingChunkMediaType::MeshNodes,
         schema_version: 2,
         records: vec![vec![1; 500]],
     }];
@@ -145,12 +144,12 @@ fn chunk_builder_enforces_stream_and_hard_byte_bounds() {
 fn manifest_rejects_duplicate_or_discontinuous_chunk_descriptors() {
     let payload = build_chunked_stage_payload(&streams(), policy(512, 2)).unwrap();
     let (_, mut manifest) = build_closed_stage_manifest(
-        MeshingStageV2::Serialization,
-        MeshingStageResultKindV2::WholeStage,
+        MeshingStageKind::Serialization,
+        MeshingStageResultKind::WholeStage,
         digest(1),
         digest(2),
         Vec::new(),
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )
     .unwrap();
@@ -161,12 +160,12 @@ fn manifest_rejects_duplicate_or_discontinuous_chunk_descriptors() {
     );
 
     let (_, mut manifest) = build_closed_stage_manifest(
-        MeshingStageV2::Serialization,
-        MeshingStageResultKindV2::WholeStage,
+        MeshingStageKind::Serialization,
+        MeshingStageResultKind::WholeStage,
         digest(1),
         digest(2),
         Vec::new(),
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )
     .unwrap();

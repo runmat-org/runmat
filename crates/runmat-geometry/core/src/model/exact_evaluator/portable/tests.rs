@@ -75,10 +75,10 @@ fn assert_near(actual: f64, expected: f64, tolerance: f64) {
 #[test]
 fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
     let registry = registry();
-    let evaluator = PortableExactEvaluatorV2::new(&registry, &topology(), &model()).unwrap();
+    let evaluator = PortableExactEvaluator::new(&registry, &topology(), &model()).unwrap();
     let control = generous_control();
-    let curve_id = CurveEvaluatorIdV2::new("curve:1").unwrap();
-    let at_quarter = ExactCurveEvaluatorV2::derivatives(
+    let curve_id = CurveEvaluatorId::new("curve:1").unwrap();
+    let at_quarter = ExactCurveEvaluator::derivatives(
         &evaluator,
         &curve_id,
         std::f64::consts::FRAC_PI_2,
@@ -102,7 +102,7 @@ fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
         evaluator
             .arc_length_m(
                 &curve_id,
-                ParameterRangeV2 {
+                ParameterRange {
                     start: 0.0,
                     end: std::f64::consts::TAU,
                 },
@@ -119,8 +119,8 @@ fn analytic_circle_answers_complete_curve_and_pcurve_queries() {
     assert_near(projection.parameter, 0.0, 1.0e-10);
     assert_near(projection.distance_m, 1.0, 1.0e-12);
 
-    let pcurve_id = PcurveEvaluatorIdV2::new("pcurve:1").unwrap();
-    let pcurve = ExactPcurveEvaluatorV2::derivatives(
+    let pcurve_id = PcurveEvaluatorId::new("pcurve:1").unwrap();
+    let pcurve = ExactPcurveEvaluator::derivatives(
         &evaluator,
         &pcurve_id,
         std::f64::consts::FRAC_PI_2,
@@ -142,14 +142,14 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
     topology.edges[0].end_vertex_id = Some(end_vertex.id.clone());
     topology.vertices.push(end_vertex);
     let mut registry = registry();
-    registry.curves[0].implementation = ExactCurveImplementationV2::Portable {
-        definition: ExactCurveDefinitionV2::Nurbs {
-            definition: NurbsCurve3V2 {
+    registry.curves[0].implementation = ExactCurveImplementation::Portable {
+        definition: ExactCurveDefinition::Nurbs {
+            definition: NurbsCurve3 {
                 degree: 2,
                 knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
                 control_points_m: vec![[0.0, 0.0, 0.0], [0.5, 1.0, 0.0], [1.0, 0.0, 0.0]],
                 weights: vec![1.0, 1.0, 1.0],
-                domain: ParameterRangeV2 {
+                domain: ParameterRange {
                     start: 0.0,
                     end: 1.0,
                 },
@@ -157,14 +157,14 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
             },
         },
     };
-    registry.pcurves[0].implementation = ExactPcurveImplementationV2::Portable {
-        definition: ExactPcurveDefinitionV2::Nurbs {
-            definition: NurbsCurve2V2 {
+    registry.pcurves[0].implementation = ExactPcurveImplementation::Portable {
+        definition: ExactPcurveDefinition::Nurbs {
+            definition: NurbsCurve2 {
                 degree: 2,
                 knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
                 control_points_uv: vec![[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]],
                 weights: vec![1.0, 0.5, 1.0],
-                domain: ParameterRangeV2 {
+                domain: ParameterRange {
                     start: 0.0,
                     end: 1.0,
                 },
@@ -174,10 +174,10 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
     };
     let mut summary = model();
     summary.vertex_count = 2;
-    let evaluator = PortableExactEvaluatorV2::new(&registry, &topology, &summary).unwrap();
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, &summary).unwrap();
     let control = generous_control();
-    let id = CurveEvaluatorIdV2::new("curve:1").unwrap();
-    let value = ExactCurveEvaluatorV2::derivatives(&evaluator, &id, 0.5, &control).unwrap();
+    let id = CurveEvaluatorId::new("curve:1").unwrap();
+    let value = ExactCurveEvaluator::derivatives(&evaluator, &id, 0.5, &control).unwrap();
     assert_eq!(value.point_m, [0.5, 0.5, 0.0]);
     assert_eq!(value.first_m, [1.0, 0.0, 0.0]);
     assert_eq!(value.second_m, [0.0, -4.0, 0.0]);
@@ -189,7 +189,7 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
     let length = evaluator
         .arc_length_m(
             &id,
-            ParameterRangeV2 {
+            ParameterRange {
                 start: 0.0,
                 end: 1.0,
             },
@@ -201,7 +201,7 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
     let repeated_length = evaluator
         .arc_length_m(
             &id,
-            ParameterRangeV2 {
+            ParameterRange {
                 start: 0.0,
                 end: 1.0,
             },
@@ -215,9 +215,9 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
         .unwrap();
     assert_near(projection.parameter, 0.5, 1.0e-8);
     assert_near(projection.distance_m, 0.1, 1.0e-8);
-    let pcurve = ExactPcurveEvaluatorV2::derivatives(
+    let pcurve = ExactPcurveEvaluator::derivatives(
         &evaluator,
-        &PcurveEvaluatorIdV2::new("pcurve:1").unwrap(),
+        &PcurveEvaluatorId::new("pcurve:1").unwrap(),
         0.5,
         &control,
     )
@@ -229,7 +229,7 @@ fn rational_bspline_derivatives_length_and_projection_are_deterministic() {
     let error = evaluator
         .arc_length_m(
             &id,
-            ParameterRangeV2 {
+            ParameterRange {
                 start: 0.0,
                 end: 1.0,
             },
@@ -252,19 +252,19 @@ fn analytic_line_projection_clamps_to_its_exact_domain() {
     topology.edges[0].end_vertex_id = Some(end_vertex.id.clone());
     topology.vertices.push(end_vertex);
     let mut registry = registry();
-    let domain = ParameterRangeV2 {
+    let domain = ParameterRange {
         start: 0.0,
         end: 2.0,
     };
-    registry.curves[0].implementation = ExactCurveImplementationV2::Portable {
-        definition: ExactCurveDefinitionV2::Line {
+    registry.curves[0].implementation = ExactCurveImplementation::Portable {
+        definition: ExactCurveDefinition::Line {
             origin_m: [1.0, 0.0, 0.0],
             direction_m_per_parameter: [2.0, 0.0, 0.0],
             domain,
         },
     };
-    registry.pcurves[0].implementation = ExactPcurveImplementationV2::Portable {
-        definition: ExactPcurveDefinitionV2::Line {
+    registry.pcurves[0].implementation = ExactPcurveImplementation::Portable {
+        definition: ExactPcurveDefinition::Line {
             origin_uv: [0.0, 0.0],
             direction_uv_per_parameter: [1.0, 0.0],
             domain,
@@ -272,11 +272,11 @@ fn analytic_line_projection_clamps_to_its_exact_domain() {
     };
     let mut summary = model();
     summary.vertex_count = 2;
-    let evaluator = PortableExactEvaluatorV2::new(&registry, &topology, &summary).unwrap();
-    let id = CurveEvaluatorIdV2::new("curve:1").unwrap();
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, &summary).unwrap();
+    let id = CurveEvaluatorId::new("curve:1").unwrap();
     let control = generous_control();
     assert_eq!(
-        ExactCurveEvaluatorV2::point(&evaluator, &id, 1.0, &control).unwrap(),
+        ExactCurveEvaluator::point(&evaluator, &id, 1.0, &control).unwrap(),
         [3.0, 0.0, 0.0]
     );
     assert_eq!(
@@ -296,22 +296,21 @@ fn analytic_line_projection_clamps_to_its_exact_domain() {
 #[test]
 fn kernel_ownership_cancellation_and_budgets_fail_explicitly() {
     let mut kernel_registry = registry();
-    kernel_registry.curves[0].implementation = ExactCurveImplementationV2::Kernel {
-        reference: KernelEvaluatorRefV2 {
+    kernel_registry.curves[0].implementation = ExactCurveImplementation::Kernel {
+        reference: KernelEvaluatorRef {
             entity_token: "edge:1".into(),
             representation_digest: [7; 32],
         },
     };
-    let evaluator = PortableExactEvaluatorV2::new(&kernel_registry, &topology(), &model()).unwrap();
-    let id = CurveEvaluatorIdV2::new("curve:1").unwrap();
-    let error =
-        ExactCurveEvaluatorV2::point(&evaluator, &id, 0.0, &generous_control()).unwrap_err();
+    let evaluator = PortableExactEvaluator::new(&kernel_registry, &topology(), &model()).unwrap();
+    let id = CurveEvaluatorId::new("curve:1").unwrap();
+    let error = ExactCurveEvaluator::point(&evaluator, &id, 0.0, &generous_control()).unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::KernelUnavailable);
 
     let registry = registry();
-    let evaluator = PortableExactEvaluatorV2::new(&registry, &topology(), &model()).unwrap();
-    let error = ExactCurveEvaluatorV2::point(&evaluator, &id, 0.0, &BudgetControl::cancelled())
-        .unwrap_err();
+    let evaluator = PortableExactEvaluator::new(&registry, &topology(), &model()).unwrap();
+    let error =
+        ExactCurveEvaluator::point(&evaluator, &id, 0.0, &BudgetControl::cancelled()).unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::Cancelled);
     let error = evaluator
         .inverse_project(&id, [0.0, 2.0, 0.0], 1.0e-12, &BudgetControl::new(1, 1))
@@ -326,8 +325,7 @@ fn kernel_ownership_cancellation_and_budgets_fail_explicitly() {
         )
         .unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::BudgetExceeded);
-    let error =
-        ExactCurveEvaluatorV2::point(&evaluator, &id, -1.0, &generous_control()).unwrap_err();
+    let error = ExactCurveEvaluator::point(&evaluator, &id, -1.0, &generous_control()).unwrap_err();
     assert_eq!(
         error.kind,
         GeometryEvaluationErrorKind::ParameterOutsideDomain

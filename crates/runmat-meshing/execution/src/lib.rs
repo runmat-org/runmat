@@ -28,7 +28,7 @@ pub use budget::{
 };
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
 pub use host::{
-    MeshingHostWorkloadV2, MESHING_HOST_EXECUTION_MODE, MESHING_HOST_TARGET_PROFILE,
+    MeshingHostWorkload, MESHING_HOST_EXECUTION_MODE, MESHING_HOST_TARGET_PROFILE,
     MESHING_HOST_WORKLOAD_SCHEMA_VERSION,
 };
 pub use objects::{
@@ -40,7 +40,7 @@ pub use publication::{
     import_result_publication, prepare_result_publication, MeshingArtifactAccess,
     PreparedMeshingResultPublication,
 };
-pub use response::{MeshingHostResponseV2, MESHING_HOST_RESPONSE_SCHEMA_VERSION};
+pub use response::{MeshingHostResponse, MESHING_HOST_RESPONSE_SCHEMA_VERSION};
 pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,

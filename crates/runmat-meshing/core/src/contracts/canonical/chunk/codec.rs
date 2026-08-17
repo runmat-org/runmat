@@ -2,15 +2,15 @@ use minicbor::{Decoder, Encoder};
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    EncodedMeshingChunkV2, MeshingChunkDescriptorV2, MeshingChunkMediaTypeV2, MAX_RECORDS_PER_CHUNK,
+    EncodedMeshingChunk, MeshingChunkDescriptor, MeshingChunkMediaType, MAX_RECORDS_PER_CHUNK,
 };
-use crate::contracts::v2::{MeshingContractError, StableDigest};
+use crate::contracts::canonical::{MeshingContractError, StableDigest};
 
 const CHUNK_PREFIX: &[u8] = b"runmat-meshing-logical-record-chunk/v2\0";
 const CHUNK_ENVELOPE_SCHEMA_VERSION: u16 = 2;
 
-pub(super) struct DecodedMeshingChunkV2 {
-    pub media_type: MeshingChunkMediaTypeV2,
+pub(super) struct DecodedMeshingChunk {
+    pub media_type: MeshingChunkMediaType,
     pub schema_version: u16,
     pub records: Vec<Vec<u8>>,
 }
@@ -18,10 +18,10 @@ pub(super) struct DecodedMeshingChunkV2 {
 pub(super) fn encode_chunk(
     ordinal: u32,
     first_logical_entity_ordinal: u64,
-    media_type: MeshingChunkMediaTypeV2,
+    media_type: MeshingChunkMediaType,
     schema_version: u16,
     records: &[Vec<u8>],
-) -> Result<EncodedMeshingChunkV2, MeshingContractError> {
+) -> Result<EncodedMeshingChunk, MeshingContractError> {
     let decoded_length = records.iter().try_fold(0_u64, |total, record| {
         total.checked_add(record.len() as u64).ok_or_else(|| {
             MeshingContractError::invalid("meshing chunk", "decoded length overflow")
@@ -34,8 +34,8 @@ pub(super) fn encode_chunk(
         schema_version,
         records,
     )?;
-    Ok(EncodedMeshingChunkV2 {
-        descriptor: MeshingChunkDescriptorV2 {
+    Ok(EncodedMeshingChunk {
+        descriptor: MeshingChunkDescriptor {
             ordinal,
             first_logical_entity_ordinal,
             digest: StableDigest::from_bytes(Sha256::digest(&bytes).into()),
@@ -50,8 +50,8 @@ pub(super) fn encode_chunk(
 }
 
 pub(super) fn decode_chunk(
-    chunk: &EncodedMeshingChunkV2,
-) -> Result<DecodedMeshingChunkV2, MeshingContractError> {
+    chunk: &EncodedMeshingChunk,
+) -> Result<DecodedMeshingChunk, MeshingContractError> {
     if chunk.descriptor.encoded_length != chunk.bytes.len() as u64
         || chunk.descriptor.digest != StableDigest::from_bytes(Sha256::digest(&chunk.bytes).into())
     {
@@ -77,7 +77,7 @@ pub(super) fn decode_chunk(
         ));
     }
     let media = decoder.str().map_err(decoding_error)?;
-    let media_type = MeshingChunkMediaTypeV2::from_media_type(media).ok_or_else(|| {
+    let media_type = MeshingChunkMediaType::from_media_type(media).ok_or_else(|| {
         MeshingContractError::invalid("meshing chunk", "unknown meshing media type")
     })?;
     let schema_version = decoder.u16().map_err(decoding_error)?;
@@ -142,7 +142,7 @@ pub(super) fn decode_chunk(
             "chunk bytes are not canonical",
         ));
     }
-    Ok(DecodedMeshingChunkV2 {
+    Ok(DecodedMeshingChunk {
         media_type,
         schema_version,
         records,
@@ -152,7 +152,7 @@ pub(super) fn decode_chunk(
 fn encode_bytes(
     ordinal: u32,
     first_logical_entity_ordinal: u64,
-    media_type: MeshingChunkMediaTypeV2,
+    media_type: MeshingChunkMediaType,
     schema_version: u16,
     records: &[Vec<u8>],
 ) -> Result<Vec<u8>, MeshingContractError> {

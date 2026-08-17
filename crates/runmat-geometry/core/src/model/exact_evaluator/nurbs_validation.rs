@@ -1,15 +1,13 @@
 use super::{
     definition_validation_math::{finite_vector, validate_range},
-    NurbsCurve2V2, NurbsCurve3V2, NurbsSurface3V2, ParameterRangeV2,
+    NurbsCurve2, NurbsCurve3, NurbsSurface3, ParameterRange,
 };
 use crate::model::GeometryContractError;
 
 const MAX_NURBS_DEGREE: u8 = 15;
 const MAX_CONTROL_POINTS: usize = 1_000_000;
 
-pub(super) fn validate_nurbs_curve3(
-    definition: &NurbsCurve3V2,
-) -> Result<(), GeometryContractError> {
+pub(super) fn validate_nurbs_curve3(definition: &NurbsCurve3) -> Result<(), GeometryContractError> {
     validate_nurbs_components(
         "3D NURBS curve",
         definition.degree,
@@ -24,9 +22,7 @@ pub(super) fn validate_nurbs_curve3(
     Ok(())
 }
 
-pub(super) fn validate_nurbs_curve2(
-    definition: &NurbsCurve2V2,
-) -> Result<(), GeometryContractError> {
+pub(super) fn validate_nurbs_curve2(definition: &NurbsCurve2) -> Result<(), GeometryContractError> {
     validate_nurbs_components(
         "2D NURBS curve",
         definition.degree,
@@ -42,7 +38,7 @@ pub(super) fn validate_nurbs_curve2(
 }
 
 pub(super) fn validate_nurbs_surface(
-    definition: &NurbsSurface3V2,
+    definition: &NurbsSurface3,
 ) -> Result<(), GeometryContractError> {
     let u_count = usize::try_from(definition.u_control_count).map_err(|_| {
         invalid(
@@ -95,7 +91,7 @@ fn validate_nurbs_components(
     knots: &[f64],
     control_count: usize,
     weights: &[f64],
-    domain: &ParameterRangeV2,
+    domain: &ParameterRange,
 ) -> Result<(), GeometryContractError> {
     if control_count == 0 || control_count > MAX_CONTROL_POINTS || weights.len() != control_count {
         return Err(invalid(
@@ -112,7 +108,7 @@ fn validate_knot_axis(
     degree: u8,
     knots: &[f64],
     control_count: usize,
-    domain: &ParameterRangeV2,
+    domain: &ParameterRange,
 ) -> Result<(), GeometryContractError> {
     let degree = usize::from(degree);
     if degree == 0
@@ -147,7 +143,7 @@ fn validate_knot_axis(
         run_start = run_end;
     }
     validate_range(field, domain)?;
-    let knot_domain = ParameterRangeV2 {
+    let knot_domain = ParameterRange {
         start: knots[degree],
         end: knots[knots.len() - degree - 1],
     };

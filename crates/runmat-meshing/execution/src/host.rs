@@ -7,7 +7,7 @@ use runmat_execution_artifact::{
     PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingRequestV2, MeshingStageIdentityV2, MeshingWorkloadRequestV2,
+    CanonicalMeshingContract, MeshingRequest, MeshingStageIdentity, MeshingWorkloadRequest,
 };
 
 use crate::task::validate_inputs;
@@ -22,19 +22,19 @@ const MAX_HOST_BYTES: usize = 64 * 1024 * 1024;
 const MAX_COMPONENT_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MeshingHostWorkloadV2 {
+pub struct MeshingHostWorkload {
     pub schema_version: u16,
-    pub workload: MeshingWorkloadRequestV2,
-    pub stage_identity: MeshingStageIdentityV2,
-    pub resolved_request: MeshingRequestV2,
+    pub workload: MeshingWorkloadRequest,
+    pub stage_identity: MeshingStageIdentity,
+    pub resolved_request: MeshingRequest,
     pub artifact_access: MeshingArtifactAccess,
 }
 
-impl MeshingHostWorkloadV2 {
+impl MeshingHostWorkload {
     pub fn new(
-        workload: MeshingWorkloadRequestV2,
-        stage_identity: MeshingStageIdentityV2,
-        resolved_request: MeshingRequestV2,
+        workload: MeshingWorkloadRequest,
+        stage_identity: MeshingStageIdentity,
+        resolved_request: MeshingRequest,
         artifact_access: MeshingArtifactAccess,
     ) -> MeshingExecutionResult<Self> {
         let host = Self {
@@ -114,9 +114,9 @@ impl MeshingHostWorkloadV2 {
         }
         let mut decoder = HostDecoder::new(bytes)?;
         let schema_version = decoder.u16()?;
-        let workload = MeshingWorkloadRequestV2::canonical_decode(decoder.component()?)?;
-        let stage_identity = MeshingStageIdentityV2::canonical_decode(decoder.component()?)?;
-        let resolved_request = MeshingRequestV2::canonical_decode(decoder.component()?)?;
+        let workload = MeshingWorkloadRequest::canonical_decode(decoder.component()?)?;
+        let stage_identity = MeshingStageIdentity::canonical_decode(decoder.component()?)?;
+        let resolved_request = MeshingRequest::canonical_decode(decoder.component()?)?;
         let artifact_access = decode_access(decoder.component()?)?;
         decoder.finish()?;
         let host = Self {
@@ -158,7 +158,7 @@ impl MeshingHostWorkloadV2 {
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::MeshingWorkloadV2,
+            ExecutableForm::MeshingWorkload,
             self.canonical_bytes()?,
         )?;
         let request = ProgramExecutionRequest {
@@ -179,7 +179,7 @@ impl MeshingHostWorkloadV2 {
 
     pub fn from_program_request(request: &ProgramExecutionRequest) -> MeshingExecutionResult<Self> {
         request.validate_for_portable_host()?;
-        if request.artifact.form != ExecutableForm::MeshingWorkloadV2
+        if request.artifact.form != ExecutableForm::MeshingWorkload
             || request.recipe.execution_mode != MESHING_HOST_EXECUTION_MODE
             || request.recipe.target != ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE)
         {

@@ -121,7 +121,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                         materialization.form,
                         ExecutableForm::ExecutableUnitV3
                             | ExecutableForm::NativeObjectV1
-                            | ExecutableForm::MeshingWorkloadV2
+                            | ExecutableForm::MeshingWorkload
                     )
                 }))
         {

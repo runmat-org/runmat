@@ -6,7 +6,7 @@ pub const MESHING_FAILURE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MeshingStageV2 {
+pub enum MeshingStageKind {
     GeometryAdmission,
     Healing,
     Sizing,
@@ -23,7 +23,7 @@ pub enum MeshingStageV2 {
     Publication,
 }
 
-impl MeshingStageV2 {
+impl MeshingStageKind {
     pub const ALL: [Self; 14] = [
         Self::GeometryAdmission,
         Self::Healing,
@@ -44,7 +44,7 @@ impl MeshingStageV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MeshingOperationV2 {
+pub enum MeshingOperation {
     AdmitGeometry,
     HealGeometry,
     ResolveMetric,
@@ -163,8 +163,8 @@ impl MeshingDiagnosticEntry {
 pub struct MeshingFailure {
     pub schema_version: u16,
     pub category: MeshingFailureCategory,
-    pub stage: MeshingStageV2,
-    pub operation: MeshingOperationV2,
+    pub stage: MeshingStageKind,
+    pub operation: MeshingOperation,
     #[serde(default)]
     pub entity_ids: Vec<PersistentEntityId>,
     #[serde(default)]
@@ -212,23 +212,23 @@ impl MeshingFailure {
     }
 }
 
-impl MeshingOperationV2 {
-    pub const fn stage(self) -> MeshingStageV2 {
+impl MeshingOperation {
+    pub const fn stage(self) -> MeshingStageKind {
         match self {
-            Self::AdmitGeometry => MeshingStageV2::GeometryAdmission,
-            Self::HealGeometry => MeshingStageV2::Healing,
-            Self::ResolveMetric => MeshingStageV2::Sizing,
-            Self::DiscretizeCurve => MeshingStageV2::CurveMesh,
-            Self::TriangulateSurface => MeshingStageV2::SurfaceMesh,
-            Self::BuildProtectedBoundaryComplex => MeshingStageV2::ProtectedBoundaryComplex,
-            Self::Tetrahedralize => MeshingStageV2::Tetrahedralization,
-            Self::RecoverConstraint => MeshingStageV2::ConstraintRecovery,
-            Self::Refine => MeshingStageV2::Refinement,
-            Self::Optimize => MeshingStageV2::Optimization,
-            Self::ElevateOrder => MeshingStageV2::OrderElevation,
-            Self::Validate => MeshingStageV2::Validation,
-            Self::Serialize => MeshingStageV2::Serialization,
-            Self::Publish => MeshingStageV2::Publication,
+            Self::AdmitGeometry => MeshingStageKind::GeometryAdmission,
+            Self::HealGeometry => MeshingStageKind::Healing,
+            Self::ResolveMetric => MeshingStageKind::Sizing,
+            Self::DiscretizeCurve => MeshingStageKind::CurveMesh,
+            Self::TriangulateSurface => MeshingStageKind::SurfaceMesh,
+            Self::BuildProtectedBoundaryComplex => MeshingStageKind::ProtectedBoundaryComplex,
+            Self::Tetrahedralize => MeshingStageKind::Tetrahedralization,
+            Self::RecoverConstraint => MeshingStageKind::ConstraintRecovery,
+            Self::Refine => MeshingStageKind::Refinement,
+            Self::Optimize => MeshingStageKind::Optimization,
+            Self::ElevateOrder => MeshingStageKind::OrderElevation,
+            Self::Validate => MeshingStageKind::Validation,
+            Self::Serialize => MeshingStageKind::Serialization,
+            Self::Publish => MeshingStageKind::Publication,
         }
     }
 }

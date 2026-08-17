@@ -1,4 +1,4 @@
-use super::ParameterRangeV2;
+use super::ParameterRange;
 use crate::model::GeometryContractError;
 
 // Dimensionless serialization-integrity threshold for normalized frame data.
@@ -7,7 +7,7 @@ const FRAME_NORMALIZATION_ERROR: f64 = 1.0e-12;
 
 pub(super) fn validate_ranges(
     field: &str,
-    ranges: &[ParameterRangeV2; 2],
+    ranges: &[ParameterRange; 2],
 ) -> Result<(), GeometryContractError> {
     validate_range(field, &ranges[0])?;
     validate_range(field, &ranges[1])
@@ -15,7 +15,7 @@ pub(super) fn validate_ranges(
 
 pub(super) fn validate_range(
     field: &str,
-    range: &ParameterRangeV2,
+    range: &ParameterRange,
 ) -> Result<(), GeometryContractError> {
     if !range.start.is_finite()
         || !range.end.is_finite()

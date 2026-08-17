@@ -80,7 +80,7 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
             message: "test-attempt programs require a test-capable execution host".into(),
         };
     }
-    if request.artifact.form == ExecutableForm::MeshingWorkloadV2 {
+    if request.artifact.form == ExecutableForm::MeshingWorkload {
         return ProgramExecutionResponse::Failure {
             message: "meshing workloads require a meshing-capable execution host".into(),
         };
@@ -354,7 +354,7 @@ mod tests {
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::MeshingWorkloadV2,
+            ExecutableForm::MeshingWorkload,
             b"inert-host-contract".to_vec(),
         )
         .unwrap();

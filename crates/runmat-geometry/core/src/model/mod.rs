@@ -1,6 +1,6 @@
 mod analysis_identity;
 mod assembly;
-mod document_v2;
+mod document;
 mod exact_evaluator;
 mod exact_topology;
 mod exact_topology_assembly_validation;
@@ -20,7 +20,7 @@ pub use analysis_identity::{
     GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind,
 };
 pub use assembly::AssemblyNode;
-pub use document_v2::*;
+pub use document::*;
 pub use exact_evaluator::*;
 pub use exact_topology::*;
 pub use field::{FieldLocation, FieldValueKind};

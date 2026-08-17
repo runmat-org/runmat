@@ -4,11 +4,11 @@ use super::{
     exact_topology_validation_support::{
         claim_unique, invalid, require_ordered_refs, require_reference, validate_transform,
     },
-    ExactBRepTopologyV2, GeometryContractError, PersistentEntityId, PersistentEntityKind,
+    ExactBRepTopology, GeometryContractError, PersistentEntityId, PersistentEntityKind,
 };
 
 pub(super) fn validate_assembly_occurrences(
-    topology: &ExactBRepTopologyV2,
+    topology: &ExactBRepTopology,
     assemblies: &BTreeSet<PersistentEntityId>,
     instances: &BTreeSet<PersistentEntityId>,
     bodies: &BTreeSet<PersistentEntityId>,

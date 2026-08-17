@@ -1,18 +1,18 @@
 use super::*;
 use crate::model::exact_topology_tests::{model, topology};
 
-fn range(start: f64, end: f64) -> ParameterRangeV2 {
-    ParameterRangeV2 { start, end }
+fn range(start: f64, end: f64) -> ParameterRange {
+    ParameterRange { start, end }
 }
 
-pub(super) fn registry() -> ExactEvaluatorRegistryV2 {
-    ExactEvaluatorRegistryV2 {
+pub(super) fn registry() -> ExactEvaluatorRegistry {
+    ExactEvaluatorRegistry {
         schema_version: EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION,
         kernel_abi: "occt-v1".into(),
-        curves: vec![ExactCurveEvaluatorRecordV2 {
-            id: CurveEvaluatorIdV2::new("curve:1").unwrap(),
-            implementation: ExactCurveImplementationV2::Portable {
-                definition: ExactCurveDefinitionV2::Circle {
+        curves: vec![ExactCurveEvaluatorRecord {
+            id: CurveEvaluatorId::new("curve:1").unwrap(),
+            implementation: ExactCurveImplementation::Portable {
+                definition: ExactCurveDefinition::Circle {
                     center_m: [0.0, 0.0, 0.0],
                     x_axis: [1.0, 0.0, 0.0],
                     y_axis: [0.0, 1.0, 0.0],
@@ -21,10 +21,10 @@ pub(super) fn registry() -> ExactEvaluatorRegistryV2 {
                 },
             },
         }],
-        pcurves: vec![ExactPcurveEvaluatorRecordV2 {
-            id: PcurveEvaluatorIdV2::new("pcurve:1").unwrap(),
-            implementation: ExactPcurveImplementationV2::Portable {
-                definition: ExactPcurveDefinitionV2::Circle {
+        pcurves: vec![ExactPcurveEvaluatorRecord {
+            id: PcurveEvaluatorId::new("pcurve:1").unwrap(),
+            implementation: ExactPcurveImplementation::Portable {
+                definition: ExactPcurveDefinition::Circle {
                     center_uv: [0.0, 0.0],
                     x_axis_uv: [1.0, 0.0],
                     y_axis_uv: [0.0, 1.0],
@@ -33,10 +33,10 @@ pub(super) fn registry() -> ExactEvaluatorRegistryV2 {
                 },
             },
         }],
-        surfaces: vec![ExactSurfaceEvaluatorRecordV2 {
-            id: SurfaceEvaluatorIdV2::new("surface:1").unwrap(),
-            implementation: ExactSurfaceImplementationV2::Portable {
-                definition: ExactSurfaceDefinitionV2::Plane {
+        surfaces: vec![ExactSurfaceEvaluatorRecord {
+            id: SurfaceEvaluatorId::new("surface:1").unwrap(),
+            implementation: ExactSurfaceImplementation::Portable {
+                definition: ExactSurfaceDefinition::Plane {
                     origin_m: [0.0, 0.0, 0.0],
                     u_axis_m_per_parameter: [1.0, 0.0, 0.0],
                     v_axis_m_per_parameter: [0.0, 1.0, 0.0],
@@ -44,14 +44,14 @@ pub(super) fn registry() -> ExactEvaluatorRegistryV2 {
                 },
             },
         }],
-        trim_classifiers: vec![ExactTrimClassifierRecordV2 {
-            id: TrimClassifierIdV2::new("trim:1").unwrap(),
-            implementation: ExactTrimClassifierImplementationV2::OrientedPcurveWinding,
+        trim_classifiers: vec![ExactTrimClassifierRecord {
+            id: TrimClassifierId::new("trim:1").unwrap(),
+            implementation: ExactTrimClassifierImplementation::OrientedPcurveWinding,
         }],
-        mass_properties: vec![ExactMassPropertiesRecordV2 {
-            id: MassPropertiesEvaluatorIdV2::new("mass:1").unwrap(),
-            implementation: ExactMassPropertiesImplementationV2::KernelValidated {
-                properties: BodyMassPropertiesV2 {
+        mass_properties: vec![ExactMassPropertiesRecord {
+            id: MassPropertiesEvaluatorId::new("mass:1").unwrap(),
+            implementation: ExactMassPropertiesImplementation::KernelValidated {
+                properties: BodyMassProperties {
                     volume_m3: 1.0,
                     surface_area_m2: 6.0,
                     centroid_m: [0.5, 0.5, 0.5],
@@ -68,7 +68,7 @@ fn exact_registry_fully_binds_topology_and_round_trips() {
     let registry = registry();
     registry.validate_against(&topology(), &model()).unwrap();
     let json = serde_json::to_string(&registry).unwrap();
-    let decoded: ExactEvaluatorRegistryV2 = serde_json::from_str(&json).unwrap();
+    let decoded: ExactEvaluatorRegistry = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded, registry);
 }
 
@@ -79,15 +79,15 @@ fn evaluator_inventory_is_exact_canonical_and_kernel_bound() {
     assert!(missing.validate_against(&topology(), &model()).is_err());
 
     let mut extra = registry();
-    extra.curves.push(ExactCurveEvaluatorRecordV2 {
-        id: CurveEvaluatorIdV2::new("curve:extra").unwrap(),
+    extra.curves.push(ExactCurveEvaluatorRecord {
+        id: CurveEvaluatorId::new("curve:extra").unwrap(),
         implementation: extra.curves[0].implementation.clone(),
     });
     assert!(extra.validate_against(&topology(), &model()).is_err());
 
     let mut noncanonical = registry();
-    noncanonical.curves.push(ExactCurveEvaluatorRecordV2 {
-        id: CurveEvaluatorIdV2::new("curve:0").unwrap(),
+    noncanonical.curves.push(ExactCurveEvaluatorRecord {
+        id: CurveEvaluatorId::new("curve:0").unwrap(),
         implementation: noncanonical.curves[0].implementation.clone(),
     });
     let error = noncanonical
@@ -105,9 +105,9 @@ fn portable_nurbs_curves_pcurves_and_surfaces_are_admitted_without_samples() {
     let mut topology = topology();
     topology.edges[0].is_periodic = false;
     let mut registry = registry();
-    registry.curves[0].implementation = ExactCurveImplementationV2::Portable {
-        definition: ExactCurveDefinitionV2::Nurbs {
-            definition: NurbsCurve3V2 {
+    registry.curves[0].implementation = ExactCurveImplementation::Portable {
+        definition: ExactCurveDefinition::Nurbs {
+            definition: NurbsCurve3 {
                 degree: 2,
                 knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
                 control_points_m: vec![[0.0, 0.0, 0.0], [0.5, 1.0, 0.0], [1.0, 0.0, 0.0]],
@@ -117,9 +117,9 @@ fn portable_nurbs_curves_pcurves_and_surfaces_are_admitted_without_samples() {
             },
         },
     };
-    registry.pcurves[0].implementation = ExactPcurveImplementationV2::Portable {
-        definition: ExactPcurveDefinitionV2::Nurbs {
-            definition: NurbsCurve2V2 {
+    registry.pcurves[0].implementation = ExactPcurveImplementation::Portable {
+        definition: ExactPcurveDefinition::Nurbs {
+            definition: NurbsCurve2 {
                 degree: 1,
                 knots: vec![0.0, 0.0, 1.0, 1.0],
                 control_points_uv: vec![[0.0, 0.0], [1.0, 0.0]],
@@ -129,9 +129,9 @@ fn portable_nurbs_curves_pcurves_and_surfaces_are_admitted_without_samples() {
             },
         },
     };
-    registry.surfaces[0].implementation = ExactSurfaceImplementationV2::Portable {
-        definition: ExactSurfaceDefinitionV2::Nurbs {
-            definition: NurbsSurface3V2 {
+    registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
+        definition: ExactSurfaceDefinition::Nurbs {
+            definition: NurbsSurface3 {
                 u_degree: 1,
                 v_degree: 1,
                 u_knots: vec![0.0, 0.0, 1.0, 1.0],
@@ -153,12 +153,11 @@ fn portable_nurbs_curves_pcurves_and_surfaces_are_admitted_without_samples() {
     };
     registry.validate_against(&topology, &model()).unwrap();
 
-    let ExactCurveImplementationV2::Portable { definition } =
-        &mut registry.curves[0].implementation
+    let ExactCurveImplementation::Portable { definition } = &mut registry.curves[0].implementation
     else {
         unreachable!()
     };
-    let ExactCurveDefinitionV2::Nurbs { definition } = definition else {
+    let ExactCurveDefinition::Nurbs { definition } = definition else {
         unreachable!()
     };
     definition.knots[3] = -1.0;
@@ -180,8 +179,8 @@ fn portable_geometry_and_topology_flags_cannot_disagree() {
         .is_err());
 
     let mut domain_mismatch = registry();
-    let ExactPcurveImplementationV2::Portable {
-        definition: ExactPcurveDefinitionV2::Circle { domain, .. },
+    let ExactPcurveImplementation::Portable {
+        definition: ExactPcurveDefinition::Circle { domain, .. },
     } = &mut domain_mismatch.pcurves[0].implementation
     else {
         unreachable!()
@@ -196,8 +195,8 @@ fn portable_geometry_and_topology_flags_cannot_disagree() {
 #[test]
 fn invalid_kernel_and_mass_evidence_fail_closed() {
     let mut kernel = registry();
-    kernel.curves[0].implementation = ExactCurveImplementationV2::Kernel {
-        reference: KernelEvaluatorRefV2 {
+    kernel.curves[0].implementation = ExactCurveImplementation::Kernel {
+        reference: KernelEvaluatorRef {
             entity_token: "edge:1".into(),
             representation_digest: [0; 32],
         },
@@ -205,7 +204,7 @@ fn invalid_kernel_and_mass_evidence_fail_closed() {
     assert!(kernel.validate_against(&topology(), &model()).is_err());
 
     let mut mass = registry();
-    let ExactMassPropertiesImplementationV2::KernelValidated {
+    let ExactMassPropertiesImplementation::KernelValidated {
         properties,
         validation_digest,
     } = &mut mass.mass_properties[0].implementation

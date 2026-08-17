@@ -5,7 +5,7 @@ use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionRequest, ProgramExecutionResponse,
 };
 use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptSuccess};
-use runmat_meshing_core::{MeshingCancellationSignal, MeshingProgressV2};
+use runmat_meshing_core::{MeshingCancellationSignal, MeshingProgress};
 use runmat_meshing_execution::{MeshingProgressSink, MeshingStageKernel};
 
 use super::object_transfer::RemoteObjectStore;
@@ -48,7 +48,7 @@ pub(super) async fn execute(
     cancellation: Arc<AttemptCancellation>,
     progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
-    if program.artifact.form == ExecutableForm::MeshingWorkloadV2 {
+    if program.artifact.form == ExecutableForm::MeshingWorkload {
         let Some(host) = meshing_host else {
             return failure("remote worker has no meshing host capability");
         };
@@ -118,7 +118,7 @@ struct ChannelProgress {
 }
 
 impl MeshingProgressSink for ChannelProgress {
-    fn record(&mut self, progress: &MeshingProgressV2) {
+    fn record(&mut self, progress: &MeshingProgress) {
         let result = crate::meshing_host::encode_meshing_progress(progress).and_then(|progress| {
             self.sender
                 .blocking_send(progress)

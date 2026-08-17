@@ -14,12 +14,12 @@ fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
     }
 }
 
-pub(super) fn batch_partition() -> MeshingPartitionDescriptorV2 {
-    MeshingPartitionDescriptorV2 {
-        kind: MeshingPartitionKindV2::CanonicalEntityBatch,
+pub(super) fn batch_partition() -> MeshingPartitionDescriptor {
+    MeshingPartitionDescriptor {
+        kind: MeshingPartitionKind::CanonicalEntityBatch,
         partition_index: 0,
         partition_count: 2,
-        entity_range: Some(CanonicalEntityRangeV2 {
+        entity_range: Some(CanonicalEntityRange {
             first: entity(PersistentEntityKind::Face, "face:001"),
             last: entity(PersistentEntityKind::Face, "face:016"),
             entity_count: 16,
@@ -27,10 +27,10 @@ pub(super) fn batch_partition() -> MeshingPartitionDescriptorV2 {
     }
 }
 
-pub(super) fn stage_identity() -> MeshingStageIdentityV2 {
-    MeshingStageIdentityV2 {
+pub(super) fn stage_identity() -> MeshingStageIdentity {
+    MeshingStageIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage: MeshingStageV2::SurfaceMesh,
+        stage: MeshingStageKind::SurfaceMesh,
         geometry: GeometryRevisionRef {
             source_digest: digest(1),
             geometry_revision: 3,
@@ -46,37 +46,37 @@ pub(super) fn stage_identity() -> MeshingStageIdentityV2 {
     }
 }
 
-pub(super) fn workload() -> MeshingWorkloadRequestV2 {
-    MeshingWorkloadRequestV2 {
+pub(super) fn workload() -> MeshingWorkloadRequest {
+    MeshingWorkloadRequest {
         schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
-        stage: MeshingStageV2::SurfaceMesh,
+        stage: MeshingStageKind::SurfaceMesh,
         stage_identity_digest: digest(8),
         partition: batch_partition(),
         input_manifest_digests: vec![digest(9)],
         required_capabilities: vec![
-            MeshingCapabilityRequirementV2::HostWorkload {
+            MeshingCapabilityRequirement::HostWorkload {
                 abi: "meshing-host-v2".into(),
             },
-            MeshingCapabilityRequirementV2::ExactCadKernel {
+            MeshingCapabilityRequirement::ExactCadKernel {
                 abi: "opencascade-7.9".into(),
             },
-            MeshingCapabilityRequirementV2::MeshingAlgorithm {
+            MeshingCapabilityRequirement::MeshingAlgorithm {
                 version: "surface-cdt-v2".into(),
             },
-            MeshingCapabilityRequirementV2::ElementOrder {
-                order: MeshElementOrderV2::Tet10,
+            MeshingCapabilityRequirement::ElementOrder {
+                order: ElementOrder::Tet10,
             },
-            MeshingCapabilityRequirementV2::DeterministicPlatformCohort {
+            MeshingCapabilityRequirement::DeterministicPlatformCohort {
                 cohort: "native-exact-cad-v1".into(),
             },
         ],
     }
 }
 
-pub(super) fn progress(sequence: u64, completed_work: u64) -> MeshingProgressV2 {
-    MeshingProgressV2 {
+pub(super) fn progress(sequence: u64, completed_work: u64) -> MeshingProgress {
+    MeshingProgress {
         schema_version: MESHING_PROGRESS_SCHEMA_VERSION,
-        stage: MeshingStageV2::SurfaceMesh,
+        stage: MeshingStageKind::SurfaceMesh,
         partition_index: 0,
         sequence,
         completed_work,
@@ -95,27 +95,27 @@ fn canonical_stage_partition_and_join_identities_round_trip() {
     stage.validate().unwrap();
     let encoded = serde_json::to_vec(&stage).unwrap();
     assert_eq!(
-        serde_json::from_slice::<MeshingStageIdentityV2>(&encoded).unwrap(),
+        serde_json::from_slice::<MeshingStageIdentity>(&encoded).unwrap(),
         stage
     );
 
-    let partition = MeshingPartitionIdentityV2 {
+    let partition = MeshingPartitionIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage_identity_digest: digest(10),
         partition: batch_partition(),
     };
     partition.validate().unwrap();
 
-    let join = MeshingJoinIdentityV2 {
+    let join = MeshingJoinIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage_identity_digest: digest(10),
         join_algorithm_version: "surface-stitch/v2".into(),
         ordered_partition_results: vec![
-            MeshingPartitionResultRefV2 {
+            MeshingPartitionResultRef {
                 partition_index: 0,
                 result_digest: digest(11),
             },
-            MeshingPartitionResultRefV2 {
+            MeshingPartitionResultRef {
                 partition_index: 1,
                 result_digest: digest(12),
             },
@@ -123,10 +123,10 @@ fn canonical_stage_partition_and_join_identities_round_trip() {
     };
     join.validate().unwrap();
 
-    MeshingStageResultIdentityV2 {
+    MeshingStageResultIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage: MeshingStageV2::SurfaceMesh,
-        result_kind: MeshingStageResultKindV2::DeterministicJoin,
+        stage: MeshingStageKind::SurfaceMesh,
+        result_kind: MeshingStageResultKind::DeterministicJoin,
         producer_identity_digest: digest(13),
         logical_content_digest: digest(14),
         logical_entity_count: 16,
@@ -135,7 +135,7 @@ fn canonical_stage_partition_and_join_identities_round_trip() {
     .validate()
     .unwrap();
 
-    MeshingValidationIdentityV2 {
+    MeshingValidationIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         subject_stage_result_digest: digest(17),
         geometry: stage.geometry.clone(),
@@ -160,7 +160,7 @@ fn identities_reject_completion_order_and_physical_host_fields() {
     value["worker_id"] = serde_json::json!("worker-7");
     value["physical_path"] = serde_json::json!("/tmp/mesh");
     value["completed_at"] = serde_json::json!(1234);
-    assert!(serde_json::from_value::<MeshingStageIdentityV2>(value).is_err());
+    assert!(serde_json::from_value::<MeshingStageIdentity>(value).is_err());
 
     let mut invalid = stage_identity();
     invalid.prerequisite_artifact_digests.swap(0, 1);
@@ -175,7 +175,7 @@ fn workload_and_manifest_reject_unknown_control_plane_fields() {
     let mut workload = serde_json::to_value(workload()).unwrap();
     workload["retry_policy"] = serde_json::json!("infrastructure");
     workload["worker_id"] = serde_json::json!("worker-9");
-    assert!(serde_json::from_value::<MeshingWorkloadRequestV2>(workload).is_err());
+    assert!(serde_json::from_value::<MeshingWorkloadRequest>(workload).is_err());
 
     let digest_one = vec![1_u8; 32];
     let digest_two = vec![2_u8; 32];
@@ -191,35 +191,35 @@ fn workload_and_manifest_reject_unknown_control_plane_fields() {
         "total_encoded_length": 0,
     });
     manifest["physical_path"] = serde_json::json!("/tmp/result");
-    assert!(serde_json::from_value::<MeshingStageManifestV2>(manifest).is_err());
+    assert!(serde_json::from_value::<MeshingStageManifest>(manifest).is_err());
 }
 
 #[test]
 fn stage_manifest_closes_over_ordered_typed_chunks() {
-    let manifest = MeshingStageManifestV2 {
+    let manifest = MeshingStageManifest {
         schema_version: MESHING_STAGE_MANIFEST_SCHEMA_VERSION,
-        stage: MeshingStageV2::SurfaceMesh,
-        result_kind: MeshingStageResultKindV2::DeterministicJoin,
+        stage: MeshingStageKind::SurfaceMesh,
+        result_kind: MeshingStageResultKind::DeterministicJoin,
         logical_result_identity: digest(20),
-        disposition: MeshingManifestDispositionV2::ValidatedDependency,
+        disposition: MeshingManifestDisposition::ValidatedDependency,
         prerequisite_manifest_digests: vec![digest(21)],
         invariant_summary_digest: digest(22),
         chunks: vec![
-            MeshingChunkDescriptorV2 {
+            MeshingChunkDescriptor {
                 ordinal: 0,
                 first_logical_entity_ordinal: 0,
                 digest: digest(23),
-                media_type: MeshingChunkMediaTypeV2::SurfacePartitions,
+                media_type: MeshingChunkMediaType::SurfacePartitions,
                 schema_version: 2,
                 encoded_length: 400,
                 decoded_length: 800,
                 logical_entity_count: 16,
             },
-            MeshingChunkDescriptorV2 {
+            MeshingChunkDescriptor {
                 ordinal: 1,
                 first_logical_entity_ordinal: 16,
                 digest: digest(24),
-                media_type: MeshingChunkMediaTypeV2::ValidationEvidence,
+                media_type: MeshingChunkMediaType::ValidationEvidence,
                 schema_version: 2,
                 encoded_length: 100,
                 decoded_length: 120,
@@ -243,7 +243,7 @@ fn stage_manifest_closes_over_ordered_typed_chunks() {
     );
 
     let mut diagnostic = manifest;
-    diagnostic.disposition = MeshingManifestDispositionV2::DiagnosticOnly;
+    diagnostic.disposition = MeshingManifestDisposition::DiagnosticOnly;
     diagnostic.validate().unwrap();
     assert!(!diagnostic.is_dependency_eligible());
 }
@@ -252,7 +252,7 @@ fn stage_manifest_closes_over_ordered_typed_chunks() {
 fn workload_requires_canonical_domain_capabilities_and_limits_entity_batching() {
     let request = workload();
     request.validate().unwrap();
-    MeshingWorkloadResultV2::Validated {
+    MeshingWorkloadResult::Validated {
         stage_manifest_digest: digest(30),
     }
     .validate_against(&request)
@@ -266,7 +266,7 @@ fn workload_requires_canonical_domain_capabilities_and_limits_entity_batching() 
     );
 
     let mut invalid_partition = request;
-    invalid_partition.stage = MeshingStageV2::Tetrahedralization;
+    invalid_partition.stage = MeshingStageKind::Tetrahedralization;
     assert_eq!(
         invalid_partition.validate().unwrap_err().field,
         "meshing workload partition"
@@ -290,12 +290,12 @@ fn detailed_progress_is_bounded_and_monotone_per_partition() {
 #[test]
 fn workload_failure_must_match_the_requested_stage() {
     let request = workload();
-    let result = MeshingWorkloadResultV2::Failed {
+    let result = MeshingWorkloadResult::Failed {
         failure: MeshingFailure {
             schema_version: MESHING_FAILURE_SCHEMA_VERSION,
             category: MeshingFailureCategory::NumericalFailure,
-            stage: MeshingStageV2::Optimization,
-            operation: MeshingOperationV2::Optimize,
+            stage: MeshingStageKind::Optimization,
+            operation: MeshingOperation::Optimize,
             entity_ids: Vec::new(),
             witnesses: Vec::new(),
             request_values: Vec::new(),

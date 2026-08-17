@@ -4,14 +4,14 @@ use std::collections::BTreeSet;
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingCanonicalLimits, MeshingFailure, MeshingWorkloadResultV2,
+    CanonicalMeshingContract, MeshingCanonicalLimits, MeshingFailure, MeshingWorkloadResult,
     StableDigest,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     CompletedMeshingStage, MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
-    MeshingHostWorkloadV2, MeshingSerialExecutionError, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
+    MeshingHostWorkload, MeshingSerialExecutionError, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
 pub const MESHING_HOST_RESPONSE_SCHEMA_VERSION: u16 = 2;
@@ -20,7 +20,7 @@ const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
-pub enum MeshingHostResponseV2 {
+pub enum MeshingHostResponse {
     Validated {
         schema_version: u16,
         stage_manifest_digest: StableDigest,
@@ -33,12 +33,12 @@ pub enum MeshingHostResponseV2 {
     },
 }
 
-impl MeshingHostResponseV2 {
+impl MeshingHostResponse {
     pub fn completed(
-        host: &MeshingHostWorkloadV2,
+        host: &MeshingHostWorkload,
         completed: &CompletedMeshingStage,
     ) -> MeshingExecutionResult<Self> {
-        let MeshingWorkloadResultV2::Validated {
+        let MeshingWorkloadResult::Validated {
             stage_manifest_digest,
         } = completed.workload_result()
         else {
@@ -63,10 +63,10 @@ impl MeshingHostResponseV2 {
     }
 
     pub fn failed(
-        host: &MeshingHostWorkloadV2,
+        host: &MeshingHostWorkload,
         error: &MeshingSerialExecutionError,
     ) -> MeshingExecutionResult<Option<Self>> {
-        let Some(MeshingWorkloadResultV2::Failed { failure }) = error.workload_result() else {
+        let Some(MeshingWorkloadResult::Failed { failure }) = error.workload_result() else {
             return Ok(None);
         };
         let response = Self::Failed {
@@ -77,7 +77,7 @@ impl MeshingHostResponseV2 {
         Ok(Some(response))
     }
 
-    pub fn validate_against(&self, host: &MeshingHostWorkloadV2) -> MeshingExecutionResult<()> {
+    pub fn validate_against(&self, host: &MeshingHostWorkload) -> MeshingExecutionResult<()> {
         host.validate()?;
         self.validate_standalone()?;
         match self {
@@ -87,14 +87,14 @@ impl MeshingHostResponseV2 {
                 result_objects: _,
                 ..
             } => {
-                MeshingWorkloadResultV2::Validated {
+                MeshingWorkloadResult::Validated {
                     stage_manifest_digest: *stage_manifest_digest,
                 }
                 .validate_against(&host.workload)?;
                 validate_access(root, &host.artifact_access)?;
             }
             Self::Failed { failure, .. } => {
-                MeshingWorkloadResultV2::Failed {
+                MeshingWorkloadResult::Failed {
                     failure: failure.clone(),
                 }
                 .validate_against(&host.workload)?;
@@ -197,7 +197,7 @@ impl MeshingHostResponseV2 {
     }
 }
 
-impl CanonicalMeshingContract for MeshingHostResponseV2 {
+impl CanonicalMeshingContract for MeshingHostResponse {
     const DOMAIN: &'static str = "analysis.mesh.host-response/v2";
     const LIMITS: MeshingCanonicalLimits = MeshingCanonicalLimits::MANIFEST;
 

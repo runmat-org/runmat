@@ -4,7 +4,7 @@ use std::task::{Context, Poll, Waker};
 
 use crate::{
     build_task_submission, prepare_result_publication, prepare_stage_objects,
-    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponseV2, MeshingHostWorkloadV2,
+    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
     MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
@@ -18,14 +18,14 @@ use runmat_execution_runner::port::BackendPort;
 use runmat_execution_runner::{AttemptReport, AttemptRequest};
 use runmat_meshing_core::{
     build_chunked_stage_payload, build_closed_stage_manifest, AlgorithmVersionSet,
-    CancellationPolicyV2, CanonicalMeshingContract, GeometryRevisionRef, GeometryTolerancePolicy,
-    MeshElementOrderV2, MeshingCancellationSignal, MeshingCapabilityRequirementV2,
-    MeshingChunkMediaTypeV2, MeshingChunkPolicyV2, MeshingChunkStreamV2, MeshingFailure,
-    MeshingFailureCategory, MeshingManifestDispositionV2, MeshingPartitionDescriptorV2,
-    MeshingPartitionKindV2, MeshingQualityTargetsV2, MeshingRequestV2, MeshingResourceBudgetV2,
-    MeshingStageIdentityV2, MeshingStageResultKindV2, MeshingStageV2, MeshingWorkloadRequestV2,
-    MetricCombinationRule, MetricFieldRequestV2, MetricTensor3, NeverCancelled, StableDigest,
-    SurfaceQualityTargetsV2, VolumeQualityTargetsV2, MESHING_IDENTITY_SCHEMA_VERSION,
+    CancellationPolicy, CanonicalMeshingContract, ElementOrder, GeometryRevisionRef,
+    GeometryTolerancePolicy, MeshingCancellationSignal, MeshingCapabilityRequirement,
+    MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingFailure,
+    MeshingFailureCategory, MeshingManifestDisposition, MeshingPartitionDescriptor,
+    MeshingPartitionKind, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingStageIdentity, MeshingStageKind, MeshingStageResultKind, MeshingWorkloadRequest,
+    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION,
     MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
@@ -63,10 +63,10 @@ impl CacheExport for MemoryStore {
 }
 
 #[derive(Default)]
-struct Progress(Vec<runmat_meshing_core::MeshingProgressV2>);
+struct Progress(Vec<runmat_meshing_core::MeshingProgress>);
 
 impl MeshingProgressSink for Progress {
-    fn record(&mut self, progress: &runmat_meshing_core::MeshingProgressV2) {
+    fn record(&mut self, progress: &runmat_meshing_core::MeshingProgress) {
         self.0.push(progress.clone());
     }
 }
@@ -91,8 +91,8 @@ impl MeshingStageKernel for SurfaceKernel {
         })?;
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(90),
-            streams: vec![MeshingChunkStreamV2 {
-                media_type: MeshingChunkMediaTypeV2::SurfacePartitions,
+            streams: vec![MeshingChunkStream {
+                media_type: MeshingChunkMediaType::SurfacePartitions,
                 schema_version: 2,
                 records: vec![vec![1; 700], vec![2; 700], vec![3; 700]],
             }],
@@ -153,9 +153,9 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
         .workload_result()
         .validate_against(&fixture.host.workload)
         .unwrap();
-    let response = MeshingHostResponseV2::completed(&fixture.host, &completed).unwrap();
+    let response = MeshingHostResponse::completed(&fixture.host, &completed).unwrap();
     let encoded = response.canonical_encode().unwrap();
-    let decoded = MeshingHostResponseV2::canonical_decode(&encoded).unwrap();
+    let decoded = MeshingHostResponse::canonical_decode(&encoded).unwrap();
     decoded.validate_against(&fixture.host).unwrap();
     assert_eq!(decoded.attempt_success(), Some(completed.attempt_success()));
     decoded
@@ -311,7 +311,7 @@ fn serial_stage_reports_typed_cancellation_and_search_budget_failures() {
         .unwrap()
         .validate_against(&cancelled.host.workload)
         .unwrap();
-    let response = MeshingHostResponseV2::failed(&cancelled.host, &error)
+    let response = MeshingHostResponse::failed(&cancelled.host, &error)
         .unwrap()
         .unwrap();
     response.validate_against(&cancelled.host).unwrap();
@@ -350,8 +350,8 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let response = MeshingHostResponseV2::completed(&fixture.host, &completed).unwrap();
-    let MeshingHostResponseV2::Validated {
+    let response = MeshingHostResponse::completed(&fixture.host, &completed).unwrap();
+    let MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
         mut root,
@@ -361,7 +361,7 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
         panic!("successful stage returned a failure response")
     };
     result_objects.retain(|object| object != &root);
-    let missing = MeshingHostResponseV2::Validated {
+    let missing = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
         root: root.clone(),
@@ -370,7 +370,7 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
     assert!(missing.validate_against(&fixture.host).is_err());
 
     root.authorization_scope = "another-run".into();
-    let wrong_authority = MeshingHostResponseV2::Validated {
+    let wrong_authority = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
         root,
@@ -449,7 +449,7 @@ fn stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes() 
     timed.resources.maximum_wall_time_ms = 1;
     let mut progress = Progress::default();
     let mut control = MeshingStageControl::new(
-        MeshingStageV2::SurfaceMesh,
+        MeshingStageKind::SurfaceMesh,
         0,
         &timed,
         &NeverCancelled,
@@ -509,7 +509,7 @@ fn serial_stage_rehashes_every_input_before_invoking_the_kernel() {
 }
 
 struct Fixture {
-    host: MeshingHostWorkloadV2,
+    host: MeshingHostWorkload,
     program: runmat_execution_artifact::ProgramExecutionRequest,
     store: MemoryStore,
 }
@@ -519,7 +519,7 @@ impl Fixture {
         Self::with_request(request())
     }
 
-    fn with_request(request: MeshingRequestV2) -> Self {
+    fn with_request(request: MeshingRequest) -> Self {
         let access = MeshingArtifactAccess {
             authorization_scope: "serial-meshing-run".into(),
             encryption_context: Digest::sha256(b"serial-meshing-encryption-context"),
@@ -531,9 +531,9 @@ impl Fixture {
             store.write_verified(object).unwrap();
         }
         let root_digest = StableDigest::from_bytes(*root.logical_digest.bytes());
-        let identity = MeshingStageIdentityV2 {
+        let identity = MeshingStageIdentity {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-            stage: MeshingStageV2::SurfaceMesh,
+            stage: MeshingStageKind::SurfaceMesh,
             geometry: GeometryRevisionRef {
                 source_digest: stable(1),
                 geometry_revision: 2,
@@ -547,33 +547,33 @@ impl Fixture {
             prerequisite_artifact_digests: vec![root_digest],
             capability_cohort: Some("native-cohort-v1".into()),
         };
-        let workload = MeshingWorkloadRequestV2 {
+        let workload = MeshingWorkloadRequest {
             schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
-            stage: MeshingStageV2::SurfaceMesh,
+            stage: MeshingStageKind::SurfaceMesh,
             stage_identity_digest: identity.canonical_digest().unwrap(),
-            partition: MeshingPartitionDescriptorV2 {
-                kind: MeshingPartitionKindV2::WholeStage,
+            partition: MeshingPartitionDescriptor {
+                kind: MeshingPartitionKind::WholeStage,
                 partition_index: 0,
                 partition_count: 1,
                 entity_range: None,
             },
             input_manifest_digests: vec![root_digest],
             required_capabilities: vec![
-                MeshingCapabilityRequirementV2::HostWorkload {
+                MeshingCapabilityRequirement::HostWorkload {
                     abi: "host-v2".into(),
                 },
-                MeshingCapabilityRequirementV2::MeshingAlgorithm {
+                MeshingCapabilityRequirement::MeshingAlgorithm {
                     version: "surface/v2".into(),
                 },
-                MeshingCapabilityRequirementV2::ElementOrder {
-                    order: MeshElementOrderV2::Tet4,
+                MeshingCapabilityRequirement::ElementOrder {
+                    order: ElementOrder::Tet4,
                 },
-                MeshingCapabilityRequirementV2::DeterministicPlatformCohort {
+                MeshingCapabilityRequirement::DeterministicPlatformCohort {
                     cohort: "native-cohort-v1".into(),
                 },
             ],
         };
-        let host = MeshingHostWorkloadV2::new(workload, identity, request, access).unwrap();
+        let host = MeshingHostWorkload::new(workload, identity, request, access).unwrap();
         let program = host
             .program_request(revision(), std::slice::from_ref(&root))
             .unwrap();
@@ -597,7 +597,7 @@ fn checkpoint_failure(checkpoint: MeshingStageCheckpoint) -> Box<MeshingFailure>
     let request = request();
     let mut progress = Progress::default();
     let mut control = MeshingStageControl::new(
-        MeshingStageV2::SurfaceMesh,
+        MeshingStageKind::SurfaceMesh,
         0,
         &request,
         &NeverCancelled,
@@ -619,8 +619,8 @@ fn stage_failure(error: &MeshingSerialExecutionError) -> &MeshingFailure {
 
 fn input_publication(access: MeshingArtifactAccess) -> crate::PreparedMeshingResultPublication {
     let payload = build_chunked_stage_payload(
-        &[MeshingChunkStreamV2 {
-            media_type: MeshingChunkMediaTypeV2::ExactGeometry,
+        &[MeshingChunkStream {
+            media_type: MeshingChunkMediaType::ExactGeometry,
             schema_version: 2,
             records: vec![b"validated-exact-geometry".to_vec()],
         }],
@@ -628,12 +628,12 @@ fn input_publication(access: MeshingArtifactAccess) -> crate::PreparedMeshingRes
     )
     .unwrap();
     let (identity, manifest) = build_closed_stage_manifest(
-        MeshingStageV2::Healing,
-        MeshingStageResultKindV2::WholeStage,
+        MeshingStageKind::Healing,
+        MeshingStageResultKind::WholeStage,
         stable(70),
         stable(71),
         Vec::new(),
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )
     .unwrap();
@@ -654,18 +654,18 @@ fn root(payload: &ValuePayload) -> ValueRef {
     (**root).clone()
 }
 
-fn chunk_policy(maximum_chunk_bytes: u64) -> MeshingChunkPolicyV2 {
-    MeshingChunkPolicyV2 {
+fn chunk_policy(maximum_chunk_bytes: u64) -> MeshingChunkPolicy {
+    MeshingChunkPolicy {
         maximum_chunk_bytes,
         maximum_records_per_chunk: 10,
         maximum_total_encoded_bytes: 1_000_000,
     }
 }
 
-fn request() -> MeshingRequestV2 {
-    MeshingRequestV2 {
+fn request() -> MeshingRequest {
+    MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
-        element_order: MeshElementOrderV2::Tet4,
+        element_order: ElementOrder::Tet4,
         deterministic_seed: 7,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -683,26 +683,26 @@ fn request() -> MeshingRequestV2 {
             requested_deviation_m: 1.0e-5,
             maximum_healing_displacement_m: 1.0e-6,
         },
-        metric: MetricFieldRequestV2 {
+        metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
         },
-        quality: MeshingQualityTargetsV2 {
-            surface: SurfaceQualityTargetsV2 {
+        quality: MeshingQualityTargets {
+            surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
                 maximum_normal_deviation_degrees: 5.0,
             },
-            volume: VolumeQualityTargetsV2 {
+            volume: VolumeQualityTargets {
                 maximum_radius_edge_ratio: 2.0,
                 minimum_scaled_jacobian: 0.05,
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudgetV2 {
+        resources: MeshingResourceBudget {
             maximum_nodes: 100,
             maximum_elements: 100,
             maximum_memory_bytes: 4_000_000,
@@ -713,7 +713,7 @@ fn request() -> MeshingRequestV2 {
             maximum_recursion_depth: 32,
             maximum_iterations: 100,
         },
-        cancellation: CancellationPolicyV2 {
+        cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 1000,
             maximum_work_units_between_checks: 1000,
         },

@@ -101,7 +101,7 @@ fn meshing_host_workload_form_survives_package_archive_round_trip() {
         .with_compiled_package_closure()
         .with_materialized_program(
             recipe,
-            ExecutableForm::MeshingWorkloadV2,
+            ExecutableForm::MeshingWorkload,
             b"canonical-meshing-host-contract".to_vec(),
         )
         .build()
@@ -112,7 +112,7 @@ fn meshing_host_workload_form_survives_package_archive_round_trip() {
     assert_eq!(decoded, bundle);
     assert_eq!(
         decoded.manifest.artifacts[0].form,
-        ExecutableForm::MeshingWorkloadV2
+        ExecutableForm::MeshingWorkload
     );
 }
 

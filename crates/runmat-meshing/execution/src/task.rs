@@ -14,9 +14,9 @@ use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind}
 use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::TaskSubmission;
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshElementOrderV2, MeshingCapabilityRequirementV2,
-    MeshingPartitionIdentityV2, MeshingRequestV2, MeshingStageIdentityV2, MeshingStageV2,
-    MeshingWorkloadRequestV2, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
+    CanonicalMeshingContract, ElementOrder, MeshingCapabilityRequirement, MeshingPartitionIdentity,
+    MeshingRequest, MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, StableDigest,
+    MESHING_IDENTITY_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -51,9 +51,9 @@ pub enum MeshingTaskEffectPolicy {
 }
 
 pub fn build_task_submission(
-    workload: &MeshingWorkloadRequestV2,
-    stage_identity: &MeshingStageIdentityV2,
-    resolved_request: &MeshingRequestV2,
+    workload: &MeshingWorkloadRequest,
+    stage_identity: &MeshingStageIdentity,
+    resolved_request: &MeshingRequest,
     input_roots: &[ValueRef],
     dependencies: BTreeSet<TaskId>,
     context: &MeshingExecutionContext,
@@ -67,7 +67,7 @@ pub fn build_task_submission(
     validate_inputs(workload, input_roots, &context.artifact_access)?;
     let capabilities = map_capabilities(workload, stage_identity, resolved_request)?;
     let retry = map_retry(workload.stage, effect)?;
-    let partition_identity = MeshingPartitionIdentityV2 {
+    let partition_identity = MeshingPartitionIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage_identity_digest: workload.stage_identity_digest,
         partition: workload.partition.clone(),
@@ -128,9 +128,9 @@ pub fn build_task_submission(
 }
 
 fn validate_identity_binding(
-    workload: &MeshingWorkloadRequestV2,
-    stage_identity: &MeshingStageIdentityV2,
-    resolved_request: &MeshingRequestV2,
+    workload: &MeshingWorkloadRequest,
+    stage_identity: &MeshingStageIdentity,
+    resolved_request: &MeshingRequest,
 ) -> MeshingExecutionResult<()> {
     if workload.stage != stage_identity.stage
         || workload.stage_identity_digest != stage_identity.canonical_digest()?
@@ -145,7 +145,7 @@ fn validate_identity_binding(
 }
 
 pub(crate) fn validate_inputs(
-    workload: &MeshingWorkloadRequestV2,
+    workload: &MeshingWorkloadRequest,
     roots: &[ValueRef],
     access: &MeshingArtifactAccess,
 ) -> MeshingExecutionResult<()> {
@@ -174,9 +174,9 @@ pub(crate) fn validate_inputs(
 }
 
 fn map_capabilities(
-    workload: &MeshingWorkloadRequestV2,
-    stage_identity: &MeshingStageIdentityV2,
-    request: &MeshingRequestV2,
+    workload: &MeshingWorkloadRequest,
+    stage_identity: &MeshingStageIdentity,
+    request: &MeshingRequest,
 ) -> MeshingExecutionResult<BTreeSet<Capability>> {
     let mut mapped = BTreeSet::new();
     let mut host_count = 0;
@@ -185,15 +185,15 @@ fn map_capabilities(
     let mut cohort = None;
     for requirement in &workload.required_capabilities {
         let custom = match requirement {
-            MeshingCapabilityRequirementV2::HostWorkload { abi } => {
+            MeshingCapabilityRequirement::HostWorkload { abi } => {
                 host_count += 1;
                 format!("runmat.meshing.host:{abi}")
             }
-            MeshingCapabilityRequirementV2::ExactCadKernel { abi } => {
+            MeshingCapabilityRequirement::ExactCadKernel { abi } => {
                 mapped.insert(Capability::ProcessIsolation);
                 format!("runmat.meshing.exact-cad:{abi}")
             }
-            MeshingCapabilityRequirementV2::MeshingAlgorithm { version } => {
+            MeshingCapabilityRequirement::MeshingAlgorithm { version } => {
                 algorithm_count += 1;
                 if version != algorithm_for_stage(workload.stage, request) {
                     return Err(MeshingExecutionError::Invalid(
@@ -202,7 +202,7 @@ fn map_capabilities(
                 }
                 format!("runmat.meshing.algorithm:{version}")
             }
-            MeshingCapabilityRequirementV2::ElementOrder { order } => {
+            MeshingCapabilityRequirement::ElementOrder { order } => {
                 order_count += 1;
                 if *order != request.element_order {
                     return Err(MeshingExecutionError::Invalid(
@@ -211,7 +211,7 @@ fn map_capabilities(
                 }
                 format!("runmat.meshing.element-order:{}", order_name(*order))
             }
-            MeshingCapabilityRequirementV2::DeterministicPlatformCohort { cohort: required } => {
+            MeshingCapabilityRequirement::DeterministicPlatformCohort { cohort: required } => {
                 cohort = Some(required.as_str());
                 format!("runmat.meshing.cohort:{required}")
             }
@@ -231,10 +231,10 @@ fn map_capabilities(
 }
 
 fn map_retry(
-    stage: MeshingStageV2,
+    stage: MeshingStageKind,
     effect: MeshingTaskEffectPolicy,
 ) -> MeshingExecutionResult<RetryPolicy> {
-    if stage == MeshingStageV2::Publication {
+    if stage == MeshingStageKind::Publication {
         return match effect {
             MeshingTaskEffectPolicy::UnknownEffect => Ok(RetryPolicy::Never),
             MeshingTaskEffectPolicy::ContentAddressedPure { .. } => {
@@ -263,50 +263,50 @@ fn map_retry(
     }
 }
 
-fn algorithm_for_stage(stage: MeshingStageV2, request: &MeshingRequestV2) -> &str {
+fn algorithm_for_stage(stage: MeshingStageKind, request: &MeshingRequest) -> &str {
     // Stages share only the algorithm families frozen in `AlgorithmVersionSet`; this mapping is
     // explicit so adding a new stage or version family cannot silently inherit another domain.
     match stage {
-        MeshingStageV2::GeometryAdmission | MeshingStageV2::Healing | MeshingStageV2::Sizing => {
-            &request.algorithms.geometry
-        }
-        MeshingStageV2::CurveMesh => &request.algorithms.curve,
-        MeshingStageV2::SurfaceMesh => &request.algorithms.surface,
-        MeshingStageV2::ProtectedBoundaryComplex => &request.algorithms.plc,
-        MeshingStageV2::Tetrahedralization
-        | MeshingStageV2::ConstraintRecovery
-        | MeshingStageV2::Refinement => &request.algorithms.tetrahedron,
-        MeshingStageV2::Optimization | MeshingStageV2::OrderElevation => {
+        MeshingStageKind::GeometryAdmission
+        | MeshingStageKind::Healing
+        | MeshingStageKind::Sizing => &request.algorithms.geometry,
+        MeshingStageKind::CurveMesh => &request.algorithms.curve,
+        MeshingStageKind::SurfaceMesh => &request.algorithms.surface,
+        MeshingStageKind::ProtectedBoundaryComplex => &request.algorithms.plc,
+        MeshingStageKind::Tetrahedralization
+        | MeshingStageKind::ConstraintRecovery
+        | MeshingStageKind::Refinement => &request.algorithms.tetrahedron,
+        MeshingStageKind::Optimization | MeshingStageKind::OrderElevation => {
             &request.algorithms.optimization
         }
-        MeshingStageV2::Validation
-        | MeshingStageV2::Serialization
-        | MeshingStageV2::Publication => &request.algorithms.validation,
+        MeshingStageKind::Validation
+        | MeshingStageKind::Serialization
+        | MeshingStageKind::Publication => &request.algorithms.validation,
     }
 }
 
-const fn order_name(order: MeshElementOrderV2) -> &'static str {
+const fn order_name(order: ElementOrder) -> &'static str {
     match order {
-        MeshElementOrderV2::Tet4 => "tet4",
-        MeshElementOrderV2::Tet10 => "tet10",
+        ElementOrder::Tet4 => "tet4",
+        ElementOrder::Tet10 => "tet10",
     }
 }
 
-const fn stage_callable(stage: MeshingStageV2) -> &'static str {
+const fn stage_callable(stage: MeshingStageKind) -> &'static str {
     match stage {
-        MeshingStageV2::GeometryAdmission => "geometry-admission",
-        MeshingStageV2::Healing => "healing",
-        MeshingStageV2::Sizing => "sizing",
-        MeshingStageV2::CurveMesh => "curve-mesh",
-        MeshingStageV2::SurfaceMesh => "surface-mesh",
-        MeshingStageV2::ProtectedBoundaryComplex => "protected-boundary-complex",
-        MeshingStageV2::Tetrahedralization => "tetrahedralization",
-        MeshingStageV2::ConstraintRecovery => "constraint-recovery",
-        MeshingStageV2::Refinement => "refinement",
-        MeshingStageV2::Optimization => "optimization",
-        MeshingStageV2::OrderElevation => "order-elevation",
-        MeshingStageV2::Validation => "validation",
-        MeshingStageV2::Serialization => "serialization",
-        MeshingStageV2::Publication => "publication",
+        MeshingStageKind::GeometryAdmission => "geometry-admission",
+        MeshingStageKind::Healing => "healing",
+        MeshingStageKind::Sizing => "sizing",
+        MeshingStageKind::CurveMesh => "curve-mesh",
+        MeshingStageKind::SurfaceMesh => "surface-mesh",
+        MeshingStageKind::ProtectedBoundaryComplex => "protected-boundary-complex",
+        MeshingStageKind::Tetrahedralization => "tetrahedralization",
+        MeshingStageKind::ConstraintRecovery => "constraint-recovery",
+        MeshingStageKind::Refinement => "refinement",
+        MeshingStageKind::Optimization => "optimization",
+        MeshingStageKind::OrderElevation => "order-elevation",
+        MeshingStageKind::Validation => "validation",
+        MeshingStageKind::Serialization => "serialization",
+        MeshingStageKind::Publication => "publication",
     }
 }

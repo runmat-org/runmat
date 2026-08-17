@@ -6,11 +6,11 @@ use std::sync::{Arc, Mutex};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingCancellationSignal, MeshingChunkPolicyV2, MeshingProgressV2,
+    CanonicalMeshingContract, MeshingCancellationSignal, MeshingChunkPolicy, MeshingProgress,
     NeverCancelled,
 };
 use runmat_meshing_execution::{
-    execute_serial_stage, MeshingHostResponseV2, MeshingHostWorkloadV2, MeshingProgressSink,
+    execute_serial_stage, MeshingHostResponse, MeshingHostWorkload, MeshingProgressSink,
     MeshingStageKernel,
 };
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
@@ -24,7 +24,7 @@ const PROGRESS_CHANNEL_CAPACITY: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeMeshingHostLimits {
-    pub chunk_policy: MeshingChunkPolicyV2,
+    pub chunk_policy: MeshingChunkPolicy,
     pub inventory: ObjectInventoryLimits,
     pub max_message_bytes: u32,
 }
@@ -50,7 +50,7 @@ impl NativeMeshingHostLimits {
 impl Default for NativeMeshingHostLimits {
     fn default() -> Self {
         Self {
-            chunk_policy: MeshingChunkPolicyV2 {
+            chunk_policy: MeshingChunkPolicy {
                 maximum_chunk_bytes: 8 * 1024 * 1024,
                 maximum_records_per_chunk: 65_536,
                 maximum_total_encoded_bytes: 4 * 1024 * 1024 * 1024,
@@ -75,7 +75,7 @@ pub fn execute_meshing_program_request<
     if let Err(error) = limits.validate() {
         return failure(error.to_string());
     }
-    let host = match MeshingHostWorkloadV2::from_program_request(request) {
+    let host = match MeshingHostWorkload::from_program_request(request) {
         Ok(host) => host,
         Err(error) => return failure(error.to_string()),
     };
@@ -88,9 +88,9 @@ pub fn execute_meshing_program_request<
         limits.chunk_policy,
         limits.inventory,
     ) {
-        Ok(completed) => MeshingHostResponseV2::completed(&host, &completed)
+        Ok(completed) => MeshingHostResponse::completed(&host, &completed)
             .map(|response| response.program_response()),
-        Err(error) => match MeshingHostResponseV2::failed(&host, &error) {
+        Err(error) => match MeshingHostResponse::failed(&host, &error) {
             Ok(Some(response)) => Ok(response.program_response()),
             Ok(None) => return failure(error.to_string()),
             Err(response_error) => return failure(response_error.to_string()),
@@ -185,7 +185,7 @@ struct ChannelProgress {
 }
 
 impl MeshingProgressSink for ChannelProgress {
-    fn record(&mut self, progress: &MeshingProgressV2) {
+    fn record(&mut self, progress: &MeshingProgress) {
         let message = encode_meshing_progress(progress).and_then(|progress| {
             self.sender
                 .blocking_send(progress)
@@ -198,7 +198,7 @@ impl MeshingProgressSink for ChannelProgress {
 }
 
 pub(crate) fn encode_meshing_progress(
-    progress: &MeshingProgressV2,
+    progress: &MeshingProgress,
 ) -> Result<ProgramProgress, String> {
     let encoded = ProgramProgress {
         schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V1,

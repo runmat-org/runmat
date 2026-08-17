@@ -5,24 +5,24 @@ mod projection;
 mod spline;
 mod vector;
 
-use super::super::{ExactBRepModelV2, ExactBRepTopologyV2, GeometryContractError};
+use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError};
 use super::{
-    CurveEvaluatorIdV2, ExactCurveEvaluatorRecordV2, ExactEvaluatorRegistryV2,
-    ExactPcurveEvaluatorRecordV2, GeometryEvaluationError, GeometryEvaluationErrorKind,
-    PcurveEvaluatorIdV2,
+    CurveEvaluatorId, ExactCurveEvaluatorRecord, ExactEvaluatorRegistry,
+    ExactPcurveEvaluatorRecord, GeometryEvaluationError, GeometryEvaluationErrorKind,
+    PcurveEvaluatorId,
 };
 
 /// Portable evaluator for analytic and NURBS definitions. Construction performs
 /// full topology/registry admission; kernel records remain explicit ABI-owned calls.
-pub struct PortableExactEvaluatorV2<'a> {
-    registry: &'a ExactEvaluatorRegistryV2,
+pub struct PortableExactEvaluator<'a> {
+    registry: &'a ExactEvaluatorRegistry,
 }
 
-impl<'a> PortableExactEvaluatorV2<'a> {
+impl<'a> PortableExactEvaluator<'a> {
     pub fn new(
-        registry: &'a ExactEvaluatorRegistryV2,
-        topology: &ExactBRepTopologyV2,
-        model: &ExactBRepModelV2,
+        registry: &'a ExactEvaluatorRegistry,
+        topology: &ExactBRepTopology,
+        model: &ExactBRepModel,
     ) -> Result<Self, GeometryContractError> {
         registry.validate_against(topology, model)?;
         Ok(Self { registry })
@@ -30,8 +30,8 @@ impl<'a> PortableExactEvaluatorV2<'a> {
 
     fn curve_record(
         &self,
-        id: &CurveEvaluatorIdV2,
-    ) -> Result<&ExactCurveEvaluatorRecordV2, GeometryEvaluationError> {
+        id: &CurveEvaluatorId,
+    ) -> Result<&ExactCurveEvaluatorRecord, GeometryEvaluationError> {
         self.registry
             .curves
             .binary_search_by(|record| record.id.cmp(id))
@@ -41,8 +41,8 @@ impl<'a> PortableExactEvaluatorV2<'a> {
 
     fn pcurve_record(
         &self,
-        id: &PcurveEvaluatorIdV2,
-    ) -> Result<&ExactPcurveEvaluatorRecordV2, GeometryEvaluationError> {
+        id: &PcurveEvaluatorId,
+    ) -> Result<&ExactPcurveEvaluatorRecord, GeometryEvaluationError> {
         self.registry
             .pcurves
             .binary_search_by(|record| record.id.cmp(id))

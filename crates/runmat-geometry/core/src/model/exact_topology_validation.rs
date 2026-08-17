@@ -2,15 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     exact_topology_assembly_validation::validate_assembly_occurrences,
-    exact_topology_validation_support::*, ExactBRepModelV2, ExactBRepTopologyV2,
-    GeometryContractError, PersistentEntityKind, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
+    exact_topology_validation_support::*, ExactBRepModel, ExactBRepTopology, GeometryContractError,
+    PersistentEntityKind, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
 };
 
 const MAX_TOPOLOGY_ENTITIES: usize = 10_000_000;
 const MAX_TOPOLOGY_INCIDENCES: usize = 100_000_000;
 
-impl ExactBRepTopologyV2 {
-    pub fn validate_against(&self, model: &ExactBRepModelV2) -> Result<(), GeometryContractError> {
+impl ExactBRepTopology {
+    pub fn validate_against(&self, model: &ExactBRepModel) -> Result<(), GeometryContractError> {
         if self.schema_version != EXACT_BREP_TOPOLOGY_SCHEMA_VERSION {
             return Err(invalid("exact topology schema", "unsupported version"));
         }

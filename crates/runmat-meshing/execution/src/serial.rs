@@ -1,6 +1,6 @@
 use crate::{
     import_result_publication, prepare_result_publication, prepare_stage_objects,
-    MeshingExecutionError, MeshingHostWorkloadV2, PreparedMeshingResultPublication,
+    MeshingExecutionError, MeshingHostWorkload, PreparedMeshingResultPublication,
 };
 use runmat_execution::value::ValuePayload;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
@@ -8,16 +8,16 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_meshing_core::{
     build_chunked_stage_payload, build_closed_stage_manifest, CanonicalMeshingContract,
-    MeshingCancellationSignal, MeshingChunkMediaTypeV2, MeshingChunkPolicyV2, MeshingChunkStreamV2,
-    MeshingFailure, MeshingFailureCategory, MeshingManifestDispositionV2,
-    MeshingPartitionIdentityV2, MeshingPartitionKindV2, MeshingStageResultKindV2, MeshingStageV2,
-    MeshingWorkloadResultV2, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
+    MeshingCancellationSignal, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream,
+    MeshingFailure, MeshingFailureCategory, MeshingManifestDisposition, MeshingPartitionIdentity,
+    MeshingPartitionKind, MeshingStageKind, MeshingStageResultKind, MeshingWorkloadResult,
+    StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
 };
 
 use super::budget::{failure, MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl};
 
 pub struct MeshingStageInvocation<'a, 'control> {
-    pub host: &'a MeshingHostWorkloadV2,
+    pub host: &'a MeshingHostWorkload,
     pub inputs: &'a [PreparedMeshingResultPublication],
     pub control: &'a mut MeshingStageControl<'control>,
 }
@@ -36,18 +36,18 @@ pub trait MeshingStageKernel: Send + Sync {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatedMeshingStageOutput {
     pub invariant_summary_digest: StableDigest,
-    pub streams: Vec<MeshingChunkStreamV2>,
+    pub streams: Vec<MeshingChunkStream>,
     pub final_checkpoint: MeshingStageCheckpoint,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompletedMeshingStage {
-    workload_result: MeshingWorkloadResultV2,
+    workload_result: MeshingWorkloadResult,
     publication: PreparedMeshingResultPublication,
 }
 
 impl CompletedMeshingStage {
-    pub const fn workload_result(&self) -> &MeshingWorkloadResultV2 {
+    pub const fn workload_result(&self) -> &MeshingWorkloadResult {
         &self.workload_result
     }
 
@@ -75,9 +75,9 @@ impl From<runmat_meshing_core::MeshingContractError> for MeshingSerialExecutionE
 }
 
 impl MeshingSerialExecutionError {
-    pub fn workload_result(&self) -> Option<MeshingWorkloadResultV2> {
+    pub fn workload_result(&self) -> Option<MeshingWorkloadResult> {
         match self {
-            Self::Stage(failure) => Some(MeshingWorkloadResultV2::Failed {
+            Self::Stage(failure) => Some(MeshingWorkloadResult::Failed {
                 failure: failure.as_ref().clone(),
             }),
             Self::Bridge(_) => None,
@@ -92,14 +92,14 @@ pub fn execute_serial_stage<S, K>(
     kernel: &K,
     cancellation: &dyn MeshingCancellationSignal,
     progress: &mut dyn MeshingProgressSink,
-    chunk_policy: MeshingChunkPolicyV2,
+    chunk_policy: MeshingChunkPolicy,
     inventory_limits: ObjectInventoryLimits,
 ) -> Result<CompletedMeshingStage, MeshingSerialExecutionError>
 where
     S: CacheImport + CacheExport,
     K: MeshingStageKernel + ?Sized,
 {
-    let host = MeshingHostWorkloadV2::from_program_request(request)?;
+    let host = MeshingHostWorkload::from_program_request(request)?;
     let roots = input_roots(request)?;
     let limits = effective_limits(&host, inventory_limits)?;
     let inputs = roots
@@ -137,15 +137,15 @@ where
             MeshingSerialExecutionError::Bridge(MeshingExecutionError::from(error))
         }
     })?;
-    let partition_identity = MeshingPartitionIdentityV2 {
+    let partition_identity = MeshingPartitionIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage_identity_digest: host.workload.stage_identity_digest,
         partition: host.workload.partition.clone(),
     };
     let result_kind = match host.workload.partition.kind {
-        MeshingPartitionKindV2::WholeStage => MeshingStageResultKindV2::WholeStage,
-        MeshingPartitionKindV2::CanonicalEntityBatch
-        | MeshingPartitionKindV2::DisconnectedComponent => MeshingStageResultKindV2::Partition,
+        MeshingPartitionKind::WholeStage => MeshingStageResultKind::WholeStage,
+        MeshingPartitionKind::CanonicalEntityBatch
+        | MeshingPartitionKind::DisconnectedComponent => MeshingStageResultKind::Partition,
     };
     let (result_identity, manifest) = build_closed_stage_manifest(
         host.workload.stage,
@@ -153,7 +153,7 @@ where
         partition_identity.canonical_digest()?,
         output.invariant_summary_digest,
         host.workload.input_manifest_digests.clone(),
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )?;
     let stage_objects = prepare_stage_objects(result_identity, manifest, payload.chunks, limits)
@@ -168,7 +168,7 @@ where
     }
     let manifest_digest =
         StableDigest::from_bytes(*publication.stage_objects().root.digest.bytes());
-    let workload_result = MeshingWorkloadResultV2::Validated {
+    let workload_result = MeshingWorkloadResult::Validated {
         stage_manifest_digest: manifest_digest,
     };
     workload_result.validate_against(&host.workload)?;
@@ -179,44 +179,43 @@ where
 }
 
 fn validate_stage_streams(
-    stage: MeshingStageV2,
-    streams: &[MeshingChunkStreamV2],
+    stage: MeshingStageKind,
+    streams: &[MeshingChunkStream],
 ) -> Result<(), MeshingSerialExecutionError> {
     let legal = |media| match stage {
-        MeshingStageV2::GeometryAdmission | MeshingStageV2::Healing => {
-            matches!(media, MeshingChunkMediaTypeV2::ExactGeometry)
+        MeshingStageKind::GeometryAdmission | MeshingStageKind::Healing => {
+            matches!(media, MeshingChunkMediaType::ExactGeometry)
         }
-        MeshingStageV2::Sizing => matches!(media, MeshingChunkMediaTypeV2::MetricField),
-        MeshingStageV2::CurveMesh => matches!(media, MeshingChunkMediaTypeV2::CurvePartitions),
-        MeshingStageV2::SurfaceMesh => {
-            matches!(media, MeshingChunkMediaTypeV2::SurfacePartitions)
+        MeshingStageKind::Sizing => matches!(media, MeshingChunkMediaType::MetricField),
+        MeshingStageKind::CurveMesh => matches!(media, MeshingChunkMediaType::CurvePartitions),
+        MeshingStageKind::SurfaceMesh => {
+            matches!(media, MeshingChunkMediaType::SurfacePartitions)
         }
-        MeshingStageV2::ProtectedBoundaryComplex => {
-            matches!(media, MeshingChunkMediaTypeV2::ProtectedBoundaryComplex)
+        MeshingStageKind::ProtectedBoundaryComplex => {
+            matches!(media, MeshingChunkMediaType::ProtectedBoundaryComplex)
         }
-        MeshingStageV2::Tetrahedralization
-        | MeshingStageV2::ConstraintRecovery
-        | MeshingStageV2::Refinement
-        | MeshingStageV2::Optimization => matches!(
+        MeshingStageKind::Tetrahedralization
+        | MeshingStageKind::ConstraintRecovery
+        | MeshingStageKind::Refinement
+        | MeshingStageKind::Optimization => matches!(
             media,
-            MeshingChunkMediaTypeV2::VolumeTopology
-                | MeshingChunkMediaTypeV2::MeshNodes
-                | MeshingChunkMediaTypeV2::MeshElements
-                | MeshingChunkMediaTypeV2::MeshClassification
+            MeshingChunkMediaType::VolumeTopology
+                | MeshingChunkMediaType::MeshNodes
+                | MeshingChunkMediaType::MeshElements
+                | MeshingChunkMediaType::MeshClassification
         ),
-        MeshingStageV2::OrderElevation => matches!(
+        MeshingStageKind::OrderElevation => matches!(
             media,
-            MeshingChunkMediaTypeV2::MeshNodes
-                | MeshingChunkMediaTypeV2::MeshElements
-                | MeshingChunkMediaTypeV2::MeshClassification
+            MeshingChunkMediaType::MeshNodes
+                | MeshingChunkMediaType::MeshElements
+                | MeshingChunkMediaType::MeshClassification
         ),
-        MeshingStageV2::Validation => {
-            matches!(media, MeshingChunkMediaTypeV2::ValidationEvidence)
+        MeshingStageKind::Validation => {
+            matches!(media, MeshingChunkMediaType::ValidationEvidence)
         }
-        MeshingStageV2::Serialization | MeshingStageV2::Publication => matches!(
+        MeshingStageKind::Serialization | MeshingStageKind::Publication => matches!(
             media,
-            MeshingChunkMediaTypeV2::AnalysisMeshArtifact
-                | MeshingChunkMediaTypeV2::MeshingEvidence
+            MeshingChunkMediaType::AnalysisMeshArtifact | MeshingChunkMediaType::MeshingEvidence
         ),
     };
     if streams.is_empty() || streams.iter().any(|stream| !legal(stream.media_type)) {
@@ -247,7 +246,7 @@ fn input_roots(
 }
 
 fn effective_limits(
-    host: &MeshingHostWorkloadV2,
+    host: &MeshingHostWorkload,
     mut limits: ObjectInventoryLimits,
 ) -> Result<ObjectInventoryLimits, MeshingExecutionError> {
     if limits.max_objects == 0 || limits.max_object_bytes == 0 || limits.max_total_bytes == 0 {
@@ -263,9 +262,9 @@ fn effective_limits(
 }
 
 fn effective_chunk_policy(
-    host: &MeshingHostWorkloadV2,
-    mut policy: MeshingChunkPolicyV2,
-) -> Result<MeshingChunkPolicyV2, MeshingSerialExecutionError> {
+    host: &MeshingHostWorkload,
+    mut policy: MeshingChunkPolicy,
+) -> Result<MeshingChunkPolicy, MeshingSerialExecutionError> {
     policy.maximum_total_encoded_bytes = policy
         .maximum_total_encoded_bytes
         .min(host.resolved_request.resources.maximum_artifact_bytes);
@@ -311,7 +310,7 @@ fn validate_combined_input_inventory(
 }
 
 fn map_artifact_limit(
-    host: &MeshingHostWorkloadV2,
+    host: &MeshingHostWorkload,
     error: MeshingExecutionError,
 ) -> MeshingSerialExecutionError {
     if matches!(
@@ -324,7 +323,7 @@ fn map_artifact_limit(
     }
 }
 
-fn artifact_budget_failure(host: &MeshingHostWorkloadV2) -> Box<MeshingFailure> {
+fn artifact_budget_failure(host: &MeshingHostWorkload) -> Box<MeshingFailure> {
     failure(
         host.workload.stage,
         MeshingFailureCategory::ArtifactBudgetExceeded,

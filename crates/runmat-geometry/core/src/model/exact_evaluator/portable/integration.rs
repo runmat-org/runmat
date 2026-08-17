@@ -1,6 +1,5 @@
 use super::super::{
-    GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
-    ParameterRangeV2,
+    GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind, ParameterRange,
 };
 
 const MAX_INTEGRATION_DEPTH: u8 = 32;
@@ -20,7 +19,7 @@ struct Interval {
 }
 
 pub(super) fn adaptive_arc_length(
-    range: ParameterRangeV2,
+    range: ParameterRange,
     absolute_error_m: f64,
     control: &dyn GeometryEvaluationControl,
     mut speed: impl FnMut(f64) -> Result<f64, GeometryEvaluationError>,

@@ -6,8 +6,8 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactResult, LogicalObject};
 use runmat_meshing_core::{
     build_chunked_stage_payload, build_closed_stage_manifest, CanonicalMeshingContract,
-    MeshingChunkMediaTypeV2, MeshingChunkPolicyV2, MeshingChunkStreamV2,
-    MeshingManifestDispositionV2, MeshingStageResultKindV2, MeshingStageV2, StableDigest,
+    MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingManifestDisposition,
+    MeshingStageKind, MeshingStageResultKind, StableDigest,
 };
 
 use crate::{import_stage_objects, prepare_stage_objects, MeshingStageObjectRoot};
@@ -179,17 +179,17 @@ fn fixture_contracts(
     records: Vec<Vec<u8>>,
     maximum_chunk_bytes: u64,
 ) -> (
-    runmat_meshing_core::MeshingStageResultIdentityV2,
-    runmat_meshing_core::MeshingStageManifestV2,
-    Vec<runmat_meshing_core::EncodedMeshingChunkV2>,
+    runmat_meshing_core::MeshingStageResultIdentity,
+    runmat_meshing_core::MeshingStageManifest,
+    Vec<runmat_meshing_core::EncodedMeshingChunk>,
 ) {
     let payload = build_chunked_stage_payload(
-        &[MeshingChunkStreamV2 {
-            media_type: MeshingChunkMediaTypeV2::MeshNodes,
+        &[MeshingChunkStream {
+            media_type: MeshingChunkMediaType::MeshNodes,
             schema_version: 2,
             records,
         }],
-        MeshingChunkPolicyV2 {
+        MeshingChunkPolicy {
             maximum_chunk_bytes,
             maximum_records_per_chunk: 10,
             maximum_total_encoded_bytes: 8 * 1024 * 1024,
@@ -197,12 +197,12 @@ fn fixture_contracts(
     )
     .unwrap();
     let (identity, manifest) = build_closed_stage_manifest(
-        MeshingStageV2::Tetrahedralization,
-        MeshingStageResultKindV2::WholeStage,
+        MeshingStageKind::Tetrahedralization,
+        MeshingStageResultKind::WholeStage,
         digest(1),
         digest(2),
         Vec::new(),
-        MeshingManifestDispositionV2::ValidatedDependency,
+        MeshingManifestDisposition::ValidatedDependency,
         &payload,
     )
     .unwrap();

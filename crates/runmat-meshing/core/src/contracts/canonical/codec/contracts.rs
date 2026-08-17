@@ -1,12 +1,12 @@
 use sha2::{Digest as _, Sha256};
 
 use super::{encode_contract, CanonicalMeshingContract, MeshingCanonicalLimits};
-use crate::contracts::v2::{
-    AlgorithmVersionSet, AnalysisMeshArtifactV2, GeometryTolerancePolicy, MeshingContractError,
-    MeshingEvidenceV2, MeshingFailure, MeshingJoinIdentityV2, MeshingPartitionDescriptorV2,
-    MeshingPartitionIdentityV2, MeshingProgressV2, MeshingRequestV2, MeshingStageIdentityV2,
-    MeshingStageManifestV2, MeshingStageResultIdentityV2, MeshingValidationIdentityV2,
-    MeshingWorkloadRequestV2, MeshingWorkloadResultV2, MetricFieldRequestV2, StableDigest,
+use crate::contracts::canonical::{
+    AlgorithmVersionSet, GeometryTolerancePolicy, MeshingContractError, MeshingEvidence,
+    MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor, MeshingPartitionIdentity,
+    MeshingProgress, MeshingRequest, MeshingStageIdentity, MeshingStageManifest,
+    MeshingStageResultIdentity, MeshingValidationIdentity, MeshingWorkloadRequest,
+    MeshingWorkloadResult, MetricFieldRequest, SolverMeshArtifact, StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -29,10 +29,10 @@ canonical_contract!(
     GeometryTolerancePolicy::validate
 );
 canonical_contract!(
-    MetricFieldRequestV2,
+    MetricFieldRequest,
     "analysis.mesh.metric-field-request/v2",
     MeshingCanonicalLimits::REQUEST,
-    MetricFieldRequestV2::validate
+    MetricFieldRequest::validate
 );
 canonical_contract!(
     AlgorithmVersionSet,
@@ -41,10 +41,10 @@ canonical_contract!(
     AlgorithmVersionSet::validate
 );
 canonical_contract!(
-    MeshingRequestV2,
+    MeshingRequest,
     "analysis.mesh.request/v2",
     MeshingCanonicalLimits::REQUEST,
-    MeshingRequestV2::validate
+    MeshingRequest::validate
 );
 canonical_contract!(
     MeshingFailure,
@@ -53,61 +53,61 @@ canonical_contract!(
     MeshingFailure::validate
 );
 canonical_contract!(
-    MeshingPartitionDescriptorV2,
+    MeshingPartitionDescriptor,
     "analysis.mesh.partition-descriptor/v2",
     MeshingCanonicalLimits::IDENTITY,
-    MeshingPartitionDescriptorV2::validate
+    MeshingPartitionDescriptor::validate
 );
 canonical_contract!(
-    MeshingStageIdentityV2,
+    MeshingStageIdentity,
     "analysis.mesh.stage-request-identity/v2",
     MeshingCanonicalLimits::IDENTITY,
-    MeshingStageIdentityV2::validate
+    MeshingStageIdentity::validate
 );
 canonical_contract!(
-    MeshingPartitionIdentityV2,
+    MeshingPartitionIdentity,
     "analysis.mesh.partition-identity/v2",
     MeshingCanonicalLimits::IDENTITY,
-    MeshingPartitionIdentityV2::validate
+    MeshingPartitionIdentity::validate
 );
 canonical_contract!(
-    MeshingJoinIdentityV2,
+    MeshingJoinIdentity,
     "analysis.mesh.join-identity/v2",
     MeshingCanonicalLimits::IDENTITY,
-    MeshingJoinIdentityV2::validate
+    MeshingJoinIdentity::validate
 );
 canonical_contract!(
-    MeshingStageResultIdentityV2,
+    MeshingStageResultIdentity,
     "analysis.mesh.stage-result-identity/v2",
     MeshingCanonicalLimits::MANIFEST,
-    MeshingStageResultIdentityV2::validate
+    MeshingStageResultIdentity::validate
 );
 canonical_contract!(
-    MeshingValidationIdentityV2,
+    MeshingValidationIdentity,
     "analysis.mesh.validation-identity/v2",
     MeshingCanonicalLimits::IDENTITY,
-    MeshingValidationIdentityV2::validate
+    MeshingValidationIdentity::validate
 );
 canonical_contract!(
-    MeshingStageManifestV2,
+    MeshingStageManifest,
     "analysis.mesh.stage-manifest/v2",
     MeshingCanonicalLimits::MANIFEST,
-    MeshingStageManifestV2::validate
+    MeshingStageManifest::validate
 );
 canonical_contract!(
-    MeshingWorkloadRequestV2,
+    MeshingWorkloadRequest,
     "analysis.mesh.workload-request/v2",
     MeshingCanonicalLimits::IDENTITY,
-    MeshingWorkloadRequestV2::validate
+    MeshingWorkloadRequest::validate
 );
 canonical_contract!(
-    MeshingProgressV2,
+    MeshingProgress,
     "analysis.mesh.progress/v2",
     MeshingCanonicalLimits::IDENTITY,
-    MeshingProgressV2::validate
+    MeshingProgress::validate
 );
 
-impl CanonicalMeshingContract for MeshingWorkloadResultV2 {
+impl CanonicalMeshingContract for MeshingWorkloadResult {
     const DOMAIN: &'static str = "analysis.mesh.workload-result/v2";
     const LIMITS: MeshingCanonicalLimits = MeshingCanonicalLimits::MANIFEST;
 
@@ -116,7 +116,7 @@ impl CanonicalMeshingContract for MeshingWorkloadResultV2 {
     }
 }
 
-impl CanonicalMeshingContract for MeshingEvidenceV2 {
+impl CanonicalMeshingContract for MeshingEvidence {
     const DOMAIN: &'static str = "analysis.mesh.evidence/v2";
     const LIMITS: MeshingCanonicalLimits = MeshingCanonicalLimits::MANIFEST;
 
@@ -125,7 +125,7 @@ impl CanonicalMeshingContract for MeshingEvidenceV2 {
     }
 }
 
-impl CanonicalMeshingContract for AnalysisMeshArtifactV2 {
+impl CanonicalMeshingContract for SolverMeshArtifact {
     const DOMAIN: &'static str = "analysis.mesh.artifact/v2";
     const LIMITS: MeshingCanonicalLimits = MeshingCanonicalLimits::ARTIFACT;
 
@@ -148,7 +148,7 @@ impl CanonicalMeshingContract for AnalysisMeshArtifactV2 {
     }
 }
 
-impl AnalysisMeshArtifactV2 {
+impl SolverMeshArtifact {
     pub fn seal_canonical_digest(&mut self) -> Result<StableDigest, MeshingContractError> {
         self.validate_payload()?;
         let digest = artifact_identity_digest(self)?;
@@ -158,14 +158,14 @@ impl AnalysisMeshArtifactV2 {
 }
 
 fn artifact_identity_digest(
-    artifact: &AnalysisMeshArtifactV2,
+    artifact: &SolverMeshArtifact,
 ) -> Result<StableDigest, MeshingContractError> {
     let mut projection = artifact.clone();
     projection.canonical_digest = StableDigest::ZERO;
     let encoded = encode_contract(
-        <AnalysisMeshArtifactV2 as CanonicalMeshingContract>::DOMAIN,
+        <SolverMeshArtifact as CanonicalMeshingContract>::DOMAIN,
         &projection,
-        <AnalysisMeshArtifactV2 as CanonicalMeshingContract>::LIMITS,
+        <SolverMeshArtifact as CanonicalMeshingContract>::LIMITS,
     )?;
     Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
 }

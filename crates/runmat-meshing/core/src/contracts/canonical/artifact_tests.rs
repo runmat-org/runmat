@@ -14,10 +14,10 @@ fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
     }
 }
 
-pub(super) fn request() -> MeshingRequestV2 {
-    MeshingRequestV2 {
+pub(super) fn request() -> MeshingRequest {
+    MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
-        element_order: MeshElementOrderV2::Tet4,
+        element_order: ElementOrder::Tet4,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -35,26 +35,26 @@ pub(super) fn request() -> MeshingRequestV2 {
             requested_deviation_m: 1.0e-5,
             maximum_healing_displacement_m: 1.0e-6,
         },
-        metric: MetricFieldRequestV2 {
+        metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
         },
-        quality: MeshingQualityTargetsV2 {
-            surface: SurfaceQualityTargetsV2 {
+        quality: MeshingQualityTargets {
+            surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
                 maximum_normal_deviation_degrees: 5.0,
             },
-            volume: VolumeQualityTargetsV2 {
+            volume: VolumeQualityTargets {
                 maximum_radius_edge_ratio: 2.0,
                 minimum_scaled_jacobian: 0.05,
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudgetV2 {
+        resources: MeshingResourceBudget {
             maximum_nodes: 100,
             maximum_elements: 100,
             maximum_memory_bytes: 1_000_000,
@@ -65,14 +65,14 @@ pub(super) fn request() -> MeshingRequestV2 {
             maximum_recursion_depth: 32,
             maximum_iterations: 10_000,
         },
-        cancellation: CancellationPolicyV2 {
+        cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
     }
 }
 
-pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
+pub(super) fn artifact() -> SolverMeshArtifact {
     let solid = entity(PersistentEntityKind::Solid, "solid:1");
     let region = entity(PersistentEntityKind::Region, "region:1");
     let nodes = [
@@ -83,7 +83,7 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, coordinates_m)| AnalysisMeshNodeV2 {
+    .map(|(index, coordinates_m)| SolverMeshNode {
         node_id: index as u64 + 1,
         coordinates_m,
         provenance: vec![solid.clone()],
@@ -93,12 +93,12 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
     let boundary_faces = face_nodes
         .into_iter()
         .enumerate()
-        .map(|(index, node_ids)| AnalysisBoundaryFaceV2 {
+        .map(|(index, node_ids)| SolverBoundaryFace {
             face_id: index as u64 + 10,
-            order: BoundaryTriangleOrderV2::Tri3,
+            order: BoundaryTriangleOrder::Tri3,
             node_ids: node_ids.into(),
             adjacent_volume_element_ids: vec![1],
-            role: BoundaryFaceRoleV2::Exterior,
+            role: BoundaryFaceRole::Exterior,
             provenance: vec![entity(PersistentEntityKind::Face, &format!("face:{index}"))],
         })
         .collect();
@@ -113,7 +113,7 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
     .into_iter()
     .enumerate()
     .map(
-        |(index, (node_ids, adjacent_boundary_face_ids))| AnalysisBoundaryEdgeV2 {
+        |(index, (node_ids, adjacent_boundary_face_ids))| SolverBoundaryEdge {
             edge_id: index as u64 + 20,
             node_ids,
             adjacent_boundary_face_ids,
@@ -121,7 +121,7 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
         },
     )
     .collect();
-    let mut artifact = AnalysisMeshArtifactV2 {
+    let mut artifact = SolverMeshArtifact {
         schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: digest(1),
         root_stage_manifest_digest: digest(2),
@@ -131,18 +131,18 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
             persistent_mapping_version: 2,
         },
         resolved_request: request(),
-        topology: AnalysisMeshTopologyV2 {
+        topology: SolverMeshTopology {
             nodes,
-            volume_elements: vec![AnalysisVolumeElementV2 {
+            volume_elements: vec![SolverVolumeElement {
                 element_id: 1,
-                order: MeshElementOrderV2::Tet4,
+                order: ElementOrder::Tet4,
                 node_ids: vec![1, 2, 3, 4],
                 region_id: region.clone(),
                 material_id: "steel".into(),
                 provenance: vec![solid],
             }],
             neighbors: (0..4)
-                .map(|local_face_index| MeshNeighborV2 {
+                .map(|local_face_index| MeshNeighbor {
                     element_id: 1,
                     local_face_index,
                     adjacent_element_id: None,
@@ -150,7 +150,7 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
                 .collect(),
             boundary_faces,
             boundary_edges,
-            regions: vec![MeshRegionV2 {
+            regions: vec![MeshRegion {
                 region_id: region,
                 material_id: "steel".into(),
                 element_ids: vec![1],
@@ -158,24 +158,24 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
             material_interfaces: Vec::new(),
             contacts: Vec::new(),
             field_topologies: vec![
-                FieldTopologyMapV2 {
+                FieldTopologyMap {
                     topology_id: "nodes".into(),
-                    location: FieldTopologyLocationV2::Node,
+                    location: FieldTopologyLocation::Node,
                     ordered_entity_ids: vec![1, 2, 3, 4],
                 },
-                FieldTopologyMapV2 {
+                FieldTopologyMap {
                     topology_id: "elements".into(),
-                    location: FieldTopologyLocationV2::VolumeElement,
+                    location: FieldTopologyLocation::VolumeElement,
                     ordered_entity_ids: vec![1],
                 },
-                FieldTopologyMapV2 {
+                FieldTopologyMap {
                     topology_id: "boundary_faces".into(),
-                    location: FieldTopologyLocationV2::BoundaryFace,
+                    location: FieldTopologyLocation::BoundaryFace,
                     ordered_entity_ids: vec![10, 11, 12, 13],
                 },
-                FieldTopologyMapV2 {
+                FieldTopologyMap {
                     topology_id: "boundary_edges".into(),
-                    location: FieldTopologyLocationV2::BoundaryEdge,
+                    location: FieldTopologyLocation::BoundaryEdge,
                     ordered_entity_ids: vec![20, 21, 22, 23, 24, 25],
                 },
             ],
@@ -185,28 +185,28 @@ pub(super) fn artifact() -> AnalysisMeshArtifactV2 {
     artifact
 }
 
-pub(super) fn evidence(artifact: &AnalysisMeshArtifactV2) -> MeshingEvidenceV2 {
-    MeshingEvidenceV2 {
+pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
+    MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
         geometry: artifact.geometry.clone(),
         resolved_request_digest: artifact.resolved_request.canonical_digest().unwrap(),
         artifact_digest: artifact.canonical_digest,
         algorithms: artifact.resolved_request.algorithms.clone(),
         deterministic_seed: artifact.resolved_request.deterministic_seed,
-        platform: PlatformBuildIdentityV2 {
+        platform: PlatformBuildIdentity {
             capability_cohort: "native-exact-cad-v1".into(),
             target_triple: "x86_64-unknown-linux-gnu".into(),
             build_digest: digest(5),
             exact_kernel_abi: Some("opencascade-7.9".into()),
         },
-        stages: MeshingStageV2::ALL
+        stages: MeshingStageKind::ALL
             .into_iter()
             .enumerate()
-            .map(|(index, stage)| StageEvidenceV2 {
+            .map(|(index, stage)| MeshingStageEvidence {
                 stage,
                 stage_result_digest: digest(index as u8 + 10),
                 entity_counts: BTreeMap::from([("accepted".into(), 1)]),
-                invariants: vec![InvariantEvidenceV2 {
+                invariants: vec![InvariantEvidence {
                     invariant_id: "stage_complete".into(),
                     passed: true,
                     measured: None,
@@ -221,7 +221,7 @@ pub(super) fn evidence(artifact: &AnalysisMeshArtifactV2) -> MeshingEvidenceV2 {
                 cancellation_checkpoints: 1,
             })
             .collect(),
-        sizing: vec![SizingResolutionEvidenceV2 {
+        sizing: vec![SizingResolutionEvidence {
             scope: entity(PersistentEntityKind::Region, "region:1"),
             requested_size_m: 0.1,
             resolved_size_m: 0.1,
@@ -229,7 +229,7 @@ pub(super) fn evidence(artifact: &AnalysisMeshArtifactV2) -> MeshingEvidenceV2 {
             clipped_contribution_count: 0,
             rejected_contribution_count: 0,
         }],
-        resources: MeshingResourceUsageV2 {
+        resources: MeshingResourceUsage {
             generated_nodes: 4,
             generated_elements: 1,
             peak_memory_bytes: 100,
@@ -240,7 +240,7 @@ pub(super) fn evidence(artifact: &AnalysisMeshArtifactV2) -> MeshingEvidenceV2 {
             maximum_recursion_depth: 2,
             iterations: 8,
         },
-        cache_admission: CacheAdmissionDecisionV2::Admitted,
+        cache_admission: CacheAdmissionDecision::Admitted,
     }
 }
 
@@ -253,12 +253,12 @@ fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
 
     let encoded = serde_json::to_vec(&artifact).unwrap();
     assert_eq!(
-        serde_json::from_slice::<AnalysisMeshArtifactV2>(&encoded).unwrap(),
+        serde_json::from_slice::<SolverMeshArtifact>(&encoded).unwrap(),
         artifact
     );
     let encoded = serde_json::to_vec(&evidence).unwrap();
     assert_eq!(
-        serde_json::from_slice::<MeshingEvidenceV2>(&encoded).unwrap(),
+        serde_json::from_slice::<MeshingEvidence>(&encoded).unwrap(),
         evidence
     );
 }
@@ -304,8 +304,8 @@ fn successful_evidence_requires_every_stage_and_respects_hard_budgets() {
 }
 
 #[test]
-fn v2_artifact_rejects_unknown_legacy_backend_evidence() {
+fn solver_artifact_rejects_unknown_legacy_backend_evidence() {
     let mut value = serde_json::to_value(artifact()).unwrap();
     value["backend"] = serde_json::json!("structured_grid_tetrahedron");
-    assert!(serde_json::from_value::<AnalysisMeshArtifactV2>(value).is_err());
+    assert!(serde_json::from_value::<SolverMeshArtifact>(value).is_err());
 }

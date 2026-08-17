@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{identity::validate_digest_list, MeshingContractError, MeshingStageV2, StableDigest};
+use super::{identity::validate_digest_list, MeshingContractError, MeshingStageKind, StableDigest};
 
 pub const MESHING_STAGE_MANIFEST_SCHEMA_VERSION: u16 = 2;
 const MAX_CHUNKS_PER_MANIFEST: usize = 65_536;
@@ -15,7 +15,7 @@ const MAX_MANIFEST_PREREQUISITES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MeshingChunkMediaTypeV2 {
+pub enum MeshingChunkMediaType {
     GeometrySource,
     ExactGeometry,
     MetricField,
@@ -32,7 +32,7 @@ pub enum MeshingChunkMediaTypeV2 {
     MeshingEvidence,
 }
 
-impl MeshingChunkMediaTypeV2 {
+impl MeshingChunkMediaType {
     pub const fn media_type(self) -> &'static str {
         match self {
             Self::GeometrySource => "application/vnd.runmat.geometry-source.v2",
@@ -76,18 +76,18 @@ impl MeshingChunkMediaTypeV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingChunkDescriptorV2 {
+pub struct MeshingChunkDescriptor {
     pub ordinal: u32,
     pub first_logical_entity_ordinal: u64,
     pub digest: StableDigest,
-    pub media_type: MeshingChunkMediaTypeV2,
+    pub media_type: MeshingChunkMediaType,
     pub schema_version: u16,
     pub encoded_length: u64,
     pub decoded_length: u64,
     pub logical_entity_count: u64,
 }
 
-impl MeshingChunkDescriptorV2 {
+impl MeshingChunkDescriptor {
     fn validate(&self, expected_ordinal: usize) -> Result<(), MeshingContractError> {
         if self.ordinal != expected_ordinal as u32
             || self.schema_version == 0
@@ -106,7 +106,7 @@ impl MeshingChunkDescriptorV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MeshingStageResultKindV2 {
+pub enum MeshingStageResultKind {
     WholeStage,
     Partition,
     DeterministicJoin,
@@ -114,26 +114,26 @@ pub enum MeshingStageResultKindV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MeshingManifestDispositionV2 {
+pub enum MeshingManifestDisposition {
     ValidatedDependency,
     DiagnosticOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingStageManifestV2 {
+pub struct MeshingStageManifest {
     pub schema_version: u16,
-    pub stage: MeshingStageV2,
-    pub result_kind: MeshingStageResultKindV2,
+    pub stage: MeshingStageKind,
+    pub result_kind: MeshingStageResultKind,
     pub logical_result_identity: StableDigest,
-    pub disposition: MeshingManifestDispositionV2,
+    pub disposition: MeshingManifestDisposition,
     pub prerequisite_manifest_digests: Vec<StableDigest>,
     pub invariant_summary_digest: StableDigest,
-    pub chunks: Vec<MeshingChunkDescriptorV2>,
+    pub chunks: Vec<MeshingChunkDescriptor>,
     pub total_encoded_length: u64,
 }
 
-impl MeshingStageManifestV2 {
+impl MeshingStageManifest {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != MESHING_STAGE_MANIFEST_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
@@ -197,7 +197,7 @@ impl MeshingStageManifestV2 {
     pub const fn is_dependency_eligible(&self) -> bool {
         matches!(
             self.disposition,
-            MeshingManifestDispositionV2::ValidatedDependency
+            MeshingManifestDisposition::ValidatedDependency
         )
     }
 }

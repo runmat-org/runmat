@@ -1,39 +1,39 @@
 use super::{
-    CurveEvaluatorIdV2, MassPropertiesEvaluatorIdV2, PcurveEvaluatorIdV2, SurfaceEvaluatorIdV2,
-    TrimClassifierIdV2,
+    CurveEvaluatorId, MassPropertiesEvaluatorId, PcurveEvaluatorId, SurfaceEvaluatorId,
+    TrimClassifierId,
 };
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ParameterRangeV2 {
+pub struct ParameterRange {
     pub start: f64,
     pub end: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CurveDerivativesV2 {
+pub struct CurveDerivatives {
     pub point_m: [f64; 3],
     pub first_m: [f64; 3],
     pub second_m: [f64; 3],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PcurveDerivativesV2 {
+pub struct PcurveDerivatives {
     pub point_uv: [f64; 2],
     pub first_uv: [f64; 2],
     pub second_uv: [f64; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CurveProjectionV2 {
+pub struct CurveProjection {
     pub parameter: f64,
     pub point_m: [f64; 3],
     pub distance_m: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SurfaceDerivativesV2 {
+pub struct SurfaceDerivatives {
     pub point_m: [f64; 3],
     pub du_m: [f64; 3],
     pub dv_m: [f64; 3],
@@ -43,7 +43,7 @@ pub struct SurfaceDerivativesV2 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SurfaceCurvatureV2 {
+pub struct SurfaceCurvature {
     pub minimum_1_per_m: f64,
     pub maximum_1_per_m: f64,
     pub minimum_direction_uv: [f64; 2],
@@ -51,14 +51,14 @@ pub struct SurfaceCurvatureV2 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SurfaceProjectionV2 {
+pub struct SurfaceProjection {
     pub uv: [f64; 2],
     pub point_m: [f64; 3],
     pub distance_m: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrimDomainLocationV2 {
+pub enum TrimDomainLocation {
     Inside,
     OnBoundary,
     Outside,
@@ -66,7 +66,7 @@ pub enum TrimDomainLocationV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct BodyMassPropertiesV2 {
+pub struct BodyMassProperties {
     pub volume_m3: f64,
     pub surface_area_m2: f64,
     pub centroid_m: [f64; 3],
@@ -121,126 +121,126 @@ pub trait GeometryEvaluationControl: Send + Sync {
     fn consume_search_work(&self, count: u64) -> Result<(), GeometryEvaluationError>;
 }
 
-pub trait ExactCurveEvaluatorV2: Send + Sync {
+pub trait ExactCurveEvaluator: Send + Sync {
     fn parameter_range(
         &self,
-        id: &CurveEvaluatorIdV2,
-    ) -> Result<ParameterRangeV2, GeometryEvaluationError>;
+        id: &CurveEvaluatorId,
+    ) -> Result<ParameterRange, GeometryEvaluationError>;
     fn point(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError>;
     fn unit_tangent(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError>;
     fn derivatives(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<CurveDerivativesV2, GeometryEvaluationError>;
+    ) -> Result<CurveDerivatives, GeometryEvaluationError>;
     fn curvature_1_per_m(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<f64, GeometryEvaluationError>;
     fn arc_length_m(
         &self,
-        id: &CurveEvaluatorIdV2,
-        range: ParameterRangeV2,
+        id: &CurveEvaluatorId,
+        range: ParameterRange,
         absolute_error_m: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<f64, GeometryEvaluationError>;
     fn inverse_project(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         point_m: [f64; 3],
         absolute_error_m: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<CurveProjectionV2, GeometryEvaluationError>;
+    ) -> Result<CurveProjection, GeometryEvaluationError>;
 }
 
-pub trait ExactPcurveEvaluatorV2: Send + Sync {
+pub trait ExactPcurveEvaluator: Send + Sync {
     fn parameter_range(
         &self,
-        id: &PcurveEvaluatorIdV2,
-    ) -> Result<ParameterRangeV2, GeometryEvaluationError>;
+        id: &PcurveEvaluatorId,
+    ) -> Result<ParameterRange, GeometryEvaluationError>;
     fn point(
         &self,
-        id: &PcurveEvaluatorIdV2,
+        id: &PcurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 2], GeometryEvaluationError>;
     fn derivatives(
         &self,
-        id: &PcurveEvaluatorIdV2,
+        id: &PcurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<PcurveDerivativesV2, GeometryEvaluationError>;
+    ) -> Result<PcurveDerivatives, GeometryEvaluationError>;
 }
 
-pub trait ExactSurfaceEvaluatorV2: Send + Sync {
+pub trait ExactSurfaceEvaluator: Send + Sync {
     fn parameter_bounds(
         &self,
-        id: &SurfaceEvaluatorIdV2,
-    ) -> Result<[ParameterRangeV2; 2], GeometryEvaluationError>;
+        id: &SurfaceEvaluatorId,
+    ) -> Result<[ParameterRange; 2], GeometryEvaluationError>;
     fn periodicity(
         &self,
-        id: &SurfaceEvaluatorIdV2,
+        id: &SurfaceEvaluatorId,
     ) -> Result<[Option<f64>; 2], GeometryEvaluationError>;
     fn point(
         &self,
-        id: &SurfaceEvaluatorIdV2,
+        id: &SurfaceEvaluatorId,
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError>;
     fn derivatives(
         &self,
-        id: &SurfaceEvaluatorIdV2,
+        id: &SurfaceEvaluatorId,
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<SurfaceDerivativesV2, GeometryEvaluationError>;
+    ) -> Result<SurfaceDerivatives, GeometryEvaluationError>;
     fn unit_normal(
         &self,
-        id: &SurfaceEvaluatorIdV2,
+        id: &SurfaceEvaluatorId,
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError>;
     fn principal_curvature(
         &self,
-        id: &SurfaceEvaluatorIdV2,
+        id: &SurfaceEvaluatorId,
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<SurfaceCurvatureV2, GeometryEvaluationError>;
+    ) -> Result<SurfaceCurvature, GeometryEvaluationError>;
     fn closest_point(
         &self,
-        id: &SurfaceEvaluatorIdV2,
+        id: &SurfaceEvaluatorId,
         point_m: [f64; 3],
         absolute_error_m: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<SurfaceProjectionV2, GeometryEvaluationError>;
+    ) -> Result<SurfaceProjection, GeometryEvaluationError>;
 }
 
-pub trait ExactTrimClassifierV2: Send + Sync {
+pub trait ExactTrimClassifier: Send + Sync {
     fn classify(
         &self,
-        id: &TrimClassifierIdV2,
+        id: &TrimClassifierId,
         uv: [f64; 2],
         boundary_tolerance_uv: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<TrimDomainLocationV2, GeometryEvaluationError>;
+    ) -> Result<TrimDomainLocation, GeometryEvaluationError>;
 }
 
-pub trait ExactMassPropertiesEvaluatorV2: Send + Sync {
+pub trait ExactMassPropertiesEvaluator: Send + Sync {
     fn mass_properties(
         &self,
-        id: &MassPropertiesEvaluatorIdV2,
+        id: &MassPropertiesEvaluatorId,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<BodyMassPropertiesV2, GeometryEvaluationError>;
+    ) -> Result<BodyMassProperties, GeometryEvaluationError>;
 }

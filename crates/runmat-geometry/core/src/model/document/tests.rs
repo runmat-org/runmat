@@ -4,8 +4,8 @@ fn digest(seed: u8) -> GeometryDigest {
     GeometryDigest::from_bytes([seed; 32])
 }
 
-fn object(seed: u8, media_type: &str) -> GeometryObjectRefV2 {
-    GeometryObjectRefV2 {
+fn object(seed: u8, media_type: &str) -> GeometryObjectRef {
+    GeometryObjectRef {
         digest: digest(seed),
         encoded_length: 4096,
         media_type: media_type.into(),
@@ -13,8 +13,8 @@ fn object(seed: u8, media_type: &str) -> GeometryObjectRefV2 {
     }
 }
 
-fn complete_capabilities() -> ExactGeometryCapabilitiesV2 {
-    ExactGeometryCapabilitiesV2 {
+fn complete_capabilities() -> ExactGeometryCapabilities {
+    ExactGeometryCapabilities {
         curve_point: true,
         curve_tangent: true,
         curve_curvature: true,
@@ -35,18 +35,18 @@ fn complete_capabilities() -> ExactGeometryCapabilitiesV2 {
     }
 }
 
-fn exact_document() -> GeometryDocumentV2 {
-    GeometryDocumentV2 {
+fn exact_document() -> GeometryDocument {
+    GeometryDocument {
         schema_version: GEOMETRY_DOCUMENT_SCHEMA_VERSION,
-        source: GeometrySourceIdentityV2 {
+        source: GeometrySourceIdentity {
             content_digest: digest(1),
-            format: GeometrySourceFormatV2::Step,
+            format: GeometrySourceFormat::Step,
             importer_version: "step-import/v2".into(),
             kernel_version: Some("occt/7.9".into()),
             source_units: UnitSystem::Millimeter,
             meters_per_source_unit: 0.001,
         },
-        revision: GeometryRevisionIdentityV2 {
+        revision: GeometryRevisionIdentity {
             revision: 7,
             persistent_mapping_version: 2,
             parent_document_digest: Some(digest(2)),
@@ -58,7 +58,7 @@ fn exact_document() -> GeometryDocumentV2 {
             requested_deviation_m: 1.0e-5,
             maximum_healing_displacement_m: 1.0e-6,
         },
-        healing: GeometryHealingPolicyV2 {
+        healing: GeometryHealingPolicy {
             algorithm_version: "geometry-healing/v2".into(),
             sew: true,
             repair_orientation: true,
@@ -66,9 +66,9 @@ fn exact_document() -> GeometryDocumentV2 {
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: false,
         },
-        model: GeometryModelV2::ExactBRep {
-            model: ExactBRepModelV2 {
-                artifact: object(3, EXACT_BREP_MEDIA_TYPE_V2),
+        model: GeometryModel::ExactBRep {
+            model: ExactBRepModel {
+                artifact: object(3, EXACT_BREP_MEDIA_TYPE),
                 kernel_abi: "occt-v1".into(),
                 capabilities: complete_capabilities(),
                 assembly_count: 1,
@@ -86,11 +86,11 @@ fn exact_document() -> GeometryDocumentV2 {
                 contact_count: 0,
             },
         },
-        display_tessellations: vec![DisplayTessellationRefV2 {
+        display_tessellations: vec![DisplayTessellationRef {
             profile_id: "interactive/v2".into(),
             geometry_revision: 7,
             derived_from_primary_digest: digest(3),
-            artifact: object(4, DISPLAY_TESSELLATION_MEDIA_TYPE_V2),
+            artifact: object(4, DISPLAY_TESSELLATION_MEDIA_TYPE),
         }],
     }
 }
@@ -102,10 +102,10 @@ fn exact_document_is_path_free_and_display_is_derived() {
     assert!(document.is_exact());
     let encoded = serde_json::to_string(&document).unwrap();
     assert!(!encoded.contains("path"));
-    assert!(encoded.contains(EXACT_BREP_MEDIA_TYPE_V2));
-    assert!(encoded.contains(DISPLAY_TESSELLATION_MEDIA_TYPE_V2));
+    assert!(encoded.contains(EXACT_BREP_MEDIA_TYPE));
+    assert!(encoded.contains(DISPLAY_TESSELLATION_MEDIA_TYPE));
     assert_eq!(
-        serde_json::from_str::<GeometryDocumentV2>(&encoded).unwrap(),
+        serde_json::from_str::<GeometryDocument>(&encoded).unwrap(),
         document
     );
 }
@@ -120,7 +120,7 @@ fn exact_sources_cannot_degrade_to_faceted_payloads() {
 #[test]
 fn faceted_sources_cannot_claim_exact_capability() {
     let mut document = exact_document();
-    document.source.format = GeometrySourceFormatV2::Stl;
+    document.source.format = GeometrySourceFormat::Stl;
     document.source.kernel_version = None;
     document.model = faceted_model();
     document.display_tessellations[0].derived_from_primary_digest = digest(5);
@@ -133,11 +133,11 @@ fn faceted_sources_cannot_claim_exact_capability() {
 #[test]
 fn exact_admission_requires_complete_evaluators() {
     let mut document = exact_document();
-    if let GeometryModelV2::ExactBRep { model } = &mut document.model {
+    if let GeometryModel::ExactBRep { model } = &mut document.model {
         model.capabilities.trim_domain_classification = false;
     }
     assert!(document.validate().is_err());
-    if let GeometryModelV2::ExactBRep { model } = &mut document.model {
+    if let GeometryModel::ExactBRep { model } = &mut document.model {
         model.capabilities.trim_domain_classification = true;
         model.capabilities.pcurve_derivatives = false;
     }
@@ -147,7 +147,7 @@ fn exact_admission_requires_complete_evaluators() {
 #[test]
 fn exact_root_parts_and_sheet_models_do_not_require_fake_instances_or_solids() {
     let mut document = exact_document();
-    let GeometryModelV2::ExactBRep { model } = &mut document.model else {
+    let GeometryModel::ExactBRep { model } = &mut document.model else {
         unreachable!()
     };
     model.instance_count = 0;
@@ -173,20 +173,20 @@ fn document_rejects_unknown_fields_and_unbounded_artifacts() {
         .as_object_mut()
         .unwrap()
         .insert("physicalPath".into(), serde_json::json!("/tmp/model.step"));
-    assert!(serde_json::from_value::<GeometryDocumentV2>(value).is_err());
+    assert!(serde_json::from_value::<GeometryDocument>(value).is_err());
 
     let mut document = exact_document();
-    let GeometryModelV2::ExactBRep { model } = &mut document.model else {
+    let GeometryModel::ExactBRep { model } = &mut document.model else {
         unreachable!()
     };
     model.artifact.encoded_length = (1_u64 << 40) + 1;
     assert!(document.validate().is_err());
 }
 
-fn faceted_model() -> GeometryModelV2 {
-    GeometryModelV2::FacetedSolid {
-        model: FacetedSolidModelV2 {
-            artifact: object(5, FACETED_SOLID_MEDIA_TYPE_V2),
+fn faceted_model() -> GeometryModel {
+    GeometryModel::FacetedSolid {
+        model: FacetedSolidModel {
+            artifact: object(5, FACETED_SOLID_MEDIA_TYPE),
             vertex_count: 4,
             triangle_count: 4,
             shell_count: 1,

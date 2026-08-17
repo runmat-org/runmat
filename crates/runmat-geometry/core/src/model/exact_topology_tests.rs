@@ -16,27 +16,27 @@ fn part_id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
     }
 }
 
-fn curve_evaluator(name: &str) -> CurveEvaluatorIdV2 {
-    CurveEvaluatorIdV2::new(name).unwrap()
+fn curve_evaluator(name: &str) -> CurveEvaluatorId {
+    CurveEvaluatorId::new(name).unwrap()
 }
 
-fn pcurve_evaluator(name: &str) -> PcurveEvaluatorIdV2 {
-    PcurveEvaluatorIdV2::new(name).unwrap()
+fn pcurve_evaluator(name: &str) -> PcurveEvaluatorId {
+    PcurveEvaluatorId::new(name).unwrap()
 }
 
-fn surface_evaluator(name: &str) -> SurfaceEvaluatorIdV2 {
-    SurfaceEvaluatorIdV2::new(name).unwrap()
+fn surface_evaluator(name: &str) -> SurfaceEvaluatorId {
+    SurfaceEvaluatorId::new(name).unwrap()
 }
 
-fn trim_classifier(name: &str) -> TrimClassifierIdV2 {
-    TrimClassifierIdV2::new(name).unwrap()
+fn trim_classifier(name: &str) -> TrimClassifierId {
+    TrimClassifierId::new(name).unwrap()
 }
 
-fn mass_properties_evaluator(name: &str) -> MassPropertiesEvaluatorIdV2 {
-    MassPropertiesEvaluatorIdV2::new(name).unwrap()
+fn mass_properties_evaluator(name: &str) -> MassPropertiesEvaluatorId {
+    MassPropertiesEvaluatorId::new(name).unwrap()
 }
 
-pub(super) fn topology() -> ExactBRepTopologyV2 {
+pub(super) fn topology() -> ExactBRepTopology {
     let part_assembly = part_id(PersistentEntityKind::Assembly, "assembly-part");
     let root_assembly = id(PersistentEntityKind::Assembly, "assembly-root");
     let instance = part_id(PersistentEntityKind::Instance, "instance");
@@ -49,58 +49,58 @@ pub(super) fn topology() -> ExactBRepTopologyV2 {
     let coedge = part_id(PersistentEntityKind::Coedge, "coedge");
     let edge = part_id(PersistentEntityKind::Edge, "edge");
     let vertex = part_id(PersistentEntityKind::Vertex, "vertex");
-    ExactBRepTopologyV2 {
+    ExactBRepTopology {
         schema_version: EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
         root_assembly_id: root_assembly.clone(),
         assemblies: vec![
-            ExactAssemblyV2 {
+            ExactAssembly {
                 id: part_assembly.clone(),
                 definition_digest: [1; 32],
                 body_ids: vec![body.clone()],
                 child_instance_ids: Vec::new(),
             },
-            ExactAssemblyV2 {
+            ExactAssembly {
                 id: root_assembly.clone(),
                 definition_digest: [2; 32],
                 body_ids: Vec::new(),
                 child_instance_ids: vec![instance.clone()],
             },
         ],
-        instances: vec![ExactInstanceV2 {
+        instances: vec![ExactInstance {
             id: instance,
             parent_assembly_id: root_assembly,
             instantiated_assembly_id: part_assembly,
-            transform: GeometryTransformV2([
+            transform: GeometryTransform([
                 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
             ]),
         }],
-        bodies: vec![ExactBodyV2 {
+        bodies: vec![ExactBody {
             id: body,
             mass_properties_evaluator_id: mass_properties_evaluator("mass:1"),
             lump_ids: vec![lump.clone()],
             is_sheet_body: false,
             sheet_shell_ids: Vec::new(),
         }],
-        lumps: vec![ExactLumpV2 {
+        lumps: vec![ExactLump {
             id: lump,
             solid_ids: vec![solid.clone()],
         }],
-        solids: vec![ExactSolidV2 {
+        solids: vec![ExactSolid {
             id: solid,
             outer_shell_id: shell.clone(),
             void_shell_ids: Vec::new(),
         }],
-        shells: vec![ExactShellV2 {
+        shells: vec![ExactShell {
             id: shell,
-            orientation: TopologicalOrientationV2::Forward,
-            face_uses: vec![OrientedEntityUseV2 {
+            orientation: TopologicalOrientation::Forward,
+            face_uses: vec![OrientedEntityUse {
                 entity_id: face.clone(),
-                orientation: TopologicalOrientationV2::Forward,
+                orientation: TopologicalOrientation::Forward,
             }],
         }],
-        faces: vec![ExactFaceV2 {
+        faces: vec![ExactFace {
             id: face.clone(),
-            orientation: TopologicalOrientationV2::Forward,
+            orientation: TopologicalOrientation::Forward,
             surface_evaluator_id: surface_evaluator("surface:1"),
             trim_classifier_id: trim_classifier("trim:1"),
             outer_wire_id: wire.clone(),
@@ -109,20 +109,20 @@ pub(super) fn topology() -> ExactBRepTopologyV2 {
             periodic_v: false,
             has_singularity: false,
         }],
-        wires: vec![ExactWireV2 {
+        wires: vec![ExactWire {
             id: wire,
-            orientation: TopologicalOrientationV2::Forward,
+            orientation: TopologicalOrientation::Forward,
             coedge_ids: vec![coedge.clone()],
         }],
-        coedges: vec![ExactCoedgeV2 {
+        coedges: vec![ExactCoedge {
             id: coedge,
             face_id: face,
             edge_id: edge.clone(),
-            orientation: TopologicalOrientationV2::Forward,
+            orientation: TopologicalOrientation::Forward,
             pcurve_evaluator_id: pcurve_evaluator("pcurve:1"),
             seam_image: None,
         }],
-        edges: vec![ExactEdgeV2 {
+        edges: vec![ExactEdge {
             id: edge,
             curve_evaluator_id: curve_evaluator("curve:1"),
             start_vertex_id: Some(vertex.clone()),
@@ -131,7 +131,7 @@ pub(super) fn topology() -> ExactBRepTopologyV2 {
             is_periodic: true,
             is_degenerate: false,
         }],
-        vertices: vec![ExactVertexV2 {
+        vertices: vec![ExactVertex {
             id: vertex,
             point_m: [0.0, 0.0, 0.0],
             tolerance_m: 1.0e-8,
@@ -141,16 +141,16 @@ pub(super) fn topology() -> ExactBRepTopologyV2 {
     }
 }
 
-pub(super) fn model() -> ExactBRepModelV2 {
-    ExactBRepModelV2 {
-        artifact: GeometryObjectRefV2 {
+pub(super) fn model() -> ExactBRepModel {
+    ExactBRepModel {
+        artifact: GeometryObjectRef {
             digest: GeometryDigest::from_bytes([1; 32]),
             encoded_length: 4096,
-            media_type: EXACT_BREP_MEDIA_TYPE_V2.into(),
+            media_type: EXACT_BREP_MEDIA_TYPE.into(),
             schema_version: GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
         },
         kernel_abi: "occt-v1".into(),
-        capabilities: ExactGeometryCapabilitiesV2 {
+        capabilities: ExactGeometryCapabilities {
             curve_point: true,
             curve_tangent: true,
             curve_curvature: true,
@@ -185,51 +185,51 @@ pub(super) fn model() -> ExactBRepModelV2 {
     }
 }
 
-fn add_second_interface_side(topology: &mut ExactBRepTopologyV2) {
+fn add_second_interface_side(topology: &mut ExactBRepTopology) {
     let body = part_id(PersistentEntityKind::Body, "body-b");
     let lump = part_id(PersistentEntityKind::Lump, "lump-b");
     let solid = part_id(PersistentEntityKind::Solid, "solid-b");
     let shell = part_id(PersistentEntityKind::Shell, "shell-b");
     topology.assemblies[0].body_ids.push(body.clone());
-    topology.bodies.push(ExactBodyV2 {
+    topology.bodies.push(ExactBody {
         id: body,
         mass_properties_evaluator_id: mass_properties_evaluator("mass:2"),
         lump_ids: vec![lump.clone()],
         is_sheet_body: false,
         sheet_shell_ids: Vec::new(),
     });
-    topology.lumps.push(ExactLumpV2 {
+    topology.lumps.push(ExactLump {
         id: lump,
         solid_ids: vec![solid.clone()],
     });
-    topology.solids.push(ExactSolidV2 {
+    topology.solids.push(ExactSolid {
         id: solid,
         outer_shell_id: shell.clone(),
         void_shell_ids: Vec::new(),
     });
-    topology.shells.push(ExactShellV2 {
+    topology.shells.push(ExactShell {
         id: shell,
-        orientation: TopologicalOrientationV2::Forward,
-        face_uses: vec![OrientedEntityUseV2 {
+        orientation: TopologicalOrientation::Forward,
+        face_uses: vec![OrientedEntityUse {
             entity_id: topology.faces[0].id.clone(),
-            orientation: TopologicalOrientationV2::Reversed,
+            orientation: TopologicalOrientation::Reversed,
         }],
     });
 }
 
-fn add_independent_contact_face(topology: &mut ExactBRepTopologyV2) -> PersistentEntityId {
+fn add_independent_contact_face(topology: &mut ExactBRepTopology) -> PersistentEntityId {
     let face = part_id(PersistentEntityKind::Face, "face-contact");
     let wire = part_id(PersistentEntityKind::Wire, "wire-contact");
     let coedge = part_id(PersistentEntityKind::Coedge, "coedge-contact");
     let edge = part_id(PersistentEntityKind::Edge, "edge-contact");
     let vertex = part_id(PersistentEntityKind::Vertex, "vertex-contact");
-    topology.shells[0].face_uses.push(OrientedEntityUseV2 {
+    topology.shells[0].face_uses.push(OrientedEntityUse {
         entity_id: face.clone(),
-        orientation: TopologicalOrientationV2::Forward,
+        orientation: TopologicalOrientation::Forward,
     });
-    topology.faces.push(ExactFaceV2 {
+    topology.faces.push(ExactFace {
         id: face.clone(),
-        orientation: TopologicalOrientationV2::Forward,
+        orientation: TopologicalOrientation::Forward,
         surface_evaluator_id: surface_evaluator("surface:contact"),
         trim_classifier_id: trim_classifier("trim:contact"),
         outer_wire_id: wire.clone(),
@@ -238,20 +238,20 @@ fn add_independent_contact_face(topology: &mut ExactBRepTopologyV2) -> Persisten
         periodic_v: false,
         has_singularity: false,
     });
-    topology.wires.push(ExactWireV2 {
+    topology.wires.push(ExactWire {
         id: wire,
-        orientation: TopologicalOrientationV2::Forward,
+        orientation: TopologicalOrientation::Forward,
         coedge_ids: vec![coedge.clone()],
     });
-    topology.coedges.push(ExactCoedgeV2 {
+    topology.coedges.push(ExactCoedge {
         id: coedge,
         face_id: face.clone(),
         edge_id: edge.clone(),
-        orientation: TopologicalOrientationV2::Forward,
+        orientation: TopologicalOrientation::Forward,
         pcurve_evaluator_id: pcurve_evaluator("pcurve:contact"),
         seam_image: None,
     });
-    topology.edges.push(ExactEdgeV2 {
+    topology.edges.push(ExactEdge {
         id: edge,
         curve_evaluator_id: curve_evaluator("curve:contact"),
         start_vertex_id: Some(vertex.clone()),
@@ -260,7 +260,7 @@ fn add_independent_contact_face(topology: &mut ExactBRepTopologyV2) -> Persisten
         is_periodic: true,
         is_degenerate: false,
     });
-    topology.vertices.push(ExactVertexV2 {
+    topology.vertices.push(ExactVertex {
         id: vertex,
         point_m: [1.0, 0.0, 0.0],
         tolerance_m: 1.0e-8,
@@ -273,7 +273,7 @@ fn explicit_topology_validates_and_round_trips() {
     let topology = topology();
     topology.validate_against(&model()).unwrap();
     assert_eq!(
-        serde_json::from_str::<ExactBRepTopologyV2>(&serde_json::to_string(&topology).unwrap())
+        serde_json::from_str::<ExactBRepTopology>(&serde_json::to_string(&topology).unwrap())
             .unwrap(),
         topology
     );
@@ -345,12 +345,12 @@ fn dangling_kind_confused_and_wrong_face_incidence_fail() {
 fn shared_interfaces_require_opposite_oriented_region_uses() {
     let mut topology = topology();
     add_second_interface_side(&mut topology);
-    topology.interfaces.push(ExactSharedInterfaceV2 {
+    topology.interfaces.push(ExactSharedInterface {
         face_id: topology.faces[0].id.clone(),
         side_a_region_id: id(PersistentEntityKind::Region, "region-a"),
         side_b_region_id: id(PersistentEntityKind::Region, "region-b"),
-        side_a_orientation: TopologicalOrientationV2::Forward,
-        side_b_orientation: TopologicalOrientationV2::Reversed,
+        side_a_orientation: TopologicalOrientation::Forward,
+        side_b_orientation: TopologicalOrientation::Reversed,
     });
     let mut summary = model();
     summary.body_count = 2;
@@ -359,10 +359,10 @@ fn shared_interfaces_require_opposite_oriented_region_uses() {
     summary.shell_count = 2;
     summary.interface_count = 1;
     topology.validate_against(&summary).unwrap();
-    topology.interfaces[0].side_b_orientation = TopologicalOrientationV2::Forward;
+    topology.interfaces[0].side_b_orientation = TopologicalOrientation::Forward;
     assert!(topology.validate_against(&summary).is_err());
-    topology.interfaces[0].side_b_orientation = TopologicalOrientationV2::Reversed;
-    topology.shells[1].face_uses[0].orientation = TopologicalOrientationV2::Forward;
+    topology.interfaces[0].side_b_orientation = TopologicalOrientation::Reversed;
+    topology.shells[1].face_uses[0].orientation = TopologicalOrientation::Forward;
     assert!(topology.validate_against(&summary).is_err());
 }
 
@@ -371,7 +371,7 @@ fn contacts_require_disjoint_faces_and_nonzero_pairing_contract() {
     let mut topology = topology();
     let side_a_face = topology.faces[0].id.clone();
     let side_b_face = add_independent_contact_face(&mut topology);
-    topology.contacts.push(ExactContactPairV2 {
+    topology.contacts.push(ExactContactPair {
         id: id(PersistentEntityKind::Contact, "contact"),
         side_a_face_ids: vec![side_a_face.clone()],
         side_b_face_ids: vec![side_b_face.clone()],
@@ -396,7 +396,7 @@ fn contacts_require_disjoint_faces_and_nonzero_pairing_contract() {
 #[test]
 fn noncanonical_order_and_summary_substitution_fail() {
     let mut noncanonical = topology();
-    noncanonical.vertices.push(ExactVertexV2 {
+    noncanonical.vertices.push(ExactVertex {
         id: id(PersistentEntityKind::Vertex, "a-before-existing"),
         point_m: [1.0, 0.0, 0.0],
         tolerance_m: 0.0,

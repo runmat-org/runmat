@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     validate_finite, validate_token, AlgorithmVersionSet, CanonicalMeshingContract,
-    GeometryRevisionRef, MeshingContractError, MeshingResourceBudgetV2, MeshingStageV2,
+    GeometryRevisionRef, MeshingContractError, MeshingResourceBudget, MeshingStageKind,
     PersistentEntityId, StableDigest,
 };
 
@@ -15,7 +15,7 @@ const MAX_SIZING_EVIDENCE: usize = 65_536;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ErrorDistributionV2 {
+pub struct ErrorDistribution {
     pub sample_count: u64,
     pub minimum: f64,
     pub mean: f64,
@@ -25,7 +25,7 @@ pub struct ErrorDistributionV2 {
     pub unit: String,
 }
 
-impl ErrorDistributionV2 {
+impl ErrorDistribution {
     fn validate(&self) -> Result<(), MeshingContractError> {
         if self.sample_count == 0 {
             return Err(MeshingContractError::invalid(
@@ -59,7 +59,7 @@ impl ErrorDistributionV2 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct InvariantEvidenceV2 {
+pub struct InvariantEvidence {
     pub invariant_id: String,
     pub passed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,7 +70,7 @@ pub struct InvariantEvidenceV2 {
     pub unit: Option<String>,
 }
 
-impl InvariantEvidenceV2 {
+impl InvariantEvidence {
     fn validate(&self) -> Result<(), MeshingContractError> {
         validate_token("invariant id", &self.invariant_id, 256)?;
         if !self.passed {
@@ -94,12 +94,12 @@ impl InvariantEvidenceV2 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StageEvidenceV2 {
-    pub stage: MeshingStageV2,
+pub struct MeshingStageEvidence {
+    pub stage: MeshingStageKind,
     pub stage_result_digest: StableDigest,
     pub entity_counts: BTreeMap<String, u64>,
-    pub invariants: Vec<InvariantEvidenceV2>,
-    pub achieved_error_distributions: BTreeMap<String, ErrorDistributionV2>,
+    pub invariants: Vec<InvariantEvidence>,
+    pub achieved_error_distributions: BTreeMap<String, ErrorDistribution>,
     pub completed_work: u64,
     pub estimated_work: u64,
     pub peak_memory_bytes: u64,
@@ -107,7 +107,7 @@ pub struct StageEvidenceV2 {
     pub cancellation_checkpoints: u64,
 }
 
-impl StageEvidenceV2 {
+impl MeshingStageEvidence {
     fn validate(&self) -> Result<(), MeshingContractError> {
         self.stage_result_digest
             .validate_nonzero("stage evidence result digest")?;
@@ -145,7 +145,7 @@ impl StageEvidenceV2 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SizingResolutionEvidenceV2 {
+pub struct SizingResolutionEvidence {
     pub scope: PersistentEntityId,
     pub requested_size_m: f64,
     pub resolved_size_m: f64,
@@ -154,7 +154,7 @@ pub struct SizingResolutionEvidenceV2 {
     pub rejected_contribution_count: u32,
 }
 
-impl SizingResolutionEvidenceV2 {
+impl SizingResolutionEvidence {
     fn validate(&self) -> Result<(), MeshingContractError> {
         self.scope.validate()?;
         for value in [
@@ -176,7 +176,7 @@ impl SizingResolutionEvidenceV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingResourceUsageV2 {
+pub struct MeshingResourceUsage {
     pub generated_nodes: u64,
     pub generated_elements: u64,
     pub peak_memory_bytes: u64,
@@ -188,11 +188,8 @@ pub struct MeshingResourceUsageV2 {
     pub iterations: u64,
 }
 
-impl MeshingResourceUsageV2 {
-    fn validate_against(
-        &self,
-        budget: &MeshingResourceBudgetV2,
-    ) -> Result<(), MeshingContractError> {
+impl MeshingResourceUsage {
+    fn validate_against(&self, budget: &MeshingResourceBudget) -> Result<(), MeshingContractError> {
         if self.generated_nodes > budget.maximum_nodes
             || self.generated_elements > budget.maximum_elements
             || self.peak_memory_bytes > budget.maximum_memory_bytes
@@ -214,7 +211,7 @@ impl MeshingResourceUsageV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PlatformBuildIdentityV2 {
+pub struct PlatformBuildIdentity {
     pub capability_cohort: String,
     pub target_triple: String,
     pub build_digest: StableDigest,
@@ -222,7 +219,7 @@ pub struct PlatformBuildIdentityV2 {
     pub exact_kernel_abi: Option<String>,
 }
 
-impl PlatformBuildIdentityV2 {
+impl PlatformBuildIdentity {
     fn validate(&self) -> Result<(), MeshingContractError> {
         validate_token("capability cohort", &self.capability_cohort, 128)?;
         validate_token("target triple", &self.target_triple, 128)?;
@@ -237,7 +234,7 @@ impl PlatformBuildIdentityV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CacheAdmissionDecisionV2 {
+pub enum CacheAdmissionDecision {
     Admitted,
     RejectedNonportableCapability,
     RejectedPolicy,
@@ -245,24 +242,24 @@ pub enum CacheAdmissionDecisionV2 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingEvidenceV2 {
+pub struct MeshingEvidence {
     pub schema_version: u16,
     pub geometry: GeometryRevisionRef,
     pub resolved_request_digest: StableDigest,
     pub artifact_digest: StableDigest,
     pub algorithms: AlgorithmVersionSet,
     pub deterministic_seed: u64,
-    pub platform: PlatformBuildIdentityV2,
-    pub stages: Vec<StageEvidenceV2>,
-    pub sizing: Vec<SizingResolutionEvidenceV2>,
-    pub resources: MeshingResourceUsageV2,
-    pub cache_admission: CacheAdmissionDecisionV2,
+    pub platform: PlatformBuildIdentity,
+    pub stages: Vec<MeshingStageEvidence>,
+    pub sizing: Vec<SizingResolutionEvidence>,
+    pub resources: MeshingResourceUsage,
+    pub cache_admission: CacheAdmissionDecision,
 }
 
-impl MeshingEvidenceV2 {
+impl MeshingEvidence {
     pub fn validate(
         &self,
-        artifact: &super::AnalysisMeshArtifactV2,
+        artifact: &super::SolverMeshArtifact,
     ) -> Result<(), MeshingContractError> {
         self.validate_standalone()?;
         artifact.validate()?;
@@ -303,12 +300,12 @@ impl MeshingEvidenceV2 {
             .validate_nonzero("evidence artifact digest")?;
         self.algorithms.validate()?;
         self.platform.validate()?;
-        if self.stages.len() != MeshingStageV2::ALL.len()
+        if self.stages.len() != MeshingStageKind::ALL.len()
             || self
                 .stages
                 .iter()
                 .map(|value| value.stage)
-                .ne(MeshingStageV2::ALL)
+                .ne(MeshingStageKind::ALL)
             || self.sizing.len() > MAX_SIZING_EVIDENCE
             || !strictly_increasing_by(&self.sizing, |value| &value.scope)
         {

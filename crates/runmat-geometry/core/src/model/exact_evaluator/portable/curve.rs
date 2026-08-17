@@ -1,53 +1,53 @@
 use super::super::definition_validation::curve_domain;
 use super::super::{
-    CurveDerivativesV2, CurveEvaluatorIdV2, CurveProjectionV2, ExactCurveDefinitionV2,
-    ExactCurveEvaluatorV2, ExactCurveImplementationV2, GeometryEvaluationControl,
-    GeometryEvaluationError, GeometryEvaluationErrorKind, ParameterRangeV2,
+    CurveDerivatives, CurveEvaluatorId, CurveProjection, ExactCurveDefinition, ExactCurveEvaluator,
+    ExactCurveImplementation, GeometryEvaluationControl, GeometryEvaluationError,
+    GeometryEvaluationErrorKind, ParameterRange,
 };
 use super::integration::adaptive_arc_length;
 use super::projection::{project_curve, uniform_seeds};
 use super::spline::rational_derivatives;
 use super::vector::{add_scaled, cross, distance, dot, norm, normalize, subtract};
-use super::{invalid_result, kernel_owned, outside_domain, PortableExactEvaluatorV2};
+use super::{invalid_result, kernel_owned, outside_domain, PortableExactEvaluator};
 
 const MAX_NURBS_PROJECTION_SEEDS: usize = 1_000_000;
 
-impl ExactCurveEvaluatorV2 for PortableExactEvaluatorV2<'_> {
+impl ExactCurveEvaluator for PortableExactEvaluator<'_> {
     fn parameter_range(
         &self,
-        id: &CurveEvaluatorIdV2,
-    ) -> Result<ParameterRangeV2, GeometryEvaluationError> {
+        id: &CurveEvaluatorId,
+    ) -> Result<ParameterRange, GeometryEvaluationError> {
         let record = self.curve_record(id)?;
         curve_domain(&record.implementation).ok_or_else(|| kernel_owned("curve"))
     }
 
     fn point(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError> {
-        Ok(ExactCurveEvaluatorV2::derivatives(self, id, parameter, control)?.point_m)
+        Ok(ExactCurveEvaluator::derivatives(self, id, parameter, control)?.point_m)
     }
 
     fn unit_tangent(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError> {
-        normalize(&ExactCurveEvaluatorV2::derivatives(self, id, parameter, control)?.first_m)
+        normalize(&ExactCurveEvaluator::derivatives(self, id, parameter, control)?.first_m)
             .ok_or_else(|| invalid_result("curve tangent is undefined at a singular parameter"))
     }
 
     fn derivatives(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<CurveDerivativesV2, GeometryEvaluationError> {
+    ) -> Result<CurveDerivatives, GeometryEvaluationError> {
         let record = self.curve_record(id)?;
-        let ExactCurveImplementationV2::Portable { definition } = &record.implementation else {
+        let ExactCurveImplementation::Portable { definition } = &record.implementation else {
             return Err(kernel_owned("curve"));
         };
         evaluate_curve(definition, parameter, control)
@@ -55,11 +55,11 @@ impl ExactCurveEvaluatorV2 for PortableExactEvaluatorV2<'_> {
 
     fn curvature_1_per_m(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<f64, GeometryEvaluationError> {
-        let derivatives = ExactCurveEvaluatorV2::derivatives(self, id, parameter, control)?;
+        let derivatives = ExactCurveEvaluator::derivatives(self, id, parameter, control)?;
         let speed = norm(&derivatives.first_m);
         if speed == 0.0 || !speed.is_finite() {
             return Err(invalid_result(
@@ -75,27 +75,27 @@ impl ExactCurveEvaluatorV2 for PortableExactEvaluatorV2<'_> {
 
     fn arc_length_m(
         &self,
-        id: &CurveEvaluatorIdV2,
-        range: ParameterRangeV2,
+        id: &CurveEvaluatorId,
+        range: ParameterRange,
         absolute_error_m: f64,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<f64, GeometryEvaluationError> {
         let record = self.curve_record(id)?;
-        let ExactCurveImplementationV2::Portable { definition } = &record.implementation else {
+        let ExactCurveImplementation::Portable { definition } = &record.implementation else {
             return Err(kernel_owned("curve"));
         };
         require_subrange(range, definition_range(definition))?;
         require_positive_error(absolute_error_m)?;
         control.checkpoint()?;
         match definition {
-            ExactCurveDefinitionV2::Line {
+            ExactCurveDefinition::Line {
                 direction_m_per_parameter,
                 ..
             } => {
                 control.consume_iterations(1)?;
                 finite_length(norm(direction_m_per_parameter) * (range.end - range.start))
             }
-            ExactCurveDefinitionV2::Circle { radius_m, .. } => {
+            ExactCurveDefinition::Circle { radius_m, .. } => {
                 control.consume_iterations(1)?;
                 finite_length(radius_m * (range.end - range.start))
             }
@@ -109,13 +109,13 @@ impl ExactCurveEvaluatorV2 for PortableExactEvaluatorV2<'_> {
 
     fn inverse_project(
         &self,
-        id: &CurveEvaluatorIdV2,
+        id: &CurveEvaluatorId,
         point_m: [f64; 3],
         absolute_error_m: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<CurveProjectionV2, GeometryEvaluationError> {
+    ) -> Result<CurveProjection, GeometryEvaluationError> {
         let record = self.curve_record(id)?;
-        let ExactCurveImplementationV2::Portable { definition } = &record.implementation else {
+        let ExactCurveImplementation::Portable { definition } = &record.implementation else {
             return Err(kernel_owned("curve"));
         };
         if point_m.iter().any(|value| !value.is_finite()) {
@@ -123,7 +123,7 @@ impl ExactCurveEvaluatorV2 for PortableExactEvaluatorV2<'_> {
         }
         require_positive_error(absolute_error_m)?;
         let range = definition_range(definition);
-        if let ExactCurveDefinitionV2::Line {
+        if let ExactCurveDefinition::Line {
             origin_m,
             direction_m_per_parameter,
             ..
@@ -153,7 +153,7 @@ impl ExactCurveEvaluatorV2 for PortableExactEvaluatorV2<'_> {
                     "line projection produced an invalid distance",
                 ));
             }
-            return Ok(CurveProjectionV2 {
+            return Ok(CurveProjection {
                 parameter,
                 point_m: projected,
                 distance_m,
@@ -172,19 +172,19 @@ impl ExactCurveEvaluatorV2 for PortableExactEvaluatorV2<'_> {
 }
 
 fn evaluate_curve(
-    definition: &ExactCurveDefinitionV2,
+    definition: &ExactCurveDefinition,
     parameter: f64,
     control: &dyn GeometryEvaluationControl,
-) -> Result<CurveDerivativesV2, GeometryEvaluationError> {
+) -> Result<CurveDerivatives, GeometryEvaluationError> {
     require_parameter(parameter, definition_range(definition))?;
     control.checkpoint()?;
     control.consume_iterations(1)?;
     let result = match definition {
-        ExactCurveDefinitionV2::Line {
+        ExactCurveDefinition::Line {
             origin_m,
             direction_m_per_parameter,
             ..
-        } => CurveDerivativesV2 {
+        } => CurveDerivatives {
             point_m: add_scaled(
                 origin_m,
                 direction_m_per_parameter,
@@ -195,7 +195,7 @@ fn evaluate_curve(
             first_m: *direction_m_per_parameter,
             second_m: [0.0; 3],
         },
-        ExactCurveDefinitionV2::Circle {
+        ExactCurveDefinition::Circle {
             center_m,
             x_axis,
             y_axis,
@@ -204,13 +204,13 @@ fn evaluate_curve(
         } => {
             let (point_m, first_m, second_m) =
                 trigonometric_curve(center_m, x_axis, y_axis, *radius_m, *radius_m, parameter);
-            CurveDerivativesV2 {
+            CurveDerivatives {
                 point_m,
                 first_m,
                 second_m,
             }
         }
-        ExactCurveDefinitionV2::Ellipse {
+        ExactCurveDefinition::Ellipse {
             center_m,
             x_axis,
             y_axis,
@@ -226,13 +226,13 @@ fn evaluate_curve(
                 *minor_radius_m,
                 parameter,
             );
-            CurveDerivativesV2 {
+            CurveDerivatives {
                 point_m,
                 first_m,
                 second_m,
             }
         }
-        ExactCurveDefinitionV2::Nurbs { definition } => {
+        ExactCurveDefinition::Nurbs { definition } => {
             let value = rational_derivatives(
                 definition.degree,
                 &definition.knots,
@@ -241,7 +241,7 @@ fn evaluate_curve(
                 parameter,
                 control,
             )?;
-            CurveDerivativesV2 {
+            CurveDerivatives {
                 point_m: value.point,
                 first_m: value.first,
                 second_m: value.second,
@@ -290,18 +290,18 @@ pub(super) fn trigonometric_curve<const N: usize>(
     )
 }
 
-fn definition_range(definition: &ExactCurveDefinitionV2) -> ParameterRangeV2 {
+fn definition_range(definition: &ExactCurveDefinition) -> ParameterRange {
     match definition {
-        ExactCurveDefinitionV2::Line { domain, .. }
-        | ExactCurveDefinitionV2::Circle { domain, .. }
-        | ExactCurveDefinitionV2::Ellipse { domain, .. } => *domain,
-        ExactCurveDefinitionV2::Nurbs { definition } => definition.domain,
+        ExactCurveDefinition::Line { domain, .. }
+        | ExactCurveDefinition::Circle { domain, .. }
+        | ExactCurveDefinition::Ellipse { domain, .. } => *domain,
+        ExactCurveDefinition::Nurbs { definition } => definition.domain,
     }
 }
 
 fn require_parameter(
     parameter: f64,
-    domain: ParameterRangeV2,
+    domain: ParameterRange,
 ) -> Result<(), GeometryEvaluationError> {
     if !parameter.is_finite() || parameter < domain.start || parameter > domain.end {
         return Err(outside_domain(
@@ -312,8 +312,8 @@ fn require_parameter(
 }
 
 fn require_subrange(
-    range: ParameterRangeV2,
-    domain: ParameterRangeV2,
+    range: ParameterRange,
+    domain: ParameterRange,
 ) -> Result<(), GeometryEvaluationError> {
     if !range.start.is_finite()
         || !range.end.is_finite()
@@ -345,11 +345,11 @@ fn finite_length(value: f64) -> Result<f64, GeometryEvaluationError> {
 }
 
 fn projection_seeds(
-    definition: &ExactCurveDefinitionV2,
-    range: ParameterRangeV2,
+    definition: &ExactCurveDefinition,
+    range: ParameterRange,
 ) -> Result<Vec<f64>, GeometryEvaluationError> {
     match definition {
-        ExactCurveDefinitionV2::Nurbs { definition } => {
+        ExactCurveDefinition::Nurbs { definition } => {
             let subdivisions = usize::from(definition.degree).saturating_mul(8).max(8);
             let mut seeds = Vec::new();
             for knots in definition.knots.windows(2) {

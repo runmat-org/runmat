@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    validate_finite, validate_token, CancellationPolicyV2, GeometryTolerancePolicy,
-    MeshingContractError, MetricFieldRequestV2,
+    validate_finite, validate_token, CancellationPolicy, GeometryTolerancePolicy,
+    MeshingContractError, MetricFieldRequest,
 };
 
 pub const MESHING_REQUEST_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MeshElementOrderV2 {
+pub enum ElementOrder {
     Tet4,
     Tet10,
 }
@@ -45,14 +45,14 @@ impl AlgorithmVersionSet {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SurfaceQualityTargetsV2 {
+pub struct SurfaceQualityTargets {
     pub minimum_metric_angle_degrees: f64,
     pub maximum_physical_aspect_ratio: f64,
     pub maximum_chordal_deviation_m: f64,
     pub maximum_normal_deviation_degrees: f64,
 }
 
-impl SurfaceQualityTargetsV2 {
+impl SurfaceQualityTargets {
     fn validate(&self) -> Result<(), MeshingContractError> {
         for (field, value) in [
             (
@@ -90,13 +90,13 @@ impl SurfaceQualityTargetsV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VolumeQualityTargetsV2 {
+pub struct VolumeQualityTargets {
     pub maximum_radius_edge_ratio: f64,
     pub minimum_scaled_jacobian: f64,
     pub maximum_metric_edge_length: f64,
 }
 
-impl VolumeQualityTargetsV2 {
+impl VolumeQualityTargets {
     fn validate(&self) -> Result<(), MeshingContractError> {
         for (field, value) in [
             ("maximum radius-edge ratio", self.maximum_radius_edge_ratio),
@@ -124,12 +124,12 @@ impl VolumeQualityTargetsV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingQualityTargetsV2 {
-    pub surface: SurfaceQualityTargetsV2,
-    pub volume: VolumeQualityTargetsV2,
+pub struct MeshingQualityTargets {
+    pub surface: SurfaceQualityTargets,
+    pub volume: VolumeQualityTargets,
 }
 
-impl MeshingQualityTargetsV2 {
+impl MeshingQualityTargets {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         self.surface.validate()?;
         self.volume.validate()
@@ -138,7 +138,7 @@ impl MeshingQualityTargetsV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingResourceBudgetV2 {
+pub struct MeshingResourceBudget {
     pub maximum_nodes: u64,
     pub maximum_elements: u64,
     pub maximum_memory_bytes: u64,
@@ -150,7 +150,7 @@ pub struct MeshingResourceBudgetV2 {
     pub maximum_iterations: u64,
 }
 
-impl MeshingResourceBudgetV2 {
+impl MeshingResourceBudget {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if [
             self.maximum_nodes,
@@ -176,19 +176,19 @@ impl MeshingResourceBudgetV2 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingRequestV2 {
+pub struct MeshingRequest {
     pub schema_version: u16,
-    pub element_order: MeshElementOrderV2,
+    pub element_order: ElementOrder,
     pub deterministic_seed: u64,
     pub algorithms: AlgorithmVersionSet,
     pub tolerance: GeometryTolerancePolicy,
-    pub metric: MetricFieldRequestV2,
-    pub quality: MeshingQualityTargetsV2,
-    pub resources: MeshingResourceBudgetV2,
-    pub cancellation: CancellationPolicyV2,
+    pub metric: MetricFieldRequest,
+    pub quality: MeshingQualityTargets,
+    pub resources: MeshingResourceBudget,
+    pub cancellation: CancellationPolicy,
 }
 
-impl MeshingRequestV2 {
+impl MeshingRequest {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != MESHING_REQUEST_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(

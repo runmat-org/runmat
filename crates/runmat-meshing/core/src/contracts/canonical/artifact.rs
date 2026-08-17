@@ -1,15 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    validate_finite, validate_token, AnalysisMeshArtifactV2, AnalysisMeshTopologyV2,
-    CanonicalMeshingContract, FieldTopologyLocationV2, MeshElementOrderV2, MeshingContractError,
-    MeshingRequestV2, PersistentEntityId, PersistentEntityKind,
-    ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    validate_finite, validate_token, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
+    MeshingContractError, MeshingRequest, PersistentEntityId, PersistentEntityKind,
+    SolverMeshArtifact, SolverMeshTopology, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 const MAX_ENTITY_PROVENANCE: usize = 32;
 
-impl AnalysisMeshArtifactV2 {
+impl SolverMeshArtifact {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         self.validate_canonical()
     }
@@ -29,8 +28,8 @@ impl AnalysisMeshArtifactV2 {
     }
 }
 
-impl AnalysisMeshTopologyV2 {
-    pub(super) fn validate(&self, request: &MeshingRequestV2) -> Result<(), MeshingContractError> {
+impl SolverMeshTopology {
+    pub(super) fn validate(&self, request: &MeshingRequest) -> Result<(), MeshingContractError> {
         require_nonempty("mesh nodes", &self.nodes)?;
         require_nonempty("volume elements", &self.volume_elements)?;
         if self.nodes.len() as u64 > request.resources.maximum_nodes
@@ -68,8 +67,8 @@ impl AnalysisMeshTopologyV2 {
             if element.order != request.element_order
                 || element.node_ids.len()
                     != match element.order {
-                        MeshElementOrderV2::Tet4 => 4,
-                        MeshElementOrderV2::Tet10 => 10,
+                        ElementOrder::Tet4 => 4,
+                        ElementOrder::Tet10 => 10,
                     }
                 || !all_references_exist(&element.node_ids, &node_ids)
             {
@@ -176,10 +175,10 @@ impl AnalysisMeshTopologyV2 {
         edge_ids: &BTreeSet<u64>,
     ) -> Result<(), MeshingContractError> {
         let expected = BTreeMap::from([
-            (FieldTopologyLocationV2::Node, node_ids),
-            (FieldTopologyLocationV2::VolumeElement, element_ids),
-            (FieldTopologyLocationV2::BoundaryFace, face_ids),
-            (FieldTopologyLocationV2::BoundaryEdge, edge_ids),
+            (FieldTopologyLocation::Node, node_ids),
+            (FieldTopologyLocation::VolumeElement, element_ids),
+            (FieldTopologyLocation::BoundaryFace, face_ids),
+            (FieldTopologyLocation::BoundaryEdge, edge_ids),
         ]);
         if self.field_topologies.len() != expected.len() {
             return Err(MeshingContractError::invalid(

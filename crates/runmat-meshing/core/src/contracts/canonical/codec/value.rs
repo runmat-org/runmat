@@ -3,7 +3,7 @@ use minicbor::{Decoder, Encoder};
 use serde_json::{Map, Number, Value};
 
 use super::{decoding_error, encoding_error, MeshingCanonicalLimits};
-use crate::contracts::v2::MeshingContractError;
+use crate::contracts::canonical::MeshingContractError;
 
 pub(super) fn encode_value(
     encoder: &mut Encoder<&mut Vec<u8>>,

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::{ExactBRepModelV2, ExactBRepTopologyV2, GeometryContractError};
+use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError};
 use super::{
     definition_validation::{
         curve_domain, curve_dynamic_value_count, curve_is_periodic, pcurve_domain,
@@ -8,19 +8,19 @@ use super::{
         validate_curve, validate_mass_properties, validate_pcurve, validate_surface,
         validate_token, validate_trim_classifier,
     },
-    CurveEvaluatorIdV2, ExactEvaluatorRegistryV2, ExactMassPropertiesImplementationV2,
-    MassPropertiesEvaluatorIdV2, PcurveEvaluatorIdV2, SurfaceEvaluatorIdV2, TrimClassifierIdV2,
+    CurveEvaluatorId, ExactEvaluatorRegistry, ExactMassPropertiesImplementation,
+    MassPropertiesEvaluatorId, PcurveEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
     EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION,
 };
 
 const MAX_EVALUATOR_RECORDS: usize = 10_000_000;
 const MAX_DYNAMIC_NUMERIC_VALUES: usize = 100_000_000;
 
-impl ExactEvaluatorRegistryV2 {
+impl ExactEvaluatorRegistry {
     pub fn validate_against(
         &self,
-        topology: &ExactBRepTopologyV2,
-        model: &ExactBRepModelV2,
+        topology: &ExactBRepTopology,
+        model: &ExactBRepModel,
     ) -> Result<(), GeometryContractError> {
         topology.validate_against(model)?;
         if self.schema_version != EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION {
@@ -81,31 +81,31 @@ impl ExactEvaluatorRegistryV2 {
             "curve evaluators",
             &self.curves,
             |record| &record.id,
-            CurveEvaluatorIdV2::validate,
+            CurveEvaluatorId::validate,
         )?;
         let pcurves = collect_records(
             "pcurve evaluators",
             &self.pcurves,
             |record| &record.id,
-            PcurveEvaluatorIdV2::validate,
+            PcurveEvaluatorId::validate,
         )?;
         let surfaces = collect_records(
             "surface evaluators",
             &self.surfaces,
             |record| &record.id,
-            SurfaceEvaluatorIdV2::validate,
+            SurfaceEvaluatorId::validate,
         )?;
         let classifiers = collect_records(
             "trim classifiers",
             &self.trim_classifiers,
             |record| &record.id,
-            TrimClassifierIdV2::validate,
+            TrimClassifierId::validate,
         )?;
         let mass_properties = collect_records(
             "mass-properties evaluators",
             &self.mass_properties,
             |record| &record.id,
-            MassPropertiesEvaluatorIdV2::validate,
+            MassPropertiesEvaluatorId::validate,
         )?;
 
         require_exact_inventory(
@@ -175,8 +175,8 @@ impl ExactEvaluatorRegistryV2 {
 }
 
 fn validate_topology_claims(
-    registry: &ExactEvaluatorRegistryV2,
-    topology: &ExactBRepTopologyV2,
+    registry: &ExactEvaluatorRegistry,
+    topology: &ExactBRepTopology,
 ) -> Result<(), GeometryContractError> {
     let curves = registry
         .curves
@@ -254,7 +254,7 @@ fn validate_topology_claims(
         let implementation = mass_properties
             .get(&body.mass_properties_evaluator_id)
             .ok_or_else(|| invalid("body mass properties", "inventory index is incomplete"))?;
-        if let ExactMassPropertiesImplementationV2::KernelValidated { properties, .. } =
+        if let ExactMassPropertiesImplementation::KernelValidated { properties, .. } =
             implementation
         {
             if body.is_sheet_body != (properties.volume_m3 == 0.0) {

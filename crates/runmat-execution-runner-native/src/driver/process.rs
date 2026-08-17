@@ -27,7 +27,7 @@ pub(super) fn execute_attempt(
     let function = match stored.artifact.form {
         runmat_execution_artifact::ExecutableForm::InterpreterScriptV1
         | runmat_execution_artifact::ExecutableForm::TestAttemptV1
-        | runmat_execution_artifact::ExecutableForm::MeshingWorkloadV2 => 0,
+        | runmat_execution_artifact::ExecutableForm::MeshingWorkload => 0,
         _ => request
             .task
             .callable

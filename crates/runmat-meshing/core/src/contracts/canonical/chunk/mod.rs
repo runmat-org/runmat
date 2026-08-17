@@ -9,9 +9,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use super::{
-    MeshingChunkDescriptorV2, MeshingChunkMediaTypeV2, MeshingContractError, StableDigest,
-};
+use super::{MeshingChunkDescriptor, MeshingChunkMediaType, MeshingContractError, StableDigest};
 
 pub use closure::{build_closed_stage_manifest, verify_stage_manifest_closure};
 
@@ -24,13 +22,13 @@ const CHUNK_OVERHEAD_RESERVE: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingChunkPolicyV2 {
+pub struct MeshingChunkPolicy {
     pub maximum_chunk_bytes: u64,
     pub maximum_records_per_chunk: u32,
     pub maximum_total_encoded_bytes: u64,
 }
 
-impl MeshingChunkPolicyV2 {
+impl MeshingChunkPolicy {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.maximum_chunk_bytes < 512
             || self.maximum_records_per_chunk == 0
@@ -48,30 +46,30 @@ impl MeshingChunkPolicyV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MeshingChunkStreamV2 {
-    pub media_type: MeshingChunkMediaTypeV2,
+pub struct MeshingChunkStream {
+    pub media_type: MeshingChunkMediaType,
     pub schema_version: u16,
     pub records: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EncodedMeshingChunkV2 {
-    pub descriptor: MeshingChunkDescriptorV2,
+pub struct EncodedMeshingChunk {
+    pub descriptor: MeshingChunkDescriptor,
     pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MeshingChunkedPayloadV2 {
+pub struct MeshingChunkedPayload {
     pub logical_content_digest: StableDigest,
     pub logical_entity_count: u64,
-    pub chunks: Vec<EncodedMeshingChunkV2>,
+    pub chunks: Vec<EncodedMeshingChunk>,
     pub total_encoded_length: u64,
 }
 
 pub fn build_chunked_stage_payload(
-    streams: &[MeshingChunkStreamV2],
-    policy: MeshingChunkPolicyV2,
-) -> Result<MeshingChunkedPayloadV2, MeshingContractError> {
+    streams: &[MeshingChunkStream],
+    policy: MeshingChunkPolicy,
+) -> Result<MeshingChunkedPayload, MeshingContractError> {
     policy.validate()?;
     validate_streams(streams)?;
     let logical_content_digest = logical_content_digest(streams)?;
@@ -149,7 +147,7 @@ pub fn build_chunked_stage_payload(
             "chunk inventory exceeds the hard total byte limit",
         ));
     }
-    Ok(MeshingChunkedPayloadV2 {
+    Ok(MeshingChunkedPayload {
         logical_content_digest,
         logical_entity_count,
         chunks,
@@ -157,7 +155,7 @@ pub fn build_chunked_stage_payload(
     })
 }
 
-fn validate_streams(streams: &[MeshingChunkStreamV2]) -> Result<(), MeshingContractError> {
+fn validate_streams(streams: &[MeshingChunkStream]) -> Result<(), MeshingContractError> {
     if streams.is_empty()
         || !streams
             .windows(2)
@@ -186,7 +184,7 @@ fn validate_streams(streams: &[MeshingChunkStreamV2]) -> Result<(), MeshingContr
 }
 
 fn logical_content_digest(
-    streams: &[MeshingChunkStreamV2],
+    streams: &[MeshingChunkStream],
 ) -> Result<StableDigest, MeshingContractError> {
     let record_count = streams.iter().try_fold(0_u64, |count, stream| {
         count

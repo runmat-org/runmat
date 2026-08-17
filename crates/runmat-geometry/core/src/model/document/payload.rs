@@ -2,15 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use super::GeometryDigest;
 
-pub const EXACT_BREP_MEDIA_TYPE_V2: &str = "application/vnd.runmat.geometry.exact-brep.v2+cbor";
-pub const FACETED_SOLID_MEDIA_TYPE_V2: &str =
-    "application/vnd.runmat.geometry.faceted-solid.v2+cbor";
-pub const DISPLAY_TESSELLATION_MEDIA_TYPE_V2: &str =
+pub const EXACT_BREP_MEDIA_TYPE: &str = "application/vnd.runmat.geometry.exact-brep.v2+cbor";
+pub const FACETED_SOLID_MEDIA_TYPE: &str = "application/vnd.runmat.geometry.faceted-solid.v2+cbor";
+pub const DISPLAY_TESSELLATION_MEDIA_TYPE: &str =
     "application/vnd.runmat.geometry.display-tessellation.v2+cbor";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct GeometryObjectRefV2 {
+pub struct GeometryObjectRef {
     pub digest: GeometryDigest,
     pub encoded_length: u64,
     pub media_type: String,
@@ -19,7 +18,7 @@ pub struct GeometryObjectRefV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExactGeometryCapabilitiesV2 {
+pub struct ExactGeometryCapabilities {
     pub curve_point: bool,
     pub curve_tangent: bool,
     pub curve_curvature: bool,
@@ -39,7 +38,7 @@ pub struct ExactGeometryCapabilitiesV2 {
     pub mass_properties: bool,
 }
 
-impl ExactGeometryCapabilitiesV2 {
+impl ExactGeometryCapabilities {
     pub const fn complete_for_meshing(&self) -> bool {
         self.curve_point
             && self.curve_tangent
@@ -63,10 +62,10 @@ impl ExactGeometryCapabilitiesV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExactBRepModelV2 {
-    pub artifact: GeometryObjectRefV2,
+pub struct ExactBRepModel {
+    pub artifact: GeometryObjectRef,
     pub kernel_abi: String,
-    pub capabilities: ExactGeometryCapabilitiesV2,
+    pub capabilities: ExactGeometryCapabilities,
     pub assembly_count: u64,
     pub instance_count: u64,
     pub body_count: u64,
@@ -84,8 +83,8 @@ pub struct ExactBRepModelV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct FacetedSolidModelV2 {
-    pub artifact: GeometryObjectRefV2,
+pub struct FacetedSolidModel {
+    pub artifact: GeometryObjectRef,
     pub vertex_count: u64,
     pub triangle_count: u64,
     pub shell_count: u64,
@@ -95,13 +94,13 @@ pub struct FacetedSolidModelV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum GeometryModelV2 {
-    ExactBRep { model: ExactBRepModelV2 },
-    FacetedSolid { model: FacetedSolidModelV2 },
+pub enum GeometryModel {
+    ExactBRep { model: ExactBRepModel },
+    FacetedSolid { model: FacetedSolidModel },
 }
 
-impl GeometryModelV2 {
-    pub const fn primary_artifact(&self) -> &GeometryObjectRefV2 {
+impl GeometryModel {
+    pub const fn primary_artifact(&self) -> &GeometryObjectRef {
         match self {
             Self::ExactBRep { model } => &model.artifact,
             Self::FacetedSolid { model } => &model.artifact,
@@ -111,9 +110,9 @@ impl GeometryModelV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct DisplayTessellationRefV2 {
+pub struct DisplayTessellationRef {
     pub profile_id: String,
     pub geometry_revision: u64,
     pub derived_from_primary_digest: GeometryDigest,
-    pub artifact: GeometryObjectRefV2,
+    pub artifact: GeometryObjectRef,
 }

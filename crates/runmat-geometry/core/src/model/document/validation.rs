@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    GeometryDocumentV2, GeometryModelV2, GeometryObjectRefV2, GeometrySourceFormatV2,
-    DISPLAY_TESSELLATION_MEDIA_TYPE_V2, EXACT_BREP_MEDIA_TYPE_V2, FACETED_SOLID_MEDIA_TYPE_V2,
+    GeometryDocument, GeometryModel, GeometryObjectRef, GeometrySourceFormat,
+    DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE, FACETED_SOLID_MEDIA_TYPE,
     GEOMETRY_DOCUMENT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
 use crate::{GeometryContractError, UnitSystem};
@@ -10,9 +10,7 @@ use crate::{GeometryContractError, UnitSystem};
 const MAX_ARTIFACT_BYTES: u64 = 1 << 40;
 const MAX_DISPLAY_TESSELLATIONS: usize = 16;
 
-pub(super) fn validate_document(
-    document: &GeometryDocumentV2,
-) -> Result<(), GeometryContractError> {
+pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), GeometryContractError> {
     if document.schema_version != GEOMETRY_DOCUMENT_SCHEMA_VERSION {
         return Err(invalid("geometry document schema", "unsupported version"));
     }
@@ -51,7 +49,7 @@ pub(super) fn validate_document(
     )?;
 
     match &document.model {
-        GeometryModelV2::ExactBRep { model } => {
+        GeometryModel::ExactBRep { model } => {
             require_source_class(document.source.format, true)?;
             let kernel_version = document.source.kernel_version.as_deref().ok_or_else(|| {
                 invalid(
@@ -61,7 +59,7 @@ pub(super) fn validate_document(
             })?;
             validate_token("geometry kernel version", kernel_version, 128)?;
             validate_token("exact geometry kernel ABI", &model.kernel_abi, 128)?;
-            validate_object(&model.artifact, EXACT_BREP_MEDIA_TYPE_V2)?;
+            validate_object(&model.artifact, EXACT_BREP_MEDIA_TYPE)?;
             if !model.capabilities.complete_for_meshing() {
                 return Err(invalid(
                     "exact geometry capabilities",
@@ -83,7 +81,7 @@ pub(super) fn validate_document(
                 ));
             }
         }
-        GeometryModelV2::FacetedSolid { model } => {
+        GeometryModel::FacetedSolid { model } => {
             require_source_class(document.source.format, false)?;
             if document.source.kernel_version.is_some() {
                 return Err(invalid(
@@ -91,7 +89,7 @@ pub(super) fn validate_document(
                     "faceted sources cannot claim an exact CAD kernel",
                 ));
             }
-            validate_object(&model.artifact, FACETED_SOLID_MEDIA_TYPE_V2)?;
+            validate_object(&model.artifact, FACETED_SOLID_MEDIA_TYPE)?;
             if model.vertex_count < 4
                 || model.triangle_count < 4
                 || model.shell_count == 0
@@ -124,7 +122,7 @@ pub(super) fn validate_document(
                 "profiles must be unique and bind the exact document revision and primary payload",
             ));
         }
-        validate_object(&display.artifact, DISPLAY_TESSELLATION_MEDIA_TYPE_V2)?;
+        validate_object(&display.artifact, DISPLAY_TESSELLATION_MEDIA_TYPE)?;
         if display.artifact.digest == document.primary_artifact().digest {
             return Err(invalid(
                 "display tessellation artifact",
@@ -136,7 +134,7 @@ pub(super) fn validate_document(
 }
 
 fn require_source_class(
-    format: GeometrySourceFormatV2,
+    format: GeometrySourceFormat,
     exact: bool,
 ) -> Result<(), GeometryContractError> {
     if format.is_exact() != exact {
@@ -149,7 +147,7 @@ fn require_source_class(
 }
 
 fn validate_object(
-    object: &GeometryObjectRefV2,
+    object: &GeometryObjectRef,
     required_media_type: &str,
 ) -> Result<(), GeometryContractError> {
     object.digest.validate_nonzero("geometry artifact digest")?;

@@ -128,7 +128,7 @@ impl MetricContribution {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MetricFieldRequestV2 {
+pub struct MetricFieldRequest {
     pub combination: MetricCombinationRule,
     pub global_metric: MetricTensor3,
     pub maximum_grading_ratio: f64,
@@ -136,7 +136,7 @@ pub struct MetricFieldRequestV2 {
     pub contributions: Vec<MetricContribution>,
 }
 
-impl MetricFieldRequestV2 {
+impl MetricFieldRequest {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         self.global_metric.validate()?;
         validate_finite("maximum metric grading ratio", self.maximum_grading_ratio)?;

@@ -3,8 +3,8 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::{validate_inventory, ObjectInventoryLimits};
 use runmat_execution_artifact::{ArtifactError, LogicalObject, ObjectDescriptor, ObjectNamespace};
 use runmat_meshing_core::{
-    verify_stage_manifest_closure, CanonicalMeshingContract, EncodedMeshingChunkV2,
-    MeshingStageManifestV2, MeshingStageResultIdentityV2, StableDigest,
+    verify_stage_manifest_closure, CanonicalMeshingContract, EncodedMeshingChunk,
+    MeshingStageManifest, MeshingStageResultIdentity, StableDigest,
 };
 
 use crate::{MeshingExecutionError, MeshingExecutionResult};
@@ -22,8 +22,8 @@ pub struct MeshingStageObjectRoot {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedMeshingStageObjects {
-    pub result_identity: MeshingStageResultIdentityV2,
-    pub manifest: MeshingStageManifestV2,
+    pub result_identity: MeshingStageResultIdentity,
+    pub manifest: MeshingStageManifest,
     pub root: ObjectDescriptor,
     pub objects: Vec<LogicalObject>,
 }
@@ -45,7 +45,7 @@ impl PreparedMeshingStageObjects {
                 .iter()
                 .find(|object| object.descriptor.digest == digest)
                 .ok_or(MeshingExecutionError::MissingObject(digest))?;
-            chunks.push(EncodedMeshingChunkV2 {
+            chunks.push(EncodedMeshingChunk {
                 descriptor: descriptor.clone(),
                 bytes: object.bytes.clone(),
             });
@@ -66,9 +66,9 @@ impl PreparedMeshingStageObjects {
 }
 
 pub fn prepare_stage_objects(
-    result_identity: MeshingStageResultIdentityV2,
-    manifest: MeshingStageManifestV2,
-    chunks: Vec<EncodedMeshingChunkV2>,
+    result_identity: MeshingStageResultIdentity,
+    manifest: MeshingStageManifest,
+    chunks: Vec<EncodedMeshingChunk>,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedMeshingStageObjects> {
     verify_stage_manifest_closure(&manifest, &result_identity, &chunks)?;
@@ -122,7 +122,7 @@ pub fn import_stage_objects(
 ) -> MeshingExecutionResult<PreparedMeshingStageObjects> {
     enforce_object_length("manifest", root.encoded_length, limits)?;
     let manifest_bytes = read_exact(source, root.digest, root.encoded_length)?;
-    let manifest = MeshingStageManifestV2::canonical_decode(&manifest_bytes)?;
+    let manifest = MeshingStageManifest::canonical_decode(&manifest_bytes)?;
     let object_count = manifest.chunks.len().checked_add(2).ok_or_else(|| {
         ArtifactError::Limit("meshing stage object inventory count overflow".into())
     })?;
@@ -134,7 +134,7 @@ pub fn import_stage_objects(
     let identity_bytes = read_unbounded(source, identity_digest)?;
     enforce_object_length("result identity", identity_bytes.len() as u64, limits)?;
     add_inventory_bytes(&mut total_bytes, identity_bytes.len() as u64, limits)?;
-    let result_identity = MeshingStageResultIdentityV2::canonical_decode(&identity_bytes)?;
+    let result_identity = MeshingStageResultIdentity::canonical_decode(&identity_bytes)?;
     if result_identity.canonical_digest()? != manifest.logical_result_identity {
         return Err(MeshingExecutionError::Identity(
             "result identity bytes differ from manifest identity",
@@ -147,7 +147,7 @@ pub fn import_stage_objects(
         add_inventory_bytes(&mut total_bytes, descriptor.encoded_length, limits)?;
         let digest = execution_digest(descriptor.digest);
         let bytes = read_exact(source, digest, descriptor.encoded_length)?;
-        chunks.push(EncodedMeshingChunkV2 {
+        chunks.push(EncodedMeshingChunk {
             descriptor: descriptor.clone(),
             bytes,
         });

@@ -3,19 +3,19 @@ use std::time::Instant;
 
 use runmat_meshing_core::{
     MeshingCancellationSignal, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure,
-    MeshingFailureCategory, MeshingOperationV2, MeshingProgressV2, MeshingRequestV2,
-    MeshingStageV2, MESHING_FAILURE_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
+    MeshingFailureCategory, MeshingOperation, MeshingProgress, MeshingRequest, MeshingStageKind,
+    MESHING_FAILURE_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
 };
 
 pub trait MeshingProgressSink {
-    fn record(&mut self, progress: &MeshingProgressV2);
+    fn record(&mut self, progress: &MeshingProgress);
 }
 
 #[derive(Debug, Default)]
 pub struct NoopMeshingProgress;
 
 impl MeshingProgressSink for NoopMeshingProgress {
-    fn record(&mut self, _progress: &MeshingProgressV2) {}
+    fn record(&mut self, _progress: &MeshingProgress) {}
 }
 
 /// Absolute algorithm usage observed at one cancellation/budget checkpoint.
@@ -34,23 +34,23 @@ pub struct MeshingStageCheckpoint {
 }
 
 pub struct MeshingStageControl<'a> {
-    stage: MeshingStageV2,
+    stage: MeshingStageKind,
     partition_index: u32,
-    request: &'a MeshingRequestV2,
+    request: &'a MeshingRequest,
     cancellation: &'a dyn MeshingCancellationSignal,
     progress: &'a mut dyn MeshingProgressSink,
     started: Instant,
     last_checkpoint_at: Instant,
     last: MeshingStageCheckpoint,
-    last_progress: Option<MeshingProgressV2>,
+    last_progress: Option<MeshingProgress>,
     sequence: u64,
 }
 
 impl<'a> MeshingStageControl<'a> {
     pub fn new(
-        stage: MeshingStageV2,
+        stage: MeshingStageKind,
         partition_index: u32,
-        request: &'a MeshingRequestV2,
+        request: &'a MeshingRequest,
         cancellation: &'a dyn MeshingCancellationSignal,
         progress: &'a mut dyn MeshingProgressSink,
     ) -> Result<Self, Box<MeshingFailure>> {
@@ -77,7 +77,7 @@ impl<'a> MeshingStageControl<'a> {
         })
     }
 
-    pub const fn request(&self) -> &MeshingRequestV2 {
+    pub const fn request(&self) -> &MeshingRequest {
         self.request
     }
 
@@ -153,7 +153,7 @@ impl<'a> MeshingStageControl<'a> {
                 None,
             )
         })?;
-        let progress = MeshingProgressV2 {
+        let progress = MeshingProgress {
             schema_version: MESHING_PROGRESS_SCHEMA_VERSION,
             stage: self.stage,
             partition_index: self.partition_index,
@@ -307,7 +307,7 @@ fn elapsed_millis(start: Instant, end: Instant) -> u64 {
 }
 
 pub(super) fn failure(
-    stage: MeshingStageV2,
+    stage: MeshingStageKind,
     category: MeshingFailureCategory,
     remediation: &str,
     budget: Option<(&str, u64, u64)>,
@@ -342,23 +342,23 @@ fn diagnostic(name: &str, value: u64) -> MeshingDiagnosticEntry {
     }
 }
 
-const fn operation(stage: MeshingStageV2) -> MeshingOperationV2 {
+const fn operation(stage: MeshingStageKind) -> MeshingOperation {
     match stage {
-        MeshingStageV2::GeometryAdmission => MeshingOperationV2::AdmitGeometry,
-        MeshingStageV2::Healing => MeshingOperationV2::HealGeometry,
-        MeshingStageV2::Sizing => MeshingOperationV2::ResolveMetric,
-        MeshingStageV2::CurveMesh => MeshingOperationV2::DiscretizeCurve,
-        MeshingStageV2::SurfaceMesh => MeshingOperationV2::TriangulateSurface,
-        MeshingStageV2::ProtectedBoundaryComplex => {
-            MeshingOperationV2::BuildProtectedBoundaryComplex
+        MeshingStageKind::GeometryAdmission => MeshingOperation::AdmitGeometry,
+        MeshingStageKind::Healing => MeshingOperation::HealGeometry,
+        MeshingStageKind::Sizing => MeshingOperation::ResolveMetric,
+        MeshingStageKind::CurveMesh => MeshingOperation::DiscretizeCurve,
+        MeshingStageKind::SurfaceMesh => MeshingOperation::TriangulateSurface,
+        MeshingStageKind::ProtectedBoundaryComplex => {
+            MeshingOperation::BuildProtectedBoundaryComplex
         }
-        MeshingStageV2::Tetrahedralization => MeshingOperationV2::Tetrahedralize,
-        MeshingStageV2::ConstraintRecovery => MeshingOperationV2::RecoverConstraint,
-        MeshingStageV2::Refinement => MeshingOperationV2::Refine,
-        MeshingStageV2::Optimization => MeshingOperationV2::Optimize,
-        MeshingStageV2::OrderElevation => MeshingOperationV2::ElevateOrder,
-        MeshingStageV2::Validation => MeshingOperationV2::Validate,
-        MeshingStageV2::Serialization => MeshingOperationV2::Serialize,
-        MeshingStageV2::Publication => MeshingOperationV2::Publish,
+        MeshingStageKind::Tetrahedralization => MeshingOperation::Tetrahedralize,
+        MeshingStageKind::ConstraintRecovery => MeshingOperation::RecoverConstraint,
+        MeshingStageKind::Refinement => MeshingOperation::Refine,
+        MeshingStageKind::Optimization => MeshingOperation::Optimize,
+        MeshingStageKind::OrderElevation => MeshingOperation::ElevateOrder,
+        MeshingStageKind::Validation => MeshingOperation::Validate,
+        MeshingStageKind::Serialization => MeshingOperation::Serialize,
+        MeshingStageKind::Publication => MeshingOperation::Publish,
     }
 }

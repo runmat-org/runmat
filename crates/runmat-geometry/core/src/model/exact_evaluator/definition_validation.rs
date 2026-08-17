@@ -3,19 +3,19 @@ use super::nurbs_validation::{
     validate_nurbs_curve2, validate_nurbs_curve3, validate_nurbs_surface,
 };
 use super::{
-    BodyMassPropertiesV2, ExactCurveDefinitionV2, ExactCurveImplementationV2,
-    ExactMassPropertiesImplementationV2, ExactPcurveDefinitionV2, ExactPcurveImplementationV2,
-    ExactSurfaceDefinitionV2, ExactSurfaceImplementationV2, ExactTrimClassifierImplementationV2,
-    KernelEvaluatorRefV2, ParameterRangeV2,
+    BodyMassProperties, ExactCurveDefinition, ExactCurveImplementation,
+    ExactMassPropertiesImplementation, ExactPcurveDefinition, ExactPcurveImplementation,
+    ExactSurfaceDefinition, ExactSurfaceImplementation, ExactTrimClassifierImplementation,
+    KernelEvaluatorRef, ParameterRange,
 };
 use crate::model::GeometryContractError;
 
 pub(super) fn validate_curve(
-    implementation: &ExactCurveImplementationV2,
+    implementation: &ExactCurveImplementation,
 ) -> Result<(), GeometryContractError> {
     match implementation {
-        ExactCurveImplementationV2::Portable { definition } => match definition {
-            ExactCurveDefinitionV2::Line {
+        ExactCurveImplementation::Portable { definition } => match definition {
+            ExactCurveDefinition::Line {
                 origin_m,
                 direction_m_per_parameter,
                 domain,
@@ -24,7 +24,7 @@ pub(super) fn validate_curve(
                 nonzero_vector("line direction", direction_m_per_parameter)?;
                 validate_range("line domain", domain)
             }
-            ExactCurveDefinitionV2::Circle {
+            ExactCurveDefinition::Circle {
                 center_m,
                 x_axis,
                 y_axis,
@@ -36,7 +36,7 @@ pub(super) fn validate_curve(
                 positive("circle radius", *radius_m)?;
                 validate_range("circle domain", domain)
             }
-            ExactCurveDefinitionV2::Ellipse {
+            ExactCurveDefinition::Ellipse {
                 center_m,
                 x_axis,
                 y_axis,
@@ -56,18 +56,18 @@ pub(super) fn validate_curve(
                 }
                 validate_range("ellipse domain", domain)
             }
-            ExactCurveDefinitionV2::Nurbs { definition } => validate_nurbs_curve3(definition),
+            ExactCurveDefinition::Nurbs { definition } => validate_nurbs_curve3(definition),
         },
-        ExactCurveImplementationV2::Kernel { reference } => validate_kernel_ref(reference),
+        ExactCurveImplementation::Kernel { reference } => validate_kernel_ref(reference),
     }
 }
 
 pub(super) fn validate_pcurve(
-    implementation: &ExactPcurveImplementationV2,
+    implementation: &ExactPcurveImplementation,
 ) -> Result<(), GeometryContractError> {
     match implementation {
-        ExactPcurveImplementationV2::Portable { definition } => match definition {
-            ExactPcurveDefinitionV2::Line {
+        ExactPcurveImplementation::Portable { definition } => match definition {
+            ExactPcurveDefinition::Line {
                 origin_uv,
                 direction_uv_per_parameter,
                 domain,
@@ -76,7 +76,7 @@ pub(super) fn validate_pcurve(
                 nonzero_vector("pcurve line direction", direction_uv_per_parameter)?;
                 validate_range("pcurve line domain", domain)
             }
-            ExactPcurveDefinitionV2::Circle {
+            ExactPcurveDefinition::Circle {
                 center_uv,
                 x_axis_uv,
                 y_axis_uv,
@@ -88,18 +88,18 @@ pub(super) fn validate_pcurve(
                 positive("pcurve circle radius", *radius_uv)?;
                 validate_range("pcurve circle domain", domain)
             }
-            ExactPcurveDefinitionV2::Nurbs { definition } => validate_nurbs_curve2(definition),
+            ExactPcurveDefinition::Nurbs { definition } => validate_nurbs_curve2(definition),
         },
-        ExactPcurveImplementationV2::Kernel { reference } => validate_kernel_ref(reference),
+        ExactPcurveImplementation::Kernel { reference } => validate_kernel_ref(reference),
     }
 }
 
 pub(super) fn validate_surface(
-    implementation: &ExactSurfaceImplementationV2,
+    implementation: &ExactSurfaceImplementation,
 ) -> Result<(), GeometryContractError> {
     match implementation {
-        ExactSurfaceImplementationV2::Portable { definition } => match definition {
-            ExactSurfaceDefinitionV2::Plane {
+        ExactSurfaceImplementation::Portable { definition } => match definition {
+            ExactSurfaceDefinition::Plane {
                 origin_m,
                 u_axis_m_per_parameter,
                 v_axis_m_per_parameter,
@@ -113,7 +113,7 @@ pub(super) fn validate_surface(
                 )?;
                 validate_ranges("plane domains", domains)
             }
-            ExactSurfaceDefinitionV2::Cylinder {
+            ExactSurfaceDefinition::Cylinder {
                 origin_m,
                 x_axis,
                 y_axis,
@@ -126,7 +126,7 @@ pub(super) fn validate_surface(
                 positive("cylinder radius", *radius_m)?;
                 validate_ranges("cylinder domains", domains)
             }
-            ExactSurfaceDefinitionV2::Cone {
+            ExactSurfaceDefinition::Cone {
                 apex_m,
                 x_axis,
                 y_axis,
@@ -147,7 +147,7 @@ pub(super) fn validate_surface(
                 }
                 validate_ranges("cone domains", domains)
             }
-            ExactSurfaceDefinitionV2::Sphere {
+            ExactSurfaceDefinition::Sphere {
                 center_m,
                 x_axis,
                 y_axis,
@@ -160,7 +160,7 @@ pub(super) fn validate_surface(
                 positive("sphere radius", *radius_m)?;
                 validate_ranges("sphere domains", domains)
             }
-            ExactSurfaceDefinitionV2::Torus {
+            ExactSurfaceDefinition::Torus {
                 center_m,
                 x_axis,
                 y_axis,
@@ -181,27 +181,27 @@ pub(super) fn validate_surface(
                 }
                 validate_ranges("torus domains", domains)
             }
-            ExactSurfaceDefinitionV2::Nurbs { definition } => validate_nurbs_surface(definition),
+            ExactSurfaceDefinition::Nurbs { definition } => validate_nurbs_surface(definition),
         },
-        ExactSurfaceImplementationV2::Kernel { reference } => validate_kernel_ref(reference),
+        ExactSurfaceImplementation::Kernel { reference } => validate_kernel_ref(reference),
     }
 }
 
 pub(super) fn validate_trim_classifier(
-    implementation: &ExactTrimClassifierImplementationV2,
+    implementation: &ExactTrimClassifierImplementation,
 ) -> Result<(), GeometryContractError> {
     match implementation {
-        ExactTrimClassifierImplementationV2::OrientedPcurveWinding => Ok(()),
-        ExactTrimClassifierImplementationV2::Kernel { reference } => validate_kernel_ref(reference),
+        ExactTrimClassifierImplementation::OrientedPcurveWinding => Ok(()),
+        ExactTrimClassifierImplementation::Kernel { reference } => validate_kernel_ref(reference),
     }
 }
 
 pub(super) fn validate_mass_properties(
-    implementation: &ExactMassPropertiesImplementationV2,
+    implementation: &ExactMassPropertiesImplementation,
 ) -> Result<(), GeometryContractError> {
     match implementation {
-        ExactMassPropertiesImplementationV2::Kernel { reference } => validate_kernel_ref(reference),
-        ExactMassPropertiesImplementationV2::KernelValidated {
+        ExactMassPropertiesImplementation::Kernel { reference } => validate_kernel_ref(reference),
+        ExactMassPropertiesImplementation::KernelValidated {
             properties,
             validation_digest,
         } => {
@@ -217,66 +217,62 @@ pub(super) fn validate_mass_properties(
     }
 }
 
-pub(super) fn curve_is_periodic(implementation: &ExactCurveImplementationV2) -> Option<bool> {
+pub(super) fn curve_is_periodic(implementation: &ExactCurveImplementation) -> Option<bool> {
     match implementation {
-        ExactCurveImplementationV2::Portable { definition } => Some(match definition {
-            ExactCurveDefinitionV2::Circle { .. } | ExactCurveDefinitionV2::Ellipse { .. } => true,
-            ExactCurveDefinitionV2::Line { .. } => false,
-            ExactCurveDefinitionV2::Nurbs { definition } => definition.periodic,
+        ExactCurveImplementation::Portable { definition } => Some(match definition {
+            ExactCurveDefinition::Circle { .. } | ExactCurveDefinition::Ellipse { .. } => true,
+            ExactCurveDefinition::Line { .. } => false,
+            ExactCurveDefinition::Nurbs { definition } => definition.periodic,
         }),
-        ExactCurveImplementationV2::Kernel { .. } => None,
+        ExactCurveImplementation::Kernel { .. } => None,
     }
 }
 
 pub(super) fn surface_periodicity(
-    implementation: &ExactSurfaceImplementationV2,
+    implementation: &ExactSurfaceImplementation,
 ) -> Option<[bool; 2]> {
     match implementation {
-        ExactSurfaceImplementationV2::Portable { definition } => Some(match definition {
-            ExactSurfaceDefinitionV2::Plane { .. } => [false, false],
-            ExactSurfaceDefinitionV2::Cylinder { .. }
-            | ExactSurfaceDefinitionV2::Cone { .. }
-            | ExactSurfaceDefinitionV2::Sphere { .. } => [true, false],
-            ExactSurfaceDefinitionV2::Torus { .. } => [true, true],
-            ExactSurfaceDefinitionV2::Nurbs { definition } => {
+        ExactSurfaceImplementation::Portable { definition } => Some(match definition {
+            ExactSurfaceDefinition::Plane { .. } => [false, false],
+            ExactSurfaceDefinition::Cylinder { .. }
+            | ExactSurfaceDefinition::Cone { .. }
+            | ExactSurfaceDefinition::Sphere { .. } => [true, false],
+            ExactSurfaceDefinition::Torus { .. } => [true, true],
+            ExactSurfaceDefinition::Nurbs { definition } => {
                 [definition.periodic_u, definition.periodic_v]
             }
         }),
-        ExactSurfaceImplementationV2::Kernel { .. } => None,
+        ExactSurfaceImplementation::Kernel { .. } => None,
     }
 }
 
-pub(super) fn curve_domain(
-    implementation: &ExactCurveImplementationV2,
-) -> Option<ParameterRangeV2> {
+pub(super) fn curve_domain(implementation: &ExactCurveImplementation) -> Option<ParameterRange> {
     match implementation {
-        ExactCurveImplementationV2::Portable { definition } => Some(match definition {
-            ExactCurveDefinitionV2::Line { domain, .. }
-            | ExactCurveDefinitionV2::Circle { domain, .. }
-            | ExactCurveDefinitionV2::Ellipse { domain, .. } => *domain,
-            ExactCurveDefinitionV2::Nurbs { definition } => definition.domain,
+        ExactCurveImplementation::Portable { definition } => Some(match definition {
+            ExactCurveDefinition::Line { domain, .. }
+            | ExactCurveDefinition::Circle { domain, .. }
+            | ExactCurveDefinition::Ellipse { domain, .. } => *domain,
+            ExactCurveDefinition::Nurbs { definition } => definition.domain,
         }),
-        ExactCurveImplementationV2::Kernel { .. } => None,
+        ExactCurveImplementation::Kernel { .. } => None,
     }
 }
 
-pub(super) fn pcurve_domain(
-    implementation: &ExactPcurveImplementationV2,
-) -> Option<ParameterRangeV2> {
+pub(super) fn pcurve_domain(implementation: &ExactPcurveImplementation) -> Option<ParameterRange> {
     match implementation {
-        ExactPcurveImplementationV2::Portable { definition } => Some(match definition {
-            ExactPcurveDefinitionV2::Line { domain, .. }
-            | ExactPcurveDefinitionV2::Circle { domain, .. } => *domain,
-            ExactPcurveDefinitionV2::Nurbs { definition } => definition.domain,
+        ExactPcurveImplementation::Portable { definition } => Some(match definition {
+            ExactPcurveDefinition::Line { domain, .. }
+            | ExactPcurveDefinition::Circle { domain, .. } => *domain,
+            ExactPcurveDefinition::Nurbs { definition } => definition.domain,
         }),
-        ExactPcurveImplementationV2::Kernel { .. } => None,
+        ExactPcurveImplementation::Kernel { .. } => None,
     }
 }
 
-pub(super) fn curve_dynamic_value_count(implementation: &ExactCurveImplementationV2) -> usize {
+pub(super) fn curve_dynamic_value_count(implementation: &ExactCurveImplementation) -> usize {
     match implementation {
-        ExactCurveImplementationV2::Portable {
-            definition: ExactCurveDefinitionV2::Nurbs { definition },
+        ExactCurveImplementation::Portable {
+            definition: ExactCurveDefinition::Nurbs { definition },
         } => definition
             .knots
             .len()
@@ -286,10 +282,10 @@ pub(super) fn curve_dynamic_value_count(implementation: &ExactCurveImplementatio
     }
 }
 
-pub(super) fn pcurve_dynamic_value_count(implementation: &ExactPcurveImplementationV2) -> usize {
+pub(super) fn pcurve_dynamic_value_count(implementation: &ExactPcurveImplementation) -> usize {
     match implementation {
-        ExactPcurveImplementationV2::Portable {
-            definition: ExactPcurveDefinitionV2::Nurbs { definition },
+        ExactPcurveImplementation::Portable {
+            definition: ExactPcurveDefinition::Nurbs { definition },
         } => definition
             .knots
             .len()
@@ -299,10 +295,10 @@ pub(super) fn pcurve_dynamic_value_count(implementation: &ExactPcurveImplementat
     }
 }
 
-pub(super) fn surface_dynamic_value_count(implementation: &ExactSurfaceImplementationV2) -> usize {
+pub(super) fn surface_dynamic_value_count(implementation: &ExactSurfaceImplementation) -> usize {
     match implementation {
-        ExactSurfaceImplementationV2::Portable {
-            definition: ExactSurfaceDefinitionV2::Nurbs { definition },
+        ExactSurfaceImplementation::Portable {
+            definition: ExactSurfaceDefinition::Nurbs { definition },
         } => definition
             .u_knots
             .len()
@@ -313,7 +309,7 @@ pub(super) fn surface_dynamic_value_count(implementation: &ExactSurfaceImplement
     }
 }
 
-fn validate_mass_values(properties: &BodyMassPropertiesV2) -> Result<(), GeometryContractError> {
+fn validate_mass_values(properties: &BodyMassProperties) -> Result<(), GeometryContractError> {
     if !properties.volume_m3.is_finite()
         || properties.volume_m3 < 0.0
         || !properties.surface_area_m2.is_finite()
@@ -343,7 +339,7 @@ fn validate_mass_values(properties: &BodyMassPropertiesV2) -> Result<(), Geometr
     Ok(())
 }
 
-fn validate_kernel_ref(reference: &KernelEvaluatorRefV2) -> Result<(), GeometryContractError> {
+fn validate_kernel_ref(reference: &KernelEvaluatorRef) -> Result<(), GeometryContractError> {
     validate_token("kernel evaluator entity token", &reference.entity_token)?;
     if reference.representation_digest == [0; 32] {
         return Err(invalid(

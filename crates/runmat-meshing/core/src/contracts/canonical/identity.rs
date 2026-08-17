@@ -62,13 +62,13 @@ impl GeometryRevisionRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CanonicalEntityRangeV2 {
+pub struct CanonicalEntityRange {
     pub first: PersistentEntityId,
     pub last: PersistentEntityId,
     pub entity_count: u64,
 }
 
-impl CanonicalEntityRangeV2 {
+impl CanonicalEntityRange {
     fn validate(&self) -> Result<(), MeshingContractError> {
         self.first.validate()?;
         self.last.validate()?;
@@ -84,7 +84,7 @@ impl CanonicalEntityRangeV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MeshingPartitionKindV2 {
+pub enum MeshingPartitionKind {
     WholeStage,
     CanonicalEntityBatch,
     DisconnectedComponent,
@@ -92,15 +92,15 @@ pub enum MeshingPartitionKindV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingPartitionDescriptorV2 {
-    pub kind: MeshingPartitionKindV2,
+pub struct MeshingPartitionDescriptor {
+    pub kind: MeshingPartitionKind,
     pub partition_index: u32,
     pub partition_count: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entity_range: Option<CanonicalEntityRangeV2>,
+    pub entity_range: Option<CanonicalEntityRange>,
 }
 
-impl MeshingPartitionDescriptorV2 {
+impl MeshingPartitionDescriptor {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.partition_count == 0 || self.partition_index >= self.partition_count {
             return Err(MeshingContractError::invalid(
@@ -109,10 +109,10 @@ impl MeshingPartitionDescriptorV2 {
             ));
         }
         match (&self.kind, &self.entity_range) {
-            (MeshingPartitionKindV2::WholeStage, None)
+            (MeshingPartitionKind::WholeStage, None)
                 if self.partition_index == 0 && self.partition_count == 1 => {}
-            (MeshingPartitionKindV2::CanonicalEntityBatch, Some(range))
-            | (MeshingPartitionKindV2::DisconnectedComponent, Some(range)) => range.validate()?,
+            (MeshingPartitionKind::CanonicalEntityBatch, Some(range))
+            | (MeshingPartitionKind::DisconnectedComponent, Some(range)) => range.validate()?,
             _ => {
                 return Err(MeshingContractError::invalid(
                     "meshing partition descriptor",
@@ -126,9 +126,9 @@ impl MeshingPartitionDescriptorV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingStageIdentityV2 {
+pub struct MeshingStageIdentity {
     pub schema_version: u16,
-    pub stage: super::MeshingStageV2,
+    pub stage: super::MeshingStageKind,
     pub geometry: GeometryRevisionRef,
     pub resolved_request_digest: StableDigest,
     pub tolerance_policy_digest: StableDigest,
@@ -140,7 +140,7 @@ pub struct MeshingStageIdentityV2 {
     pub capability_cohort: Option<String>,
 }
 
-impl MeshingStageIdentityV2 {
+impl MeshingStageIdentity {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != MESHING_IDENTITY_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
@@ -172,13 +172,13 @@ impl MeshingStageIdentityV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingPartitionIdentityV2 {
+pub struct MeshingPartitionIdentity {
     pub schema_version: u16,
     pub stage_identity_digest: StableDigest,
-    pub partition: MeshingPartitionDescriptorV2,
+    pub partition: MeshingPartitionDescriptor,
 }
 
-impl MeshingPartitionIdentityV2 {
+impl MeshingPartitionIdentity {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         validate_identity_version(self.schema_version)?;
         self.stage_identity_digest
@@ -189,21 +189,21 @@ impl MeshingPartitionIdentityV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingPartitionResultRefV2 {
+pub struct MeshingPartitionResultRef {
     pub partition_index: u32,
     pub result_digest: StableDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingJoinIdentityV2 {
+pub struct MeshingJoinIdentity {
     pub schema_version: u16,
     pub stage_identity_digest: StableDigest,
     pub join_algorithm_version: String,
-    pub ordered_partition_results: Vec<MeshingPartitionResultRefV2>,
+    pub ordered_partition_results: Vec<MeshingPartitionResultRef>,
 }
 
-impl MeshingJoinIdentityV2 {
+impl MeshingJoinIdentity {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         validate_identity_version(self.schema_version)?;
         self.stage_identity_digest
@@ -234,17 +234,17 @@ impl MeshingJoinIdentityV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingStageResultIdentityV2 {
+pub struct MeshingStageResultIdentity {
     pub schema_version: u16,
-    pub stage: super::MeshingStageV2,
-    pub result_kind: super::MeshingStageResultKindV2,
+    pub stage: super::MeshingStageKind,
+    pub result_kind: super::MeshingStageResultKind,
     pub producer_identity_digest: StableDigest,
     pub logical_content_digest: StableDigest,
     pub logical_entity_count: u64,
     pub invariant_summary_digest: StableDigest,
 }
 
-impl MeshingStageResultIdentityV2 {
+impl MeshingStageResultIdentity {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         validate_identity_version(self.schema_version)?;
         self.producer_identity_digest
@@ -265,7 +265,7 @@ impl MeshingStageResultIdentityV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MeshingValidationIdentityV2 {
+pub struct MeshingValidationIdentity {
     pub schema_version: u16,
     pub subject_stage_result_digest: StableDigest,
     pub geometry: GeometryRevisionRef,
@@ -275,7 +275,7 @@ pub struct MeshingValidationIdentityV2 {
     pub capability_cohort: Option<String>,
 }
 
-impl MeshingValidationIdentityV2 {
+impl MeshingValidationIdentity {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         validate_identity_version(self.schema_version)?;
         self.subject_stage_result_digest

@@ -9,13 +9,13 @@ use runmat_execution::{Digest, ExecutionScopeId, PoolId};
 use runmat_execution_runner::driver::{DriverAction, DriverCommand, DriverConfig};
 use runmat_execution_runner::{Driver, PoolSpec, WorkerSpec};
 use runmat_meshing_core::{
-    AlgorithmVersionSet, CancellationPolicyV2, CanonicalMeshingContract, GeometryRevisionRef,
-    GeometryTolerancePolicy, MeshElementOrderV2, MeshingCapabilityRequirementV2,
-    MeshingPartitionDescriptorV2, MeshingPartitionKindV2, MeshingQualityTargetsV2,
-    MeshingRequestV2, MeshingResourceBudgetV2, MeshingStageIdentityV2, MeshingStageV2,
-    MeshingWorkloadRequestV2, MetricCombinationRule, MetricFieldRequestV2, MetricTensor3,
-    StableDigest, SurfaceQualityTargetsV2, VolumeQualityTargetsV2, MESHING_IDENTITY_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
+    AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, ElementOrder,
+    GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
+    MeshingPartitionDescriptor, MeshingPartitionKind, MeshingQualityTargets, MeshingRequest,
+    MeshingResourceBudget, MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest,
+    MetricCombinationRule, MetricFieldRequest, MetricTensor3, StableDigest, SurfaceQualityTargets,
+    VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
 
 #[test]
 fn task_projection_binds_identity_inputs_resources_and_capabilities() {
-    let fixture = Fixture::new(MeshingStageV2::SurfaceMesh);
+    let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let submission = fixture.submit(MeshingTaskEffectPolicy::ContentAddressedPure {
         maximum_attempts: 3,
         replay_proof_digest: stable(31),
@@ -74,7 +74,7 @@ fn task_projection_binds_identity_inputs_resources_and_capabilities() {
 
 #[test]
 fn logical_partition_task_is_placement_independent_within_a_scope() {
-    let fixture = Fixture::new(MeshingStageV2::SurfaceMesh);
+    let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let first = fixture.submit(MeshingTaskEffectPolicy::UnknownEffect);
     let mut other = fixture.context.clone();
     other.pool_id = PoolId::derive(&[b"other-pool"]);
@@ -100,7 +100,7 @@ fn logical_partition_task_is_placement_independent_within_a_scope() {
 
 #[test]
 fn mismatched_request_input_or_authority_fails_closed() {
-    let fixture = Fixture::new(MeshingStageV2::SurfaceMesh);
+    let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let mut wrong_request = fixture.request.clone();
     wrong_request.resources.maximum_memory_bytes += 1;
     assert!(build_task_submission(
@@ -130,7 +130,7 @@ fn mismatched_request_input_or_authority_fails_closed() {
 
 #[test]
 fn incomplete_or_inconsistent_capability_declarations_are_rejected() {
-    let fixture = Fixture::new(MeshingStageV2::SurfaceMesh);
+    let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let mut missing_host = fixture.workload.clone();
     missing_host.required_capabilities.remove(0);
     assert!(build_task_submission(
@@ -145,8 +145,8 @@ fn incomplete_or_inconsistent_capability_declarations_are_rejected() {
     .is_err());
 
     let mut wrong_order = fixture.workload.clone();
-    wrong_order.required_capabilities[3] = MeshingCapabilityRequirementV2::ElementOrder {
-        order: MeshElementOrderV2::Tet4,
+    wrong_order.required_capabilities[3] = MeshingCapabilityRequirement::ElementOrder {
+        order: ElementOrder::Tet4,
     };
     assert!(build_task_submission(
         &wrong_order,
@@ -162,7 +162,7 @@ fn incomplete_or_inconsistent_capability_declarations_are_rejected() {
 
 #[test]
 fn final_publication_and_unknown_effects_never_retry() {
-    let ordinary = Fixture::new(MeshingStageV2::SurfaceMesh);
+    let ordinary = Fixture::new(MeshingStageKind::SurfaceMesh);
     assert_eq!(
         ordinary
             .submit(MeshingTaskEffectPolicy::UnknownEffect)
@@ -171,7 +171,7 @@ fn final_publication_and_unknown_effects_never_retry() {
         RetryPolicy::Never
     );
 
-    let final_stage = Fixture::new(MeshingStageV2::Publication);
+    let final_stage = Fixture::new(MeshingStageKind::Publication);
     assert!(build_task_submission(
         &final_stage.workload,
         &final_stage.identity,
@@ -196,7 +196,7 @@ fn final_publication_and_unknown_effects_never_retry() {
 
 #[test]
 fn unchanged_scheduler_admits_only_a_capable_worker() {
-    let fixture = Fixture::new(MeshingStageV2::SurfaceMesh);
+    let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let submission = fixture.submit(MeshingTaskEffectPolicy::UnknownEffect);
     let scope = submission.request.scope_id;
     let pool = submission.request.pool_id;
@@ -266,19 +266,19 @@ fn unchanged_scheduler_admits_only_a_capable_worker() {
 }
 
 pub(crate) struct Fixture {
-    pub(crate) request: MeshingRequestV2,
-    pub(crate) identity: MeshingStageIdentityV2,
-    pub(crate) workload: MeshingWorkloadRequestV2,
+    pub(crate) request: MeshingRequest,
+    pub(crate) identity: MeshingStageIdentity,
+    pub(crate) workload: MeshingWorkloadRequest,
     pub(crate) input: ValueRef,
     pub(crate) context: MeshingExecutionContext,
 }
 
 impl Fixture {
-    pub(crate) fn new(stage: MeshingStageV2) -> Self {
+    pub(crate) fn new(stage: MeshingStageKind) -> Self {
         let request = request();
         let input_digest = stable(20);
         let cohort = "native-cohort-v1".to_string();
-        let identity = MeshingStageIdentityV2 {
+        let identity = MeshingStageIdentity {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage,
             geometry: GeometryRevisionRef {
@@ -294,31 +294,31 @@ impl Fixture {
             prerequisite_artifact_digests: vec![input_digest],
             capability_cohort: Some(cohort.clone()),
         };
-        let workload = MeshingWorkloadRequestV2 {
+        let workload = MeshingWorkloadRequest {
             schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
             stage,
             stage_identity_digest: identity.canonical_digest().unwrap(),
-            partition: MeshingPartitionDescriptorV2 {
-                kind: MeshingPartitionKindV2::WholeStage,
+            partition: MeshingPartitionDescriptor {
+                kind: MeshingPartitionKind::WholeStage,
                 partition_index: 0,
                 partition_count: 1,
                 entity_range: None,
             },
             input_manifest_digests: vec![input_digest],
             required_capabilities: vec![
-                MeshingCapabilityRequirementV2::HostWorkload {
+                MeshingCapabilityRequirement::HostWorkload {
                     abi: "host-v2".into(),
                 },
-                MeshingCapabilityRequirementV2::ExactCadKernel {
+                MeshingCapabilityRequirement::ExactCadKernel {
                     abi: "cad-abi-v1".into(),
                 },
-                MeshingCapabilityRequirementV2::MeshingAlgorithm {
+                MeshingCapabilityRequirement::MeshingAlgorithm {
                     version: algorithm(stage, &request).into(),
                 },
-                MeshingCapabilityRequirementV2::ElementOrder {
+                MeshingCapabilityRequirement::ElementOrder {
                     order: request.element_order,
                 },
-                MeshingCapabilityRequirementV2::DeterministicPlatformCohort { cohort },
+                MeshingCapabilityRequirement::DeterministicPlatformCohort { cohort },
             ],
         };
         let access = MeshingArtifactAccess {
@@ -371,10 +371,10 @@ impl Fixture {
     }
 }
 
-fn request() -> MeshingRequestV2 {
-    MeshingRequestV2 {
+fn request() -> MeshingRequest {
+    MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
-        element_order: MeshElementOrderV2::Tet10,
+        element_order: ElementOrder::Tet10,
         deterministic_seed: 7,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -392,26 +392,26 @@ fn request() -> MeshingRequestV2 {
             requested_deviation_m: 1.0e-5,
             maximum_healing_displacement_m: 1.0e-6,
         },
-        metric: MetricFieldRequestV2 {
+        metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
         },
-        quality: MeshingQualityTargetsV2 {
-            surface: SurfaceQualityTargetsV2 {
+        quality: MeshingQualityTargets {
+            surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
                 maximum_normal_deviation_degrees: 5.0,
             },
-            volume: VolumeQualityTargetsV2 {
+            volume: VolumeQualityTargets {
                 maximum_radius_edge_ratio: 2.0,
                 minimum_scaled_jacobian: 0.05,
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudgetV2 {
+        resources: MeshingResourceBudget {
             maximum_nodes: 100,
             maximum_elements: 100,
             maximum_memory_bytes: 4_000_000,
@@ -422,17 +422,17 @@ fn request() -> MeshingRequestV2 {
             maximum_recursion_depth: 32,
             maximum_iterations: 10_000,
         },
-        cancellation: CancellationPolicyV2 {
+        cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
     }
 }
 
-fn algorithm(stage: MeshingStageV2, request: &MeshingRequestV2) -> &str {
+fn algorithm(stage: MeshingStageKind, request: &MeshingRequest) -> &str {
     match stage {
-        MeshingStageV2::SurfaceMesh => &request.algorithms.surface,
-        MeshingStageV2::Publication => &request.algorithms.validation,
+        MeshingStageKind::SurfaceMesh => &request.algorithms.surface,
+        MeshingStageKind::Publication => &request.algorithms.validation,
         _ => panic!("fixture only supports exercised stages"),
     }
 }

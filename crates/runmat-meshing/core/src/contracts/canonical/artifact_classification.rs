@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    validate_token, AnalysisMeshTopologyV2, MeshingContractError, PersistentEntityId,
-    PersistentEntityKind,
+    validate_token, MeshingContractError, PersistentEntityId, PersistentEntityKind,
+    SolverMeshTopology,
 };
 
 pub(super) fn validate_classification(
-    topology: &AnalysisMeshTopologyV2,
+    topology: &SolverMeshTopology,
     element_ids: &BTreeSet<u64>,
     face_ids: &BTreeSet<u64>,
 ) -> Result<(), MeshingContractError> {
@@ -36,7 +36,7 @@ pub(super) fn validate_classification(
 }
 
 fn validate_regions<'a>(
-    topology: &'a AnalysisMeshTopologyV2,
+    topology: &'a SolverMeshTopology,
     element_ids: &BTreeSet<u64>,
 ) -> Result<BTreeMap<&'a PersistentEntityId, &'a str>, MeshingContractError> {
     let mut classified_elements = BTreeSet::new();
@@ -69,7 +69,7 @@ fn validate_regions<'a>(
 }
 
 fn validate_interfaces(
-    topology: &AnalysisMeshTopologyV2,
+    topology: &SolverMeshTopology,
     face_ids: &BTreeSet<u64>,
     region_materials: &BTreeMap<&PersistentEntityId, &str>,
 ) -> Result<(), MeshingContractError> {
@@ -96,7 +96,7 @@ fn validate_interfaces(
 }
 
 fn validate_contacts(
-    topology: &AnalysisMeshTopologyV2,
+    topology: &SolverMeshTopology,
     face_ids: &BTreeSet<u64>,
 ) -> Result<(), MeshingContractError> {
     for contact in &topology.contacts {

@@ -16,10 +16,10 @@ fn algorithms() -> AlgorithmVersionSet {
     }
 }
 
-fn request() -> MeshingRequestV2 {
-    MeshingRequestV2 {
+fn request() -> MeshingRequest {
+    MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
-        element_order: MeshElementOrderV2::Tet10,
+        element_order: ElementOrder::Tet10,
         deterministic_seed: 7,
         algorithms: algorithms(),
         tolerance: GeometryTolerancePolicy {
@@ -29,7 +29,7 @@ fn request() -> MeshingRequestV2 {
             requested_deviation_m: 1.0e-5,
             maximum_healing_displacement_m: 1.0e-6,
         },
-        metric: MetricFieldRequestV2 {
+        metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.01).unwrap(),
             maximum_grading_ratio: 1.3,
@@ -45,20 +45,20 @@ fn request() -> MeshingRequestV2 {
                 metric: MetricTensor3::isotropic_length_m(0.002).unwrap(),
             }],
         },
-        quality: MeshingQualityTargetsV2 {
-            surface: SurfaceQualityTargetsV2 {
+        quality: MeshingQualityTargets {
+            surface: SurfaceQualityTargets {
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
                 maximum_normal_deviation_degrees: 5.0,
             },
-            volume: VolumeQualityTargetsV2 {
+            volume: VolumeQualityTargets {
                 maximum_radius_edge_ratio: 2.0,
                 minimum_scaled_jacobian: 0.05,
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudgetV2 {
+        resources: MeshingResourceBudget {
             maximum_nodes: 2_000_000,
             maximum_elements: 10_000_000,
             maximum_memory_bytes: 8 * 1024 * 1024 * 1024,
@@ -69,7 +69,7 @@ fn request() -> MeshingRequestV2 {
             maximum_recursion_depth: 256,
             maximum_iterations: 100_000_000,
         },
-        cancellation: CancellationPolicyV2 {
+        cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 4096,
         },
@@ -77,20 +77,20 @@ fn request() -> MeshingRequestV2 {
 }
 
 #[test]
-fn v2_request_round_trips_and_rejects_unknown_fields() {
+fn canonical_request_round_trips_and_rejects_unknown_fields() {
     let request = request();
     request.validate().unwrap();
     let encoded = serde_json::to_vec(&request).unwrap();
-    let decoded: MeshingRequestV2 = serde_json::from_slice(&encoded).unwrap();
+    let decoded: MeshingRequest = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(decoded, request);
 
     let mut value = serde_json::to_value(&request).unwrap();
     value["backend"] = serde_json::json!("structured_grid_tetrahedron");
-    assert!(serde_json::from_value::<MeshingRequestV2>(value).is_err());
+    assert!(serde_json::from_value::<MeshingRequest>(value).is_err());
 }
 
 #[test]
-fn v2_request_rejects_non_finite_and_unbounded_inputs() {
+fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
     let mut invalid = request();
     invalid.tolerance.source_tolerance_m = f64::NAN;
     assert_eq!(invalid.validate().unwrap_err().field, "source_tolerance_m");
@@ -170,8 +170,8 @@ fn typed_failure_round_trips_and_requires_canonical_diagnostics() {
     let failure = MeshingFailure {
         schema_version: MESHING_FAILURE_SCHEMA_VERSION,
         category: MeshingFailureCategory::QualityTargetUnreachable,
-        stage: MeshingStageV2::Optimization,
-        operation: MeshingOperationV2::Optimize,
+        stage: MeshingStageKind::Optimization,
+        operation: MeshingOperation::Optimize,
         entity_ids: vec![PersistentEntityId {
             kind: PersistentEntityKind::Solid,
             source_topology_id: "solid:1".into(),
@@ -214,7 +214,7 @@ fn typed_failure_round_trips_and_requires_canonical_diagnostics() {
     mismatched
         .request_values
         .sort_by(|left, right| left.name.cmp(&right.name));
-    mismatched.stage = MeshingStageV2::CurveMesh;
+    mismatched.stage = MeshingStageKind::CurveMesh;
     assert_eq!(
         mismatched.validate().unwrap_err().field,
         "meshing failure operation"
