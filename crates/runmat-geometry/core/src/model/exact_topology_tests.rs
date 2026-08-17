@@ -428,16 +428,19 @@ fn exact_regions_require_one_to_one_solid_ownership() {
 }
 
 #[test]
-fn contacts_require_disjoint_faces_and_nonzero_pairing_contract() {
+fn contacts_are_authored_from_canonical_exact_source_faces() {
     let mut topology = topology();
     let side_a_face = topology.faces[0].id.clone();
     let side_b_face = add_independent_contact_face(&mut topology);
-    topology.contacts.push(ExactContactPair {
-        id: id(PersistentEntityKind::Contact, "contact"),
-        side_a_face_ids: vec![side_a_face.clone()],
-        side_b_face_ids: vec![side_b_face.clone()],
-        pairing_contract_digest: [7; 32],
-    });
+    topology.contacts = author_exact_contacts(
+        &topology,
+        &[ExactContactDefinition {
+            side_a_face_ids: vec![side_b_face.clone()],
+            side_b_face_ids: vec![side_a_face.clone()],
+        }],
+    )
+    .unwrap();
+    let authored = topology.contacts[0].clone();
     let mut summary = model();
     summary.face_count = 2;
     summary.wire_count = 2;
@@ -447,11 +450,83 @@ fn contacts_require_disjoint_faces_and_nonzero_pairing_contract() {
     summary.contact_count = 1;
     topology.validate_against(&summary).unwrap();
 
-    topology.contacts[0].side_b_face_ids = vec![side_a_face];
+    let reversed = author_exact_contacts(
+        &topology,
+        &[ExactContactDefinition {
+            side_a_face_ids: vec![side_a_face.clone()],
+            side_b_face_ids: vec![side_b_face.clone()],
+        }],
+    )
+    .unwrap();
+    assert_eq!(reversed, vec![authored.clone()]);
+
+    topology.contacts[0].side_b_face_ids = topology.contacts[0].side_a_face_ids.clone();
     assert!(topology.validate_against(&summary).is_err());
-    topology.contacts[0].side_b_face_ids = vec![side_b_face];
+    topology.contacts[0] = authored.clone();
+    topology.contacts[0].pairing_schema_version += 1;
+    assert!(topology.validate_against(&summary).is_err());
+    topology.contacts[0] = authored.clone();
     topology.contacts[0].pairing_contract_digest = [0; 32];
     assert!(topology.validate_against(&summary).is_err());
+    topology.contacts[0] = authored;
+    topology.contacts[0].id.source_topology_id = "contact:tampered".into();
+    assert!(topology.validate_against(&summary).is_err());
+}
+
+#[test]
+fn contact_authoring_rejects_unknown_interface_and_reused_faces() {
+    let mut topology = topology();
+    let first = topology.faces[0].id.clone();
+    let second = add_independent_contact_face(&mut topology);
+    let unknown = part_id(PersistentEntityKind::Face, "unknown");
+    assert!(author_exact_contacts(
+        &topology,
+        &[ExactContactDefinition {
+            side_a_face_ids: Vec::new(),
+            side_b_face_ids: vec![first.clone()],
+        }]
+    )
+    .is_err());
+    assert!(author_exact_contacts(
+        &topology,
+        &[ExactContactDefinition {
+            side_a_face_ids: vec![first.clone()],
+            side_b_face_ids: vec![unknown],
+        }]
+    )
+    .is_err());
+
+    assert!(author_exact_contacts(
+        &topology,
+        &[
+            ExactContactDefinition {
+                side_a_face_ids: vec![first.clone()],
+                side_b_face_ids: vec![second.clone()],
+            },
+            ExactContactDefinition {
+                side_a_face_ids: vec![first.clone()],
+                side_b_face_ids: vec![second.clone()],
+            },
+        ]
+    )
+    .is_err());
+
+    add_second_interface_side(&mut topology);
+    topology.interfaces.push(ExactSharedInterface {
+        face_id: first.clone(),
+        side_a_region_id: topology.regions[0].id.clone(),
+        side_b_region_id: topology.regions[1].id.clone(),
+        side_a_orientation: TopologicalOrientation::Forward,
+        side_b_orientation: TopologicalOrientation::Reversed,
+    });
+    assert!(author_exact_contacts(
+        &topology,
+        &[ExactContactDefinition {
+            side_a_face_ids: vec![first],
+            side_b_face_ids: vec![second],
+        }]
+    )
+    .is_err());
 }
 
 #[test]

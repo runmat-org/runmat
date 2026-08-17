@@ -6,6 +6,7 @@ use super::{
 };
 
 pub const EXACT_BREP_TOPOLOGY_SCHEMA_VERSION: u16 = 2;
+pub const EXACT_CONTACT_PAIRING_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -185,5 +186,8 @@ pub struct ExactContactPair {
     pub id: PersistentEntityId,
     pub side_a_face_ids: Vec<PersistentEntityId>,
     pub side_b_face_ids: Vec<PersistentEntityId>,
+    /// Version of the canonical exact source-face pairing identity below.
+    pub pairing_schema_version: u16,
+    /// Domain-separated digest of both canonical persistent face-ID sets.
     pub pairing_contract_digest: [u8; 32],
 }

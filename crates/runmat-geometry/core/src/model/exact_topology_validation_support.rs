@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{ExactBRepTopology, GeometryContractError, PersistentEntityId, PersistentEntityKind};
+use super::{
+    exact_contacts::expected_contact_pair, ExactBRepTopology, GeometryContractError,
+    PersistentEntityId, PersistentEntityKind,
+};
 
 pub(super) fn validate_interfaces(
     topology: &ExactBRepTopology,
@@ -59,6 +62,7 @@ pub(super) fn validate_contacts(
         PersistentEntityKind::Contact,
         topology.contacts.iter().map(|value| &value.id),
     )?;
+    let mut claimed_faces = BTreeSet::new();
     for contact in &topology.contacts {
         require_ordered_refs(
             "contact side A faces",
@@ -75,7 +79,7 @@ pub(super) fn validate_contacts(
             true,
         )?;
         if !ordered_sets_are_disjoint(&contact.side_a_face_ids, &contact.side_b_face_ids)
-            || contact.pairing_contract_digest == [0; 32]
+            || contact.side_b_face_ids < contact.side_a_face_ids
             || contact
                 .side_a_face_ids
                 .iter()
@@ -84,7 +88,29 @@ pub(super) fn validate_contacts(
         {
             return Err(invalid(
                 "contact pairing",
-                "contact sides must be disjoint from each other and conformal interfaces, and bind a nonzero pairing contract",
+                "contact sides must be canonical, disjoint from each other and conformal interfaces, and bind their source-face pairing contract",
+            ));
+        }
+        if contact
+            .side_a_face_ids
+            .iter()
+            .chain(&contact.side_b_face_ids)
+            .any(|face| !claimed_faces.insert(face.clone()))
+        {
+            return Err(invalid(
+                "contact face ownership",
+                "an exact face cannot belong to more than one contact pair",
+            ));
+        }
+        let expected = expected_contact_pair(
+            &topology.root_assembly_id.assembly_path,
+            &contact.side_a_face_ids,
+            &contact.side_b_face_ids,
+        );
+        if contact != &expected {
+            return Err(invalid(
+                "contact pairing contract",
+                "contact identity and pairing digest must derive from the canonical source-face sides",
             ));
         }
     }

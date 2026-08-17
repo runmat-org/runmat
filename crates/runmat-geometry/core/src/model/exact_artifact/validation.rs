@@ -199,9 +199,7 @@ fn topology_contains(
         PersistentEntityKind::Edge => topology.edges.iter().any(|value| &value.id == target),
         PersistentEntityKind::Vertex => topology.vertices.iter().any(|value| &value.id == target),
         PersistentEntityKind::Contact => topology.contacts.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Region => topology.interfaces.iter().any(|interface| {
-            &interface.side_a_region_id == target || &interface.side_b_region_id == target
-        }),
+        PersistentEntityKind::Region => topology.regions.iter().any(|value| &value.id == target),
     }
 }
 

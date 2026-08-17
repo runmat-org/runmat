@@ -5,9 +5,9 @@ use crate::{
     import_exact_cad, ExactCadImportOptions, GeometryFormat,
 };
 use runmat_geometry_core::{
-    GeometryEvaluationError, GeometryEvaluationErrorKind, GeometryHealingOperationKind,
-    MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId, TrimDomainLocation,
-    UnitSystem,
+    ExactContactDefinition, GeometryEvaluationError, GeometryEvaluationErrorKind,
+    GeometryHealingOperationKind, MassPropertiesEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
+    TrimDomainLocation, UnitSystem,
 };
 use sha2::Digest as _;
 
@@ -19,6 +19,8 @@ const DISCONNECTED_SOLIDS: &[u8] =
 const DISCONNECTED_SOLIDS_REVERSED: &[u8] =
     include_bytes!("../../../tests/fixtures/disconnected_solids_reversed.brep");
 const GAPPED_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/gapped_sheet.brep");
+const INDEPENDENT_CONTACT: &[u8] =
+    include_bytes!("../../../tests/fixtures/independent_contact.step");
 const INVALID_CAVITY: &[u8] = include_bytes!("../../../tests/fixtures/invalid_cavity.brep");
 const MIXED_SOLID_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/mixed_solid_sheet.brep");
 const SHORT_EDGE_FACE: &[u8] = include_bytes!("../../../tests/fixtures/short_edge_face.brep");
@@ -293,6 +295,77 @@ fn conformal_solids_share_one_oriented_interface_identity() {
     assert_eq!(imported.model.interface_count, 1);
     assert_eq!(imported.model.region_count, 2);
     assert_eq!(imported.model.contact_count, 0);
+}
+
+#[test]
+fn independent_coincident_faces_require_explicit_contact_authoring() {
+    let unpaired = import_exact_cad(
+        "independent_contact.step",
+        INDEPENDENT_CONTACT,
+        GeometryFormat::Step,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    assert_eq!(unpaired.topology.solids.len(), 2);
+    assert_eq!(unpaired.topology.faces.len(), 12);
+    assert!(unpaired.topology.interfaces.is_empty());
+    assert!(unpaired.topology.contacts.is_empty());
+
+    let evaluator = OcctExactEvaluator::new(&unpaired).unwrap();
+    let mut coincident_faces = unpaired
+        .topology
+        .faces
+        .iter()
+        .filter_map(|face| {
+            let bounds = runmat_geometry_core::ExactSurfaceEvaluator::parameter_bounds(
+                &evaluator,
+                &face.surface_evaluator_id,
+            )
+            .unwrap();
+            let uv = [
+                (bounds[0].start + bounds[0].end) * 0.5,
+                (bounds[1].start + bounds[1].end) * 0.5,
+            ];
+            let point = runmat_geometry_core::ExactSurfaceEvaluator::point(
+                &evaluator,
+                &face.surface_evaluator_id,
+                uv,
+                &Unlimited,
+            )
+            .unwrap();
+            let translation_x = unpaired
+                .topology
+                .instances
+                .iter()
+                .find(|instance| instance.id.assembly_path == face.id.assembly_path)
+                .map(|instance| instance.transform.0[3])?;
+            ((point[0] + translation_x - 1.0).abs() < 1.0e-12).then(|| face.id.clone())
+        })
+        .collect::<Vec<_>>();
+    coincident_faces.sort();
+    assert_eq!(coincident_faces.len(), 2);
+
+    let definitions = [ExactContactDefinition {
+        side_a_face_ids: vec![coincident_faces[1].clone()],
+        side_b_face_ids: vec![coincident_faces[0].clone()],
+    }];
+    let paired = import_exact_cad(
+        "renamed-contact.step",
+        INDEPENDENT_CONTACT,
+        GeometryFormat::Step,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap()
+    .with_contacts(&definitions)
+    .unwrap();
+    assert!(paired.topology.interfaces.is_empty());
+    assert_eq!(paired.topology.contacts.len(), 1);
+    assert_eq!(paired.topology.contacts[0].side_a_face_ids.len(), 1);
+    assert_eq!(paired.topology.contacts[0].side_b_face_ids.len(), 1);
+    assert_eq!(paired.model.contact_count, 1);
+    paired.build_closure().unwrap();
 }
 
 #[test]

@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    build_exact_geometry_closure, EncodedExactGeometryClosure, ExactBRepModel, ExactBRepTopology,
-    ExactEvaluatorRegistry, GeometryDigest, GeometryDocument, GeometryHealingPolicy,
-    GeometryHealingReport, GeometryModel, GeometryRevisionIdentity, GeometrySourceFormat,
-    GeometrySourceIdentity, GeometryTolerancePolicy, UnitSystem, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
+    author_exact_contacts, build_exact_geometry_closure, EncodedExactGeometryClosure,
+    ExactBRepModel, ExactBRepTopology, ExactContactDefinition, ExactEvaluatorRegistry,
+    GeometryDigest, GeometryDocument, GeometryHealingPolicy, GeometryHealingReport, GeometryModel,
+    GeometryRevisionIdentity, GeometrySourceFormat, GeometrySourceIdentity,
+    GeometryTolerancePolicy, UnitSystem, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -50,6 +51,18 @@ impl ImportedExactCad {
 
     pub fn representation_digest(&self) -> [u8; 32] {
         exact_representation_digest(&self.representation)
+    }
+
+    /// Replaces the analysis contact model by resolving explicit persistent source-face sides.
+    /// This does not re-run the kernel or infer contact from geometric proximity.
+    pub fn with_contacts(
+        mut self,
+        definitions: &[ExactContactDefinition],
+    ) -> Result<Self, runmat_geometry_core::GeometryContractError> {
+        self.topology.contacts = author_exact_contacts(&self.topology, definitions)?;
+        self.model.contact_count = self.topology.contacts.len() as u64;
+        self.topology.validate_against(&self.model)?;
+        Ok(self)
     }
 
     pub fn build_closure(
