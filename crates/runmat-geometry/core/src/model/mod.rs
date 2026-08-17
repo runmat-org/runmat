@@ -1,3 +1,4 @@
+mod analysis_identity;
 mod assembly;
 mod field;
 mod geometry;
@@ -9,6 +10,9 @@ mod tessellation_profile;
 mod topology;
 mod units;
 
+pub use analysis_identity::{
+    GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind,
+};
 pub use assembly::AssemblyNode;
 pub use field::{FieldLocation, FieldValueKind};
 pub use geometry::{GeometryAsset, GeometrySource};

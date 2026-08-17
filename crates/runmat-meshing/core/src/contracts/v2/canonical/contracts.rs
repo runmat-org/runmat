@@ -16,7 +16,7 @@ macro_rules! canonical_contract {
             const LIMITS: MeshingCanonicalLimits = $limits;
 
             fn validate_canonical(&self) -> Result<(), MeshingContractError> {
-                $validator(self)
+                $validator(self).map_err(Into::into)
             }
         }
     };

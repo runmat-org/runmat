@@ -11,7 +11,6 @@ mod identity;
 mod manifest;
 mod metric;
 mod request;
-mod tolerance;
 mod workload;
 
 pub use artifact_types::{
@@ -40,8 +39,7 @@ pub use identity::{
     CanonicalEntityRangeV2, GeometryRevisionRef, MeshingJoinIdentityV2,
     MeshingPartitionDescriptorV2, MeshingPartitionIdentityV2, MeshingPartitionKindV2,
     MeshingPartitionResultRefV2, MeshingStageIdentityV2, MeshingStageResultIdentityV2,
-    MeshingValidationIdentityV2, PersistentEntityId, PersistentEntityKind, StableDigest,
-    MESHING_IDENTITY_SCHEMA_VERSION,
+    MeshingValidationIdentityV2, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
 };
 pub use manifest::{
     MeshingChunkDescriptorV2, MeshingChunkMediaTypeV2, MeshingManifestDispositionV2,
@@ -56,7 +54,7 @@ pub use request::{
     MeshingResourceBudgetV2, SurfaceQualityTargetsV2, VolumeQualityTargetsV2,
     MESHING_REQUEST_SCHEMA_VERSION,
 };
-pub use tolerance::GeometryTolerancePolicy;
+pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
 pub use workload::{
     MeshingCapabilityRequirementV2, MeshingProgressV2, MeshingWorkloadRequestV2,
     MeshingWorkloadResultV2, MESHING_PROGRESS_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,

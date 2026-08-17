@@ -20,3 +20,12 @@ impl std::fmt::Display for MeshingContractError {
 }
 
 impl std::error::Error for MeshingContractError {}
+
+impl From<runmat_geometry_core::GeometryContractError> for MeshingContractError {
+    fn from(error: runmat_geometry_core::GeometryContractError) -> Self {
+        Self {
+            field: error.field,
+            reason: error.reason,
+        }
+    }
+}

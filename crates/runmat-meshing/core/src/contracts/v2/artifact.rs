@@ -218,7 +218,7 @@ fn validate_region_id(id: &PersistentEntityId) -> Result<(), MeshingContractErro
             "must identify a persistent region entity",
         ));
     }
-    id.validate()
+    Ok(id.validate()?)
 }
 
 fn validate_provenance(

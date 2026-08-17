@@ -9,8 +9,9 @@ pub use model::{
     AssemblyNode, CadColorEvidence, CadCurveEvaluationSample, CadCurveEvaluationSampleSource,
     CadCurveEvaluator, CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource,
     CadFaceEvaluator, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
-    CadSemanticKind, EntityIdRange, GeometryAsset, GeometrySource, MaterialEvidence,
-    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
+    CadSemanticKind, EntityIdRange, GeometryAsset, GeometryContractError, GeometrySource,
+    GeometryTolerancePolicy, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
+    MeshKind, PersistentEntityId, PersistentEntityKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 pub use selection::{EntityKind, EntityRef};
