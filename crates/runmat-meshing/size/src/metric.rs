@@ -216,6 +216,24 @@ impl MetricFieldRequest {
         }
         Ok(())
     }
+
+    pub fn intersect_contributions(
+        &self,
+        additional: impl IntoIterator<Item = MetricContribution>,
+    ) -> Result<Self, MetricContractError> {
+        self.validate()?;
+        let mut resolved = self.clone();
+        for contribution in additional {
+            contribution.validate()?;
+            resolved.contributions.push(contribution);
+        }
+        resolved.contributions.sort_by(compare_contributions);
+        resolved
+            .contributions
+            .dedup_by(|left, right| compare_contributions(left, right) == Ordering::Equal);
+        resolved.validate()?;
+        Ok(resolved)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

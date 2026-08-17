@@ -4,6 +4,7 @@ mod codec;
 mod discretize;
 mod error;
 mod geometric_validation;
+mod geometry_metric;
 mod identity;
 mod resolved_metric;
 mod types;
@@ -22,6 +23,7 @@ pub use error::{SharedCurveError, SharedCurveErrorKind};
 pub use geometric_validation::{
     validate_shared_curve_geometry, SharedCurveGeometryValidationReport,
 };
+pub use geometry_metric::derive_curve_geometry_metric;
 pub use identity::{shared_curve_node_id, shared_degenerate_curve_node_id};
 pub use resolved_metric::ResolvedCurveMetricField;
 pub use types::{

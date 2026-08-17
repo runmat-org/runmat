@@ -11,9 +11,9 @@ use runmat_meshing_core::{
     MESHING_FAILURE_SCHEMA_VERSION,
 };
 use runmat_meshing_curve::{
-    discretize_shared_curve_partition, encode_shared_curve_batch, CurveResolutionPolicy,
-    ResolvedCurveMetricField, SharedCurveDiscretizationOptions, SharedCurveError,
-    SharedCurveErrorKind, SHARED_CURVE_BATCH_SCHEMA_VERSION,
+    derive_curve_geometry_metric, discretize_shared_curve_partition, encode_shared_curve_batch,
+    CurveResolutionPolicy, ResolvedCurveMetricField, SharedCurveDiscretizationOptions,
+    SharedCurveError, SharedCurveErrorKind, SHARED_CURVE_BATCH_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -98,11 +98,17 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
                     &error.to_string(),
                 )
             })?;
-        let metric = ResolvedCurveMetricField::new(
+        let control = invocation.control.geometry_evaluation_control();
+        let metric_request = derive_curve_geometry_metric(
             &geometry.topology,
+            evaluator.as_ref(),
+            &control,
             &invocation.host.resolved_request.metric,
+            invocation.host.resolved_request.quality.curve,
         )
         .map_err(map_curve_error)?;
+        let metric = ResolvedCurveMetricField::new(&geometry.topology, &metric_request)
+            .map_err(map_curve_error)?;
         if invocation.host.resolved_request.resources.maximum_nodes < 2 {
             return Err(curve_failure(
                 MeshingFailureCategory::NodeBudgetExceeded,
@@ -112,7 +118,6 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
             ));
         }
         let options = curve_options(invocation.host);
-        let control = invocation.control.geometry_evaluation_control();
         let batch = discretize_shared_curve_partition(
             &geometry.topology,
             evaluator.as_ref(),

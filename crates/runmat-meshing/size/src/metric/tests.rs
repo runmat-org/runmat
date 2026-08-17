@@ -91,6 +91,43 @@ fn contract_rejects_duplicate_and_ambiguous_global_contributions() {
     );
 }
 
+#[test]
+fn request_intersects_and_canonicalizes_derived_contributions() {
+    let edge_a = id(PersistentEntityKind::Edge, "edge-a");
+    let edge_b = id(PersistentEntityKind::Edge, "edge-b");
+    let unit = MetricTensor3::isotropic_length_m(1.0).unwrap();
+    let request = MetricFieldRequest {
+        combination: MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: unit,
+        maximum_grading_ratio: 1.25,
+        contributions: Vec::new(),
+    };
+    let contribution = |entity_id| MetricContribution {
+        source: MetricSourceKind::Curve,
+        scope: MetricContributionScope::Entity { entity_id },
+        metric: unit,
+    };
+
+    let resolved = request
+        .intersect_contributions([
+            contribution(edge_b),
+            contribution(edge_a.clone()),
+            contribution(edge_a),
+        ])
+        .unwrap();
+
+    assert_eq!(resolved.contributions.len(), 2);
+    let MetricContributionScope::Entity { entity_id: first } = &resolved.contributions[0].scope
+    else {
+        panic!("derived curve contribution must remain entity-scoped")
+    };
+    let MetricContributionScope::Entity { entity_id: second } = &resolved.contributions[1].scope
+    else {
+        panic!("derived curve contribution must remain entity-scoped")
+    };
+    assert!(first < second);
+}
+
 fn id(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
     PersistentEntityId {
         kind,

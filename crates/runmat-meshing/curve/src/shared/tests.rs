@@ -552,6 +552,47 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
 }
 
 #[test]
+fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let request = runmat_meshing_core::MetricFieldRequest {
+        combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
+        maximum_grading_ratio: 1.3,
+        contributions: Vec::new(),
+    };
+    let quality = runmat_meshing_core::CurveQualityTargets {
+        maximum_chordal_deviation_m: 0.001,
+        maximum_tangent_change_degrees: 5.0,
+        minimum_metric_edge_length: 0.01,
+        maximum_metric_edge_length: 1.5,
+    };
+    let derived =
+        derive_curve_geometry_metric(&topology, &evaluator, &UnlimitedControl, &request, quality)
+            .unwrap();
+
+    assert_eq!(derived.contributions.len(), 1);
+    assert_eq!(
+        derived.contributions[0].source,
+        runmat_meshing_core::MetricSourceKind::Curve
+    );
+    assert!(derived.contributions[0].metric.xx > 100.0);
+    let cancelled =
+        derive_curve_geometry_metric(&topology, &evaluator, &CancelledControl, &request, quality)
+            .unwrap_err();
+    assert_eq!(
+        cancelled.kind,
+        SharedCurveErrorKind::GeometryEvaluation(
+            runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled
+        )
+    );
+}
+
+#[test]
 fn canonical_edge_batches_join_independently_of_layout_and_completion_order() {
     let (document, base_topology, registry) = runmat_geometry_fixtures::exact_circle();
     let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
