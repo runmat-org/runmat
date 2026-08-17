@@ -1495,6 +1495,7 @@ pub struct KernelLaunchTelemetry {
 pub type AccelProviderFuture<'a, T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + 'a>>;
 pub type AccelDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostTensorOwned>;
 pub type AccelIntegerDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostIntegerTensorOwned>;
+pub type AccelNumericDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostNumericTensorOwned>;
 
 fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, T> {
     Box::pin(async move { Err(anyhow::anyhow!(message)) })
@@ -1504,6 +1505,84 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
+
+    /// Upload one native numeric payload through the shared all-class transfer
+    /// contract. Providers should override this method as they adopt native
+    /// single and complex integer storage. The default adapter preserves exact
+    /// existing double and real-integer routes and rejects every representation
+    /// those routes cannot express.
+    fn upload_numeric(
+        &self,
+        host: &crate::HostNumericTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        host.validate()?;
+        match (host.data, host.storage) {
+            (crate::HostNumericDataView::F64(data), GpuTensorStorage::Real) => {
+                self.upload(&crate::HostTensorView {
+                    data,
+                    shape: host.shape,
+                })
+            }
+            (data, GpuTensorStorage::Real) if data.element_type().integer_type().is_some() => {
+                let data = match data {
+                    crate::HostNumericDataView::I8(data) => crate::HostIntegerDataView::I8(data),
+                    crate::HostNumericDataView::I16(data) => crate::HostIntegerDataView::I16(data),
+                    crate::HostNumericDataView::I32(data) => crate::HostIntegerDataView::I32(data),
+                    crate::HostNumericDataView::I64(data) => crate::HostIntegerDataView::I64(data),
+                    crate::HostNumericDataView::U8(data) => crate::HostIntegerDataView::U8(data),
+                    crate::HostNumericDataView::U16(data) => crate::HostIntegerDataView::U16(data),
+                    crate::HostNumericDataView::U32(data) => crate::HostIntegerDataView::U32(data),
+                    crate::HostNumericDataView::U64(data) => crate::HostIntegerDataView::U64(data),
+                    crate::HostNumericDataView::F64(_) | crate::HostNumericDataView::F32(_) => {
+                        unreachable!("guarded integer numeric transfer")
+                    }
+                };
+                self.upload_integer(&crate::HostIntegerTensorView {
+                    data,
+                    shape: host.shape,
+                })
+            }
+            (data, storage) => Err(anyhow!(
+                "provider must implement native {:?} {:?} uploads through upload_numeric",
+                data.element_type(),
+                storage
+            )),
+        }
+    }
+
+    /// Download one native numeric payload through the shared all-class
+    /// transfer contract. The default adapter keeps exact real-integer and
+    /// native-double downloads available while refusing to present widened
+    /// single data as native `f32`.
+    fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            let storage = handle_storage(h);
+            if handle_integer_type(h).is_some() {
+                if storage != GpuTensorStorage::Real {
+                    return Err(anyhow!(
+                        "provider must implement native complex integer downloads through download_numeric"
+                    ));
+                }
+                let legacy = self.download_integer(h).await?;
+                let numeric: crate::HostNumericTensorOwned = legacy.into();
+                numeric.validate()?;
+                return Ok(numeric);
+            }
+            if handle_precision(h) == Some(ProviderPrecision::F32) {
+                return Err(anyhow!(
+                    "provider must implement native single downloads through download_numeric"
+                ));
+            }
+            let legacy = self.download(h).await?;
+            let numeric = crate::HostNumericTensorOwned {
+                data: crate::HostNumericDataOwned::F64(legacy.data),
+                shape: legacy.shape,
+                storage: legacy.storage,
+            };
+            numeric.validate()?;
+            Ok(numeric)
+        })
+    }
 
     /// Upload exact native integer storage without converting through f64.
     /// Providers that do not expose native integer buffers must reject this
@@ -3648,6 +3727,264 @@ pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<
     None
 }
 
+/// Physical element type carried by a numeric provider transfer.
+///
+/// This type is exhaustive over RunMat's real numeric classes and lives in the
+/// acceleration API so providers do not depend on runtime or builtin storage
+/// types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NumericElementType {
+    F64,
+    F32,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+impl NumericElementType {
+    pub const fn element_size(self) -> usize {
+        match self {
+            Self::F64 | Self::I64 | Self::U64 => 8,
+            Self::F32 | Self::I32 | Self::U32 => 4,
+            Self::I16 | Self::U16 => 2,
+            Self::I8 | Self::U8 => 1,
+        }
+    }
+
+    pub const fn class_name(self) -> &'static str {
+        match self {
+            Self::F64 => "double",
+            Self::F32 => "single",
+            Self::I8 => "int8",
+            Self::I16 => "int16",
+            Self::I32 => "int32",
+            Self::I64 => "int64",
+            Self::U8 => "uint8",
+            Self::U16 => "uint16",
+            Self::U32 => "uint32",
+            Self::U64 => "uint64",
+        }
+    }
+
+    pub const fn precision(self) -> Option<ProviderPrecision> {
+        match self {
+            Self::F64 => Some(ProviderPrecision::F64),
+            Self::F32 => Some(ProviderPrecision::F32),
+            Self::I8
+            | Self::I16
+            | Self::I32
+            | Self::I64
+            | Self::U8
+            | Self::U16
+            | Self::U32
+            | Self::U64 => None,
+        }
+    }
+
+    pub const fn integer_type(self) -> Option<IntegerElementType> {
+        match self {
+            Self::F64 | Self::F32 => None,
+            Self::I8 => Some(IntegerElementType::I8),
+            Self::I16 => Some(IntegerElementType::I16),
+            Self::I32 => Some(IntegerElementType::I32),
+            Self::I64 => Some(IntegerElementType::I64),
+            Self::U8 => Some(IntegerElementType::U8),
+            Self::U16 => Some(IntegerElementType::U16),
+            Self::U32 => Some(IntegerElementType::U32),
+            Self::U64 => Some(IntegerElementType::U64),
+        }
+    }
+}
+
+impl From<IntegerElementType> for NumericElementType {
+    fn from(value: IntegerElementType) -> Self {
+        match value {
+            IntegerElementType::I8 => Self::I8,
+            IntegerElementType::I16 => Self::I16,
+            IntegerElementType::I32 => Self::I32,
+            IntegerElementType::I64 => Self::I64,
+            IntegerElementType::U8 => Self::U8,
+            IntegerElementType::U16 => Self::U16,
+            IntegerElementType::U32 => Self::U32,
+            IntegerElementType::U64 => Self::U64,
+        }
+    }
+}
+
+/// Borrowed native numeric buffer used for provider transfers.
+#[derive(Debug, Clone, Copy)]
+pub enum HostNumericDataView<'a> {
+    F64(&'a [f64]),
+    F32(&'a [f32]),
+    I8(&'a [i8]),
+    I16(&'a [i16]),
+    I32(&'a [i32]),
+    I64(&'a [i64]),
+    U8(&'a [u8]),
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+    U64(&'a [u64]),
+}
+
+impl HostNumericDataView<'_> {
+    pub const fn element_type(self) -> NumericElementType {
+        match self {
+            Self::F64(_) => NumericElementType::F64,
+            Self::F32(_) => NumericElementType::F32,
+            Self::I8(_) => NumericElementType::I8,
+            Self::I16(_) => NumericElementType::I16,
+            Self::I32(_) => NumericElementType::I32,
+            Self::I64(_) => NumericElementType::I64,
+            Self::U8(_) => NumericElementType::U8,
+            Self::U16(_) => NumericElementType::U16,
+            Self::U32(_) => NumericElementType::U32,
+            Self::U64(_) => NumericElementType::U64,
+        }
+    }
+
+    pub const fn len(self) -> usize {
+        match self {
+            Self::F64(data) => data.len(),
+            Self::F32(data) => data.len(),
+            Self::I8(data) => data.len(),
+            Self::I16(data) => data.len(),
+            Self::I32(data) => data.len(),
+            Self::I64(data) => data.len(),
+            Self::U8(data) => data.len(),
+            Self::U16(data) => data.len(),
+            Self::U32(data) => data.len(),
+            Self::U64(data) => data.len(),
+        }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Borrowed tensor transfer with one native numeric payload and explicit
+/// real/complex layout.
+#[derive(Debug, Clone, Copy)]
+pub struct HostNumericTensorView<'a> {
+    pub data: HostNumericDataView<'a>,
+    pub shape: &'a [usize],
+    pub storage: GpuTensorStorage,
+}
+
+impl HostNumericTensorView<'_> {
+    pub fn validate(self) -> anyhow::Result<()> {
+        let logical_len = self
+            .shape
+            .iter()
+            .try_fold(1usize, |len, &dim| len.checked_mul(dim))
+            .ok_or_else(|| anyhow!("numeric transfer shape overflows usize"))?;
+        let expected = match self.storage {
+            GpuTensorStorage::Real => logical_len,
+            GpuTensorStorage::ComplexInterleaved => logical_len
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("complex numeric transfer length overflows usize"))?,
+        };
+        if self.data.len() != expected {
+            return Err(anyhow!(
+                "{} transfer has {} elements for shape {:?} and {:?} storage; expected {}",
+                self.data.element_type().class_name(),
+                self.data.len(),
+                self.shape,
+                self.storage,
+                expected
+            ));
+        }
+        Ok(())
+    }
+
+    pub const fn element_type(self) -> NumericElementType {
+        self.data.element_type()
+    }
+}
+
+/// Owned native numeric buffer returned by a provider download.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostNumericDataOwned {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+impl HostNumericDataOwned {
+    pub const fn element_type(&self) -> NumericElementType {
+        match self {
+            Self::F64(_) => NumericElementType::F64,
+            Self::F32(_) => NumericElementType::F32,
+            Self::I8(_) => NumericElementType::I8,
+            Self::I16(_) => NumericElementType::I16,
+            Self::I32(_) => NumericElementType::I32,
+            Self::I64(_) => NumericElementType::I64,
+            Self::U8(_) => NumericElementType::U8,
+            Self::U16(_) => NumericElementType::U16,
+            Self::U32(_) => NumericElementType::U32,
+            Self::U64(_) => NumericElementType::U64,
+        }
+    }
+
+    pub fn as_view(&self) -> HostNumericDataView<'_> {
+        match self {
+            Self::F64(data) => HostNumericDataView::F64(data),
+            Self::F32(data) => HostNumericDataView::F32(data),
+            Self::I8(data) => HostNumericDataView::I8(data),
+            Self::I16(data) => HostNumericDataView::I16(data),
+            Self::I32(data) => HostNumericDataView::I32(data),
+            Self::I64(data) => HostNumericDataView::I64(data),
+            Self::U8(data) => HostNumericDataView::U8(data),
+            Self::U16(data) => HostNumericDataView::U16(data),
+            Self::U32(data) => HostNumericDataView::U32(data),
+            Self::U64(data) => HostNumericDataView::U64(data),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.as_view().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Owned tensor transfer with one native numeric payload and explicit
+/// real/complex layout.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostNumericTensorOwned {
+    pub data: HostNumericDataOwned,
+    pub shape: Vec<usize>,
+    pub storage: GpuTensorStorage,
+}
+
+impl HostNumericTensorOwned {
+    pub fn as_view(&self) -> HostNumericTensorView<'_> {
+        HostNumericTensorView {
+            data: self.data.as_view(),
+            shape: &self.shape,
+            storage: self.storage,
+        }
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.as_view().validate()
+    }
+}
+
 // Minimal host tensor views to avoid depending on runmat-builtins and cycles
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HostTensorOwned {
@@ -3747,6 +4084,76 @@ impl HostIntegerDataOwned {
 pub struct HostIntegerTensorOwned {
     pub data: HostIntegerDataOwned,
     pub shape: Vec<usize>,
+}
+
+impl<'a> From<HostTensorView<'a>> for HostNumericTensorView<'a> {
+    fn from(value: HostTensorView<'a>) -> Self {
+        Self {
+            data: HostNumericDataView::F64(value.data),
+            shape: value.shape,
+            storage: GpuTensorStorage::Real,
+        }
+    }
+}
+
+impl<'a> From<&'a HostTensorOwned> for HostNumericTensorView<'a> {
+    fn from(value: &'a HostTensorOwned) -> Self {
+        Self {
+            data: HostNumericDataView::F64(&value.data),
+            shape: &value.shape,
+            storage: value.storage,
+        }
+    }
+}
+
+impl<'a> From<HostIntegerDataView<'a>> for HostNumericDataView<'a> {
+    fn from(value: HostIntegerDataView<'a>) -> Self {
+        match value {
+            HostIntegerDataView::I8(data) => Self::I8(data),
+            HostIntegerDataView::I16(data) => Self::I16(data),
+            HostIntegerDataView::I32(data) => Self::I32(data),
+            HostIntegerDataView::I64(data) => Self::I64(data),
+            HostIntegerDataView::U8(data) => Self::U8(data),
+            HostIntegerDataView::U16(data) => Self::U16(data),
+            HostIntegerDataView::U32(data) => Self::U32(data),
+            HostIntegerDataView::U64(data) => Self::U64(data),
+        }
+    }
+}
+
+impl<'a> From<HostIntegerTensorView<'a>> for HostNumericTensorView<'a> {
+    fn from(value: HostIntegerTensorView<'a>) -> Self {
+        Self {
+            data: value.data.into(),
+            shape: value.shape,
+            storage: GpuTensorStorage::Real,
+        }
+    }
+}
+
+impl From<HostIntegerDataOwned> for HostNumericDataOwned {
+    fn from(value: HostIntegerDataOwned) -> Self {
+        match value {
+            HostIntegerDataOwned::I8(data) => Self::I8(data),
+            HostIntegerDataOwned::I16(data) => Self::I16(data),
+            HostIntegerDataOwned::I32(data) => Self::I32(data),
+            HostIntegerDataOwned::I64(data) => Self::I64(data),
+            HostIntegerDataOwned::U8(data) => Self::U8(data),
+            HostIntegerDataOwned::U16(data) => Self::U16(data),
+            HostIntegerDataOwned::U32(data) => Self::U32(data),
+            HostIntegerDataOwned::U64(data) => Self::U64(data),
+        }
+    }
+}
+
+impl From<HostIntegerTensorOwned> for HostNumericTensorOwned {
+    fn from(value: HostIntegerTensorOwned) -> Self {
+        Self {
+            data: value.data.into(),
+            shape: value.shape,
+            storage: GpuTensorStorage::Real,
+        }
+    }
 }
 
 /// Lightweight 1-D axis view used by provider meshgrid hooks.
@@ -3968,6 +4375,60 @@ mod tests {
         spawn_concurrency: SpawnHandleConcurrency,
     }
 
+    struct LegacyNumericProvider;
+
+    impl AccelProvider for LegacyNumericProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            assert_eq!(host.data, &[1.0, 2.0]);
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: 404,
+                buffer_id: 1,
+            })
+        }
+
+        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostTensorOwned {
+                    data: vec![1.0, 2.0],
+                    shape: h.shape.clone(),
+                    storage: GpuTensorStorage::Real,
+                })
+            })
+        }
+
+        fn upload_integer(&self, host: &HostIntegerTensorView) -> anyhow::Result<GpuTensorHandle> {
+            assert!(matches!(host.data, HostIntegerDataView::U64([1, u64::MAX])));
+            let handle = GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: 404,
+                buffer_id: 2,
+            };
+            set_handle_integer_type(&handle, IntegerElementType::U64);
+            Ok(handle)
+        }
+
+        fn download_integer<'a>(
+            &'a self,
+            h: &'a GpuTensorHandle,
+        ) -> AccelIntegerDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostIntegerTensorOwned {
+                    data: HostIntegerDataOwned::U64(vec![1, u64::MAX]),
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "legacy-numeric-provider".to_string()
+        }
+    }
+
     impl AccelProvider for TestProvider {
         fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
             Err(anyhow!("test provider upload should not be called"))
@@ -4011,6 +4472,20 @@ mod tests {
         spawn_concurrency: SpawnHandleConcurrency::CopyOnWrite,
     };
 
+    fn resolve_ready<F: Future>(future: F) -> F::Output {
+        struct NoopWake;
+        impl std::task::Wake for NoopWake {
+            fn wake(self: std::sync::Arc<Self>) {}
+        }
+        let waker = std::task::Waker::from(std::sync::Arc::new(NoopWake));
+        let mut context = std::task::Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => output,
+            std::task::Poll::Pending => panic!("test adapter future unexpectedly pending"),
+        }
+    }
+
     fn register_test_providers() {
         clear_provider();
         unsafe {
@@ -4025,6 +4500,200 @@ mod tests {
             device_id,
             buffer_id: 42,
         }
+    }
+
+    #[test]
+    fn numeric_transfer_contract_is_exhaustive_and_native() {
+        let f64_values = [1.0_f64, 2.0];
+        let f32_values = [1.0_f32, 2.0];
+        let i8_values = [1_i8, 2];
+        let i16_values = [1_i16, 2];
+        let i32_values = [1_i32, 2];
+        let i64_values = [1_i64, 9_007_199_254_740_993];
+        let u8_values = [1_u8, 2];
+        let u16_values = [1_u16, 2];
+        let u32_values = [1_u32, 2];
+        let u64_values = [1_u64, 9_007_199_254_740_993];
+        let cases = [
+            (
+                HostNumericDataView::F64(&f64_values),
+                NumericElementType::F64,
+            ),
+            (
+                HostNumericDataView::F32(&f32_values),
+                NumericElementType::F32,
+            ),
+            (HostNumericDataView::I8(&i8_values), NumericElementType::I8),
+            (
+                HostNumericDataView::I16(&i16_values),
+                NumericElementType::I16,
+            ),
+            (
+                HostNumericDataView::I32(&i32_values),
+                NumericElementType::I32,
+            ),
+            (
+                HostNumericDataView::I64(&i64_values),
+                NumericElementType::I64,
+            ),
+            (HostNumericDataView::U8(&u8_values), NumericElementType::U8),
+            (
+                HostNumericDataView::U16(&u16_values),
+                NumericElementType::U16,
+            ),
+            (
+                HostNumericDataView::U32(&u32_values),
+                NumericElementType::U32,
+            ),
+            (
+                HostNumericDataView::U64(&u64_values),
+                NumericElementType::U64,
+            ),
+        ];
+
+        for (data, element_type) in cases {
+            let transfer = HostNumericTensorView {
+                data,
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            };
+            transfer.validate().expect("matching native transfer");
+            assert_eq!(transfer.element_type(), element_type);
+            assert_eq!(element_type.class_name(), data.element_type().class_name());
+            assert_eq!(
+                element_type.element_size(),
+                data.element_type().element_size()
+            );
+        }
+
+        assert_eq!(
+            NumericElementType::F64.precision(),
+            Some(ProviderPrecision::F64)
+        );
+        assert_eq!(
+            NumericElementType::F32.precision(),
+            Some(ProviderPrecision::F32)
+        );
+        assert_eq!(
+            NumericElementType::U64.integer_type(),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            NumericElementType::I64.integer_type(),
+            Some(IntegerElementType::I64)
+        );
+        assert_eq!(NumericElementType::F64.integer_type(), None);
+    }
+
+    #[test]
+    fn numeric_transfer_contract_validates_real_and_complex_lengths() {
+        let real = HostNumericTensorOwned {
+            data: HostNumericDataOwned::F32(vec![1.0, 2.0]),
+            shape: vec![2, 1],
+            storage: GpuTensorStorage::Real,
+        };
+        real.validate().expect("native single real transfer");
+
+        let complex = HostNumericTensorOwned {
+            data: HostNumericDataOwned::U64(vec![1, u64::MAX, 2, u64::MAX - 1]),
+            shape: vec![1, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        };
+        complex.validate().expect("native complex integer transfer");
+
+        let mismatch = HostNumericTensorView {
+            data: HostNumericDataView::I16(&[1, 2, 3]),
+            shape: &[2, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        let error = mismatch.validate().expect_err("shape mismatch must reject");
+        assert!(error.to_string().contains("expected 4"));
+
+        let overflow = HostNumericTensorView {
+            data: HostNumericDataView::F64(&[]),
+            shape: &[usize::MAX, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        assert!(overflow.validate().is_err());
+    }
+
+    #[test]
+    fn numeric_transfer_default_adapter_preserves_double_and_integer_storage() {
+        let provider = LegacyNumericProvider;
+        let double = HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.0, 2.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        let double_handle = provider
+            .upload_numeric(&double)
+            .expect("double upload adapter");
+        let double_download = resolve_ready(provider.download_numeric(&double_handle))
+            .expect("double download adapter");
+        assert_eq!(
+            double_download.data,
+            HostNumericDataOwned::F64(vec![1.0, 2.0])
+        );
+
+        let integer = HostNumericTensorView {
+            data: HostNumericDataView::U64(&[1, u64::MAX]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        let integer_handle = provider
+            .upload_numeric(&integer)
+            .expect("integer upload adapter");
+        let integer_download = resolve_ready(provider.download_numeric(&integer_handle))
+            .expect("integer download adapter");
+        assert_eq!(
+            integer_download.data,
+            HostNumericDataOwned::U64(vec![1, u64::MAX])
+        );
+        clear_handle_metadata(&integer_handle);
+    }
+
+    #[test]
+    fn numeric_transfer_default_adapter_rejects_widened_single_and_complex_integer() {
+        let provider = LegacyNumericProvider;
+        let single = HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        };
+        assert!(provider.upload_numeric(&single).is_err());
+
+        let complex_integer = HostNumericTensorView {
+            data: HostNumericDataView::I16(&[1, 2, 3, 4]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        };
+        assert!(provider.upload_numeric(&complex_integer).is_err());
+
+        let single_handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 404,
+            buffer_id: 3,
+        };
+        set_handle_precision(&single_handle, ProviderPrecision::F32);
+        let error = resolve_ready(provider.download_numeric(&single_handle))
+            .expect_err("widened single download must reject");
+        assert!(error.to_string().contains("native single"));
+        clear_handle_metadata(&single_handle);
+
+        let complex_integer_handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 404,
+            buffer_id: 4,
+        };
+        set_handle_integer_type(&complex_integer_handle, IntegerElementType::I16);
+        set_handle_storage(
+            &complex_integer_handle,
+            GpuTensorStorage::ComplexInterleaved,
+        );
+        let error = resolve_ready(provider.download_numeric(&complex_integer_handle))
+            .expect_err("complex integer default download must reject");
+        assert!(error.to_string().contains("complex integer"));
+        clear_handle_metadata(&complex_integer_handle);
     }
 
     #[test]

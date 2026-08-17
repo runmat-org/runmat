@@ -96,3 +96,15 @@ count_metric \
   crates \
   'HostIntegerTensorView' \
   crates
+
+count_metric \
+  unified_numeric_provider_view \
+  crates \
+  'HostNumericTensorView' \
+  crates
+
+count_metric \
+  unified_numeric_provider_owned \
+  crates \
+  'HostNumericTensorOwned' \
+  crates
