@@ -1,11 +1,42 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use super::axis_ticks::{axis_ticks_builtin, TickAxis};
 use crate::builtins::plotting::type_resolvers::get_type;
+
+const YTICKS_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "yticks-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer alias for an encoded axes handle",
+    error_identifier: Some("RunMat:compatibility:YticksIntegerAxesHandleExtension"),
+};
+pub const YTICKS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [YTICKS_INTEGER_AXES_EXTENSION];
+const YTICKS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "ticks",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "All eight integer classes are documented for increasing tick vectors.",
+}];
+const YTICKS_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
+    }];
+pub const YTICKS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "ticks = yticks(integer_ticks)", inputs: &YTICKS_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Integer ticks are checked in their native class for strict increase before crossing the graphics coordinate boundary; queried values are double." },
+    BuiltinIntegerCapabilityDescriptor { form: "ticks = yticks(integer_ax, ticks)", inputs: &YTICKS_INTEGER_AXES_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Strict mode rejects the encoded-handle alias before graphics state access." },
+];
 
 const YTICKS_OUTPUT_TICKS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ticks",
@@ -113,9 +144,21 @@ pub const YTICKS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::yticks::YTICKS_DESCRIPTOR),
+    extensions(crate::builtins::plotting::yticks::YTICKS_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::yticks::YTICKS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::yticks"
 )]
 pub fn yticks_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.len() == 2
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &YTICKS_INTEGER_AXES_EXTENSION,
+            "yticks",
+        )?;
+    }
     axis_ticks_builtin("yticks", TickAxis::Y, args)
 }
 

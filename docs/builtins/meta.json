@@ -173396,7 +173396,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "xmlread accepts a text filename only; integer and resident numeric inputs reject before file or provider access."
+      }
     },
     {
       "name": "xor",
@@ -173659,6 +173663,70 @@
           "when": "Internal plotting state update fails.",
           "message": "xtickangle: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "xtickangle-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:XtickangleIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "xtickangle(integer_angle)",
+          "inputs": [
+            {
+              "name": "angle",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric-scalar rotation contract accepts integer degree values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The finite angle crosses the graphics rotation boundary; queries return double."
+        },
+        {
+          "form": "xtickangle(integer_ax, angle)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for encoded axes handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects before graphics state access."
+        }
       ]
     },
     {
@@ -173851,7 +173919,19 @@
           "when": "Internal plotting state update fails.",
           "message": "xticklabels: internal operation failed"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "xticklabels-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:XticklabelsIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Tick labels accept text and categorical containers; integer label payloads are invalid, while a typed-integer encoded axes alias is a separately gated RunMat extension."
+      }
     },
     {
       "name": "xticks",
@@ -173955,6 +174035,70 @@
           "when": "Internal plotting state update fails.",
           "message": "xticks: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "xticks-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:XticksIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ticks = xticks(integer_ticks)",
+          "inputs": [
+            {
+              "name": "ticks",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for increasing tick vectors."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer ticks are checked in their native class for strict increase before crossing the graphics coordinate boundary; queried values are double."
+        },
+        {
+          "form": "ticks = xticks(integer_ax, ticks)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for encoded axes handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects the encoded-handle alias before graphics state access."
+        }
       ]
     },
     {
@@ -173971,6 +174115,34 @@
               "arity": "Required",
               "default": null,
               "description": "Datetime input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric scalar/tensor result."
+            }
+          ]
+        },
+        {
+          "label": "X = year(t, yearTypeOrFormat)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy serial date number or date text."
+            },
+            {
+              "name": "F",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy datestr input format."
             }
           ],
           "outputs": [
@@ -174002,6 +174174,55 @@
           "identifier": "RunMat:datetime:Internal",
           "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
           "message": "datetime: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "year-typed-legacy-serial-input",
+          "mode": "RunMatOnly",
+          "description": "year with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+          "error_identifier": "RunMat:compatibility:YearTypedLegacySerialExtension"
+        },
+        {
+          "id": "datetime-logical-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Logical values in datetime numeric positions are a RunMat-only compatibility extension",
+          "error_identifier": "RunMat:compatibility:DatetimeLogicalInputExtension"
+        },
+        {
+          "id": "datetime-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Gathering resident numeric input into a host datetime object is a RunMat-only extension",
+          "error_identifier": "RunMat:compatibility:DatetimeGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "year(integer_serial, F?)",
+          "inputs": [
+            {
+              "name": "legacy serial date number",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The retained public legacy API documents serial date numbers but does not enumerate typed integer storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Typed integer serials are gated before one checked serial-date conversion and return host double values with the input shape."
         }
       ]
     },
@@ -174136,6 +174357,97 @@
           "when": "Internal plotting state update fails.",
           "message": "ylabel: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ylabel-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:YlabelIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = ylabel(integer_txt)",
+          "inputs": [
+            {
+              "name": "txt",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A scalar integer label is formatted from its exact signed or unsigned decimal value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact decimal spelling becomes the stored String property."
+        },
+        {
+          "form": "h = ylabel(..., 'FontSize', integer_size)",
+          "inputs": [
+            {
+              "name": "FontSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for positive FontSize values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The validated positive size crosses the graphics scalar boundary."
+        },
+        {
+          "form": "h = ylabel(integer_ax, txt, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for encoded axes handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects before graphics state access."
+        }
       ]
     },
     {
@@ -174211,6 +174523,35 @@
           "identifier": "RunMat:ylim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "ylim: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "limits = ylim(integer_limits)",
+          "inputs": [
+            {
+              "name": "limits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for the two-element limits vector."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "RunMat compares same-class integer endpoints exactly, then validates that they remain distinct in the graphics coordinate domain; queried limits are double."
         }
       ]
     },
@@ -174344,6 +174685,116 @@
           "identifier": "RunMat:yline:Internal",
           "when": "Internal plotting state update fails.",
           "message": "yline: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = yline(integer_y, ...)",
+          "inputs": [
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for reference-line coordinates."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Coordinates cross the graphics floating-point boundary; returned graphics handles are double."
+        },
+        {
+          "form": "h = yline(..., 'Color', integer_rgb)",
+          "inputs": [
+            {
+              "name": "Color",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer RGB components are accepted when every component is zero or one."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Validated RGB components cross the renderer color boundary."
+        },
+        {
+          "form": "h = yline(..., 'LineWidth', integer_width)",
+          "inputs": [
+            {
+              "name": "LineWidth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer line widths are accepted when positive."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The validated positive width crosses the renderer scalar boundary."
+        },
+        {
+          "form": "h = yline(..., 'Visible', integer_visible)",
+          "inputs": [
+            {
+              "name": "Visible",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric visibility values must be exactly zero or one."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The integer is classified exactly as zero or one before graphics state is updated."
         }
       ]
     },
@@ -174499,6 +174950,70 @@
           "identifier": "RunMat:ytickangle:Internal",
           "when": "Internal plotting state update fails.",
           "message": "ytickangle: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ytickangle-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:YtickangleIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ytickangle(integer_angle)",
+          "inputs": [
+            {
+              "name": "angle",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric-scalar rotation contract accepts integer degree values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The finite angle crosses the graphics rotation boundary; queries return double."
+        },
+        {
+          "form": "ytickangle(integer_ax, angle)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for encoded axes handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects before graphics state access."
         }
       ]
     },
@@ -174692,7 +175207,19 @@
           "when": "Internal plotting state update fails.",
           "message": "yticklabels: internal operation failed"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "yticklabels-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:YticklabelsIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Tick labels accept text and categorical containers; integer label payloads are invalid, while a typed-integer encoded axes alias is a separately gated RunMat extension."
+      }
     },
     {
       "name": "yticks",
@@ -174796,6 +175323,70 @@
           "when": "Internal plotting state update fails.",
           "message": "yticks: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "yticks-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:YticksIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ticks = yticks(integer_ticks)",
+          "inputs": [
+            {
+              "name": "ticks",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for increasing tick vectors."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer ticks are checked in their native class for strict increase before crossing the graphics coordinate boundary; queried values are double."
+        },
+        {
+          "form": "ticks = yticks(integer_ax, ticks)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for encoded axes handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects the encoded-handle alias before graphics state access."
+        }
       ]
     },
     {
@@ -174850,7 +175441,11 @@
           "when": "Root calculation or output construction failed.",
           "message": "zero: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "zero accepts a dynamic-system model; fundamental integer values are invalid model inputs and reject before model payload or provider access."
+      }
     },
     {
       "name": "zeros",
@@ -175043,6 +175638,119 @@
           "when": "The 'like' keyword is specified more than once.",
           "message": "zeros: multiple 'like' specifications are not supported"
         }
+      ],
+      "extensions": [
+        {
+          "id": "zeros-column-size-vector",
+          "mode": "RunMatOnly",
+          "description": "Allow a column vector where the public size-vector form requires a row vector",
+          "error_identifier": "RunMat:compatibility:ZerosColumnSizeVectorExtension"
+        },
+        {
+          "id": "zeros-resident-size-control",
+          "mode": "RunMatOnly",
+          "description": "Allow a resident numeric value as a size control",
+          "error_identifier": "RunMat:compatibility:ZerosResidentSizeControlExtension"
+        },
+        {
+          "id": "zeros-implicit-prototype",
+          "mode": "RunMatOnly",
+          "description": "Allow a prototype array without the like keyword",
+          "error_identifier": "RunMat:compatibility:ZerosImplicitPrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = zeros(integer_n[, integer_sz2, ...])",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default output is double; typename or like can select logical, single, or an exact integer class."
+        },
+        {
+          "form": "X = zeros(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The documented size vector is a row vector of exact integer values."
+        },
+        {
+          "form": "X = zeros(..., integer_typename)",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Every integer typename creates exact native zero storage in the selected class, including explicit gpuArray construction."
+        },
+        {
+          "form": "X = zeros(..., like=integer_p)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer prototype selects exact output class, sparsity, complexity, and applicable residency."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Integer prototypes preserve exact class; resident prototypes use typed owning-provider allocation or upload when available."
+        }
       ]
     },
     {
@@ -175176,6 +175884,97 @@
           "when": "Internal plotting state update fails.",
           "message": "zlabel: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "zlabel-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded axes handle",
+          "error_identifier": "RunMat:compatibility:ZlabelIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = zlabel(integer_txt)",
+          "inputs": [
+            {
+              "name": "txt",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A scalar integer label is formatted from its exact signed or unsigned decimal value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The exact decimal spelling becomes the stored String property."
+        },
+        {
+          "form": "h = zlabel(..., 'FontSize', integer_size)",
+          "inputs": [
+            {
+              "name": "FontSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for positive FontSize values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The validated positive size crosses the graphics scalar boundary."
+        },
+        {
+          "form": "h = zlabel(integer_ax, txt, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for encoded axes handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects before graphics state access."
+        }
       ]
     },
     {
@@ -175251,6 +176050,35 @@
           "identifier": "RunMat:zlim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "zlim: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "limits = zlim(integer_limits)",
+          "inputs": [
+            {
+              "name": "limits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for the two-element limits vector."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "RunMat compares same-class integer endpoints exactly, then validates that they remain distinct in the graphics coordinate domain; queried limits are double."
         }
       ]
     },
@@ -175382,6 +176210,70 @@
           "when": "Internal zoom state or handle-object update fails.",
           "message": "zoom: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "zoom-integer-target-handle",
+          "mode": "RunMatOnly",
+          "description": "Allow a typed-integer alias for an encoded figure or axes handle",
+          "error_identifier": "RunMat:compatibility:ZoomIntegerTargetHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "zoom(integer_factor)",
+          "inputs": [
+            {
+              "name": "factor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive numeric zoom factor admits positive integer scalars."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The positive finite factor crosses the graphics scaling boundary."
+        },
+        {
+          "form": "zoom(integer_target, option_or_factor)",
+          "inputs": [
+            {
+              "name": "target",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer aliases for RunMat's encoded graphics handles are separately gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict mode rejects the encoded-handle alias before graphics state access."
+        }
       ]
     },
     {
@@ -175490,6 +176382,43 @@
           "identifier": "RunMat:zplane:Internal",
           "when": "Internal plotting state or tensor construction fails.",
           "message": "zplane: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "zplane-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "Allow typed-integer filter coefficients, zero or pole locations, SOS entries, gain, or encoded axes aliases",
+          "error_identifier": "RunMat:compatibility:ZplaneNonfloatingInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = zplane(integer_input, ...)",
+          "inputs": [
+            {
+              "name": "b/a, z/p/k, sos, or encoded axes alias",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric contract is single or double; typed integers are a separately gated convenience."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Extension mode performs one checked conversion into the floating root and graphics domain; strict mode rejects before provider or graphics state access."
         }
       ]
     }

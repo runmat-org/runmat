@@ -1,12 +1,24 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use super::axis_tick_labels::axis_tick_labels_builtin;
 use super::axis_ticks::TickAxis;
 use crate::builtins::plotting::type_resolvers::get_type;
+
+const YTICKLABELS_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "yticklabels-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer alias for an encoded axes handle",
+    error_identifier: Some("RunMat:compatibility:YticklabelsIntegerAxesHandleExtension"),
+};
+pub const YTICKLABELS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [YTICKLABELS_INTEGER_AXES_EXTENSION];
+pub const YTICKLABELS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Tick labels accept text and categorical containers; integer label payloads are invalid, while a typed-integer encoded axes alias is a separately gated RunMat extension." };
 
 const YTICKLABELS_OUTPUT_LABELS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "labels",
@@ -116,9 +128,29 @@ pub const YTICKLABELS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::yticklabels::YTICKLABELS_DESCRIPTOR),
+    extensions(crate::builtins::plotting::yticklabels::YTICKLABELS_EXTENSIONS),
+    integer_audit(crate::builtins::plotting::yticklabels::YTICKLABELS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::yticklabels"
 )]
 pub fn yticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.len() == 2
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &YTICKLABELS_INTEGER_AXES_EXTENSION,
+            "yticklabels",
+        )?;
+    } else if args
+        .iter()
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        return Err(super::plotting_error(
+            "yticklabels",
+            "yticklabels: tick labels must be text or categorical values",
+        ));
+    }
     axis_tick_labels_builtin("yticklabels", TickAxis::Y, args)
 }
 

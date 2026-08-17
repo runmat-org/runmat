@@ -5,7 +5,11 @@ use runmat_accelerate_api::{
     ProviderPrecision,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
 };
@@ -19,7 +23,12 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::{
-    gpu_helpers, random_args::validate_constructor_gpu_output, shape::normalize_scalar_shape,
+    gpu_helpers,
+    random_args::{
+        extract_constructor_dimensions, normalize_constructor_shape,
+        validate_constructor_gpu_output,
+    },
+    shape::normalize_scalar_shape,
     tensor,
 };
 use runmat_builtins::NumericDType;
@@ -82,6 +91,38 @@ fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
     tensor_type_from_rank(args, ctx)
 }
+
+const ZEROS_COLUMN_SIZE_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "zeros-column-size-vector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a column vector where the public size-vector form requires a row vector",
+    error_identifier: Some("RunMat:compatibility:ZerosColumnSizeVectorExtension"),
+};
+const ZEROS_RESIDENT_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "zeros-resident-size-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a resident numeric value as a size control",
+    error_identifier: Some("RunMat:compatibility:ZerosResidentSizeControlExtension"),
+};
+const ZEROS_IMPLICIT_PROTOTYPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "zeros-implicit-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a prototype array without the like keyword",
+    error_identifier: Some("RunMat:compatibility:ZerosImplicitPrototypeExtension"),
+};
+pub const ZEROS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    ZEROS_COLUMN_SIZE_VECTOR_EXTENSION,
+    ZEROS_RESIDENT_SIZE_EXTENSION,
+    ZEROS_IMPLICIT_PROTOTYPE_EXTENSION,
+];
+const ZEROS_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "n/sz1...szN/sz", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away." }];
+const ZEROS_INTEGER_LIKE_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "p", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "An integer prototype selects exact output class, sparsity, complexity, and applicable residency." }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "X = zeros(integer_n[, integer_sz2, ...])", inputs: &ZEROS_INTEGER_DIM_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::FunctionSpecific, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The default output is double; typename or like can select logical, single, or an exact integer class." },
+    BuiltinIntegerCapabilityDescriptor { form: "X = zeros(integer_sz)", inputs: &ZEROS_INTEGER_DIM_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::FunctionSpecific, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The documented size vector is a row vector of exact integer values." },
+    BuiltinIntegerCapabilityDescriptor { form: "X = zeros(..., integer_typename)", inputs: &[], computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::OptionDependent, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Every integer typename creates exact native zero storage in the selected class, including explicit gpuArray construction." },
+    BuiltinIntegerCapabilityDescriptor { form: "X = zeros(..., like=integer_p)", inputs: &ZEROS_INTEGER_LIKE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer prototypes preserve exact class; resident prototypes use typed owning-provider allocation or upload when available." },
+];
 
 const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
@@ -277,6 +318,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     type_resolver(zeros_type),
     descriptor(crate::builtins::array::creation::zeros::ZEROS_DESCRIPTOR),
+    extensions(ZEROS_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::zeros::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -292,9 +335,7 @@ struct ParsedZeros {
 #[derive(Clone)]
 enum OutputTemplate {
     Double,
-    /// Single-precision request. Host tensors are stored as f64 today; we
-    /// treat 'single' as a request for a numeric zeros tensor and honour
-    /// single precision when allocating on GPU via 'like' or provider hooks.
+    /// Single-precision output request.
     Single,
     Logical,
     Integer(IntegerStorage),
@@ -402,13 +443,28 @@ impl ParsedZeros {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg).await? {
+            if matches!(arg, Value::GpuTensor(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ZEROS_RESIDENT_SIZE_EXTENSION,
+                    "zeros",
+                )?;
+            }
+            if let Some(parsed_dims) = extract_constructor_dimensions(&arg, "zeros")
+                .await
+                .map_err(builtin_error)?
+            {
                 tracing::trace!("zeros: parsed dimension arguments {:?}", parsed_dims);
+                if parsed_dims.is_column_vector {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &ZEROS_COLUMN_SIZE_VECTOR_EXTENSION,
+                        "zeros",
+                    )?;
+                }
                 saw_dims_arg = true;
                 if dims.is_empty() {
-                    dims = parsed_dims;
+                    dims = parsed_dims.values;
                 } else {
-                    dims.extend(parsed_dims);
+                    dims.extend(parsed_dims.values);
                 }
                 idx += 1;
                 continue;
@@ -420,6 +476,10 @@ impl ParsedZeros {
             );
 
             if shape_source.is_none() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ZEROS_IMPLICIT_PROTOTYPE_EXTENSION,
+                    "zeros",
+                )?;
                 shape_source = Some(shape_from_value(&arg)?);
             }
             if implicit_proto.is_none() {
@@ -431,10 +491,8 @@ impl ParsedZeros {
         let shape = if saw_dims_arg {
             if dims.is_empty() {
                 vec![0, 0]
-            } else if dims.len() == 1 {
-                vec![dims[0], dims[0]]
             } else {
-                dims
+                normalize_constructor_shape(dims)
             }
         } else if let Some(shape) = shape_source {
             tracing::warn!(
@@ -899,28 +957,6 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    if matches!(value, Value::LogicalArray(_)) {
-        return Ok(None);
-    }
-    let gpu_scalar = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
-        _ => false,
-    };
-    match tensor::dims_from_value_async(value).await {
-        Ok(dims) => Ok(dims),
-        Err(err) => {
-            if matches!(value, Value::Tensor(_))
-                || (matches!(value, Value::GpuTensor(_)) && !gpu_scalar)
-            {
-                Ok(None)
-            } else {
-                Err(builtin_error(format!("zeros: {err}")))
-            }
-        }
-    }
-}
-
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
     match value {
         Value::Tensor(t) => Ok(t.shape.clone()),
@@ -1061,7 +1097,7 @@ pub(crate) mod tests {
     #[test]
     fn zeros_from_size_vector() {
         let _guard = clear_accel_provider_state();
-        let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
+        let size_vec = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
@@ -1087,6 +1123,7 @@ pub(crate) mod tests {
     #[test]
     fn zeros_like_tensor_infers_shape() {
         let _guard = clear_accel_provider_state();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
@@ -1153,6 +1190,7 @@ pub(crate) mod tests {
     #[test]
     fn zeros_like_uses_shape_argument_when_combined_with_like() {
         let _guard = clear_accel_provider_state();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let proto = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![
@@ -1398,6 +1436,25 @@ pub(crate) mod tests {
                 Some(&IntegerStorage::U64(vec![0; 4]))
             );
         });
+    }
+
+    #[test]
+    fn zeros_column_size_vector_is_independently_gated() {
+        let size = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![2, 1]).expect("column size"),
+        );
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(zeros_builtin(vec![size.clone()])).expect_err("strict gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ZerosColumnSizeVectorExtension")
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = test_support::gather(block_on(zeros_builtin(vec![size])).expect("extension"))
+            .expect("gather output");
+        assert_eq!(output.shape, vec![2, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

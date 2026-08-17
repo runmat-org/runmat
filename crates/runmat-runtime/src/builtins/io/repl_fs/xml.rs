@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray,
-    ObjectInstance, StructValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, CellArray, ObjectInstance, StructValue, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
@@ -94,6 +94,11 @@ xml_descriptor!(
     &INPUTS_THREE,
     &OUTPUT_VALUE
 );
+pub const XMLREAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "xmlread accepts a text filename only; integer and resident numeric inputs reject before file or provider access.",
+};
 xml_descriptor!(
     XMLREAD_SIGNATURES,
     XMLREAD_DESCRIPTOR,
@@ -150,9 +155,16 @@ async fn readstruct_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::io::repl_fs::xml::XMLREAD_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::xml::XMLREAD_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::xml"
 )]
 async fn xmlread_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        return Err(compat_error("xmlread", "xmlread: filename must be text"));
+    }
     let args = gather_args("xmlread", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(

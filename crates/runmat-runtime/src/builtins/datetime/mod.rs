@@ -71,6 +71,13 @@ const HOUR_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
         description: "hour with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
         error_identifier: Some("RunMat:compatibility:HourTypedLegacySerialExtension"),
     };
+const YEAR_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "year-typed-legacy-serial-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "year with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+        error_identifier: Some("RunMat:compatibility:YearTypedLegacySerialExtension"),
+    };
 const MINUTE_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "minute-typed-legacy-serial-input",
@@ -97,6 +104,11 @@ pub const DAY_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
 ];
 pub const HOUR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
     HOUR_TYPED_LEGACY_NUMERIC_EXTENSION,
+    DATETIME_LOGICAL_INPUT_EXTENSION,
+    DATETIME_GPU_INPUT_EXTENSION,
+];
+pub const YEAR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    YEAR_TYPED_LEGACY_NUMERIC_EXTENSION,
     DATETIME_LOGICAL_INPUT_EXTENSION,
     DATETIME_GPU_INPUT_EXTENSION,
 ];
@@ -444,11 +456,18 @@ const DATETIME_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
     },
 ];
 
-const DATETIME_YEAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = year(t)",
-    inputs: &DATETIME_SINGLE_INPUT,
-    outputs: &OUT_NUMERIC,
-}];
+const DATETIME_YEAR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = year(t)",
+        inputs: &DATETIME_SINGLE_INPUT,
+        outputs: &OUT_NUMERIC,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = year(t, yearTypeOrFormat)",
+        inputs: DATETIME_HOUR_SIGNATURES[1].inputs,
+        outputs: &OUT_NUMERIC,
+    },
+];
 const DATETIME_MONTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "X = month(t)",
@@ -585,6 +604,16 @@ const HOUR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerI
 }];
 pub const HOUR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "hour(integer_serial, F?)", inputs: &HOUR_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Typed integer serials are a clearly gated RunMat extension because the documented primary input is datetime and legacy examples use binary64 serial dates. Exact native storage is range-checked before one serial-date conversion; results are host double values with the input shape." }];
+
+const YEAR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "legacy serial date number",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "The retained public legacy API documents serial date numbers but does not enumerate typed integer storage.",
+}];
+pub const YEAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "year(integer_serial, F?)", inputs: &YEAR_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Typed integer serials are gated before one checked serial-date conversion and return host double values with the input shape." }];
 
 const MINUTE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -2692,13 +2721,41 @@ async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "year",
     descriptor(crate::builtins::datetime::DATETIME_YEAR_DESCRIPTOR),
+    extensions(crate::builtins::datetime::YEAR_EXTENSIONS),
+    integer_capabilities(crate::builtins::datetime::YEAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract calendar year components from datetime values.",
     keywords = "year,datetime,date component"
 )]
-async fn year_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    component_tensor_from_datetime(&value, "year", |naive| naive.year() as f64)
+async fn year_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (value, option) =
+        prepare_legacy_component_input("year", value, &rest, &YEAR_TYPED_LEGACY_NUMERIC_EXTENSION)
+            .await?;
+    if is_datetime_object(&value) {
+        let mode = option
+            .as_deref()
+            .unwrap_or("iso")
+            .trim()
+            .to_ascii_lowercase();
+        return match mode.as_str() {
+            "iso" => component_tensor_from_datetime(&value, "year", |naive| naive.year() as f64),
+            "gregorian" => component_tensor_from_datetime(&value, "year", |naive| {
+                let year = naive.year();
+                if year > 0 {
+                    year as f64
+                } else {
+                    f64::from(1 - year)
+                }
+            }),
+            _ => Err(datetime_error(format!(
+                "year: unsupported year type '{mode}'"
+            ))),
+        };
+    }
+    numeric_component_from_modern_or_legacy("year", value, option.as_deref(), |naive| {
+        naive.year() as f64
+    })
 }
 
 #[runmat_macros::runtime_builtin(
@@ -5072,8 +5129,28 @@ mod tests {
         let serials = serial_tensor_for_object(&object).expect("serials");
         assert_eq!(serials.materialize_f64().len(), 1);
         let year =
-            futures::executor::block_on(year_builtin(Value::Object(object.clone()))).expect("year");
+            futures::executor::block_on(year_builtin(Value::Object(object.clone()), Vec::new()))
+                .expect("year");
         assert_eq!(year, Value::Num(2024.0));
+    }
+
+    #[test]
+    fn year_typed_legacy_serial_is_separately_gated() {
+        let serial = serial_for_date(2024, 1, 1) as i64;
+        let input = Value::Int(runmat_builtins::IntValue::I64(serial));
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = futures::executor::block_on(year_builtin(input.clone(), Vec::new()))
+            .expect_err("strict gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:YearTypedLegacySerialExtension")
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = futures::executor::block_on(year_builtin(input, Vec::new()))
+            .expect("typed legacy serial");
+        assert_eq!(result, Value::Num(2024.0));
     }
 
     #[test]
@@ -5573,7 +5650,7 @@ mod tests {
         let indexed =
             futures::executor::block_on(datetime_subsref(value.clone(), "()".to_string(), payload))
                 .expect("subsref");
-        let year = futures::executor::block_on(year_builtin(indexed)).expect("year");
+        let year = futures::executor::block_on(year_builtin(indexed, Vec::new())).expect("year");
         assert_eq!(year, Value::Num(2025.0));
 
         let lhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(1.0)]);
@@ -5608,7 +5685,7 @@ mod tests {
         let indexed =
             futures::executor::block_on(datetime_subsref(value, "()".to_string(), payload))
                 .expect("subsref");
-        let year = futures::executor::block_on(year_builtin(indexed)).expect("year");
+        let year = futures::executor::block_on(year_builtin(indexed, Vec::new())).expect("year");
         assert_eq!(year, Value::Num(2025.0));
     }
 

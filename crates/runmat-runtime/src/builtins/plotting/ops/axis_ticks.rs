@@ -1,4 +1,4 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{NumericScalar, Tensor, Value};
 
 use super::op_common::axes_target::AxesTarget;
 use super::properties::{resolve_plot_handle, PlotHandle};
@@ -230,6 +230,22 @@ fn clear_ticks(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> Bui
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     let tensor =
         Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+    let exact = (0..tensor.len())
+        .map(|index| {
+            tensor
+                .numeric_value_at(index)
+                .expect("validated tick storage")
+        })
+        .collect::<Vec<_>>();
+    if exact
+        .windows(2)
+        .any(|pair| !numeric_scalar_strictly_less(pair[0], pair[1]))
+    {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: tick values must be strictly increasing"),
+        ));
+    }
     let ticks = tensor::tensor_values_f64(&tensor);
     if ticks.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
@@ -240,10 +256,28 @@ fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f
     if ticks.windows(2).any(|pair| pair[1] <= pair[0]) {
         return Err(plotting_error(
             builtin,
-            format!("{builtin}: tick values must be strictly increasing"),
+            format!(
+                "{builtin}: tick values must remain distinct in the graphics coordinate domain"
+            ),
         ));
     }
     Ok(ticks)
+}
+
+fn numeric_scalar_strictly_less(lo: NumericScalar, hi: NumericScalar) -> bool {
+    match (lo, hi) {
+        (NumericScalar::F64(lo), NumericScalar::F64(hi)) => lo < hi,
+        (NumericScalar::F32(lo), NumericScalar::F32(hi)) => lo < hi,
+        (NumericScalar::I8(lo), NumericScalar::I8(hi)) => lo < hi,
+        (NumericScalar::I16(lo), NumericScalar::I16(hi)) => lo < hi,
+        (NumericScalar::I32(lo), NumericScalar::I32(hi)) => lo < hi,
+        (NumericScalar::I64(lo), NumericScalar::I64(hi)) => lo < hi,
+        (NumericScalar::U8(lo), NumericScalar::U8(hi)) => lo < hi,
+        (NumericScalar::U16(lo), NumericScalar::U16(hi)) => lo < hi,
+        (NumericScalar::U32(lo), NumericScalar::U32(hi)) => lo < hi,
+        (NumericScalar::U64(lo), NumericScalar::U64(hi)) => lo < hi,
+        _ => lo.materialize_f64() < hi.materialize_f64(),
+    }
 }
 
 fn axis_bounds(bounds: Option<(f64, f64, f64, f64)>, axis: TickAxis) -> Option<(f64, f64)> {
@@ -271,5 +305,32 @@ fn value_as_string(value: &Value) -> Option<String> {
         Value::String(s) => Some(s.clone()),
         Value::CharArray(chars) => Some(chars.data.iter().collect()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn wide_integer_ticks_compare_exactly_then_reject_graphics_collapse() {
+        let base = 1_u64 << 63;
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1]), vec![1, 2])
+                .expect("wide ticks"),
+        );
+        let error = ticks_from_value(&value, "xticks").expect_err("graphics collapse");
+        assert!(error.message().contains("graphics coordinate domain"));
+    }
+
+    #[test]
+    fn integer_ticks_reject_native_ordering_failure() {
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I64(vec![3, 2]), vec![1, 2])
+                .expect("ordered ticks"),
+        );
+        let error = ticks_from_value(&value, "yticks").expect_err("ordering failure");
+        assert!(error.message().contains("strictly increasing"));
     }
 }

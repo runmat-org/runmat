@@ -3,7 +3,11 @@
 use glam::Vec4;
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Tensor, Value,
 };
@@ -29,6 +33,11 @@ const UNIT_CIRCLE_POINTS: usize = 257;
 const ZERO_COLOR: Vec4 = Vec4::new(0.10, 0.45, 0.85, 1.0);
 const POLE_COLOR: Vec4 = Vec4::new(0.85, 0.18, 0.16, 1.0);
 const GUIDE_COLOR: Vec4 = Vec4::new(0.55, 0.55, 0.55, 0.70);
+
+const ZPLANE_NONFLOATING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor { id: "zplane-nonfloating-input", mode: BuiltinExtensionMode::RunMatOnly, description: "Allow typed-integer filter coefficients, zero or pole locations, SOS entries, gain, or encoded axes aliases", error_identifier: Some("RunMat:compatibility:ZplaneNonfloatingInputExtension") };
+pub const ZPLANE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ZPLANE_NONFLOATING_EXTENSION];
+const ZPLANE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "b/a, z/p/k, sos, or encoded axes alias", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The public numeric contract is single or double; typed integers are a separately gated convenience." }];
+pub const ZPLANE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "h = zplane(integer_input, ...)", inputs: &ZPLANE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Extension mode performs one checked conversion into the floating root and graphics domain; strict mode rejects before provider or graphics state access." }];
 
 const ZPLANE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -170,6 +179,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(zplane_type),
     descriptor(crate::builtins::math::signal::zplane::ZPLANE_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::zplane::ZPLANE_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::zplane::ZPLANE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::zplane"
 )]
 async fn zplane_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -177,6 +188,15 @@ async fn zplane_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ZPLANE_NONFLOATING_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let (axes_target, args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
@@ -786,5 +806,19 @@ mod tests {
             panic!("expected output list");
         };
         assert!(values.is_empty());
+    }
+
+    #[test]
+    fn zplane_integer_extension_rejects_before_plot_state() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let coefficients = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("coefficients"),
+        );
+        let error =
+            block_on(evaluate(vec![coefficients, row(&[1.0, -0.8])])).expect_err("strict gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ZplaneNonfloatingInputExtension")
+        );
     }
 }

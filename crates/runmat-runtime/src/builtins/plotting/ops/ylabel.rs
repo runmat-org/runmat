@@ -1,12 +1,81 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::op_common::{map_figure_error, parse_text_command};
+use super::op_common::{map_figure_error, parse_numeric_text_command};
 use super::state::set_ylabel_for_axes;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
+const YLABEL_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ylabel-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Allow a typed-integer alias for an encoded axes handle",
+    error_identifier: Some("RunMat:compatibility:YlabelIntegerAxesHandleExtension"),
+};
+pub const YLABEL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [YLABEL_INTEGER_AXES_EXTENSION];
+const YLABEL_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "txt",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "A scalar integer label is formatted from its exact signed or unsigned decimal value.",
+    }];
+const YLABEL_INTEGER_FONT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "FontSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for positive FontSize values.",
+    }];
+const YLABEL_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
+    }];
+pub const YLABEL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = ylabel(integer_txt)",
+        inputs: &YLABEL_INTEGER_TEXT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The exact decimal spelling becomes the stored String property.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = ylabel(..., 'FontSize', integer_size)",
+        inputs: &YLABEL_INTEGER_FONT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The validated positive size crosses the graphics scalar boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = ylabel(integer_ax, txt, ...)",
+        inputs: &YLABEL_INTEGER_AXES_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Strict mode rejects before graphics state access.",
+    },
+];
 
 const YLABEL_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -137,10 +206,23 @@ pub const YLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::ylabel::YLABEL_DESCRIPTOR),
+    extensions(crate::builtins::plotting::ylabel::YLABEL_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::ylabel::YLABEL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::ylabel"
 )]
 pub fn ylabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let command = parse_text_command("ylabel", &args)?;
+    if args.len() >= 2
+        && args.len().is_multiple_of(2)
+        && args
+            .first()
+            .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &YLABEL_INTEGER_AXES_EXTENSION,
+            "ylabel",
+        )?;
+    }
+    let command = parse_numeric_text_command("ylabel", &args)?;
     set_ylabel_for_axes(
         command.target.0,
         command.target.1,
