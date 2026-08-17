@@ -6,6 +6,7 @@
 mod budget;
 mod error;
 mod faceted_geometry_objects;
+mod geometry_control;
 mod geometry_objects;
 mod host;
 mod object_support;
@@ -39,6 +40,7 @@ pub use faceted_geometry_objects::{
     prepare_faceted_geometry_objects, FacetedGeometryObjectRoot, PreparedFacetedGeometryInput,
     PreparedFacetedGeometryObjects,
 };
+pub use geometry_control::{GeometryEvaluationUsage, MeshingGeometryEvaluationControl};
 pub use geometry_objects::{
     import_exact_geometry_input, import_exact_geometry_objects, prepare_exact_geometry_input,
     prepare_exact_geometry_objects, ExactGeometryObjectRoot, PreparedExactGeometryInput,

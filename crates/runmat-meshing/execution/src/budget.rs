@@ -7,6 +7,8 @@ use runmat_meshing_core::{
     MESHING_FAILURE_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
 };
 
+use crate::geometry_control::MeshingGeometryEvaluationControl;
+
 pub trait MeshingProgressSink {
     fn record(&mut self, progress: &MeshingProgress);
 }
@@ -79,6 +81,15 @@ impl<'a> MeshingStageControl<'a> {
 
     pub const fn request(&self) -> &MeshingRequest {
         self.request
+    }
+
+    pub fn geometry_evaluation_control(&self) -> MeshingGeometryEvaluationControl<'_> {
+        MeshingGeometryEvaluationControl::new(
+            self.cancellation,
+            self.started,
+            &self.request.resources,
+            &self.request.cancellation,
+        )
     }
 
     pub fn guard(&self) -> Result<(), Box<MeshingFailure>> {

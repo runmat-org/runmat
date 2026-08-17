@@ -17,6 +17,7 @@ use runmat_execution_artifact::{ArtifactError, ArtifactResult, LogicalObject};
 use runmat_execution_runner::backend::SerialBackend;
 use runmat_execution_runner::port::BackendPort;
 use runmat_execution_runner::{AttemptReport, AttemptRequest};
+use runmat_geometry_core::{GeometryEvaluationControl, GeometryEvaluationErrorKind};
 use runmat_meshing_core::{
     build_chunked_stage_payload, build_closed_stage_manifest, AlgorithmVersionSet,
     CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets, ElementOrder,
@@ -500,6 +501,53 @@ fn stage_control_enforces_every_algorithm_local_resource_counter() {
             *failure
         );
     }
+}
+
+#[test]
+fn exact_geometry_control_projects_cancellation_and_hard_counters() {
+    let mut bounded = request();
+    bounded.resources.maximum_iterations = 2;
+    bounded.resources.maximum_search_work = 3;
+    bounded.resources.maximum_memory_bytes = 4;
+    let mut progress = Progress::default();
+    let stage = MeshingStageControl::new(
+        MeshingStageKind::CurveMesh,
+        0,
+        &bounded,
+        &NeverCancelled,
+        &mut progress,
+    )
+    .unwrap();
+    let geometry = stage.geometry_evaluation_control();
+    geometry.checkpoint().unwrap();
+    geometry.consume_iterations(2).unwrap();
+    geometry.consume_search_work(3).unwrap();
+    geometry.consume_allocation_bytes(4).unwrap();
+    assert_eq!(geometry.usage().iterations, 2);
+    assert_eq!(geometry.usage().search_work, 3);
+    assert_eq!(geometry.usage().allocation_bytes, 4);
+    assert_eq!(
+        geometry.consume_iterations(1).unwrap_err().kind,
+        GeometryEvaluationErrorKind::BudgetExceeded
+    );
+
+    let mut cancelled_progress = Progress::default();
+    let cancelled_stage = MeshingStageControl::new(
+        MeshingStageKind::CurveMesh,
+        0,
+        &bounded,
+        &Cancelled,
+        &mut cancelled_progress,
+    )
+    .unwrap();
+    assert_eq!(
+        cancelled_stage
+            .geometry_evaluation_control()
+            .checkpoint()
+            .unwrap_err()
+            .kind,
+        GeometryEvaluationErrorKind::Cancelled
+    );
 }
 
 #[test]
