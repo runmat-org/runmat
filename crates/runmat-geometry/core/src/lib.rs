@@ -21,7 +21,9 @@ pub use model::{
     ExactTrimClassifierImplementation, ExactTrimClassifierRecord, ExactVertex, ExactWire,
     FacetedSolidModel, GeometryAsset, GeometryContractError, GeometryDigest, GeometryDocument,
     GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
-    GeometryHealingPolicy, GeometryModel, GeometryObjectRef, GeometryRevisionIdentity,
+    GeometryHealingPolicy, GeometryModel, GeometryObjectRef, GeometryRevisionConflict,
+    GeometryRevisionConflictKind, GeometryRevisionIdentity, GeometryRevisionMap,
+    GeometryRevisionMappingError, GeometryRevisionOperation, GeometryRevisionResolution,
     GeometrySource, GeometrySourceFormat, GeometrySourceIdentity, GeometryTolerancePolicy,
     GeometryTransform, KernelEvaluatorRef, MassPropertiesEvaluatorId, MaterialEvidence,
     MaterialEvidenceConfidence, MeshDescriptor, MeshKind, NurbsCurve2, NurbsCurve3, NurbsSurface3,
@@ -32,7 +34,7 @@ pub use model::{
     TrimDomainLocation, UnitSystem, DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE,
     EXACT_BREP_TOPOLOGY_SCHEMA_VERSION, EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION,
     FACETED_SOLID_MEDIA_TYPE, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
-    GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
+    GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION, GEOMETRY_REVISION_MAP_SCHEMA_VERSION,
 };
 pub use selection::{EntityKind, EntityRef};
 

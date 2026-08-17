@@ -11,6 +11,7 @@ mod geometry;
 mod material_evidence;
 mod mesh;
 mod regions;
+mod revision_mapping;
 mod source_geometry;
 mod tessellation_profile;
 mod topology;
@@ -31,6 +32,7 @@ pub use regions::{
     CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
     CadSemanticKind, EntityIdRange, Region, RegionEntityMapping,
 };
+pub use revision_mapping::*;
 pub use source_geometry::{
     CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator, CadEvaluatorSet,
     CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator, SourceGeometry,
