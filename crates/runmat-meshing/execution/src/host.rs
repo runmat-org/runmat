@@ -219,6 +219,11 @@ impl MeshingHostWorkload {
     ) -> MeshingExecutionResult<ProgramExecutionRequest> {
         self.validate()?;
         validate_inputs(&self.workload, input_roots, &self.artifact_access)?;
+        let executable_bytes = self.canonical_bytes()?;
+        let workload_option = format!(
+            "meshing-workload:{}",
+            runmat_execution::Digest::sha256(&executable_bytes)
+        );
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision,
@@ -229,14 +234,14 @@ impl MeshingHostWorkload {
             execution_mode: MESHING_HOST_EXECUTION_MODE.into(),
             target: ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE),
             features: Default::default(),
-            compile_options: Default::default(),
+            compile_options: std::collections::BTreeSet::from([workload_option]),
             source_objects: Vec::new(),
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::MeshingWorkload,
-            self.canonical_bytes()?,
+            executable_bytes,
         )?;
         let request = ProgramExecutionRequest {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,

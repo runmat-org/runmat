@@ -55,6 +55,17 @@ impl RemoteObjectCatalog {
         }
     }
 
+    pub(super) fn contains(&self, reference: &ValueRef) -> NativeExecutionResult<bool> {
+        let state = self.state.lock().expect("remote object catalog poisoned");
+        match state.objects.get(&reference.id) {
+            Some((stored, _)) if stored == reference => Ok(true),
+            Some(_) => Err(protocol(
+                "remote execution object reference differs from stored content",
+            )),
+            None => Ok(false),
+        }
+    }
+
     pub(super) async fn transfer_all(
         &self,
         channel: &dyn RemoteWorkerChannel,
@@ -242,6 +253,10 @@ mod tests {
         catalog
             .register(input.clone(), Arc::clone(&input_bytes), "run")
             .unwrap();
+        assert!(catalog.contains(&input).unwrap());
+        let mut conflicting_input = input.clone();
+        conflicting_input.encoded_length += 1;
+        assert!(catalog.contains(&conflicting_input).is_err());
 
         let stale_bytes = Arc::<[u8]>::from(&b"stale result"[..]);
         let stale = reference("run", stale_bytes.as_ref(), b"stale");
@@ -263,6 +278,7 @@ mod tests {
         catalog.discard_results(&[stale.clone(), input.clone(), committed.clone()]);
 
         assert!(catalog.get(&stale).unwrap().is_none());
+        assert!(!catalog.contains(&stale).unwrap());
         assert!(catalog.get(&input).unwrap().is_some());
         assert_eq!(
             catalog.get(&committed).unwrap().unwrap().as_ref(),

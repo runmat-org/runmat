@@ -22,17 +22,19 @@ use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, ElementOrder,
     GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
     MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingFailure,
-    MeshingPartitionDescriptor, MeshingPartitionKind, MeshingProgress, MeshingQualityTargets,
-    MeshingRequest, MeshingResourceBudget, MeshingStageIdentity, MeshingStageKind,
-    MeshingWorkloadRequest, MetricCombinationRule, MetricFieldRequest, MetricTensor3,
-    NeverCancelled, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
-    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    MeshingInputKind, MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind,
+    MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, MetricCombinationRule,
+    MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
+    VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
     MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_execution::{
-    build_task_submission, import_result_publication, MeshingArtifactAccess,
-    MeshingExecutionContext, MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress, ValidatedMeshingStageOutput,
+    build_task_submission, import_result_publication, prepare_exact_geometry_input,
+    prepare_exact_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
+    MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
+    MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
+    ValidatedMeshingStageOutput,
 };
 
 use runmat_execution_runner_native::{
@@ -41,6 +43,8 @@ use runmat_execution_runner_native::{
     RemoteWorkerChannel, RemoteWorkerChannelConfig, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
+#[path = "meshing_process_conformance/exact_input.rs"]
+mod exact_input;
 #[path = "meshing_process_conformance/remote_recovery.rs"]
 mod remote_recovery;
 
@@ -76,6 +80,35 @@ impl MeshingStageKernel for AdmissionKernel {
 }
 
 struct SearchBudgetKernel;
+
+struct ExactInputKernel;
+
+impl MeshingStageKernel for ExactInputKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        assert_eq!(invocation.inputs.len(), 1);
+        assert!(invocation.inputs[0].exact_geometry().is_some());
+        let checkpoint = MeshingStageCheckpoint {
+            completed_work: 1,
+            estimated_work: 1,
+            peak_memory_bytes: 2048,
+            search_work: 1,
+            ..MeshingStageCheckpoint::default()
+        };
+        invocation.control.checkpoint(checkpoint.clone())?;
+        Ok(ValidatedMeshingStageOutput {
+            invariant_summary_digest: stable(92),
+            streams: vec![MeshingChunkStream {
+                media_type: MeshingChunkMediaType::SurfacePartitions,
+                schema_version: 2,
+                records: vec![vec![4; 700], vec![5; 700]],
+            }],
+            final_checkpoint: checkpoint,
+        })
+    }
+}
 
 impl MeshingStageKernel for SearchBudgetKernel {
     fn execute(
@@ -115,6 +148,9 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        if !invocation.inputs.is_empty() {
+            return ExactInputKernel.execute(invocation);
+        }
         if self.calls.fetch_add(1, Ordering::AcqRel) == 0 {
             return AdmissionKernel.execute(invocation);
         }
@@ -146,6 +182,10 @@ fn main() {
         }
         if mode == "--slow-child" {
             run_child(SlowKernel, Path::new(&root));
+            return;
+        }
+        if mode == "--exact-child" {
+            run_child(ExactInputKernel, Path::new(&root));
             return;
         }
     }
@@ -241,6 +281,8 @@ async fn parent() {
     );
     assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
 
+    exact_input::native_conformance().await;
+
     let cancellation_directory = tempfile::tempdir().unwrap();
     let (cancel_host, cancel_request) = fixture();
     let cancel_session =
@@ -288,7 +330,7 @@ async fn parent() {
 }
 
 async fn remote_conformance() {
-    let (host, request, bundle_bytes) = remote_fixture("remote-meshing-run");
+    let (host, request, exact, bundle_bytes) = remote_fixture("remote-meshing-run");
 
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
@@ -407,6 +449,66 @@ async fn remote_conformance() {
         .unwrap();
         assert_eq!(imported.result_objects(), success.result_objects);
 
+        for (object, reference) in exact
+            .input
+            .geometry_objects()
+            .objects
+            .iter()
+            .zip(exact.input.input_objects())
+        {
+            pool.register_execution_object(reference.clone(), object.bytes.clone())
+                .unwrap();
+        }
+        let exact_completion = pool
+            .submit(
+                submission_for(scope_id, pool_id, &exact.host, &exact.request),
+                exact.request.clone(),
+            )
+            .unwrap();
+        let exact_success = tokio::time::timeout(Duration::from_secs(10), exact_completion.wait())
+            .await
+            .expect("remote exact-input meshing timeout")
+            .unwrap();
+        let [ValuePayload::Object(exact_root)] = exact_success.outputs.as_slice() else {
+            panic!("remote exact-input stage returned a non-object root")
+        };
+        let mut exact_result_store = TestStore::default();
+        for reference in &exact_success.result_objects {
+            exact_result_store.0.insert(
+                reference.logical_digest,
+                pool.execution_object(reference)
+                    .unwrap()
+                    .expect("verified remote exact-input result object")
+                    .to_vec(),
+            );
+        }
+        import_result_publication(
+            &exact_result_store,
+            exact_root,
+            exact.host.artifact_access.clone(),
+            limits().inventory,
+        )
+        .unwrap();
+
+        let mut exact_serial_store = TestStore::default();
+        for object in &exact.input.geometry_objects().objects {
+            exact_serial_store
+                .write_verified(object)
+                .expect("seed exact serial input");
+        }
+        let exact_serial = execute_meshing_program_request(
+            &exact.request,
+            &mut exact_serial_store,
+            &ExactInputKernel,
+            &NeverCancelled,
+            &mut NoopMeshingProgress,
+            limits(),
+        );
+        let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = exact_serial else {
+            panic!("serial exact-input reference did not externalize its result")
+        };
+        assert_eq!(outputs, exact_success.outputs);
+
         let mut serial_store = TestStore::default();
         let serial = execute_meshing_program_request(
             &request,
@@ -482,6 +584,7 @@ fn remote_fixture(
 ) -> (
     MeshingHostWorkload,
     runmat_execution_artifact::ProgramExecutionRequest,
+    exact_input::ExactFixture,
     Arc<Vec<u8>>,
 ) {
     let project_root = tempfile::tempdir().unwrap();
@@ -504,19 +607,32 @@ fn remote_fixture(
     )
     .unwrap();
     let (host, request) = fixture_for(revision.clone(), authorization_scope);
-    let bundle = ExecutionBundleBuilder::native(&project, revision)
-        .unwrap()
-        .with_compiled_package_closure()
-        .with_materialized_program(
+    let exact = exact_input::fixture(revision.clone(), authorization_scope);
+    let mut materializations = vec![
+        (
             request.recipe.clone(),
-            ExecutableForm::MeshingWorkload,
             request.artifact.executable_bytes.clone(),
-        )
-        .build()
-        .unwrap();
+        ),
+        (
+            exact.request.recipe.clone(),
+            exact.request.artifact.executable_bytes.clone(),
+        ),
+    ];
+    materializations.sort_by_key(|(recipe, _)| recipe.id().unwrap());
+    let mut builder = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_compiled_package_closure();
+    for (recipe, executable_bytes) in materializations {
+        builder = builder.with_materialized_program(
+            recipe,
+            ExecutableForm::MeshingWorkload,
+            executable_bytes,
+        );
+    }
+    let bundle = builder.build().unwrap();
     let mut encoded_bundle = Vec::new();
     write_bundle(&bundle, &mut encoded_bundle, ArchiveLimits::default()).unwrap();
-    (host, request, Arc::new(encoded_bundle))
+    (host, request, exact, Arc::new(encoded_bundle))
 }
 
 #[derive(Default)]
@@ -572,11 +688,20 @@ fn submission_for(
     host: &MeshingHostWorkload,
     request: &runmat_execution_artifact::ProgramExecutionRequest,
 ) -> runmat_execution_runner::TaskSubmission {
+    let roots = request
+        .arguments
+        .iter()
+        .map(|value| match value {
+            ValuePayload::Object(root) => Ok((**root).clone()),
+            ValuePayload::Inline(_) => Err("meshing conformance inputs must be objects"),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
     build_task_submission(
         &host.workload,
         &host.stage_identity,
         &host.resolved_request,
-        &[],
+        &roots,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
@@ -603,6 +728,7 @@ fn worker_capabilities() -> BTreeSet<Capability> {
         Capability::Custom("runmat.meshing.host:host-v2".into()),
         Capability::Custom("runmat.meshing.exact-cad:occt-v1".into()),
         Capability::Custom("runmat.meshing.algorithm:geometry/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:surface/v2".into()),
         Capability::Custom("runmat.meshing.element-order:tet4".into()),
         Capability::Custom("runmat.meshing.cohort:native-cohort-v1".into()),
     ])

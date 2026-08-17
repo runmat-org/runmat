@@ -319,13 +319,18 @@ impl RemotePoolDriver {
                 (Some(channel), Some(mut program)) => {
                     program.arguments = request.task.inputs.clone();
                     let transfer = this
-                        .values
-                        .transfer(channel.as_ref(), request.worker_id, &program.arguments)
+                        .execution_objects
+                        .transfer_all(channel.as_ref(), request.worker_id)
                         .await;
                     let transfer = match transfer {
                         Ok(()) => {
-                            this.execution_objects
-                                .transfer_all(channel.as_ref(), request.worker_id)
+                            this.values
+                                .transfer(
+                                    channel.as_ref(),
+                                    request.worker_id,
+                                    &program.arguments,
+                                    &this.execution_objects,
+                                )
                                 .await
                         }
                         Err(error) => Err(error),

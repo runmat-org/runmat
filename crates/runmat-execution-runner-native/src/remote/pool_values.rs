@@ -5,6 +5,7 @@ use runmat_execution::identity::{ValueId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
 use tokio::sync::Mutex as AsyncMutex;
 
+use super::pool_objects::RemoteObjectCatalog;
 use super::RemoteWorkerChannel;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -42,9 +43,13 @@ impl RemoteValueCatalog {
         channel: &dyn RemoteWorkerChannel,
         worker_id: WorkerId,
         values: &[ValuePayload],
+        execution_objects: &RemoteObjectCatalog,
     ) -> NativeExecutionResult<()> {
         let references = super::value_transfer::collect_references(values);
         for reference in references {
+            if execution_objects.contains(&reference)? {
+                continue;
+            }
             let key = (worker_id, reference.id);
             if self.transferred.lock().await.contains(&key) {
                 continue;

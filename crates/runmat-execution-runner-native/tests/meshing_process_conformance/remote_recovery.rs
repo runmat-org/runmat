@@ -104,7 +104,7 @@ pub(super) async fn run() {
 
 async fn run_inner() {
     const RUN_ID: &str = "remote-meshing-recovery-run";
-    let (host, request, bundle) = remote_fixture(RUN_ID);
+    let (host, request, _, bundle) = remote_fixture(RUN_ID);
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-recovery-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"remote-recovery-pool"]);
     let run_key =

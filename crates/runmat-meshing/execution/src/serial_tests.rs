@@ -618,7 +618,7 @@ impl Fixture {
             authorization_scope: "serial-exact-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-exact-geometry-context"),
         };
-        let (document, topology, evaluators) = crate::geometry_object_tests::fixture::geometry();
+        let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
         let objects = prepare_exact_geometry_objects(
             document,
             topology,

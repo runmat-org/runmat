@@ -18,3 +18,4 @@ serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+runmat-geometry-fixtures = { workspace = true }

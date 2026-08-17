@@ -1,0 +1,8 @@
+[package]
+name = "runmat-geometry-fixtures"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+runmat-geometry-core = { workspace = true }

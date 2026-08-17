@@ -1,22 +1,9 @@
+//! Backend-neutral authoritative geometry fixtures for cross-crate conformance tests.
+
 use runmat_geometry_core::*;
 
-fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: if kind == PersistentEntityKind::Assembly && name == "root" {
-            Vec::new()
-        } else {
-            vec!["part".into()]
-        },
-    }
-}
-
-fn parameter(start: f64, end: f64) -> ParameterRange {
-    ParameterRange { start, end }
-}
-
-pub(crate) fn geometry() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorRegistry) {
+/// A closed circular edge on a planar face with a complete exact evaluator inventory.
+pub fn exact_circle() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorRegistry) {
     let root = id(PersistentEntityKind::Assembly, "root");
     let part = id(PersistentEntityKind::Assembly, "part");
     let instance = id(PersistentEntityKind::Instance, "instance");
@@ -119,10 +106,23 @@ pub(crate) fn geometry() -> (GeometryDocument, ExactBRepTopology, ExactEvaluator
         interfaces: Vec::new(),
         contacts: Vec::new(),
     };
-    let evaluators = evaluators();
-    let model = model();
-    let document = document(model);
-    (document, topology, evaluators)
+    (document(exact_model()), topology, evaluators())
+}
+
+fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
+    PersistentEntityId {
+        kind,
+        source_topology_id: name.into(),
+        assembly_path: if kind == PersistentEntityKind::Assembly && name == "root" {
+            Vec::new()
+        } else {
+            vec!["part".into()]
+        },
+    }
+}
+
+fn parameter(start: f64, end: f64) -> ParameterRange {
+    ParameterRange { start, end }
 }
 
 fn evaluators() -> ExactEvaluatorRegistry {
@@ -183,7 +183,7 @@ fn evaluators() -> ExactEvaluatorRegistry {
     }
 }
 
-fn model() -> ExactBRepModel {
+fn exact_model() -> ExactBRepModel {
     ExactBRepModel {
         artifact: GeometryObjectRef {
             digest: GeometryDigest::from_bytes([1; 32]),
@@ -260,5 +260,21 @@ fn document(model: ExactBRepModel) -> GeometryDocument {
         },
         model: GeometryModel::ExactBRep { model },
         display_tessellations: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_circle_is_a_complete_authoritative_fixture() {
+        let (document, topology, evaluators) = exact_circle();
+        document.validate().unwrap();
+        let GeometryModel::ExactBRep { model } = &document.model else {
+            panic!("exact-circle fixture must remain exact")
+        };
+        topology.validate_against(model).unwrap();
+        evaluators.validate_against(&topology, model).unwrap();
     }
 }

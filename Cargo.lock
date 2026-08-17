@@ -6502,6 +6502,7 @@ dependencies = [
  "runmat-execution-artifact",
  "runmat-execution-runner",
  "runmat-execution-transport-native",
+ "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "runmat-meshing-execution",
  "runmat-package",
@@ -6614,6 +6615,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "runmat-geometry-fixtures"
+version = "0.0.0"
+dependencies = [
+ "runmat-geometry-core",
 ]
 
 [[package]]
@@ -6819,6 +6827,7 @@ dependencies = [
  "runmat-execution-artifact",
  "runmat-execution-runner",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "serde",
  "thiserror 1.0.69",

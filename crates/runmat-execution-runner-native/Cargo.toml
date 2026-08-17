@@ -41,6 +41,7 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 rcgen = "0.14"
+runmat-geometry-fixtures = { workspace = true }
 runmat-test = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 

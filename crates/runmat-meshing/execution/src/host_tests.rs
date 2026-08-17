@@ -3,7 +3,6 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ExecutableForm;
 use runmat_meshing_core::MeshingStageKind;
 
-use crate::geometry_object_tests::fixture::geometry;
 use crate::task_tests::Fixture;
 use crate::{
     prepare_exact_geometry_input, prepare_exact_geometry_objects, MeshingHostWorkload,
@@ -41,6 +40,12 @@ fn program_form_contains_only_contracts_and_externalized_roots() {
     assert_eq!(request.artifact.form, ExecutableForm::MeshingWorkload);
     assert_eq!(request.recipe.target.profile, MESHING_HOST_TARGET_PROFILE);
     assert_eq!(request.arguments.len(), 1);
+    assert_eq!(request.recipe.compile_options.len(), 1);
+    assert!(request
+        .recipe
+        .compile_options
+        .iter()
+        .all(|option| option.starts_with("meshing-workload:")));
     assert!(matches!(
         request.arguments[0],
         runmat_execution::value::ValuePayload::Object(_)
@@ -88,7 +93,7 @@ fn vm_facing_form_rejects_inline_geometry_arguments() {
 
 #[test]
 fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
-    let (document, topology, evaluators) = geometry();
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     let objects = prepare_exact_geometry_objects(
         document,
         topology,

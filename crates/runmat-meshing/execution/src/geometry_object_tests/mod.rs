@@ -1,5 +1,3 @@
-pub(crate) mod fixture;
-
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 
 use crate::tests::MemoryCache;
@@ -12,7 +10,7 @@ use crate::{
 
 #[test]
 fn exact_geometry_round_trips_through_shared_input_objects() {
-    let (document, topology, evaluators) = fixture::geometry();
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     let prepared = prepare_exact_geometry_objects(
         document,
         topology,
@@ -43,7 +41,7 @@ fn exact_geometry_round_trips_through_shared_input_objects() {
 
 #[test]
 fn exact_geometry_import_rehashes_cache_and_binds_document_root() {
-    let (document, topology, evaluators) = fixture::geometry();
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     let prepared = prepare_exact_geometry_objects(
         document,
         topology,
@@ -80,7 +78,7 @@ fn exact_geometry_import_rehashes_cache_and_binds_document_root() {
 
 #[test]
 fn exact_geometry_object_count_and_total_bytes_are_hard_limits() {
-    let (document, topology, evaluators) = fixture::geometry();
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     assert!(prepare_exact_geometry_objects(
         document,
         topology,
@@ -93,7 +91,7 @@ fn exact_geometry_object_count_and_total_bytes_are_hard_limits() {
     )
     .is_err());
 
-    let (document, topology, evaluators) = fixture::geometry();
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     let prepared = prepare_exact_geometry_objects(
         document,
         topology,
@@ -118,7 +116,7 @@ fn exact_geometry_object_count_and_total_bytes_are_hard_limits() {
 
 #[test]
 fn exact_geometry_projects_to_complete_driver_owned_input_inventory() {
-    let (document, topology, evaluators) = fixture::geometry();
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     let objects = prepare_exact_geometry_objects(
         document,
         topology,
@@ -160,7 +158,7 @@ fn exact_geometry_projects_to_complete_driver_owned_input_inventory() {
 
 #[test]
 fn exact_geometry_input_rejects_wrong_authority_and_object_kind() {
-    let (document, topology, evaluators) = fixture::geometry();
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
     let objects = prepare_exact_geometry_objects(
         document,
         topology,

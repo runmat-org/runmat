@@ -51,6 +51,7 @@ members = [
     "crates/runmat-static-analysis",
     "crates/runmat-canonical-codec",
     "crates/runmat-geometry/core",
+    "crates/runmat-geometry/fixtures",
     "crates/runmat-geometry/io",
     "crates/runmat-geometry/ops",
     "crates/runmat-analysis/core",
@@ -155,6 +156,7 @@ runmat-accelerate-api = { version = "=0.6.1", path = "crates/runmat-accelerate-a
 runmat-gc-api = { version = "=0.6.1", path = "crates/runmat-gc-api" }
 runmat-thread-local = { version = "=0.6.1", path = "crates/runmat-thread-local" }
 runmat-geometry-core = { version = "=0.6.1", path = "crates/runmat-geometry/core" }
+runmat-geometry-fixtures = { path = "crates/runmat-geometry/fixtures" }
 runmat-geometry-io = { version = "=0.6.1", path = "crates/runmat-geometry/io" }
 runmat-geometry-ops = { version = "=0.6.1", path = "crates/runmat-geometry/ops" }
 runmat-analysis-core = { version = "=0.6.1", path = "crates/runmat-analysis/core" }
