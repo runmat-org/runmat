@@ -65,6 +65,25 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     let raw_digest: [u8; 32] = sha2::Sha256::digest(&imported.representation).into();
     assert_eq!(imported.representation_digest(), raw_digest);
     let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    evaluator
+        .validate_incidence_consistency(&imported.topology, 1.0e-9, &Unlimited)
+        .unwrap();
+    assert_eq!(
+        evaluator
+            .validate_incidence_consistency(&imported.topology, 1.0e-9, &Cancelled)
+            .unwrap_err()
+            .kind,
+        GeometryEvaluationErrorKind::Cancelled
+    );
+    let mut inconsistent_topology = imported.topology.clone();
+    inconsistent_topology.vertices[0].point_m[0] += 1.0;
+    assert_eq!(
+        evaluator
+            .validate_incidence_consistency(&inconsistent_topology, 1.0e-9, &Unlimited)
+            .unwrap_err()
+            .kind,
+        GeometryEvaluationErrorKind::InconsistentGeometry
+    );
     let id = &imported.topology.edges[0].curve_evaluator_id;
     let range = evaluator.parameter_range(id).unwrap();
     let start = evaluator.point(id, range.start, &Unlimited).unwrap();

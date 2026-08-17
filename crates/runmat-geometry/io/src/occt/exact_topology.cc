@@ -94,14 +94,18 @@ void append_exact_topology(OcctExactShapePayload& result,
   std::set<std::uint64_t> edge_keys;
   for (TopExp_Explorer explorer(root, TopAbs_EDGE); explorer.More(); explorer.Next()) {
     check_cancelled(options);
-    const TopoDS_Edge edge = TopoDS::Edge(explorer.Current());
+    const TopoDS_Edge edge_use = TopoDS::Edge(explorer.Current());
+    const std::uint64_t edge_key = shape_key(shape_set, edge_use, "edge");
+    const TopoDS_Edge edge = TopoDS::Edge(shape_set.Shape(static_cast<Standard_Integer>(edge_key)));
     TopoDS_Vertex start;
     TopoDS_Vertex end;
-    TopExp::Vertices(edge, start, end, Standard_True);
+    // ExactEdge endpoints are tied to increasing evaluator parameter, independent of any
+    // oriented coedge use. FORWARD/REVERSED child roles provide that canonical ordering.
+    TopExp::Vertices(edge, start, end, Standard_False);
     const bool closed = BRep_Tool::IsClosed(edge);
     BRepAdaptor_Curve curve(edge);
     OcctExactEdgePayload payload;
-    payload.shape_key = shape_key(shape_set, edge, "edge");
+    payload.shape_key = edge_key;
     if (!edge_keys.insert(payload.shape_key).second) {
       continue;
     }

@@ -166,6 +166,16 @@ impl OcctExactEvaluator {
         })
     }
 
+    /// Runs the geometry-owned adaptive incidence validator across every native edge use.
+    pub fn validate_incidence_consistency(
+        &self,
+        topology: &runmat_geometry_core::ExactBRepTopology,
+        tolerance_m: f64,
+        control: &dyn GeometryEvaluationControl,
+    ) -> Result<(), GeometryEvaluationError> {
+        runmat_geometry_core::validate_exact_incidence(topology, self, tolerance_m, control)
+    }
+
     fn shape_key(&self, id: &CurveEvaluatorId) -> Result<u64, GeometryEvaluationError> {
         self.curve_keys.get(id).copied().ok_or_else(|| {
             GeometryEvaluationError::new(
