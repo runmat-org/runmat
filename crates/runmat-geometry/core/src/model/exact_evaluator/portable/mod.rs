@@ -6,7 +6,6 @@ mod pcurve;
 mod projection;
 mod spline;
 mod surface;
-mod surface_curvature;
 mod surface_projection;
 mod surface_spline;
 mod trim_classifier;

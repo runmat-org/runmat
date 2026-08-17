@@ -3,7 +3,7 @@ use crate::{
     import::GeometryImportContext, import_exact_cad, ExactCadImportOptions, GeometryFormat,
 };
 use runmat_geometry_core::{
-    GeometryEvaluationError, TrimClassifierId, TrimDomainLocation, UnitSystem,
+    GeometryEvaluationError, SurfaceEvaluatorId, TrimClassifierId, TrimDomainLocation, UnitSystem,
 };
 use sha2::Digest as _;
 
@@ -217,6 +217,108 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         GeometryEvaluationErrorKind::UnknownEvaluator
     );
 
+    let surface_id = &face.surface_evaluator_id;
+    let surface_bounds =
+        runmat_geometry_core::ExactSurfaceEvaluator::parameter_bounds(&evaluator, surface_id)
+            .unwrap();
+    assert_eq!(
+        runmat_geometry_core::ExactSurfaceEvaluator::periodicity(&evaluator, surface_id).unwrap(),
+        [None, None]
+    );
+    let surface_uv = [
+        (surface_bounds[0].start + surface_bounds[0].end) * 0.5,
+        (surface_bounds[1].start + surface_bounds[1].end) * 0.5,
+    ];
+    let surface_derivatives = runmat_geometry_core::ExactSurfaceEvaluator::derivatives(
+        &evaluator, surface_id, surface_uv, &Unlimited,
+    )
+    .unwrap();
+    let normal = runmat_geometry_core::ExactSurfaceEvaluator::unit_normal(
+        &evaluator, surface_id, surface_uv, &Unlimited,
+    )
+    .unwrap();
+    assert!((norm(normal) - 1.0).abs() < 1.0e-12);
+    let curvature = runmat_geometry_core::ExactSurfaceEvaluator::principal_curvature(
+        &evaluator, surface_id, surface_uv, &Unlimited,
+    )
+    .unwrap();
+    assert!(curvature.minimum_1_per_m.abs() < 1.0e-12);
+    assert!(curvature.maximum_1_per_m.abs() < 1.0e-12);
+    let displaced =
+        std::array::from_fn(|axis| surface_derivatives.point_m[axis] + normal[axis] * 0.25);
+    let surface_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
+        &evaluator, surface_id, displaced, 1.0e-12, &Unlimited,
+    )
+    .unwrap();
+    assert!((surface_projection.distance_m - 0.25).abs() < 1.0e-12);
+    assert!(
+        norm(std::array::from_fn(|axis| {
+            surface_projection.point_m[axis] - surface_derivatives.point_m[axis]
+        })) < 1.0e-12
+    );
+    let u_boundary_uv = [surface_bounds[0].end, surface_uv[1]];
+    let u_boundary = runmat_geometry_core::ExactSurfaceEvaluator::point(
+        &evaluator,
+        surface_id,
+        u_boundary_uv,
+        &Unlimited,
+    )
+    .unwrap();
+    let u_direction = normalized(surface_derivatives.du_m).unwrap();
+    let beyond_u = std::array::from_fn(|axis| u_boundary[axis] + u_direction[axis] * 0.25);
+    let boundary_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
+        &evaluator, surface_id, beyond_u, 1.0e-12, &Unlimited,
+    )
+    .unwrap();
+    assert!((boundary_projection.uv[0] - surface_bounds[0].end).abs() < 1.0e-12);
+    assert!((boundary_projection.distance_m - 0.25).abs() < 1.0e-12);
+
+    let edge = imported
+        .topology
+        .edges
+        .iter()
+        .find(|edge| edge.id == coedge.edge_id)
+        .unwrap();
+    let boundary_3d = runmat_geometry_core::ExactSurfaceEvaluator::point(
+        &evaluator,
+        surface_id,
+        pcurve.point_uv,
+        &Unlimited,
+    )
+    .unwrap();
+    let edge_3d = evaluator
+        .point(&edge.curve_evaluator_id, pcurve_parameter, &Unlimited)
+        .unwrap();
+    assert!(norm(std::array::from_fn(|axis| boundary_3d[axis] - edge_3d[axis])) < 1.0e-12);
+    assert_eq!(
+        runmat_geometry_core::ExactSurfaceEvaluator::point(
+            &evaluator,
+            surface_id,
+            [surface_bounds[0].end + 1.0, surface_uv[1]],
+            &Unlimited,
+        )
+        .unwrap_err()
+        .kind,
+        GeometryEvaluationErrorKind::ParameterOutsideDomain
+    );
+    assert_eq!(
+        runmat_geometry_core::ExactSurfaceEvaluator::point(
+            &evaluator, surface_id, surface_uv, &Cancelled,
+        )
+        .unwrap_err()
+        .kind,
+        GeometryEvaluationErrorKind::Cancelled
+    );
+    assert_eq!(
+        runmat_geometry_core::ExactSurfaceEvaluator::parameter_bounds(
+            &evaluator,
+            &SurfaceEvaluatorId::new("surface:unknown").unwrap(),
+        )
+        .unwrap_err()
+        .kind,
+        GeometryEvaluationErrorKind::UnknownEvaluator
+    );
+
     let millimeter_options = ExactCadImportOptions {
         source_units: UnitSystem::Millimeter,
         ..ExactCadImportOptions::default()
@@ -239,6 +341,36 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         )
         .unwrap();
     assert!((millimeter_length - length * 0.001).abs() < 1.0e-15);
+    let millimeter_surface_id = &millimeter_import
+        .topology
+        .faces
+        .iter()
+        .find(|candidate| candidate.id == face.id)
+        .unwrap()
+        .surface_evaluator_id;
+    let millimeter_surface_point = runmat_geometry_core::ExactSurfaceEvaluator::point(
+        &millimeter_evaluator,
+        millimeter_surface_id,
+        surface_uv,
+        &Unlimited,
+    )
+    .unwrap();
+    assert!(
+        norm(std::array::from_fn(|axis| {
+            millimeter_surface_point[axis] - surface_derivatives.point_m[axis] * 0.001
+        })) < 1.0e-15
+    );
+    let millimeter_displaced =
+        std::array::from_fn(|axis| millimeter_surface_point[axis] + normal[axis] * 0.00025);
+    let millimeter_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
+        &millimeter_evaluator,
+        millimeter_surface_id,
+        millimeter_displaced,
+        1.0e-15,
+        &Unlimited,
+    )
+    .unwrap();
+    assert!((millimeter_projection.distance_m - 0.00025).abs() < 1.0e-15);
 
     let mut corrupt = imported.clone();
     corrupt.representation[0] ^= 1;

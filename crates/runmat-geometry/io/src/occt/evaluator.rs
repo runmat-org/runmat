@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
     CurveDerivatives, CurveEvaluatorId, CurveProjection, ExactCurveEvaluator,
-    ExactCurveImplementation, ExactPcurveImplementation, ExactTrimClassifierImplementation,
-    GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
-    ParameterRange, PcurveEvaluatorId, TrimClassifierId,
+    ExactCurveImplementation, ExactPcurveImplementation, ExactSurfaceImplementation,
+    ExactTrimClassifierImplementation, GeometryEvaluationControl, GeometryEvaluationError,
+    GeometryEvaluationErrorKind, ParameterRange, PcurveEvaluatorId, SurfaceEvaluatorId,
+    TrimClassifierId,
 };
 
 use super::ffi;
@@ -18,6 +19,7 @@ pub struct OcctExactEvaluator {
     pub(super) session_id: u64,
     curve_keys: BTreeMap<CurveEvaluatorId, u64>,
     pub(super) pcurve_keys: BTreeMap<PcurveEvaluatorId, PcurveKey>,
+    pub(super) surface_keys: BTreeMap<SurfaceEvaluatorId, u64>,
     pub(super) trim_keys: BTreeMap<TrimClassifierId, u64>,
 }
 
@@ -93,6 +95,34 @@ impl OcctExactEvaluator {
                 "OCCT pcurve evaluator inventory does not match exact topology",
             ));
         }
+        let mut surface_keys = BTreeMap::new();
+        for record in &imported.evaluators.surfaces {
+            let ExactSurfaceImplementation::Kernel { reference } = &record.implementation else {
+                return Err(inconsistent(
+                    "an OCCT import cannot contain a portable surface evaluator",
+                ));
+            };
+            if reference.representation_digest != representation_digest {
+                return Err(inconsistent(
+                    "surface evaluator does not bind the supplied OCCT representation",
+                ));
+            }
+            let face_key = parse_face_token(&reference.entity_token, "surface evaluator")?;
+            if surface_keys.insert(record.id.clone(), face_key).is_some() {
+                return Err(inconsistent("duplicate OCCT surface evaluator identity"));
+            }
+        }
+        let topology_surface_ids = imported
+            .topology
+            .faces
+            .iter()
+            .map(|face| &face.surface_evaluator_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        if topology_surface_ids != surface_keys.keys().collect() {
+            return Err(inconsistent(
+                "OCCT surface evaluator inventory does not match exact topology",
+            ));
+        }
         let mut trim_keys = BTreeMap::new();
         for record in &imported.evaluators.trim_classifiers {
             let ExactTrimClassifierImplementation::Kernel { reference } = &record.implementation
@@ -131,6 +161,7 @@ impl OcctExactEvaluator {
             session_id,
             curve_keys,
             pcurve_keys,
+            surface_keys,
             trim_keys,
         })
     }

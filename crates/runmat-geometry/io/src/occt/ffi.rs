@@ -223,6 +223,50 @@ pub(crate) mod bridge {
         second_v: f64,
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct OcctSurfacePropertiesPayload {
+        u_start: f64,
+        u_end: f64,
+        v_start: f64,
+        v_end: f64,
+        u_periodic: bool,
+        u_period: f64,
+        v_periodic: bool,
+        v_period: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctSurfaceDerivativesPayload {
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        du_x: f64,
+        du_y: f64,
+        du_z: f64,
+        dv_x: f64,
+        dv_y: f64,
+        dv_z: f64,
+        duu_x: f64,
+        duu_y: f64,
+        duu_z: f64,
+        duv_x: f64,
+        duv_y: f64,
+        duv_z: f64,
+        dvv_x: f64,
+        dvv_y: f64,
+        dvv_z: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctSurfaceProjectionPayload {
+        u: f64,
+        v: f64,
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        distance: f64,
+    }
+
     #[derive(Debug, Clone)]
     struct OcctPreviewSessionStartPayload {
         session_id: u64,
@@ -314,6 +358,25 @@ pub(crate) mod bridge {
             v: f64,
             boundary_tolerance_uv: f64,
         ) -> Result<i8>;
+
+        fn exact_surface_properties(
+            session_id: u64,
+            face_key: u64,
+        ) -> Result<OcctSurfacePropertiesPayload>;
+
+        fn exact_surface_derivatives(
+            session_id: u64,
+            face_key: u64,
+            u: f64,
+            v: f64,
+        ) -> Result<OcctSurfaceDerivativesPayload>;
+
+        fn exact_surface_closest_point(
+            session_id: u64,
+            face_key: u64,
+            point_m: &[f64],
+            absolute_error_m: f64,
+        ) -> Result<OcctSurfaceProjectionPayload>;
 
         fn close_exact_evaluator_session(session_id: u64);
 

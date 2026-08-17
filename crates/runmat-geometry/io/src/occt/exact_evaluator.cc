@@ -1,5 +1,6 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "runmat-geometry-io/src/occt/occt_bridge.hxx"
+#include "runmat-geometry-io/src/occt/exact_evaluator_internal.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepClass_FaceClassifier.hxx>
@@ -177,6 +178,12 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
 }
 
 } // namespace
+
+detail::ExactFaceContext detail::exact_face_context(std::uint64_t session_id,
+                                                    std::uint64_t face_key) {
+  const auto value = session(session_id);
+  return {face(*value, face_key), value->meters_per_source_unit};
+}
 
 std::uint64_t start_exact_evaluator_session(
     rust::Slice<const std::uint8_t> representation,

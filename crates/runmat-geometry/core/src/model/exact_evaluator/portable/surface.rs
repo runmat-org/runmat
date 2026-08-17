@@ -1,10 +1,10 @@
 use super::super::{
-    ExactSurfaceDefinition, ExactSurfaceEvaluator, ExactSurfaceImplementation,
-    GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind, NurbsSurface3,
-    ParameterRange, SurfaceCurvature, SurfaceDerivatives, SurfaceEvaluatorId, SurfaceProjection,
+    surface_principal_curvature, surface_unit_normal, ExactSurfaceDefinition,
+    ExactSurfaceEvaluator, ExactSurfaceImplementation, GeometryEvaluationControl,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, NurbsSurface3, ParameterRange,
+    SurfaceCurvature, SurfaceDerivatives, SurfaceEvaluatorId, SurfaceProjection,
 };
 use super::projection::charge_seed_allocation;
-use super::surface_curvature::{principal_curvature, unit_normal};
 use super::surface_projection::{project_surface, uniform_surface_seeds};
 use super::surface_spline::rational_surface_derivatives;
 use super::vector::{add_scaled, scale};
@@ -61,7 +61,7 @@ impl ExactSurfaceEvaluator for PortableExactEvaluator<'_> {
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError> {
-        unit_normal(&ExactSurfaceEvaluator::derivatives(self, id, uv, control)?)
+        surface_unit_normal(&ExactSurfaceEvaluator::derivatives(self, id, uv, control)?)
     }
 
     fn principal_curvature(
@@ -70,7 +70,7 @@ impl ExactSurfaceEvaluator for PortableExactEvaluator<'_> {
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
     ) -> Result<SurfaceCurvature, GeometryEvaluationError> {
-        principal_curvature(&ExactSurfaceEvaluator::derivatives(self, id, uv, control)?)
+        surface_principal_curvature(&ExactSurfaceEvaluator::derivatives(self, id, uv, control)?)
     }
 
     fn closest_point(
