@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
-use runmat_geometry_core::ExactMassPropertiesImplementation;
+use runmat_geometry_core::{ExactMassPropertiesImplementation, TopologicalOrientation};
 
 const BOX: &[u8] = include_bytes!("../../tests/fixtures/box.brep");
 
@@ -40,6 +40,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert_eq!(first.evaluators.surfaces.len(), 6);
     assert_eq!(first.evaluators.trim_classifiers.len(), 6);
     assert_eq!(first.evaluators.mass_properties.len(), 1);
+    first.topology.validate_solid_shell_boundaries().unwrap();
     assert!(first
         .evaluators
         .kernel_representation_digest()
@@ -59,6 +60,26 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert!((mass.volume_m3 - 6.0).abs() < 1.0e-12);
     assert!((mass.surface_area_m2 - 22.0).abs() < 1.0e-12);
     assert_eq!(mass.centroid_m, [0.5, 1.0, 1.5]);
+
+    let mut non_manifold = first.topology.clone();
+    non_manifold.coedges[0].edge_id = non_manifold.coedges[1].edge_id.clone();
+    assert!(non_manifold.validate_solid_shell_boundaries().is_err());
+
+    let mut misoriented = first.topology.clone();
+    let shared_edge = misoriented.coedges[0].edge_id.clone();
+    let matching_use = misoriented
+        .coedges
+        .iter()
+        .enumerate()
+        .find(|(index, coedge)| *index != 0 && coedge.edge_id == shared_edge)
+        .map(|(index, _)| index)
+        .unwrap();
+    misoriented.coedges[matching_use].orientation =
+        match misoriented.coedges[matching_use].orientation {
+            TopologicalOrientation::Forward => TopologicalOrientation::Reversed,
+            TopologicalOrientation::Reversed => TopologicalOrientation::Forward,
+        };
+    assert!(misoriented.validate_solid_shell_boundaries().is_err());
 
     let mut millimeter_options = options;
     millimeter_options.source_units = UnitSystem::Millimeter;

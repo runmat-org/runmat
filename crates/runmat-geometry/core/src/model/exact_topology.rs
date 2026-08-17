@@ -124,6 +124,8 @@ pub struct ExactCoedge {
     pub id: PersistentEntityId,
     pub face_id: PersistentEntityId,
     pub edge_id: PersistentEntityId,
+    /// Direction of the edge in the face-local ordered wire traversal. This already includes the
+    /// wire traversal direction and must not be composed with `ExactWire::orientation` again.
     pub orientation: TopologicalOrientation,
     pub pcurve_evaluator_id: PcurveEvaluatorId,
     #[serde(default, skip_serializing_if = "Option::is_none")]

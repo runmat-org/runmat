@@ -329,6 +329,19 @@ fn sheet_bodies_own_shells_without_fake_solids() {
 }
 
 #[test]
+fn solid_shell_boundary_validation_rejects_open_boundaries_but_allows_sheets() {
+    let mut open = topology();
+    assert!(open.validate_solid_shell_boundaries().is_err());
+
+    open.bodies[0].is_sheet_body = true;
+    open.bodies[0].lump_ids.clear();
+    open.bodies[0].sheet_shell_ids = vec![open.shells[0].id.clone()];
+    open.lumps.clear();
+    open.solids.clear();
+    open.validate_solid_shell_boundaries().unwrap();
+}
+
+#[test]
 fn dangling_kind_confused_and_wrong_face_incidence_fail() {
     let mut dangling = topology();
     dangling.coedges[0].edge_id = id(PersistentEntityKind::Edge, "missing");

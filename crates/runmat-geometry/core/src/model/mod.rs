@@ -6,6 +6,7 @@ mod exact_artifact;
 mod exact_evaluator;
 mod exact_topology;
 mod exact_topology_assembly_validation;
+mod exact_topology_solid_validation;
 mod exact_topology_validation;
 mod exact_topology_validation_support;
 mod field;

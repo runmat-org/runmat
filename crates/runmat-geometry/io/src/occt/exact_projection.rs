@@ -310,6 +310,9 @@ pub(super) fn project_exact_contracts(
     evaluators
         .validate_against(&topology, &model)
         .map_err(|error| invalid_contract("projected exact geometry", error))?;
+    topology
+        .validate_solid_shell_boundaries()
+        .map_err(|error| invalid_contract("projected solid shell boundaries", error))?;
     Ok((topology, evaluators))
 }
 
