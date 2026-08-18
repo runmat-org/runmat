@@ -346,7 +346,7 @@ impl MeshingCancellationSignal for Cancelled {
     }
 }
 
-fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
+pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
     let root = entity(PersistentEntityKind::Assembly, "root");
     let body = entity(PersistentEntityKind::Body, "body");
     let lump = entity(PersistentEntityKind::Lump, "lump");

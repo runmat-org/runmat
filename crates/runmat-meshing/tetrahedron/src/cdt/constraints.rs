@@ -161,4 +161,4 @@ pub(super) fn error(
 
 #[cfg(test)]
 #[path = "constraints/tests.rs"]
-mod tests;
+pub(crate) mod tests;

@@ -6,6 +6,7 @@ mod insertion;
 mod point_set;
 mod segment_recovery;
 mod topology;
+mod volume_mesh;
 mod volume_provenance;
 mod volume_quality;
 mod volume_refinement;
@@ -46,6 +47,11 @@ pub use segment_recovery::{
 pub use topology::{
     build_delaunay_volume_topology, DelaunayTopologyError, DelaunayTopologyErrorKind,
     DelaunayTopologyOptions, DelaunayVolumeNode, DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
+};
+pub use volume_mesh::{
+    construct_delaunay_volume_mesh, validate_delaunay_volume_mesh, DelaunayVolumeMesh,
+    DelaunayVolumeMeshError, DelaunayVolumeMeshErrorKind, DelaunayVolumeMeshOptions,
+    DelaunayVolumeMeshStage,
 };
 pub use volume_provenance::{
     build_delaunay_volume_provenance, validate_delaunay_volume_provenance,
