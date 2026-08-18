@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
     cavity::constrained::{
-        retriangulate_constrained_cavity_from_nodes, ConstrainedCavityNode,
+        retriangulate_constrained_cavity_from_nodes, ConstrainedCavity, ConstrainedCavityNode,
         ConstrainedCavityRefillOptions,
     },
     cdt::{
@@ -27,8 +27,13 @@ use crate::{
 };
 
 mod sides;
+pub(super) mod star;
 
 use sides::side_cavities;
+use star::star_refill;
+
+const EXACT_COVER_MAXIMUM_NODES: usize = 20;
+const EXACT_COVER_MAXIMUM_BOUNDARY_FACES: usize = 40;
 
 pub(super) struct BoundaryFace {
     pub(super) nodes: [u32; 3],
@@ -86,18 +91,21 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
             coordinates_m: recovery.topology.nodes[node_id as usize].coordinates_m,
         })
         .collect::<Vec<_>>();
-    let refill_options = ConstrainedCavityRefillOptions {
-        min_scaled_jacobian: 0.0,
-        ..ConstrainedCavityRefillOptions::default()
-    };
-    let Ok(Some(positive)) =
-        retriangulate_constrained_cavity_from_nodes(&positive, &nodes, refill_options)
-    else {
-        return Ok(None);
-    };
-    let Ok(Some(negative)) =
-        retriangulate_constrained_cavity_from_nodes(&negative, &nodes, refill_options)
-    else {
+    let positive = refill_side(
+        &positive,
+        &nodes,
+        &recovery.topology,
+        constraint_index,
+        work,
+    )?;
+    let negative = refill_side(
+        &negative,
+        &nodes,
+        &recovery.topology,
+        constraint_index,
+        work,
+    )?;
+    let (Some(positive), Some(negative)) = (positive, negative) else {
         return Ok(None);
     };
 
@@ -111,10 +119,9 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
         .collect::<Vec<_>>();
     tetrahedra.extend(
         positive
-            .tetrahedra
             .into_iter()
-            .chain(negative.tetrahedra)
-            .map(|tetrahedron| (tetrahedron.node_ids, None)),
+            .chain(negative)
+            .map(|tetrahedron| (tetrahedron, None)),
     );
     let candidate = match build_delaunay_volume_topology_with_regions(
         recovery.topology.nodes.clone(),
@@ -180,6 +187,39 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
     } else {
         Ok(None)
     }
+}
+
+fn refill_side(
+    cavity: &ConstrainedCavity,
+    nodes: &[ConstrainedCavityNode],
+    topology: &DelaunayVolumeTopology,
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Option<Vec<[u32; 4]>>, DelaunayFacetRecoveryError> {
+    if let Some(star) = star_refill(cavity, topology, constraint_index, work)? {
+        return Ok(Some(star));
+    }
+    if nodes.len() > EXACT_COVER_MAXIMUM_NODES
+        || cavity.boundary_faces.len() > EXACT_COVER_MAXIMUM_BOUNDARY_FACES
+    {
+        return Ok(None);
+    }
+    let refill_options = ConstrainedCavityRefillOptions {
+        min_scaled_jacobian: 0.0,
+        ..ConstrainedCavityRefillOptions::default()
+    };
+    Ok(
+        retriangulate_constrained_cavity_from_nodes(cavity, nodes, refill_options)
+            .ok()
+            .flatten()
+            .map(|refill| {
+                refill
+                    .tetrahedra
+                    .into_iter()
+                    .map(|tetrahedron| tetrahedron.node_ids)
+                    .collect()
+            }),
+    )
 }
 
 fn recovered_segments_exist(recovery: &DelaunaySegmentRecovery) -> bool {

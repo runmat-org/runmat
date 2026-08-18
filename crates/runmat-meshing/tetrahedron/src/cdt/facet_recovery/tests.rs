@@ -1,4 +1,5 @@
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+use runmat_meshing_core::quality::predicate::tetrahedron_volume;
 use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 
 use super::*;
@@ -213,6 +214,82 @@ fn facet_edge_star_cavity_enforces_its_tetrahedron_budget() {
 }
 
 #[test]
+fn facet_star_refill_exceeds_small_exact_cover_inventory() {
+    const RING_NODES: usize = 24;
+    let mut nodes = vec![DelaunayVolumeNode {
+        identity: StableDigest::from_bytes([1; 32]),
+        coordinates_m: [0.0, 0.0, 0.0],
+    }];
+    for index in 0..RING_NODES {
+        let angle = std::f64::consts::TAU * index as f64 / RING_NODES as f64;
+        nodes.push(DelaunayVolumeNode {
+            identity: StableDigest::from_bytes([(index + 2) as u8; 32]),
+            coordinates_m: [angle.cos(), angle.sin(), 0.0],
+        });
+    }
+    nodes.push(DelaunayVolumeNode {
+        identity: StableDigest::from_bytes([RING_NODES as u8 + 2; 32]),
+        coordinates_m: [0.0, 0.0, 1.0],
+    });
+    let apex = RING_NODES as u32 + 1;
+    let tetrahedra = (0..RING_NODES)
+        .map(|index| {
+            [
+                0,
+                index as u32 + 1,
+                (index as u32 + 1) % RING_NODES as u32 + 1,
+                apex,
+            ]
+        })
+        .collect::<Vec<_>>();
+    let topology = build_delaunay_volume_topology(
+        nodes,
+        tetrahedra,
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let target_volume_m3 = topology
+        .tetrahedra
+        .iter()
+        .map(|tetrahedron| {
+            tetrahedron_volume(
+                tetrahedron
+                    .vertex_indices
+                    .map(|node| topology.nodes[node as usize].coordinates_m),
+            )
+        })
+        .sum();
+    let cavity = crate::cavity::constrained::ConstrainedCavity {
+        removed_tetrahedron_ids: (0..RING_NODES as u32).collect(),
+        boundary_faces: topology
+            .incidence
+            .boundary_facets
+            .iter()
+            .map(
+                |facet| crate::cavity::constrained::ConstrainedCavityBoundaryFace {
+                    node_ids: facet.vertex_indices,
+                    outside_tetrahedron_ids: Vec::new(),
+                    source_face_id: None,
+                    source_edge_ids: [None; 3],
+                    region_ids: Vec::new(),
+                },
+            )
+            .collect(),
+        protected_node_ids: Vec::new(),
+        target_volume_m3,
+    };
+    assert!(topology.nodes.len() > 20);
+    assert!(cavity.boundary_faces.len() > 40);
+    let mut work = FacetRecoveryWork::new(DelaunayFacetRecoveryOptions::default(), &NeverCancelled);
+
+    let refill = super::cavity::star::star_refill(&cavity, &topology, 0, &mut work)
+        .unwrap()
+        .expect("the large convex pyramid has a boundary apex star");
+    assert_eq!(refill.len(), RING_NODES);
+}
+
+#[test]
 fn facet_recovery_is_a_noop_for_existing_support_and_rejects_tampering() {
     let constraints = constraints(false);
     let segments = segment_recovery(false, &constraints);
@@ -347,6 +424,16 @@ impl MeshingCancellationSignal for Cancelled {
 fn facet_recovery_enforces_search_limits_and_cancellation() {
     let constraints = constraints(false);
     let segments = segment_recovery(true, &constraints);
+    let invalid = DelaunayFacetRecoveryOptions {
+        maximum_cavity_apex_attempts: 0,
+        ..DelaunayFacetRecoveryOptions::default()
+    };
+    assert_eq!(
+        recover_delaunay_facets(segments.clone(), &constraints, invalid, &NeverCancelled,)
+            .unwrap_err()
+            .kind,
+        DelaunayFacetRecoveryErrorKind::InvalidOptions
+    );
     let bounded = DelaunayFacetRecoveryOptions {
         maximum_search_steps: 1,
         ..DelaunayFacetRecoveryOptions::default()

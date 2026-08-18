@@ -28,6 +28,7 @@ pub struct DelaunayFacetRecoveryOptions {
     pub maximum_cavity_tetrahedra: u64,
     pub maximum_cavity_nodes: u64,
     pub maximum_cavity_boundary_faces: u64,
+    pub maximum_cavity_apex_attempts: u64,
 }
 
 impl Default for DelaunayFacetRecoveryOptions {
@@ -39,8 +40,9 @@ impl Default for DelaunayFacetRecoveryOptions {
             maximum_support_steps: 100_000_000,
             maximum_cavity_steps: 100_000_000,
             maximum_cavity_tetrahedra: 10_000,
-            maximum_cavity_nodes: 20,
-            maximum_cavity_boundary_faces: 40,
+            maximum_cavity_nodes: 10_000,
+            maximum_cavity_boundary_faces: 20_000,
+            maximum_cavity_apex_attempts: 20_000,
         }
     }
 }
@@ -179,14 +181,13 @@ fn validate_options(
         || options.maximum_cavity_steps == 0
         || options.maximum_cavity_tetrahedra == 0
         || options.maximum_cavity_nodes == 0
-        || options.maximum_cavity_nodes > 20
         || options.maximum_cavity_boundary_faces == 0
-        || options.maximum_cavity_boundary_faces > 40
+        || options.maximum_cavity_apex_attempts == 0
     {
         return Err(error(
             DelaunayFacetRecoveryErrorKind::InvalidOptions,
             None,
-            "facet recovery limits must be nonzero, with at most 20 cavity nodes and 40 cavity boundary faces",
+            "facet recovery limits must be nonzero",
         ));
     }
     Ok(())

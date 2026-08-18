@@ -12,6 +12,7 @@ pub(super) struct FacetRecoveryWork<'a> {
     flip_attempts: u64,
     support_steps: u64,
     cavity_steps: u64,
+    cavity_apex_attempts: u64,
 }
 
 impl<'a> FacetRecoveryWork<'a> {
@@ -26,6 +27,7 @@ impl<'a> FacetRecoveryWork<'a> {
             flip_attempts: 0,
             support_steps: 0,
             cavity_steps: 0,
+            cavity_apex_attempts: 0,
         }
     }
 
@@ -83,6 +85,20 @@ impl<'a> FacetRecoveryWork<'a> {
             ));
         }
         self.check_cancelled(constraint_index, self.cavity_steps)
+    }
+
+    pub(super) fn cavity_apex_attempt(
+        &mut self,
+        constraint_index: u32,
+    ) -> Result<(), DelaunayFacetRecoveryError> {
+        self.cavity_apex_attempts += 1;
+        if self.cavity_apex_attempts > self.options.maximum_cavity_apex_attempts {
+            return Err(resource(
+                constraint_index,
+                "facet cavity apex-attempt limit exceeded",
+            ));
+        }
+        self.check_cancelled(constraint_index, self.cavity_apex_attempts)
     }
 
     fn check_cancelled(
