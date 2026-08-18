@@ -33,6 +33,7 @@ fn metric_contexts(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenan
                 StableDigest::from_bytes([3; 32]),
                 StableDigest::from_bytes([5; 32]),
             ],
+            chart_id: StableDigest::from_bytes([40; 32]),
             entity_ids: vec![entity(PersistentEntityKind::Face, "loaded-boundary")],
             region_ids: vec![region("outer")],
         }],

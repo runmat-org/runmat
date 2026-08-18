@@ -81,6 +81,7 @@ fn fixture(interface: bool) -> (DelaunayConstraints, DelaunayFacetRecovery) {
             .enumerate()
             .map(|(index, vertex_indices)| DelaunayConstraintFacet {
                 facet_id: StableDigest::from_bytes([(index + 90) as u8; 32]),
+                chart_id: StableDigest::from_bytes([(index + 120) as u8; 32]),
                 vertex_indices,
                 source_face_id: entity(PersistentEntityKind::Face, &format!("face:{index}")),
                 positive_side: if vertex_indices == [0, 1, 2] {

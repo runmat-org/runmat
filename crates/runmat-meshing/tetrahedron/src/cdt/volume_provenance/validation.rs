@@ -66,7 +66,9 @@ pub fn validate_delaunay_volume_provenance(
     for (index, binding) in provenance.facets.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         validate_simplex(binding.node_identities, &node_identities)?;
-        if index > 0 && provenance.facets[index - 1].node_identities >= binding.node_identities {
+        if binding.chart_id == StableDigest::ZERO
+            || index > 0 && provenance.facets[index - 1].node_identities >= binding.node_identities
+        {
             return Err(invalid("facet provenance must be canonically ordered"));
         }
         validate_entities(

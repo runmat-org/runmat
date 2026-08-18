@@ -196,6 +196,7 @@ fn construct(
             require_capacity(facets.len(), options.maximum_facet_bindings)?;
             facets.push(DelaunayFacetProvenance {
                 node_identities: identities,
+                chart_id: constraint.chart_id,
                 entity_ids: entity_ids.clone(),
                 region_ids: region_ids.clone(),
             });

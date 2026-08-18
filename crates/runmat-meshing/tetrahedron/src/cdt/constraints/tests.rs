@@ -32,6 +32,11 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
     assert_eq!(constraints.nodes.len(), 4);
     assert_eq!(constraints.segments.len(), 6);
     assert_eq!(constraints.facets.len(), 4);
+    assert!(constraints.facets.iter().all(|facet| {
+        surface.triangles.iter().any(|triangle| {
+            triangle.triangle_id == facet.facet_id && triangle.chart_id == facet.chart_id
+        })
+    }));
     assert!(constraints
         .nodes
         .iter()
@@ -92,6 +97,12 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
     assert_eq!(provenance.nodes.len(), 4);
     assert_eq!(provenance.segments.len(), 6);
     assert_eq!(provenance.facets.len(), 4);
+    assert!(provenance.facets.iter().all(|facet| {
+        constraints.facets.iter().any(|constraint| {
+            constraint.chart_id == facet.chart_id
+                && constraint.source_face_id == facet.entity_ids[0]
+        })
+    }));
     validate_delaunay_volume_provenance_sources(
         &facets,
         &constraints,
@@ -102,6 +113,23 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
         &NeverCancelled,
     )
     .unwrap();
+
+    let mut stale_chart = provenance.clone();
+    stale_chart.facets[0].chart_id = StableDigest::from_bytes([99; 32]);
+    assert_eq!(
+        validate_delaunay_volume_provenance_sources(
+            &facets,
+            &constraints,
+            &carved,
+            &stale_chart,
+            DelaunayCarvingOptions::default(),
+            DelaunayVolumeProvenanceOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        crate::cdt::DelaunayVolumeProvenanceErrorKind::InvalidProvenance
+    );
 
     let mut stale_source = provenance;
     stale_source.segments[0].edge_parameters[0] += 0.125;
@@ -278,6 +306,19 @@ fn validation_rejects_tampered_identity_side_and_edge_coverage() {
         .unwrap_err()
         .kind,
         DelaunayConstraintErrorKind::InvalidBoundary
+    );
+
+    let mut missing_chart = constraints.clone();
+    missing_chart.facets[0].chart_id = StableDigest::ZERO;
+    assert_eq!(
+        validate_delaunay_constraints(
+            &missing_chart,
+            DelaunayConstraintOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayConstraintErrorKind::InvalidIdentity
     );
 
     let mut missing_parameters = constraints.clone();

@@ -30,6 +30,7 @@ pub struct DelaunaySegmentProvenance {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DelaunayFacetProvenance {
     pub node_identities: [StableDigest; 3],
+    pub chart_id: StableDigest,
     pub entity_ids: Vec<PersistentEntityId>,
     pub region_ids: Vec<PersistentEntityId>,
 }

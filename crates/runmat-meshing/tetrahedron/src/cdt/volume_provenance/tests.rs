@@ -71,6 +71,7 @@ fn provenance() -> DelaunayVolumeProvenance {
                     StableDigest::from_bytes([3; 32]),
                     StableDigest::from_bytes([4; 32]),
                 ],
+                chart_id: StableDigest::from_bytes([40; 32]),
                 entity_ids: vec![entity(PersistentEntityKind::Face, "interface")],
                 region_ids: vec![region("inner"), region("outer")],
             },
@@ -80,6 +81,7 @@ fn provenance() -> DelaunayVolumeProvenance {
                     StableDigest::from_bytes([4; 32]),
                     StableDigest::from_bytes([5; 32]),
                 ],
+                chart_id: StableDigest::from_bytes([41; 32]),
                 entity_ids: vec![entity(PersistentEntityKind::Face, "outer-boundary")],
                 region_ids: vec![region("outer")],
             },
@@ -180,6 +182,20 @@ fn rejects_noncanonical_or_false_simplex_provenance() {
         validate_delaunay_volume_provenance(
             &topology,
             &invalid_parameters,
+            DelaunayVolumeProvenanceOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeProvenanceErrorKind::InvalidProvenance
+    );
+
+    let mut missing_chart = provenance();
+    missing_chart.facets[0].chart_id = StableDigest::ZERO;
+    assert_eq!(
+        validate_delaunay_volume_provenance(
+            &topology,
+            &missing_chart,
             DelaunayVolumeProvenanceOptions::default(),
             &NeverCancelled,
         )

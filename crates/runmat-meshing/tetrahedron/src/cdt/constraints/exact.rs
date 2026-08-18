@@ -107,6 +107,7 @@ pub fn build_delaunay_constraints(
             .ok_or_else(|| invalid_boundary("solid face side classification is incomplete"))?;
         facets.push(DelaunayConstraintFacet {
             facet_id: triangle.triangle_id,
+            chart_id: triangle.chart_id,
             vertex_indices,
             source_face_id: triangle.source_face_id.clone(),
             positive_side,

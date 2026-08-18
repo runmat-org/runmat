@@ -96,9 +96,12 @@ pub fn validate_delaunay_constraints(
     for (index, facet) in constraints.facets.iter().enumerate() {
         checkpoint(index, options, cancellation)?;
         validate_kind(&facet.source_face_id, PersistentEntityKind::Face)?;
-        if facet.facet_id == StableDigest::ZERO || !facet_ids.insert(facet.facet_id) {
+        if facet.facet_id == StableDigest::ZERO
+            || facet.chart_id == StableDigest::ZERO
+            || !facet_ids.insert(facet.facet_id)
+        {
             return Err(invalid_identity(
-                "constraint facet identities must be nonzero and unique",
+                "constraint facet and chart identities must be nonzero, and facets must be unique",
             ));
         }
         let mut key = facet.vertex_indices;

@@ -41,6 +41,7 @@ fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
             .collect(),
         facets: vec![DelaunayConstraintFacet {
             facet_id: StableDigest::from_bytes([90; 32]),
+            chart_id: StableDigest::from_bytes([91; 32]),
             vertex_indices: [0, 1, 2],
             source_face_id: entity(PersistentEntityKind::Face, "face:base"),
             positive_side: DelaunayConstraintFacetSide::Exterior,

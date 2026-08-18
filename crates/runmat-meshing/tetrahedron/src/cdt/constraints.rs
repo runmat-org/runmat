@@ -54,6 +54,7 @@ pub enum DelaunayConstraintFacetSide {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DelaunayConstraintFacet {
     pub facet_id: StableDigest,
+    pub chart_id: StableDigest,
     pub vertex_indices: [u32; 3],
     pub source_face_id: PersistentEntityId,
     /// Half-space reached along the oriented facet's positive geometric normal.

@@ -75,6 +75,7 @@ fn interior_sliver_fixture() -> (DelaunayVolumeTopology, DelaunayVolumeProvenanc
         .enumerate()
         .map(|(index, values)| DelaunayFacetProvenance {
             node_identities: values.map(|value| StableDigest::from_bytes([value; 32])),
+            chart_id: StableDigest::from_bytes([(index + 40) as u8; 32]),
             entity_ids: vec![entity(
                 PersistentEntityKind::Face,
                 &format!("outer-face-{index}"),
