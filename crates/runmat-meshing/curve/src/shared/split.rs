@@ -13,6 +13,43 @@ use super::{
 
 const MAX_SPLIT_REQUESTS: usize = 10_000_000;
 
+pub fn canonicalize_shared_curve_splits(splits: &mut Vec<SharedCurveSegmentSplit>) {
+    splits.sort_by(compare_splits);
+    splits.dedup();
+}
+
+pub fn validate_shared_curve_split_set(
+    existing: &SharedCurveMesh,
+    topology: &runmat_geometry_core::ExactBRepTopology,
+    splits: &[SharedCurveSegmentSplit],
+) -> Result<(), SharedCurveError> {
+    existing.validate_against(topology)?;
+    if splits.is_empty() || splits.len() > MAX_SPLIT_REQUESTS {
+        return Err(SharedCurveError::invalid_request(
+            "protected curve splits",
+            "split inventory must be nonempty and within its hard bound",
+        ));
+    }
+    let curves_by_edge = existing
+        .edges
+        .iter()
+        .map(|curve| (&curve.source_edge_id, curve))
+        .collect::<BTreeMap<_, _>>();
+    for split in splits {
+        validate_split(split, &curves_by_edge)?;
+    }
+    if splits
+        .windows(2)
+        .any(|pair| compare_splits(&pair[0], &pair[1]) != std::cmp::Ordering::Less)
+    {
+        return Err(SharedCurveError::invalid_request(
+            "protected curve splits",
+            "split inventory is not in unique canonical order",
+        ));
+    }
+    Ok(())
+}
+
 pub fn apply_shared_curve_splits(
     existing: &SharedCurveMesh,
     context: SharedCurveEvaluationContext<'_>,
@@ -113,6 +150,18 @@ fn validate_split(
         ));
     }
     Ok(())
+}
+
+fn compare_splits(
+    left: &SharedCurveSegmentSplit,
+    right: &SharedCurveSegmentSplit,
+) -> std::cmp::Ordering {
+    left.source_edge_id
+        .cmp(&right.source_edge_id)
+        .then_with(|| left.edge_parameters[0].total_cmp(&right.edge_parameters[0]))
+        .then_with(|| left.edge_parameters[1].total_cmp(&right.edge_parameters[1]))
+        .then_with(|| left.split_parameter.total_cmp(&right.split_parameter))
+        .then_with(|| left.endpoint_node_ids.cmp(&right.endpoint_node_ids))
 }
 
 fn invalid_split(edge_id: &PersistentEntityId, reason: &str) -> SharedCurveError {

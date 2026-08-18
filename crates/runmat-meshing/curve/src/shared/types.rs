@@ -53,7 +53,8 @@ pub struct SharedCurveNode {
     pub coordinates_m: [f64; 3],
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SharedCurveSegmentSplit {
     pub source_edge_id: PersistentEntityId,
     /// Ordered by increasing exact source-edge parameter.

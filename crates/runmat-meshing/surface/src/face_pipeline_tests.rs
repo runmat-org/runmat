@@ -5,8 +5,8 @@ use runmat_meshing_core::{
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, SurfaceQualityTargets,
 };
 use runmat_meshing_curve::{
-    discretize_shared_curves, CurveResolutionPolicy, SharedCurveDiscretizationOptions,
-    SharedCurveSegmentSplit, UniformCurveMetric,
+    canonicalize_shared_curve_splits, discretize_shared_curves, CurveResolutionPolicy,
+    SharedCurveDiscretizationOptions, SharedCurveSegmentSplit, UniformCurveMetric,
 };
 
 use crate::{
@@ -99,7 +99,7 @@ fn curve_split_demands_have_one_canonical_order() {
     };
     let mut demands = vec![second.clone(), first.clone(), second.clone()];
 
-    super::face_pipeline::canonicalize_splits(&mut demands);
+    canonicalize_shared_curve_splits(&mut demands);
 
     assert_eq!(demands, vec![first, second]);
 }

@@ -5,9 +5,9 @@ use runmat_geometry_core::{
 
 use super::*;
 use crate::{
-    discretize_shared_curves, shared_curve_interior_node_id, CurveResolutionPolicy,
-    SharedCurveDiscretizationOptions, SharedCurveEvaluationContext, SharedCurveSegmentSplit,
-    UniformCurveMetric,
+    canonicalize_shared_curve_splits, discretize_shared_curves, shared_curve_interior_node_id,
+    validate_shared_curve_split_set, CurveResolutionPolicy, SharedCurveDiscretizationOptions,
+    SharedCurveEvaluationContext, SharedCurveSegmentSplit, UniformCurveMetric,
 };
 
 #[test]
@@ -26,6 +26,18 @@ fn exact_splits_are_deduplicated_and_order_independent() {
     let nodes = &curves.edges[0].nodes;
     let first = split(&curves, 0);
     let second = split(&curves, 2);
+    let mut canonical = vec![second.clone(), first.clone(), first.clone()];
+    canonicalize_shared_curve_splits(&mut canonical);
+    assert_eq!(canonical, vec![first.clone(), second.clone()]);
+    validate_shared_curve_split_set(&curves, &topology, &canonical).unwrap();
+    let mut noncanonical = canonical.clone();
+    noncanonical.reverse();
+    assert_eq!(
+        validate_shared_curve_split_set(&curves, &topology, &noncanonical)
+            .unwrap_err()
+            .kind,
+        crate::SharedCurveErrorKind::InvalidRequest
+    );
     let context =
         SharedCurveEvaluationContext::new(&topology, &evaluator, &evaluator, &metric, &Control);
 

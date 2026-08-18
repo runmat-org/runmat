@@ -27,7 +27,9 @@ pub use geometric_validation::{
 pub use geometry_metric::derive_curve_geometry_metric;
 pub use identity::{shared_curve_interior_node_id, shared_curve_vertex_node_id};
 pub use resolved_metric::ResolvedCurveMetricField;
-pub use split::apply_shared_curve_splits;
+pub use split::{
+    apply_shared_curve_splits, canonicalize_shared_curve_splits, validate_shared_curve_split_set,
+};
 pub use types::{
     CurveMetricResolutionEvidence, CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve,
     SharedCurveBatch, SharedCurveFaceUse, SharedCurveMesh, SharedCurveNode,

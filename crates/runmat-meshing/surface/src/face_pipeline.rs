@@ -3,7 +3,9 @@ use runmat_meshing_core::{
     MeshingCancellationSignal, MeshingPartitionDescriptor, MeshingPartitionKind,
     MetricFieldRequest, SurfaceQualityTargets,
 };
-use runmat_meshing_curve::{SharedCurveMesh, SharedCurveSegmentSplit};
+use runmat_meshing_curve::{
+    canonicalize_shared_curve_splits, SharedCurveMesh, SharedCurveSegmentSplit,
+};
 
 use crate::{
     accept_exact_face_chart_mesh, build_exact_face_charts, build_exact_face_mesh_batch,
@@ -197,7 +199,7 @@ pub fn mesh_exact_face_partition(
         );
     }
     if !splits.is_empty() {
-        canonicalize_splits(&mut splits);
+        canonicalize_shared_curve_splits(&mut splits);
         return Ok(ExactFacePartitionOutcome::RequiresCurveSplits(splits));
     }
     build_exact_face_mesh_batch(context.topology, partition, meshes)
@@ -220,18 +222,6 @@ fn validate_partition(
         ));
     }
     Ok(())
-}
-
-pub(crate) fn canonicalize_splits(splits: &mut Vec<SharedCurveSegmentSplit>) {
-    splits.sort_by(|left, right| {
-        left.source_edge_id
-            .cmp(&right.source_edge_id)
-            .then_with(|| left.edge_parameters[0].total_cmp(&right.edge_parameters[0]))
-            .then_with(|| left.edge_parameters[1].total_cmp(&right.edge_parameters[1]))
-            .then_with(|| left.split_parameter.total_cmp(&right.split_parameter))
-            .then_with(|| left.endpoint_node_ids.cmp(&right.endpoint_node_ids))
-    });
-    splits.dedup();
 }
 
 fn invalid_partition(reason: impl Into<String>) -> ExactFacePartitionError {
