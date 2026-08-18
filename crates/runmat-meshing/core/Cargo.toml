@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-meshing-size = { workspace = true }
+robust = "1.2"
 
 [dev-dependencies]
 

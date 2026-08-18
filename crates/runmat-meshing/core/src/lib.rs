@@ -65,7 +65,8 @@ pub use predicate::{
     point_triangle_distance, ray_triangle_intersection, tetrahedron_centroid,
     tetrahedron_circumsphere, tetrahedron_circumsphere_contains_point,
     tetrahedron_edge_aspect_ratio, tetrahedron_signed_volume, tetrahedron_volume, triangle_area,
-    triangle_centroid, Point3, PointInClosedSurface, RayTriangleHit, Tetrahedron3, Triangle3,
+    triangle_centroid, PlanarPredicateError, PlanarPredicatePoint, Point3, PointInClosedSurface,
+    PredicateSign, RayTriangleHit, Tetrahedron3, Triangle3,
 };
 pub use quality::boundary::{
     evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,

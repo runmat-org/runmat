@@ -6794,6 +6794,7 @@ name = "runmat-meshing-core"
 version = "0.6.1"
 dependencies = [
  "minicbor",
+ "robust",
  "runmat-canonical-codec",
  "runmat-geometry-core",
  "runmat-meshing-size",
