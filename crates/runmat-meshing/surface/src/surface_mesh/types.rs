@@ -9,6 +9,7 @@ use crate::{
 
 pub const EXACT_FACE_MESH_BATCH_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION: u16 = 1;
+pub const EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_SURFACE_MESH_SCHEMA_VERSION: u16 = 1;
 pub const MAX_EXACT_FACE_PARTITIONS: usize = 63;
 
@@ -55,6 +56,24 @@ pub enum ExactFacePartitionOutcome {
     },
     RequiresCurveSplits {
         splits: Vec<SharedCurveSegmentSplit>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactSurfacePassResult {
+    pub schema_version: u16,
+    pub outcome: ExactSurfacePassOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExactSurfacePassOutcome {
+    RequiresCurveSplits {
+        splits: Vec<SharedCurveSegmentSplit>,
+    },
+    Converged {
+        surface: ExactSurfaceMesh,
     },
 }
 

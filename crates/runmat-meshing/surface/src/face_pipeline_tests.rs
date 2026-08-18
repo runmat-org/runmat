@@ -11,10 +11,11 @@ use runmat_meshing_curve::{
 };
 
 use crate::{
-    build_exact_face_partition_result, encode_exact_face_partition_result,
+    build_exact_face_partition_result, decide_exact_surface_pass,
+    encode_exact_face_partition_result, encode_exact_surface_pass_result,
     face_partition_descriptors, mesh_exact_face_partition, resolve_exact_surface_pass,
     ExactFacePartitionContext, ExactFacePartitionOptions, ExactFacePartitionOutcome,
-    ExactSurfaceConvergenceOutcome, ExactSurfaceJoinOptions,
+    ExactSurfaceConvergenceOutcome, ExactSurfaceJoinOptions, ExactSurfacePassOutcome,
 };
 
 #[test]
@@ -71,9 +72,66 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
     sheet_topology.lumps.clear();
     sheet_topology.solids.clear();
     sheet_topology.regions.clear();
+    let converged_results = [outcome.clone()];
+    let pass = decide_exact_surface_pass(
+        &curves,
+        &converged_results,
+        &sheet_topology,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert!(matches!(
+        &pass.outcome,
+        ExactSurfacePassOutcome::Converged { .. }
+    ));
+    let pass_bytes = encode_exact_surface_pass_result(
+        &pass,
+        &sheet_topology,
+        &curves,
+        &converged_results,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::decode_exact_surface_pass_result(
+            &pass_bytes,
+            &sheet_topology,
+            &curves,
+            &converged_results,
+            ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap(),
+        pass
+    );
+    assert_eq!(
+        crate::surface_mesh::decode_exact_surface_pass_result_with_byte_limit(
+            &pass_bytes,
+            &sheet_topology,
+            &curves,
+            &converged_results,
+            ExactSurfaceJoinOptions::default(),
+            pass_bytes.len() - 1,
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
+    let mut tampered_pass = pass.clone();
+    let ExactSurfacePassOutcome::Converged { surface } = &mut tampered_pass.outcome else {
+        unreachable!()
+    };
+    surface.maximum_chordal_deviation_m += 1.0;
+    assert!(encode_exact_surface_pass_result(
+        &tampered_pass,
+        &sheet_topology,
+        &curves,
+        &converged_results,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .is_err());
     let converged = resolve_exact_surface_pass(
         &curves,
-        vec![outcome.clone()],
+        &converged_results,
         SharedCurveEvaluationContext::new(
             &sheet_topology,
             &evaluator,
@@ -128,9 +186,55 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         crate::decode_exact_face_partition_result(&restart_bytes, &topology, &curves).unwrap(),
         restart
     );
+    let restart_results = [restart.clone()];
+    let restart_pass = decide_exact_surface_pass(
+        &curves,
+        &restart_results,
+        &sheet_topology,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    let ExactSurfacePassOutcome::RequiresCurveSplits { splits } = &restart_pass.outcome else {
+        panic!("restart pass must retain canonical curve split demands")
+    };
+    assert_eq!(splits, std::slice::from_ref(&split));
+    let restart_pass_bytes = encode_exact_surface_pass_result(
+        &restart_pass,
+        &sheet_topology,
+        &curves,
+        &restart_results,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::decode_exact_surface_pass_result(
+            &restart_pass_bytes,
+            &sheet_topology,
+            &curves,
+            &restart_results,
+            ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap(),
+        restart_pass
+    );
+    let mut tampered_restart_pass = restart_pass.clone();
+    let ExactSurfacePassOutcome::RequiresCurveSplits { splits } =
+        &mut tampered_restart_pass.outcome
+    else {
+        unreachable!()
+    };
+    splits.clear();
+    assert!(encode_exact_surface_pass_result(
+        &tampered_restart_pass,
+        &sheet_topology,
+        &curves,
+        &restart_results,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .is_err());
     let refined = resolve_exact_surface_pass(
         &curves,
-        vec![restart.clone()],
+        &restart_results,
         SharedCurveEvaluationContext::new(
             &sheet_topology,
             &evaluator,
