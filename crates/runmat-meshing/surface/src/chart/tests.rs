@@ -234,20 +234,104 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         .vertices
         .iter()
         .any(|vertex| vertex.evaluation.uv != vertex.evaluation.evaluator_uv));
+    let acceptance_options = crate::ExactFaceAcceptanceOptions {
+        minimum_subdivision_depth: 1,
+        maximum_subdivision_depth: 2,
+        refinement_margin_ratio: 0.5,
+        maximum_samples: 100_000,
+    };
     let acceptance = crate::accept_exact_face_chart_mesh(
         &refined,
         refinement_context,
         quality,
-        crate::ExactFaceAcceptanceOptions {
-            minimum_subdivision_depth: 1,
-            maximum_subdivision_depth: 2,
-            refinement_margin_ratio: 0.5,
-            maximum_samples: 100_000,
-        },
+        acceptance_options,
     )
     .unwrap();
     assert_eq!(acceptance.chart_id, annulus_charts.charts[0].chart_id);
     assert!(acceptance.acceptance.sample_count > 0);
+    let join_context =
+        crate::ExactFaceJoinContext::new(refinement_context, quality, acceptance_options);
+    let joined = crate::join_exact_face_charts(
+        &annulus_charts,
+        std::slice::from_ref(refined.as_ref()),
+        std::slice::from_ref(&acceptance),
+        join_context,
+        crate::ExactFaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(joined.source_face_id, annulus.source_face_id);
+    assert_eq!(joined.boundary_segments.len(), 8);
+    assert_eq!(joined.joined_chart_cut_count, 1);
+    assert_eq!(joined.joined_chart_cut_piece_count, 1);
+    assert!(joined
+        .nodes
+        .iter()
+        .any(|node| node.uses.len() == 2 && node.uses[0].uv != node.uses[1].uv));
+    assert!(joined
+        .triangles
+        .iter()
+        .all(|triangle| triangle.triangle_id != StableDigest::ZERO));
+    assert_eq!(
+        crate::join_exact_face_charts(
+            &annulus_charts,
+            std::slice::from_ref(refined.as_ref()),
+            std::slice::from_ref(&acceptance),
+            join_context,
+            crate::ExactFaceJoinOptions {
+                maximum_nodes: 1,
+                ..crate::ExactFaceJoinOptions::default()
+            },
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceJoinErrorKind::ResourceLimit
+    );
+    crate::validate_exact_face_mesh(
+        &joined,
+        &annulus_charts,
+        std::slice::from_ref(refined.as_ref()),
+        std::slice::from_ref(&acceptance),
+        join_context,
+        crate::ExactFaceJoinOptions::default(),
+    )
+    .unwrap();
+    let mut tampered_join = joined;
+    tampered_join.nodes[0].point_m[0] += 0.25;
+    assert_eq!(
+        crate::validate_exact_face_mesh(
+            &tampered_join,
+            &annulus_charts,
+            std::slice::from_ref(refined.as_ref()),
+            std::slice::from_ref(&acceptance),
+            join_context,
+            crate::ExactFaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceJoinErrorKind::InvalidInput
+    );
+    let mut unpaired_cut = (*refined).clone();
+    let cut_index = unpaired_cut
+        .mesh
+        .topology
+        .pslg
+        .segments
+        .iter()
+        .position(|segment| matches!(segment.source, ExactFacePslgSegmentSource::ChartCut { .. }))
+        .unwrap();
+    unpaired_cut.mesh.topology.pslg.segments.remove(cut_index);
+    assert_eq!(
+        crate::join_exact_face_charts(
+            &annulus_charts,
+            std::slice::from_ref(&unpaired_cut),
+            std::slice::from_ref(&acceptance),
+            join_context,
+            crate::ExactFaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceJoinErrorKind::InvalidInput
+    );
     let cut_segments = annulus_pslg
         .segments
         .iter()

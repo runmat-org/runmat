@@ -6,6 +6,7 @@ mod acceptance;
 mod chart;
 mod exact_metric;
 mod face_geometry;
+mod face_mesh;
 mod math;
 mod refinement;
 
@@ -55,6 +56,11 @@ pub use face_geometry::{
     evaluate_exact_face_geometry, validate_exact_face_geometry, ExactFaceGeometry,
     ExactFaceGeometryError, ExactFaceGeometryErrorKind, ExactFaceGeometryVertex,
     ExactFaceTriangleGeometry,
+};
+pub use face_mesh::{
+    join_exact_face_charts, validate_exact_face_mesh, ExactFaceJoinContext, ExactFaceJoinError,
+    ExactFaceJoinErrorKind, ExactFaceJoinOptions, ExactFaceMesh, ExactFaceMeshBoundarySegment,
+    ExactFaceMeshEdgeParameter, ExactFaceMeshNode, ExactFaceMeshNodeUse, ExactFaceMeshTriangle,
 };
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
