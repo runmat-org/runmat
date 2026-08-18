@@ -6,7 +6,10 @@ use super::{
     DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
     DelaunaySegmentRecovery, DelaunayVolumeTopology, FacetRecoveryWork,
 };
-use crate::cdt::validate_delaunay_segment_recovery;
+use crate::cdt::{
+    segment_recovery::validate_delaunay_segment_recovery_with_protected_faces,
+    validate_delaunay_segment_recovery,
+};
 
 pub fn validate_delaunay_facet_recovery(
     recovery: &DelaunayFacetRecovery,
@@ -15,12 +18,6 @@ pub fn validate_delaunay_facet_recovery(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayFacetRecoveryError> {
     validate_options(options)?;
-    validate_inputs(
-        &recovery.segment_recovery,
-        constraints,
-        options,
-        cancellation,
-    )?;
     if recovery.facets.len() != constraints.facets.len() {
         return Err(error(
             DelaunayFacetRecoveryErrorKind::InvalidConstraints,
@@ -28,6 +25,26 @@ pub fn validate_delaunay_facet_recovery(
             "facet recovery evidence count does not match the constraint inventory",
         ));
     }
+    let mut protected_faces = recovery
+        .facets
+        .iter()
+        .flat_map(|facet| facet.triangles.iter())
+        .map(|triangle| {
+            let mut identities = triangle.node_identities;
+            identities.sort_unstable();
+            identities
+        })
+        .collect::<Vec<_>>();
+    protected_faces.sort_unstable();
+    protected_faces.dedup();
+    validate_delaunay_segment_recovery_with_protected_faces(
+        &recovery.segment_recovery,
+        constraints,
+        &protected_faces,
+        options.segment_recovery,
+        cancellation,
+    )
+    .map_err(segment_error)?;
     let mut work = FacetRecoveryWork::new(options, cancellation);
     for (expected_index, recovered) in recovery.facets.iter().enumerate() {
         let expected = facet_support(

@@ -5,11 +5,13 @@ use super::{
     DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions, DelaunayVolumeTopology,
 };
 
+mod cavity;
 mod flip;
 mod support;
 mod validation;
 mod work;
 
+use cavity::try_recover_facet_with_edge_star_cavity;
 use flip::try_recover_facet_with_edge_flip;
 use support::facet_support;
 pub use validation::validate_delaunay_facet_recovery;
@@ -22,6 +24,10 @@ pub struct DelaunayFacetRecoveryOptions {
     pub maximum_search_steps: u64,
     pub maximum_flip_attempts: u64,
     pub maximum_support_steps: u64,
+    pub maximum_cavity_steps: u64,
+    pub maximum_cavity_tetrahedra: u64,
+    pub maximum_cavity_nodes: u64,
+    pub maximum_cavity_boundary_faces: u64,
 }
 
 impl Default for DelaunayFacetRecoveryOptions {
@@ -31,6 +37,10 @@ impl Default for DelaunayFacetRecoveryOptions {
             maximum_search_steps: 1_000_000_000,
             maximum_flip_attempts: 100_000_000,
             maximum_support_steps: 100_000_000,
+            maximum_cavity_steps: 100_000_000,
+            maximum_cavity_tetrahedra: 10_000,
+            maximum_cavity_nodes: 20,
+            maximum_cavity_boundary_faces: 40,
         }
     }
 }
@@ -113,18 +123,27 @@ pub fn recover_delaunay_facets(
                 constraint_index as u32,
                 &mut work,
             )? {
-                let Some(updated) = try_recover_facet_with_edge_flip(
+                let updated = if let Some(updated) = try_recover_facet_with_edge_flip(
                     &segment_recovery,
                     triangle.node_identities,
                     &protected_triangles,
                     constraint_index as u32,
                     &mut work,
-                )?
-                else {
+                )? {
+                    updated
+                } else if let Some(updated) = try_recover_facet_with_edge_star_cavity(
+                    &segment_recovery,
+                    triangle.node_identities,
+                    &protected_triangles,
+                    constraint_index as u32,
+                    &mut work,
+                )? {
+                    updated
+                } else {
                     return Err(error(
                         DelaunayFacetRecoveryErrorKind::UnsatisfiableConstraint,
                         Some(constraint_index as u32),
-                        "facet support is absent and no legal protected edge-star flip recovers it",
+                        "facet support is absent and no legal protected flip or edge-star cavity recovers it",
                     ));
                 };
                 segment_recovery.topology = updated;
@@ -157,11 +176,17 @@ fn validate_options(
     if options.maximum_search_steps == 0
         || options.maximum_flip_attempts == 0
         || options.maximum_support_steps == 0
+        || options.maximum_cavity_steps == 0
+        || options.maximum_cavity_tetrahedra == 0
+        || options.maximum_cavity_nodes == 0
+        || options.maximum_cavity_nodes > 20
+        || options.maximum_cavity_boundary_faces == 0
+        || options.maximum_cavity_boundary_faces > 40
     {
         return Err(error(
             DelaunayFacetRecoveryErrorKind::InvalidOptions,
             None,
-            "facet recovery limits must be nonzero",
+            "facet recovery limits must be nonzero, with at most 20 cavity nodes and 40 cavity boundary faces",
         ));
     }
     Ok(())

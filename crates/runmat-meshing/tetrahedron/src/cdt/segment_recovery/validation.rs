@@ -9,6 +9,7 @@ use super::{
     DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions, DelaunayVolumeTopology,
     RecoveryWork,
 };
+use crate::cdt::insertion::validate_constrained_delaunay_volume_topology;
 
 pub fn validate_delaunay_segment_recovery(
     recovery: &DelaunaySegmentRecovery,
@@ -16,14 +17,37 @@ pub fn validate_delaunay_segment_recovery(
     options: DelaunaySegmentRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunaySegmentRecoveryError> {
-    validate_options(options)?;
-    validate_inputs(
-        &recovery.topology,
+    validate_delaunay_segment_recovery_with_protected_faces(
+        recovery,
         constraints,
+        &[],
         options,
         cancellation,
-        false,
-    )?;
+    )
+}
+
+pub(in crate::cdt) fn validate_delaunay_segment_recovery_with_protected_faces(
+    recovery: &DelaunaySegmentRecovery,
+    constraints: &DelaunayConstraints,
+    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    options: DelaunaySegmentRecoveryOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunaySegmentRecoveryError> {
+    validate_options(options)?;
+    validate_delaunay_constraints(constraints, options.constraints, cancellation)
+        .map_err(super::constraint_error)?;
+    if protected_faces.is_empty() {
+        validate_delaunay_volume_topology(&recovery.topology, options.insertion, cancellation)
+    } else {
+        validate_constrained_delaunay_volume_topology(
+            &recovery.topology,
+            protected_faces,
+            options.insertion,
+            cancellation,
+        )
+    }
+    .map_err(|validation| super::insertion_error(validation, 0))?;
+    validate_constraint_nodes(&recovery.topology, constraints)?;
     if recovery.recovery_passes == 0
         || recovery.recovery_passes > options.maximum_recovery_passes
         || recovery.segments.len() != constraints.segments.len()
@@ -119,6 +143,13 @@ pub(super) fn validate_inputs(
             "segment recovery must precede region assignment",
         ));
     }
+    validate_constraint_nodes(topology, constraints)
+}
+
+fn validate_constraint_nodes(
+    topology: &DelaunayVolumeTopology,
+    constraints: &DelaunayConstraints,
+) -> Result<(), DelaunaySegmentRecoveryError> {
     for constraint_node in &constraints.nodes {
         let topology_node = find_node(topology, constraint_node.identity).ok_or_else(|| {
             error(

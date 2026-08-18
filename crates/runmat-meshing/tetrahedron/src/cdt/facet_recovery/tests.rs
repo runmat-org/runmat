@@ -3,9 +3,9 @@ use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDiges
 
 use super::*;
 use crate::cdt::{
-    build_delaunay_volume_topology, recover_delaunay_segments, DelaunayConstraintFacet,
-    DelaunayConstraintFacetSide, DelaunayConstraintNode, DelaunayConstraintSegment,
-    DelaunayTopologyOptions, DelaunayVolumeNode,
+    build_delaunay_volume_topology, recover_delaunay_segments, validate_delaunay_segment_recovery,
+    DelaunayConstraintFacet, DelaunayConstraintFacetSide, DelaunayConstraintNode,
+    DelaunayConstraintSegment, DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
 fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
@@ -157,6 +157,62 @@ fn facet_recovery_uses_a_checked_edge_star_flip() {
 }
 
 #[test]
+fn facet_edge_star_cavity_retriangulates_both_exact_sides() {
+    let constraints = constraints(false);
+    let segments = segment_recovery(true, &constraints);
+    let mut work = FacetRecoveryWork::new(DelaunayFacetRecoveryOptions::default(), &NeverCancelled);
+    let recovered = super::cavity::try_recover_facet_with_edge_star_cavity(
+        &segments,
+        constraints.facets[0]
+            .vertex_indices
+            .map(|index| constraints.nodes[index as usize].identity),
+        &[],
+        0,
+        &mut work,
+    )
+    .unwrap()
+    .expect("the bipyramid edge-star cavity should be recoverable");
+
+    assert_eq!(recovered.tetrahedra.len(), 2);
+    let mut candidate = segments;
+    candidate.topology = recovered;
+    validate_delaunay_segment_recovery(
+        &candidate,
+        &constraints,
+        DelaunaySegmentRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
+fn facet_edge_star_cavity_enforces_its_tetrahedron_budget() {
+    let constraints = constraints(false);
+    let segments = segment_recovery(true, &constraints);
+    let mut work = FacetRecoveryWork::new(
+        DelaunayFacetRecoveryOptions {
+            maximum_cavity_tetrahedra: 1,
+            ..DelaunayFacetRecoveryOptions::default()
+        },
+        &NeverCancelled,
+    );
+    assert_eq!(
+        super::cavity::try_recover_facet_with_edge_star_cavity(
+            &segments,
+            constraints.facets[0]
+                .vertex_indices
+                .map(|index| constraints.nodes[index as usize].identity),
+            &[],
+            0,
+            &mut work,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayFacetRecoveryErrorKind::ResourceLimit
+    );
+}
+
+#[test]
 fn facet_recovery_is_a_noop_for_existing_support_and_rejects_tampering() {
     let constraints = constraints(false);
     let segments = segment_recovery(false, &constraints);
@@ -182,6 +238,50 @@ fn facet_recovery_is_a_noop_for_existing_support_and_rejects_tampering() {
         .kind,
         DelaunayFacetRecoveryErrorKind::InvalidConstraints
     );
+}
+
+#[test]
+fn facet_validation_treats_recovered_faces_as_delaunay_barriers() {
+    let mut constraints = constraints(false);
+    let mut segments = segment_recovery(false, &constraints);
+    constraints.nodes[4].coordinates_m = [0.0, 0.0, -1.0];
+    segments.topology = build_delaunay_volume_topology(
+        constraints.volume_nodes(),
+        vec![[0, 1, 2, 3], [0, 2, 1, 4]],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(
+        validate_delaunay_segment_recovery(
+            &segments,
+            &constraints,
+            DelaunaySegmentRecoveryOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunaySegmentRecoveryErrorKind::InvalidTopology
+    );
+    let recovery = DelaunayFacetRecovery {
+        segment_recovery: segments,
+        facets: vec![DelaunayRecoveredFacet {
+            constraint_index: 0,
+            triangles: vec![DelaunayRecoveredFacetTriangle {
+                node_identities: constraints.facets[0]
+                    .vertex_indices
+                    .map(|index| constraints.nodes[index as usize].identity),
+            }],
+        }],
+    };
+
+    validate_delaunay_facet_recovery(
+        &recovery,
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
 }
 
 #[test]
