@@ -1,15 +1,20 @@
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
-use runmat_meshing_core::{
-    contracts::{MeshingStage, TopologyEntityId},
-    MeshingCancellationSignal, NeverCancelled, StableDigest,
-};
+use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 
 use super::*;
 use crate::cdt::{
     build_delaunay_volume_topology, recover_delaunay_facets, recover_delaunay_segments,
-    DelaunayConstraintFacet, DelaunayConstraintNode, DelaunayConstraintSegment,
-    DelaunaySegmentRecoveryOptions, DelaunayTopologyOptions,
+    DelaunayConstraintFacet, DelaunayConstraintFacetSide, DelaunayConstraintNode,
+    DelaunayConstraintSegment, DelaunaySegmentRecoveryOptions, DelaunayTopologyOptions,
 };
+
+fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
+    PersistentEntityId {
+        kind,
+        source_topology_id: value.to_owned(),
+        assembly_path: Vec::new(),
+    }
+}
 
 fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
     let coordinates = [
@@ -50,10 +55,7 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
             .enumerate()
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 70) as u8; 32]),
-                source_node_id: id(
-                    MeshingStage::ProtectedBoundaryComplex,
-                    &format!("node:{index}"),
-                ),
+                source_vertex_id: None,
                 coordinates_m,
             })
             .collect(),
@@ -61,7 +63,6 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
             .into_iter()
             .map(|vertex_indices| DelaunayConstraintSegment {
                 vertex_indices,
-                protected_edge_id: None,
                 source_edge_id: None,
             })
             .collect(),
@@ -69,17 +70,22 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
             .into_iter()
             .enumerate()
             .map(|(index, vertex_indices)| DelaunayConstraintFacet {
-                facet_id: id(
-                    MeshingStage::ProtectedBoundaryComplex,
-                    &format!("facet:{index}"),
-                ),
+                facet_id: StableDigest::from_bytes([(index + 90) as u8; 32]),
                 vertex_indices,
-                source_face_id: id(MeshingStage::SurfaceMesh, &format!("face:{index}")),
-                material_interface_ids: if index == 0 {
-                    vec!["interface:base".to_owned()]
+                source_face_id: entity(PersistentEntityKind::Face, &format!("face:{index}")),
+                positive_side: if index == 0 {
+                    DelaunayConstraintFacetSide::Region(entity(
+                        PersistentEntityKind::Region,
+                        "upper",
+                    ))
                 } else {
-                    Vec::new()
+                    DelaunayConstraintFacetSide::Exterior
                 },
+                negative_side: DelaunayConstraintFacetSide::Region(entity(
+                    PersistentEntityKind::Region,
+                    if index == 0 { "lower" } else { "solid" },
+                )),
+                contact_ids: Vec::new(),
             })
             .collect(),
     };
@@ -295,12 +301,5 @@ fn region(value: &str) -> PersistentEntityId {
         kind: PersistentEntityKind::Region,
         source_topology_id: value.to_owned(),
         assembly_path: Vec::new(),
-    }
-}
-
-fn id(stage: MeshingStage, value: &str) -> TopologyEntityId {
-    TopologyEntityId {
-        stage,
-        id: value.to_owned(),
     }
 }

@@ -18,8 +18,9 @@ pub use carving::{
 };
 pub use constraints::{
     build_delaunay_constraints, validate_delaunay_constraints, DelaunayConstraintError,
-    DelaunayConstraintErrorKind, DelaunayConstraintFacet, DelaunayConstraintNode,
-    DelaunayConstraintOptions, DelaunayConstraintSegment, DelaunayConstraints,
+    DelaunayConstraintErrorKind, DelaunayConstraintFacet, DelaunayConstraintFacetSide,
+    DelaunayConstraintNode, DelaunayConstraintOptions, DelaunayConstraintSegment,
+    DelaunayConstraints,
 };
 pub use facet_recovery::{
     recover_delaunay_facets, validate_delaunay_facet_recovery, DelaunayFacetRecovery,

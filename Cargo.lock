@@ -6888,9 +6888,11 @@ version = "0.6.1"
 dependencies = [
  "runmat-geometry-core",
  "runmat-meshing-core",
+ "runmat-meshing-curve",
  "runmat-meshing-opt",
  "runmat-meshing-plc",
  "runmat-meshing-size",
+ "runmat-meshing-surface",
  "serde",
  "serde_json",
  "sha2 0.10.9",

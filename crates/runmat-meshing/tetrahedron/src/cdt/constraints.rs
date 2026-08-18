@@ -1,20 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use runmat_meshing_core::{
-    contracts::{MeshingStage, ProtectedBoundaryComplex, TopologyEntityId},
-    MeshingCancellationSignal, StableDigest,
-};
-use runmat_meshing_plc::validate::validate_protected_boundary_complex;
-use sha2::{Digest as _, Sha256};
+use runmat_geometry_core::PersistentEntityId;
+use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::DelaunayVolumeNode;
 
+mod exact;
 mod validation;
 
+pub use exact::build_delaunay_constraints;
 pub use validation::validate_delaunay_constraints;
-
-const NODE_IDENTITY_DOMAIN: &[u8] = b"runmat-meshing-cdt-plc-node/v1\0";
-const MAXIMUM_ENTITY_ID_BYTES: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DelaunayConstraintOptions {
@@ -38,23 +31,35 @@ impl Default for DelaunayConstraintOptions {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayConstraintNode {
     pub identity: StableDigest,
-    pub source_node_id: TopologyEntityId,
+    pub source_vertex_id: Option<PersistentEntityId>,
     pub coordinates_m: [f64; 3],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DelaunayConstraintSegment {
     pub vertex_indices: [u32; 2],
-    pub protected_edge_id: Option<TopologyEntityId>,
-    pub source_edge_id: Option<TopologyEntityId>,
+    /// Present exactly for segments on an authoritative exact curve.
+    pub source_edge_id: Option<PersistentEntityId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DelaunayConstraintFacetSide {
+    Region(PersistentEntityId),
+    Exterior,
+    Void,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DelaunayConstraintFacet {
-    pub facet_id: TopologyEntityId,
+    pub facet_id: StableDigest,
     pub vertex_indices: [u32; 3],
-    pub source_face_id: TopologyEntityId,
-    pub material_interface_ids: Vec<String>,
+    pub source_face_id: PersistentEntityId,
+    /// Side reached by an exact positive orientation against the oriented facet.
+    pub positive_side: DelaunayConstraintFacetSide,
+    /// Side reached by an exact negative orientation against the oriented facet.
+    pub negative_side: DelaunayConstraintFacetSide,
+    /// Canonical exact contact identities authored on this face, if any.
+    pub contact_ids: Vec<PersistentEntityId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,7 +84,8 @@ impl DelaunayConstraints {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayConstraintErrorKind {
     InvalidOptions,
-    InvalidPlc,
+    InvalidGeometry,
+    InvalidBoundary,
     InvalidIdentity,
     IdentityCollision,
     ResourceLimit,
@@ -104,140 +110,6 @@ impl std::fmt::Display for DelaunayConstraintError {
 
 impl std::error::Error for DelaunayConstraintError {}
 
-pub fn build_delaunay_constraints(
-    plc: &ProtectedBoundaryComplex,
-    options: DelaunayConstraintOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayConstraints, DelaunayConstraintError> {
-    validate_options(options)?;
-    validate_protected_boundary_complex(plc).map_err(|validation| {
-        error(
-            DelaunayConstraintErrorKind::InvalidPlc,
-            validation.to_string(),
-        )
-    })?;
-    if plc.nodes.len() as u64 > options.maximum_nodes
-        || plc.facets.len() as u64 > options.maximum_facets
-    {
-        return Err(resource(
-            "PLC node or facet inventory exceeds its hard limit",
-        ));
-    }
-
-    let mut nodes = Vec::with_capacity(plc.nodes.len());
-    for (index, node) in plc.nodes.iter().enumerate() {
-        checkpoint(index, options, cancellation)?;
-        validate_entity_id(&node.node_id)?;
-        nodes.push(DelaunayConstraintNode {
-            identity: node_identity(&node.node_id),
-            source_node_id: node.node_id.clone(),
-            coordinates_m: node.coordinates_m,
-        });
-    }
-    nodes.sort_by_key(|node| node.identity);
-    if nodes
-        .windows(2)
-        .any(|pair| pair[0].identity == pair[1].identity)
-    {
-        return Err(error(
-            DelaunayConstraintErrorKind::IdentityCollision,
-            "distinct PLC nodes produced the same stable CDT identity",
-        ));
-    }
-    let node_index = nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.source_node_id.clone(), index as u32))
-        .collect::<BTreeMap<_, _>>();
-
-    let protected = plc
-        .protected_edges
-        .iter()
-        .map(|edge| {
-            validate_entity_id(&edge.edge_id)?;
-            validate_entity_id(&edge.source_edge_id)?;
-            let key =
-                sorted_segment([node_index[&edge.node_ids[0]], node_index[&edge.node_ids[1]]]);
-            Ok((key, (edge.edge_id.clone(), edge.source_edge_id.clone())))
-        })
-        .collect::<Result<BTreeMap<_, _>, DelaunayConstraintError>>()?;
-
-    let mut segment_keys = BTreeSet::new();
-    let mut facets = Vec::with_capacity(plc.facets.len());
-    for (index, facet) in plc.facets.iter().enumerate() {
-        checkpoint(index, options, cancellation)?;
-        validate_entity_id(&facet.facet_id)?;
-        validate_entity_id(&facet.source_face_id)?;
-        for interface_id in &facet.material_interface_ids {
-            validate_token("material interface", interface_id)?;
-        }
-        let vertex_indices = facet.node_ids.each_ref().map(|id| node_index[id]);
-        for edge in 0..3 {
-            segment_keys.insert(sorted_segment([
-                vertex_indices[edge],
-                vertex_indices[(edge + 1) % 3],
-            ]));
-        }
-        let mut material_interface_ids = facet.material_interface_ids.clone();
-        material_interface_ids.sort();
-        facets.push(DelaunayConstraintFacet {
-            facet_id: facet.facet_id.clone(),
-            vertex_indices,
-            source_face_id: facet.source_face_id.clone(),
-            material_interface_ids,
-        });
-    }
-    if segment_keys.len() as u64 > options.maximum_segments {
-        return Err(resource("PLC segment inventory exceeds its hard limit"));
-    }
-    facets.sort_by_key(|facet| {
-        let mut key = facet.vertex_indices;
-        key.sort_unstable();
-        key
-    });
-    let segments = segment_keys
-        .into_iter()
-        .map(|vertex_indices| {
-            let provenance = protected.get(&vertex_indices);
-            DelaunayConstraintSegment {
-                vertex_indices,
-                protected_edge_id: provenance.map(|(edge, _)| edge.clone()),
-                source_edge_id: provenance.map(|(_, source)| source.clone()),
-            }
-        })
-        .collect();
-    let constraints = DelaunayConstraints {
-        nodes,
-        segments,
-        facets,
-    };
-    validate_delaunay_constraints(&constraints, options, cancellation)?;
-    Ok(constraints)
-}
-
-fn node_identity(entity_id: &TopologyEntityId) -> StableDigest {
-    let mut hasher = Sha256::new();
-    hasher.update(NODE_IDENTITY_DOMAIN);
-    hasher.update([stage_tag(entity_id.stage)]);
-    hasher.update((entity_id.id.len() as u64).to_be_bytes());
-    hasher.update(entity_id.id.as_bytes());
-    StableDigest::from_bytes(hasher.finalize().into())
-}
-
-fn stage_tag(stage: MeshingStage) -> u8 {
-    match stage {
-        MeshingStage::CadTopology => 1,
-        MeshingStage::Sizing => 2,
-        MeshingStage::CurveMesh => 3,
-        MeshingStage::SurfaceMesh => 4,
-        MeshingStage::ProtectedBoundaryComplex => 5,
-        MeshingStage::TetrahedronMesh => 6,
-        MeshingStage::ConstraintRecovery => 7,
-        MeshingStage::Optimization => 8,
-        MeshingStage::SolveReadiness => 9,
-    }
-}
-
 pub(super) fn sorted_segment(mut vertices: [u32; 2]) -> [u32; 2] {
     vertices.sort_unstable();
     vertices
@@ -247,36 +119,14 @@ pub(super) fn validate_options(
     options: DelaunayConstraintOptions,
 ) -> Result<(), DelaunayConstraintError> {
     if options.maximum_nodes == 0
+        || options.maximum_nodes > u32::MAX as u64
         || options.maximum_segments == 0
         || options.maximum_facets == 0
         || options.cancellation_check_interval == 0
     {
         return Err(error(
             DelaunayConstraintErrorKind::InvalidOptions,
-            "constraint inventory limits and cancellation interval must be nonzero",
-        ));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_entity_id(
-    entity_id: &TopologyEntityId,
-) -> Result<(), DelaunayConstraintError> {
-    validate_token("topology entity", &entity_id.id)
-}
-
-pub(super) fn validate_token(field: &str, value: &str) -> Result<(), DelaunayConstraintError> {
-    if value.is_empty()
-        || value.len() > MAXIMUM_ENTITY_ID_BYTES
-        || !value.is_ascii()
-        || value.chars().any(char::is_control)
-        || value.trim() != value
-    {
-        return Err(error(
-            DelaunayConstraintErrorKind::InvalidIdentity,
-            format!(
-                "{field} identity must be 1..={MAXIMUM_ENTITY_ID_BYTES} printable ASCII bytes without surrounding whitespace"
-            ),
+            "constraint inventory limits and cancellation interval must be nonzero, and nodes must fit the u32 topology index space",
         ));
     }
     Ok(())

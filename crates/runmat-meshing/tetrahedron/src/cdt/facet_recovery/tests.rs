@@ -1,12 +1,11 @@
-use runmat_meshing_core::{
-    contracts::{MeshingStage, TopologyEntityId},
-    MeshingCancellationSignal, NeverCancelled, StableDigest,
-};
+use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 
 use super::*;
 use crate::cdt::{
     build_delaunay_volume_topology, recover_delaunay_segments, DelaunayConstraintFacet,
-    DelaunayConstraintNode, DelaunayConstraintSegment, DelaunayTopologyOptions, DelaunayVolumeNode,
+    DelaunayConstraintFacetSide, DelaunayConstraintNode, DelaunayConstraintSegment,
+    DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
 fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
@@ -27,10 +26,7 @@ fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
             .enumerate()
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 50) as u8; 32]),
-                source_node_id: id(
-                    MeshingStage::ProtectedBoundaryComplex,
-                    &format!("node:{index}"),
-                ),
+                source_vertex_id: None,
                 coordinates_m,
             })
             .collect(),
@@ -38,16 +34,28 @@ fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
             .into_iter()
             .map(|vertex_indices| DelaunayConstraintSegment {
                 vertex_indices,
-                protected_edge_id: None,
                 source_edge_id: None,
             })
             .collect(),
         facets: vec![DelaunayConstraintFacet {
-            facet_id: id(MeshingStage::ProtectedBoundaryComplex, "facet:base"),
+            facet_id: StableDigest::from_bytes([90; 32]),
             vertex_indices: [0, 1, 2],
-            source_face_id: id(MeshingStage::SurfaceMesh, "face:base"),
-            material_interface_ids: vec!["material:interface".to_owned()],
+            source_face_id: entity(PersistentEntityKind::Face, "face:base"),
+            positive_side: DelaunayConstraintFacetSide::Exterior,
+            negative_side: DelaunayConstraintFacetSide::Region(entity(
+                PersistentEntityKind::Region,
+                "solid",
+            )),
+            contact_ids: Vec::new(),
         }],
+    }
+}
+
+fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
+    PersistentEntityId {
+        kind,
+        source_topology_id: value.to_owned(),
+        assembly_path: Vec::new(),
     }
 }
 
@@ -280,11 +288,4 @@ fn facet_recovery_enforces_search_limits_and_cancellation() {
             .kind,
         DelaunayFacetRecoveryErrorKind::Cancelled
     );
-}
-
-fn id(stage: MeshingStage, value: &str) -> TopologyEntityId {
-    TopologyEntityId {
-        stage,
-        id: value.to_owned(),
-    }
 }

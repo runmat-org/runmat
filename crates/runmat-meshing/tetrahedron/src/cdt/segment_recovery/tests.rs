@@ -1,5 +1,4 @@
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
-use runmat_meshing_core::contracts::{MeshingStage, TopologyEntityId};
 use runmat_meshing_core::NeverCancelled;
 
 use super::*;
@@ -8,6 +7,14 @@ use crate::cdt::{
     build_delaunay_volume_topology, DelaunayConstraintNode, DelaunayConstraintSegment,
     DelaunayPointSetOptions, DelaunayTopologyOptions,
 };
+
+fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
+    PersistentEntityId {
+        kind,
+        source_topology_id: value.to_owned(),
+        assembly_path: Vec::new(),
+    }
+}
 
 fn octahedron_constraints() -> DelaunayConstraints {
     let coordinates = [
@@ -24,16 +31,12 @@ fn octahedron_constraints() -> DelaunayConstraints {
             .enumerate()
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 10) as u8; 32]),
-                source_node_id: TopologyEntityId {
-                    stage: MeshingStage::ProtectedBoundaryComplex,
-                    id: format!("node:{index}"),
-                },
+                source_vertex_id: None,
                 coordinates_m,
             })
             .collect(),
         segments: vec![DelaunayConstraintSegment {
             vertex_indices: [1, 4],
-            protected_edge_id: None,
             source_edge_id: None,
         }],
         facets: Vec::new(),
@@ -63,28 +66,17 @@ fn cospherical_bipyramid() -> (DelaunayConstraints, DelaunayVolumeTopology) {
             .enumerate()
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 30) as u8; 32]),
-                source_node_id: TopologyEntityId {
-                    stage: MeshingStage::ProtectedBoundaryComplex,
-                    id: format!("bipyramid:{index}"),
-                },
+                source_vertex_id: None,
                 coordinates_m,
             })
             .collect(),
         segments: vec![
             DelaunayConstraintSegment {
                 vertex_indices: [0, 1],
-                protected_edge_id: Some(TopologyEntityId {
-                    stage: MeshingStage::ProtectedBoundaryComplex,
-                    id: "protected:base".to_owned(),
-                }),
-                source_edge_id: Some(TopologyEntityId {
-                    stage: MeshingStage::CurveMesh,
-                    id: "curve:base".to_owned(),
-                }),
+                source_edge_id: Some(entity(PersistentEntityKind::Edge, "curve:base")),
             },
             DelaunayConstraintSegment {
                 vertex_indices: [3, 4],
-                protected_edge_id: None,
                 source_edge_id: None,
             },
         ],

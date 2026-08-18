@@ -383,7 +383,8 @@ fn constraint_error(error_value: DelaunayConstraintError) -> DelaunaySegmentReco
             DelaunaySegmentRecoveryErrorKind::ResourceLimit
         }
         DelaunayConstraintErrorKind::Cancelled => DelaunaySegmentRecoveryErrorKind::Cancelled,
-        DelaunayConstraintErrorKind::InvalidPlc
+        DelaunayConstraintErrorKind::InvalidGeometry
+        | DelaunayConstraintErrorKind::InvalidBoundary
         | DelaunayConstraintErrorKind::InvalidIdentity
         | DelaunayConstraintErrorKind::IdentityCollision => {
             DelaunaySegmentRecoveryErrorKind::InvalidConstraints
