@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
+    solver_boundary_edge_identity, solver_boundary_face_identity, solver_volume_element_identity,
     validate_finite, validate_token, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
     MeshingContractError, MeshingRequest, PersistentEntityId, PersistentEntityKind,
-    SolverMeshArtifact, SolverMeshTopology, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    SolverMeshArtifact, SolverMeshTopology, StableDigest, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 const MAX_ENTITY_PROVENANCE: usize = 32;
@@ -56,6 +57,15 @@ impl SolverMeshTopology {
             "boundary edges",
             self.boundary_edges.iter().map(|edge| edge.edge_id),
         )?;
+        let node_identities = self
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.stable_identity))
+            .collect::<BTreeMap<_, _>>();
+        validate_stable_identities(
+            "mesh nodes",
+            self.nodes.iter().map(|node| node.stable_identity),
+        )?;
 
         for node in &self.nodes {
             for coordinate in node.coordinates_m {
@@ -64,6 +74,7 @@ impl SolverMeshTopology {
             validate_provenance("mesh node", &node.provenance)?;
             super::artifact_parameters::validate_node_exact_parameters(node)?;
         }
+        let mut element_identities = BTreeSet::new();
         for element in &self.volume_elements {
             if element.order != request.element_order
                 || element.node_ids.len()
@@ -79,11 +90,20 @@ impl SolverMeshTopology {
                     "order or node connectivity is inconsistent",
                 ));
             }
+            let corners = std::array::from_fn(|index| node_identities[&element.node_ids[index]]);
+            if element.stable_identity != solver_volume_element_identity(corners)
+                || !element_identities.insert(element.stable_identity)
+            {
+                return Err(MeshingContractError::invalid(
+                    "volume element stable identity",
+                    "identity must be unique and derive from the stable corner nodes",
+                ));
+            }
             validate_token("material id", &element.material_id, 256)?;
             validate_region_id(&element.region_id)?;
             validate_provenance("volume element", &element.provenance)?;
         }
-        self.validate_boundaries(&node_ids, &element_ids, &face_ids)?;
+        self.validate_boundaries(&node_ids, &node_identities, &element_ids, &face_ids)?;
         super::artifact_order::validate_order_topology(self, request, &node_ids)?;
         super::artifact_classification::validate_classification(self, &element_ids, &face_ids)?;
         self.validate_neighbors(&element_ids)?;
@@ -93,6 +113,7 @@ impl SolverMeshTopology {
     fn validate_boundaries(
         &self,
         node_ids: &BTreeSet<u64>,
+        node_identities: &BTreeMap<u64, StableDigest>,
         element_ids: &BTreeSet<u64>,
         face_ids: &BTreeSet<u64>,
     ) -> Result<(), MeshingContractError> {
@@ -111,6 +132,7 @@ impl SolverMeshTopology {
             .iter()
             .map(|face| (face.face_id, face.node_ids.as_slice()))
             .collect::<BTreeMap<_, _>>();
+        let mut face_identities = BTreeSet::new();
         for face in &self.boundary_faces {
             if face.node_ids.len() != face.order.node_count()
                 || face.node_ids.iter().collect::<BTreeSet<_>>().len() != face.node_ids.len()
@@ -140,8 +162,18 @@ impl SolverMeshTopology {
                     "connectivity or adjacency is inconsistent",
                 ));
             }
+            let corners = std::array::from_fn(|index| node_identities[&face.node_ids[index]]);
+            if face.stable_identity != solver_boundary_face_identity(corners)
+                || !face_identities.insert(face.stable_identity)
+            {
+                return Err(MeshingContractError::invalid(
+                    "boundary face stable identity",
+                    "identity must be unique and derive from the stable corner nodes",
+                ));
+            }
             validate_provenance("boundary face", &face.provenance)?;
         }
+        let mut edge_identities = BTreeSet::new();
         for edge in &self.boundary_edges {
             if edge.node_ids.len() != edge.order.node_count()
                 || edge.node_ids[0] >= edge.node_ids[1]
@@ -160,6 +192,15 @@ impl SolverMeshTopology {
                 return Err(MeshingContractError::invalid(
                     "boundary edge",
                     "connectivity or adjacency is inconsistent",
+                ));
+            }
+            let endpoints = std::array::from_fn(|index| node_identities[&edge.node_ids[index]]);
+            if edge.stable_identity != solver_boundary_edge_identity(endpoints)
+                || !edge_identities.insert(edge.stable_identity)
+            {
+                return Err(MeshingContractError::invalid(
+                    "boundary edge stable identity",
+                    "identity must be unique and derive from the stable endpoint nodes",
                 ));
             }
             validate_provenance("boundary edge", &edge.provenance)?;
@@ -251,6 +292,22 @@ impl SolverMeshTopology {
         }
         Ok(())
     }
+}
+
+fn validate_stable_identities(
+    field: &str,
+    identities: impl Iterator<Item = StableDigest>,
+) -> Result<(), MeshingContractError> {
+    let identities = identities.collect::<Vec<_>>();
+    if identities.contains(&StableDigest::ZERO)
+        || identities.iter().copied().collect::<BTreeSet<_>>().len() != identities.len()
+    {
+        return Err(MeshingContractError::invalid(
+            field,
+            "stable identities must be nonzero and unique",
+        ));
+    }
+    Ok(())
 }
 
 /// Independently admits a solver topology against its fully resolved request.

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
-pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 5;
+pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 6;
 /// Tet10 midside-node order after the four corners: 01, 12, 20, 03, 13, 23.
 pub const TETRAHEDRON_MIDSIDE_EDGE_CORNERS: [[usize; 2]; 6] =
     [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
@@ -52,6 +52,7 @@ pub enum BoundaryFaceRole {
 #[serde(deny_unknown_fields)]
 pub struct SolverMeshNode {
     pub node_id: u64,
+    pub stable_identity: StableDigest,
     pub coordinates_m: [f64; 3],
     pub provenance: Vec<PersistentEntityId>,
     pub exact_parameters: Vec<SolverNodeExactParameter>,
@@ -75,6 +76,7 @@ pub enum SolverNodeExactParameter {
 #[serde(deny_unknown_fields)]
 pub struct SolverVolumeElement {
     pub element_id: u64,
+    pub stable_identity: StableDigest,
     pub order: ElementOrder,
     pub node_ids: Vec<u64>,
     pub region_id: PersistentEntityId,
@@ -86,6 +88,7 @@ pub struct SolverVolumeElement {
 #[serde(deny_unknown_fields)]
 pub struct SolverBoundaryFace {
     pub face_id: u64,
+    pub stable_identity: StableDigest,
     pub order: BoundaryTriangleOrder,
     pub node_ids: Vec<u64>,
     pub adjacent_volume_element_ids: Vec<u64>,
@@ -97,6 +100,7 @@ pub struct SolverBoundaryFace {
 #[serde(deny_unknown_fields)]
 pub struct SolverBoundaryEdge {
     pub edge_id: u64,
+    pub stable_identity: StableDigest,
     pub order: BoundaryEdgeOrder,
     pub node_ids: Vec<u64>,
     pub adjacent_boundary_face_ids: Vec<u64>,

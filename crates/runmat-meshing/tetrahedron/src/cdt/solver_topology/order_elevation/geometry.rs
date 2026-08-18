@@ -93,6 +93,9 @@ pub(super) fn append_midpoint_nodes(
         let node_id = topology.nodes.len() as u64 + 1;
         topology.nodes.push(SolverMeshNode {
             node_id,
+            stable_identity: runmat_meshing_core::solver_midside_node_identity(
+                edge.map(|node_id| topology.nodes[node_index[&node_id]].stable_identity),
+            ),
             coordinates_m,
             provenance,
             exact_parameters,

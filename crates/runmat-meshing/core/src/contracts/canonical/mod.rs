@@ -1,5 +1,6 @@
 mod artifact;
 mod artifact_classification;
+mod artifact_identity;
 mod artifact_order;
 mod artifact_parameters;
 mod artifact_types;
@@ -16,6 +17,10 @@ mod request;
 mod workload;
 
 pub use artifact::validate_solver_mesh_topology;
+pub use artifact_identity::{
+    solver_boundary_edge_identity, solver_boundary_face_identity, solver_midside_node_identity,
+    solver_volume_element_identity,
+};
 pub use artifact_parameters::sort_solver_node_exact_parameters;
 pub use artifact_types::{
     BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ContactPair, FieldTopologyLocation,

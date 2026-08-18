@@ -82,13 +82,18 @@ pub fn transfer_solver_field(
     };
     let component_count =
         component_count(field, source_map.ordered_entity_ids.len(), values.len())?;
+    let source_identities = stable_identities(source, source_map.location);
+    let target_identities = stable_identities(target, target_map.location);
     let source_values = source_map
         .ordered_entity_ids
         .iter()
         .enumerate()
         .map(|(index, entity_id)| {
             let start = index * component_count;
-            (*entity_id, &values[start..start + component_count])
+            (
+                source_identities[entity_id],
+                &values[start..start + component_count],
+            )
         })
         .collect::<BTreeMap<_, _>>();
     let midpoint_edges = if source_map.location == FieldTopologyLocation::Node {
@@ -100,13 +105,14 @@ pub fn transfer_solver_field(
     let mut copied_entity_count = 0;
     let mut interpolated_entity_count = 0;
     for entity_id in &target_map.ordered_entity_ids {
-        if let Some(values) = source_values.get(entity_id) {
+        let stable_identity = target_identities[entity_id];
+        if let Some(values) = source_values.get(&stable_identity) {
             output.extend_from_slice(values);
             copied_entity_count += 1;
             continue;
         }
         let [left, right] = midpoint_edges
-            .get(entity_id)
+            .get(&stable_identity)
             .copied()
             .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
         let left = source_values
@@ -143,6 +149,38 @@ pub fn transfer_solver_field(
     })
 }
 
+fn stable_identities(
+    artifact: &SolverMeshArtifact,
+    location: FieldTopologyLocation,
+) -> BTreeMap<u64, StableDigest> {
+    match location {
+        FieldTopologyLocation::Node => artifact
+            .topology
+            .nodes
+            .iter()
+            .map(|entity| (entity.node_id, entity.stable_identity))
+            .collect(),
+        FieldTopologyLocation::VolumeElement => artifact
+            .topology
+            .volume_elements
+            .iter()
+            .map(|entity| (entity.element_id, entity.stable_identity))
+            .collect(),
+        FieldTopologyLocation::BoundaryFace => artifact
+            .topology
+            .boundary_faces
+            .iter()
+            .map(|entity| (entity.face_id, entity.stable_identity))
+            .collect(),
+        FieldTopologyLocation::BoundaryEdge => artifact
+            .topology
+            .boundary_edges
+            .iter()
+            .map(|entity| (entity.edge_id, entity.stable_identity))
+            .collect(),
+    }
+}
+
 fn component_count(
     field: &AnalysisField,
     entity_count: usize,
@@ -167,16 +205,20 @@ fn component_count(
 
 fn target_midpoint_edges(
     target: &SolverMeshArtifact,
-) -> Result<BTreeMap<u64, [u64; 2]>, SolverFieldTransferError> {
+) -> Result<BTreeMap<StableDigest, [StableDigest; 2]>, SolverFieldTransferError> {
     if target.resolved_request.element_order == ElementOrder::Tet4 {
         return Ok(BTreeMap::new());
     }
     let mut result = BTreeMap::new();
+    let identities = stable_identities(target, FieldTopologyLocation::Node);
     for element in &target.topology.volume_elements {
         for (local_edge, corners) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
-            let mut edge = [element.node_ids[corners[0]], element.node_ids[corners[1]]];
+            let mut edge = [
+                identities[&element.node_ids[corners[0]]],
+                identities[&element.node_ids[corners[1]]],
+            ];
             edge.sort_unstable();
-            let midpoint = element.node_ids[4 + local_edge];
+            let midpoint = identities[&element.node_ids[4 + local_edge]];
             if result
                 .insert(midpoint, edge)
                 .is_some_and(|existing| existing != edge)
@@ -295,5 +337,41 @@ mod tests {
             ),
             Err(SolverFieldTransferError::InvalidTargetArtifact(_))
         ));
+    }
+
+    #[test]
+    fn transfer_uses_stable_identity_when_numeric_node_ids_shift() {
+        let source = artifact(ElementOrder::Tet4);
+        let mut target = source.clone();
+        let first_identity = target.topology.nodes[0].stable_identity;
+        let second_identity = target.topology.nodes[1].stable_identity;
+        target.topology.nodes[0].stable_identity = second_identity;
+        target.topology.nodes[1].stable_identity = first_identity;
+        let identities = target
+            .topology
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.stable_identity))
+            .collect::<BTreeMap<_, _>>();
+        for face in &mut target.topology.boundary_faces {
+            face.stable_identity =
+                runmat_meshing_core::solver_boundary_face_identity(std::array::from_fn(|index| {
+                    identities[&face.node_ids[index]]
+                }));
+        }
+        for edge in &mut target.topology.boundary_edges {
+            edge.stable_identity =
+                runmat_meshing_core::solver_boundary_edge_identity(std::array::from_fn(|index| {
+                    identities[&edge.node_ids[index]]
+                }));
+        }
+        target.seal_canonical_digest().unwrap();
+
+        let field = AnalysisField::host_f64("temperature", vec![4], vec![10.0, 20.0, 30.0, 40.0]);
+        let transferred = transfer_solver_field(&source, &target, "nodes", &field).unwrap();
+        assert_eq!(
+            transferred.field.as_host_f64().unwrap(),
+            &[20.0, 10.0, 30.0, 40.0]
+        );
     }
 }

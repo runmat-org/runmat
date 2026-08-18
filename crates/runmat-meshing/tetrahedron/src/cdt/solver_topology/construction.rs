@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{
-    ElementOrder, MeshNeighbor, MeshingCancellationSignal, SolverMeshNode, SolverMeshTopology,
-    SolverVolumeElement, StableDigest,
+    solver_volume_element_identity, ElementOrder, MeshNeighbor, MeshingCancellationSignal,
+    SolverMeshNode, SolverMeshTopology, SolverVolumeElement, StableDigest,
 };
 
 use super::{
@@ -176,6 +176,7 @@ fn build_nodes(
             }
             Ok(SolverMeshNode {
                 node_id: index as u64 + 1,
+                stable_identity: node.identity,
                 coordinates_m: node.coordinates_m,
                 provenance,
                 exact_parameters,
@@ -219,6 +220,11 @@ fn build_elements(
                 .ok_or_else(|| invalid_materials("volume region has no material assignment"))?;
             Ok(SolverVolumeElement {
                 element_id: index as u64 + 1,
+                stable_identity: solver_volume_element_identity(
+                    tetrahedron
+                        .vertex_indices
+                        .map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].identity),
+                ),
                 order: ElementOrder::Tet4,
                 node_ids: tetrahedron
                     .vertex_indices

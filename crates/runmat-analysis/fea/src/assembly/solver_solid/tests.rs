@@ -1,13 +1,14 @@
 use runmat_meshing_core::{
-    sort_solver_node_exact_parameters, AlgorithmVersionSet, BoundaryEdgeOrder, BoundaryFaceRole,
-    BoundaryTriangleOrder, CancellationPolicy, CurveQualityTargets, ElementOrder,
-    FieldTopologyLocation, FieldTopologyMap, GeometryRevisionRef, GeometryTolerancePolicy,
-    MeshNeighbor, MeshRegion, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
-    MetricCombinationRule, MetricFieldRequest, MetricTensor3, PersistentEntityId,
-    PersistentEntityKind, SolverBoundaryEdge, SolverBoundaryFace, SolverMeshArtifact,
-    SolverMeshNode, SolverMeshTopology, SolverNodeExactParameter, SolverVolumeElement,
-    StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
-    ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    solver_boundary_edge_identity, solver_boundary_face_identity, solver_midside_node_identity,
+    solver_volume_element_identity, sort_solver_node_exact_parameters, AlgorithmVersionSet,
+    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, CancellationPolicy,
+    CurveQualityTargets, ElementOrder, FieldTopologyLocation, FieldTopologyMap,
+    GeometryRevisionRef, GeometryTolerancePolicy, MeshNeighbor, MeshRegion, MeshingQualityTargets,
+    MeshingRequest, MeshingResourceBudget, MetricCombinationRule, MetricFieldRequest,
+    MetricTensor3, PersistentEntityId, PersistentEntityKind, SolverBoundaryEdge,
+    SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
+    SolverNodeExactParameter, SolverVolumeElement, StableDigest, SurfaceQualityTargets,
+    VolumeQualityTargets, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
 };
 
 use super::*;
@@ -70,6 +71,7 @@ pub(crate) fn artifact(order: ElementOrder) -> SolverMeshArtifact {
     .enumerate()
     .map(|(index, coordinates_m)| SolverMeshNode {
         node_id: index as u64 + 1,
+        stable_identity: digest(index as u8 + 1),
         coordinates_m,
         provenance: vec![solid.clone()],
         exact_parameters: Vec::new(),
@@ -100,6 +102,10 @@ pub(crate) fn artifact(order: ElementOrder) -> SolverMeshArtifact {
             provenance.sort();
             nodes.push(SolverMeshNode {
                 node_id: index as u64 + 5,
+                stable_identity: solver_midside_node_identity(
+                    runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
+                        .map(|corner| nodes[corner].stable_identity),
+                ),
                 coordinates_m,
                 provenance,
                 exact_parameters,
@@ -118,6 +124,9 @@ pub(crate) fn artifact(order: ElementOrder) -> SolverMeshArtifact {
             }
             SolverBoundaryFace {
                 face_id: index as u64 + 10,
+                stable_identity: solver_boundary_face_identity(
+                    corners.map(|node_id| digest(node_id as u8)),
+                ),
                 order: if order == ElementOrder::Tet4 {
                     BoundaryTriangleOrder::Tri3
                 } else {
@@ -143,6 +152,9 @@ pub(crate) fn artifact(order: ElementOrder) -> SolverMeshArtifact {
             }
             SolverBoundaryEdge {
                 edge_id: index as u64 + 20,
+                stable_identity: solver_boundary_edge_identity(
+                    corners.map(|node_id| digest(node_id as u8)),
+                ),
                 order: if order == ElementOrder::Tet4 {
                     BoundaryEdgeOrder::Line2
                 } else {
@@ -171,6 +183,12 @@ pub(crate) fn artifact(order: ElementOrder) -> SolverMeshArtifact {
             nodes,
             volume_elements: vec![SolverVolumeElement {
                 element_id: 1,
+                stable_identity: solver_volume_element_identity([
+                    digest(1),
+                    digest(2),
+                    digest(3),
+                    digest(4),
+                ]),
                 order,
                 node_ids: (1..=node_count).collect(),
                 region_id: region.clone(),

@@ -91,6 +91,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
     .enumerate()
     .map(|(index, coordinates_m)| SolverMeshNode {
         node_id: index as u64 + 1,
+        stable_identity: digest(index as u8 + 1),
         coordinates_m,
         provenance: vec![solid.clone()],
         exact_parameters: Vec::new(),
@@ -102,6 +103,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
         .enumerate()
         .map(|(index, node_ids)| SolverBoundaryFace {
             face_id: index as u64 + 10,
+            stable_identity: solver_boundary_face_identity(node_ids.map(|id| digest(id as u8))),
             order: BoundaryTriangleOrder::Tri3,
             node_ids: node_ids.into(),
             adjacent_volume_element_ids: vec![1],
@@ -122,6 +124,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
     .map(
         |(index, (node_ids, adjacent_boundary_face_ids))| SolverBoundaryEdge {
             edge_id: index as u64 + 20,
+            stable_identity: solver_boundary_edge_identity(node_ids.map(|id| digest(id as u8))),
             order: BoundaryEdgeOrder::Line2,
             node_ids: node_ids.into(),
             adjacent_boundary_face_ids,
@@ -143,6 +146,12 @@ pub(super) fn artifact() -> SolverMeshArtifact {
             nodes,
             volume_elements: vec![SolverVolumeElement {
                 element_id: 1,
+                stable_identity: solver_volume_element_identity([
+                    digest(1),
+                    digest(2),
+                    digest(3),
+                    digest(4),
+                ]),
                 order: ElementOrder::Tet4,
                 node_ids: vec![1, 2, 3, 4],
                 region_id: region.clone(),
@@ -273,6 +282,35 @@ fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
 
 #[test]
 fn artifact_rejects_noncanonical_or_dangling_connectivity() {
+    let mut invalid = artifact();
+    invalid.topology.nodes[0].stable_identity = StableDigest::ZERO;
+    assert_eq!(invalid.validate().unwrap_err().field, "mesh nodes");
+
+    let mut invalid = artifact();
+    invalid.topology.nodes[1].stable_identity = invalid.topology.nodes[0].stable_identity;
+    assert_eq!(invalid.validate().unwrap_err().field, "mesh nodes");
+
+    let mut invalid = artifact();
+    invalid.topology.volume_elements[0].stable_identity = digest(99);
+    assert_eq!(
+        invalid.validate().unwrap_err().field,
+        "volume element stable identity"
+    );
+
+    let mut invalid = artifact();
+    invalid.topology.boundary_faces[0].stable_identity = digest(99);
+    assert_eq!(
+        invalid.validate().unwrap_err().field,
+        "boundary face stable identity"
+    );
+
+    let mut invalid = artifact();
+    invalid.topology.boundary_edges[0].stable_identity = digest(99);
+    assert_eq!(
+        invalid.validate().unwrap_err().field,
+        "boundary edge stable identity"
+    );
+
     let mut invalid = artifact();
     invalid.topology.volume_elements[0].node_ids[3] = 99;
     assert_eq!(invalid.validate().unwrap_err().field, "volume element");
@@ -427,6 +465,10 @@ fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
         sort_solver_node_exact_parameters(&mut exact_parameters);
         quadratic.topology.nodes.push(SolverMeshNode {
             node_id: index as u64 + 5,
+            stable_identity: solver_midside_node_identity(
+                TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
+                    .map(|corner| quadratic.topology.nodes[corner].stable_identity),
+            ),
             coordinates_m,
             provenance,
             exact_parameters,
@@ -479,6 +521,15 @@ fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
             .unwrap_err()
             .field,
         "boundary edge"
+    );
+
+    let mut invalid = quadratic.clone();
+    invalid.topology.nodes[4].stable_identity = digest(99);
+    assert_eq!(
+        validate_solver_mesh_topology(&invalid.topology, &invalid.resolved_request)
+            .unwrap_err()
+            .field,
+        "mesh element order topology"
     );
 
     let mut invalid = quadratic;

@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    BoundaryEdgeOrder, BoundaryTriangleOrder, ElementOrder, MeshingContractError, MeshingRequest,
-    PersistentEntityKind, SolverMeshTopology, SolverNodeExactParameter,
-    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    solver_midside_node_identity, BoundaryEdgeOrder, BoundaryTriangleOrder, ElementOrder,
+    MeshingContractError, MeshingRequest, PersistentEntityKind, SolverMeshTopology,
+    SolverNodeExactParameter, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 
 pub(super) fn validate_order_topology(
@@ -67,6 +67,11 @@ fn validate_quadratic(
     let mut corners = BTreeSet::new();
     let mut midside_nodes = BTreeSet::new();
     let mut midpoint_by_edge = BTreeMap::new();
+    let stable_identity_by_node = topology
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.stable_identity))
+        .collect::<BTreeMap<_, _>>();
     for element in &topology.volume_elements {
         corners.extend(element.node_ids[..4].iter().copied());
         for (local_edge, endpoints) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
@@ -75,6 +80,14 @@ fn validate_quadratic(
                 element.node_ids[endpoints[1]],
             ]);
             let midpoint = element.node_ids[4 + local_edge];
+            let endpoint_identities = edge.map(|node| stable_identity_by_node[&node]);
+            if stable_identity_by_node[&midpoint]
+                != solver_midside_node_identity(endpoint_identities)
+            {
+                return Err(invalid(
+                    "Tet10 midside identity must derive from its stable endpoint identities",
+                ));
+            }
             midside_nodes.insert(midpoint);
             if midpoint_by_edge
                 .insert(edge, midpoint)
