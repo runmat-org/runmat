@@ -20,6 +20,7 @@ mod objects;
 mod publication;
 mod response;
 mod serial;
+mod surface_dag;
 mod surface_join_kernel;
 mod surface_kernel;
 mod task;
@@ -79,6 +80,7 @@ pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
+pub use surface_dag::{ExactSurfaceDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage};
 pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{

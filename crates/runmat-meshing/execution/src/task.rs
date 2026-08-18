@@ -157,35 +157,44 @@ pub(crate) fn validate_inputs(
         ));
     }
     for (root, input) in roots.iter().zip(&workload.inputs) {
-        ValuePayload::Object(Box::new(root.clone())).validate(ValueLimits::default())?;
-        let expected_shape = match input.kind {
-            MeshingInputKind::StageArtifact => {
-                root.kind == ValueRefKind::ResultObject
-                    && root.media_type == MESHING_STAGE_MANIFEST_MEDIA_TYPE
-                    && root.value_schema == STAGE_MANIFEST_SCHEMA
-            }
-            MeshingInputKind::ExactGeometry => {
-                root.kind == ValueRefKind::DriverObject
-                    && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
-                    && root.value_schema == EXACT_GEOMETRY_SCHEMA
-            }
-            MeshingInputKind::FacetedGeometry => {
-                root.kind == ValueRefKind::DriverObject
-                    && root.media_type == runmat_geometry_core::FACETED_SOLID_MEDIA_TYPE
-                    && root.value_schema == FACETED_GEOMETRY_SCHEMA
-            }
-        };
-        if root.logical_digest.bytes() != input.digest.bytes()
-            || root.id != access.value_id(root.logical_digest)
-            || root.encoded_length == 0
-            || !expected_shape
-            || root.authorization_scope != access.authorization_scope
-            || root.encryption_context != access.encryption_context
-        {
-            return Err(MeshingExecutionError::Invalid(
-                "externalized input root is outside workload identity or artifact authority".into(),
-            ));
+        validate_input(root, input, access)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_input(
+    root: &ValueRef,
+    input: &runmat_meshing_core::MeshingInputRef,
+    access: &MeshingArtifactAccess,
+) -> MeshingExecutionResult<()> {
+    ValuePayload::Object(Box::new(root.clone())).validate(ValueLimits::default())?;
+    let expected_shape = match input.kind {
+        MeshingInputKind::StageArtifact => {
+            root.kind == ValueRefKind::ResultObject
+                && root.media_type == MESHING_STAGE_MANIFEST_MEDIA_TYPE
+                && root.value_schema == STAGE_MANIFEST_SCHEMA
         }
+        MeshingInputKind::ExactGeometry => {
+            root.kind == ValueRefKind::DriverObject
+                && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
+                && root.value_schema == EXACT_GEOMETRY_SCHEMA
+        }
+        MeshingInputKind::FacetedGeometry => {
+            root.kind == ValueRefKind::DriverObject
+                && root.media_type == runmat_geometry_core::FACETED_SOLID_MEDIA_TYPE
+                && root.value_schema == FACETED_GEOMETRY_SCHEMA
+        }
+    };
+    if root.logical_digest.bytes() != input.digest.bytes()
+        || root.id != access.value_id(root.logical_digest)
+        || root.encoded_length == 0
+        || !expected_shape
+        || root.authorization_scope != access.authorization_scope
+        || root.encryption_context != access.encryption_context
+    {
+        return Err(MeshingExecutionError::Invalid(
+            "externalized input root is outside workload identity or artifact authority".into(),
+        ));
     }
     Ok(())
 }

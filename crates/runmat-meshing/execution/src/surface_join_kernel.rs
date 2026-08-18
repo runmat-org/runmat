@@ -182,7 +182,7 @@ fn inputs(
     }
     if partitions.is_empty() || partitions.len() > MAX_EXACT_FACE_PARTITIONS {
         return Err(invalid_input(
-            "surface join requires one through 63 face partition artifacts",
+            "surface join requires one through 62 face partition artifacts",
         ));
     }
     Ok((

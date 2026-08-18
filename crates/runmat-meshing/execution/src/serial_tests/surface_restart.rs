@@ -1,5 +1,7 @@
 use super::*;
 
+mod dag;
+
 struct SurfaceRestartKernel;
 
 impl MeshingStageKernel for SurfaceRestartKernel {

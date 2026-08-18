@@ -11,7 +11,9 @@ pub const EXACT_FACE_MESH_BATCH_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_SURFACE_MESH_SCHEMA_VERSION: u16 = 1;
-pub const MAX_EXACT_FACE_PARTITIONS: usize = 63;
+// The deterministic join consumes exact geometry and the current shared curve before the
+// partition roots, so 62 partitions fit the shared 64-input workload contract.
+pub const MAX_EXACT_FACE_PARTITIONS: usize = 62;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactSurfaceJoinOptions {

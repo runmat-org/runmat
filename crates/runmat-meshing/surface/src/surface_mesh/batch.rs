@@ -8,7 +8,8 @@ use super::{
     EXACT_FACE_MESH_BATCH_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
 };
 
-// One exact-geometry prerequisite plus this many partition roots fits the shared 64-input join.
+// Exact geometry, the current shared curve, and this many partition roots fit the shared
+// 64-input join.
 pub fn face_partition_descriptors(
     topology: &ExactBRepTopology,
     preferred_faces_per_partition: u32,
@@ -147,7 +148,7 @@ mod tests {
 
         let partitions = face_partition_descriptors(&topology, 1).unwrap();
 
-        assert_eq!(partitions.len(), 63);
+        assert_eq!(partitions.len(), 62);
         assert_eq!(
             partitions
                 .iter()
