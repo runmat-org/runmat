@@ -1,6 +1,10 @@
 use thiserror::Error;
 
-use super::{material::SolidMaterialError, quality::SolidElementQuality, SolidMaterial};
+use super::{
+    material::{elasticity_matrix as material_elasticity_matrix, SolidMaterialError},
+    quality::SolidElementQuality,
+    SolidMaterial,
+};
 
 pub const TETRAHEDRON4_NODE_DOF_COUNT: usize = 3;
 pub const TETRAHEDRON4_ELEMENT_NODE_COUNT: usize = 4;
@@ -10,7 +14,7 @@ pub const TETRAHEDRON4_ELEMENT_DOF_COUNT: usize =
 pub type Tetrahedron4Matrix12 =
     [[f64; TETRAHEDRON4_ELEMENT_DOF_COUNT]; TETRAHEDRON4_ELEMENT_DOF_COUNT];
 pub type Tetrahedron4BMatrix = [[f64; TETRAHEDRON4_ELEMENT_DOF_COUNT]; 6];
-pub type ElasticityMatrix = [[f64; 6]; 6];
+pub type ElasticityMatrix = super::material::ElasticityMatrix;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tetrahedron4ElementGeometry {
@@ -90,17 +94,7 @@ pub fn strain_displacement_matrix(
 pub fn elasticity_matrix(
     material: SolidMaterial,
 ) -> Result<ElasticityMatrix, Tetrahedron4ElementError> {
-    let lambda = material.lame_lambda_pa()?;
-    let mu = material.shear_modulus_pa()?;
-    let mut d = [[0.0_f64; 6]; 6];
-    for (row, diagonal) in d.iter_mut().enumerate().take(3) {
-        diagonal[..3].fill(lambda);
-        diagonal[row] += 2.0 * mu;
-    }
-    d[3][3] = mu;
-    d[4][4] = mu;
-    d[5][5] = mu;
-    Ok(d)
+    material_elasticity_matrix(material).map_err(Tetrahedron4ElementError::InvalidMaterial)
 }
 
 pub fn global_stiffness_matrix(
