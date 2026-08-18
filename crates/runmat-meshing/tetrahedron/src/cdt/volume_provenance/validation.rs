@@ -51,6 +51,17 @@ pub fn validate_delaunay_volume_provenance(
             return Err(invalid("provenance segment is absent from the topology"));
         }
         validate_entities(&binding.entity_ids, &[PersistentEntityKind::Edge])?;
+        if binding.entity_ids.len() != 1
+            || binding
+                .edge_parameters
+                .iter()
+                .any(|parameter| !parameter.is_finite())
+            || binding.edge_parameters[0] == binding.edge_parameters[1]
+        {
+            return Err(invalid(
+                "segment provenance must bind one exact edge and two finite distinct aligned parameters",
+            ));
+        }
     }
     for (index, binding) in provenance.facets.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;

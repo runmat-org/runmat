@@ -55,6 +55,17 @@ pub struct DelaunayRecoveredSegmentNode {
     pub parameter_exponent: u8,
 }
 
+impl DelaunayRecoveredSegmentNode {
+    pub(super) fn parameter(self) -> Result<f64, DelaunaySegmentRecoveryError> {
+        DyadicNode {
+            identity: self.identity,
+            numerator: self.parameter_numerator,
+            exponent: self.parameter_exponent,
+        }
+        .parameter()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DelaunayRecoveredSegment {
     pub constraint_index: u32,

@@ -12,6 +12,10 @@ use super::{
     DelaunayConstraintSegment, DelaunayConstraints,
 };
 
+#[path = "exact/boundaries.rs"]
+mod boundaries;
+use boundaries::boundary_edges;
+
 pub fn build_delaunay_constraints(
     topology: &ExactBRepTopology,
     surface: &ExactSurfaceMesh,
@@ -127,9 +131,11 @@ pub fn build_delaunay_constraints(
         .into_iter()
         .map(|vertex_indices| {
             let identities = vertex_indices.map(|vertex| nodes[vertex as usize].identity);
+            let exact = boundary_edges.get(&sorted_id_pair(identities));
             DelaunayConstraintSegment {
                 vertex_indices,
-                source_edge_id: boundary_edges.get(&sorted_id_pair(identities)).cloned(),
+                source_edge_id: exact.map(|segment| segment.edge_id.clone()),
+                source_edge_parameters: exact.map(|segment| segment.parameters),
             }
         })
         .collect();
@@ -363,46 +369,7 @@ fn contact_ids(
     result
 }
 
-fn boundary_edges(
-    topology: &ExactBRepTopology,
-    surface: &ExactSurfaceMesh,
-) -> Result<BTreeMap<[StableDigest; 2], PersistentEntityId>, DelaunayConstraintError> {
-    let coedges = topology
-        .coedges
-        .iter()
-        .map(|coedge| (&coedge.id, coedge))
-        .collect::<BTreeMap<_, _>>();
-    let mut result = BTreeMap::new();
-    for segment in &surface.boundary_segments {
-        let coedge = coedges.get(&segment.source_coedge_id).ok_or_else(|| {
-            invalid_boundary("surface boundary segment references an absent exact coedge")
-        })?;
-        if segment.source_edge_id != coedge.edge_id
-            || segment.node_ids[0] == segment.node_ids[1]
-            || !segment
-                .edge_parameters
-                .iter()
-                .all(|value| value.is_finite())
-            || segment.edge_parameters[0] == segment.edge_parameters[1]
-        {
-            return Err(invalid_boundary(
-                "surface boundary segment must match its exact edge and have distinct nodes and parameters",
-            ));
-        }
-        let key = sorted_id_pair(segment.node_ids);
-        if result
-            .insert(key, coedge.edge_id.clone())
-            .is_some_and(|previous| previous != coedge.edge_id)
-        {
-            return Err(invalid_boundary(
-                "one exact surface segment maps to conflicting persistent edges",
-            ));
-        }
-    }
-    Ok(result)
-}
-
-fn sorted_id_pair(mut identities: [StableDigest; 2]) -> [StableDigest; 2] {
+pub(super) fn sorted_id_pair(mut identities: [StableDigest; 2]) -> [StableDigest; 2] {
     identities.sort_unstable();
     identities
 }

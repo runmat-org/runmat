@@ -134,13 +134,25 @@ fn construct(
     let mut segments = Vec::new();
     for (index, recovered) in recovery.segment_recovery.segments.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
-        let Some(source_edge) =
-            &constraints.segments[recovered.constraint_index as usize].source_edge_id
-        else {
+        let constraint = &constraints.segments[recovered.constraint_index as usize];
+        let Some(source_edge) = &constraint.source_edge_id else {
             continue;
         };
+        let source_parameters = constraint.source_edge_parameters.ok_or_else(|| {
+            error(
+                DelaunayVolumeProvenanceErrorKind::InvalidProvenance,
+                "persistent exact edge support is missing its parameter interval",
+            )
+        })?;
         for pair in recovered.nodes.windows(2) {
             let mut identities = [pair[0].identity, pair[1].identity];
+            let mut edge_parameters = [
+                source_parameter(source_parameters, pair[0])?,
+                source_parameter(source_parameters, pair[1])?,
+            ];
+            if identities[0] > identities[1] {
+                edge_parameters.swap(0, 1);
+            }
             identities.sort_unstable();
             if !identities
                 .iter()
@@ -154,6 +166,7 @@ fn construct(
             segments.push(DelaunaySegmentProvenance {
                 node_identities: identities,
                 entity_ids: vec![source_edge.clone()],
+                edge_parameters,
             });
         }
     }
@@ -196,6 +209,19 @@ fn construct(
         segments,
         facets,
     })
+}
+
+fn source_parameter(
+    endpoints: [f64; 2],
+    node: crate::cdt::DelaunayRecoveredSegmentNode,
+) -> Result<f64, DelaunayVolumeProvenanceError> {
+    let fraction = node.parameter().map_err(|failure| {
+        error(
+            DelaunayVolumeProvenanceErrorKind::InvalidProvenance,
+            format!("recovered exact edge parameter is invalid: {failure}"),
+        )
+    })?;
+    Ok(endpoints[0] * (1.0 - fraction) + endpoints[1] * fraction)
 }
 
 fn facet_regions(facet: &crate::cdt::DelaunayConstraintFacet) -> Vec<PersistentEntityId> {
@@ -252,4 +278,22 @@ fn require_capacity(current: usize, maximum: u64) -> Result<(), DelaunayVolumePr
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod parameter_tests {
+    use runmat_meshing_core::StableDigest;
+
+    use super::source_parameter;
+
+    #[test]
+    fn dyadic_recovery_fraction_interpolates_the_exact_edge_interval() {
+        let node = crate::cdt::DelaunayRecoveredSegmentNode {
+            identity: StableDigest::from_bytes([9; 32]),
+            parameter_numerator: 1,
+            parameter_exponent: 2,
+        };
+        assert_eq!(source_parameter([2.0, 6.0], node).unwrap(), 3.0);
+        assert_eq!(source_parameter([6.0, 2.0], node).unwrap(), 5.0);
+    }
 }

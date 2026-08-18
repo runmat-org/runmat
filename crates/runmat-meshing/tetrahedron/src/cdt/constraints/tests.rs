@@ -36,10 +36,9 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
         .nodes
         .iter()
         .all(|node| node.source_vertex_id.is_some()));
-    assert!(constraints
-        .segments
-        .iter()
-        .all(|segment| segment.source_edge_id.is_some()));
+    assert!(constraints.segments.iter().all(
+        |segment| segment.source_edge_id.is_some() && segment.source_edge_parameters.is_some()
+    ));
     let region = entity(PersistentEntityKind::Region, "region");
     assert!(constraints.facets.iter().all(|facet| {
         facet.positive_side == DelaunayConstraintFacetSide::Exterior
@@ -105,7 +104,7 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
     .unwrap();
 
     let mut stale_source = provenance;
-    stale_source.facets[0].entity_ids = vec![entity(PersistentEntityKind::Face, "face:stale")];
+    stale_source.segments[0].edge_parameters[0] += 0.125;
     assert_eq!(
         validate_delaunay_volume_provenance_sources(
             &facets,
@@ -281,6 +280,19 @@ fn validation_rejects_tampered_identity_side_and_edge_coverage() {
         DelaunayConstraintErrorKind::InvalidBoundary
     );
 
+    let mut missing_parameters = constraints.clone();
+    missing_parameters.segments[0].source_edge_parameters = None;
+    assert_eq!(
+        validate_delaunay_constraints(
+            &missing_parameters,
+            DelaunayConstraintOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayConstraintErrorKind::InvalidBoundary
+    );
+
     let mut missing_edge = constraints;
     missing_edge.segments.remove(0);
     assert_eq!(
@@ -401,7 +413,7 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
                     shared_curve_vertex_node_id(&vertices[from]),
                     shared_curve_vertex_node_id(&vertices[to]),
                 ],
-                edge_parameters: [0.0, 1.0],
+                edge_parameters: if from < to { [0.0, 1.0] } else { [1.0, 0.0] },
             });
         }
         exact_wires.push(ExactWire {

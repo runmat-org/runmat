@@ -38,6 +38,7 @@ fn octahedron_constraints() -> DelaunayConstraints {
         segments: vec![DelaunayConstraintSegment {
             vertex_indices: [1, 4],
             source_edge_id: None,
+            source_edge_parameters: None,
         }],
         facets: Vec::new(),
     }
@@ -74,10 +75,12 @@ fn cospherical_bipyramid() -> (DelaunayConstraints, DelaunayVolumeTopology) {
             DelaunayConstraintSegment {
                 vertex_indices: [0, 1],
                 source_edge_id: Some(entity(PersistentEntityKind::Edge, "curve:base")),
+                source_edge_parameters: Some([0.0, 1.0]),
             },
             DelaunayConstraintSegment {
                 vertex_indices: [3, 4],
                 source_edge_id: None,
+                source_edge_parameters: None,
             },
         ],
         facets: Vec::new(),

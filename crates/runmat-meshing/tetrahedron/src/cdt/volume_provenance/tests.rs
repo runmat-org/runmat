@@ -62,6 +62,7 @@ fn provenance() -> DelaunayVolumeProvenance {
                 StableDigest::from_bytes([3; 32]),
             ],
             entity_ids: vec![entity(PersistentEntityKind::Edge, "feature")],
+            edge_parameters: [0.0, 1.0],
         }],
         facets: vec![
             DelaunayFacetProvenance {
@@ -165,6 +166,20 @@ fn rejects_noncanonical_or_false_simplex_provenance() {
         validate_delaunay_volume_provenance(
             &topology,
             &wrong_dimension,
+            DelaunayVolumeProvenanceOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeProvenanceErrorKind::InvalidProvenance
+    );
+
+    let mut invalid_parameters = provenance();
+    invalid_parameters.segments[0].edge_parameters[1] = f64::NAN;
+    assert_eq!(
+        validate_delaunay_volume_provenance(
+            &topology,
+            &invalid_parameters,
             DelaunayVolumeProvenanceOptions::default(),
             &NeverCancelled,
         )

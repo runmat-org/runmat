@@ -36,6 +36,7 @@ fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
             .map(|vertex_indices| DelaunayConstraintSegment {
                 vertex_indices,
                 source_edge_id: None,
+                source_edge_parameters: None,
             })
             .collect(),
         facets: vec![DelaunayConstraintFacet {

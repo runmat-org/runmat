@@ -404,6 +404,7 @@ fn refinement_insertion_preserves_region_interface_and_rederives_quality() {
                 StableDigest::from_bytes([3; 32]),
             ],
             entity_ids: vec![edge("interface-edge")],
+            edge_parameters: [0.0, 1.0],
         }],
         facets: vec![
             DelaunayFacetProvenance {

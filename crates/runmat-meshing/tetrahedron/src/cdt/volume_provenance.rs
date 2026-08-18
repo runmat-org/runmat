@@ -19,10 +19,12 @@ pub struct DelaunayNodeProvenance {
     pub entity_ids: Vec<PersistentEntityId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DelaunaySegmentProvenance {
     pub node_identities: [StableDigest; 2],
     pub entity_ids: Vec<PersistentEntityId>,
+    /// Exact source-edge parameters aligned with the canonical node identities.
+    pub edge_parameters: [f64; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +36,7 @@ pub struct DelaunayFacetProvenance {
 
 /// Canonical persistent incidence for protected PLC simplices. Per-tetrahedron metric context is
 /// derived from this authority after every topology mutation; it is never copied heuristically.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayVolumeProvenance {
     pub nodes: Vec<DelaunayNodeProvenance>,
     pub segments: Vec<DelaunaySegmentProvenance>,

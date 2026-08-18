@@ -5,9 +5,8 @@ use runmat_meshing_core::MeshingCancellationSignal;
 use super::{
     edge_exists, error, find_node, interpolate, validate_delaunay_constraints,
     validate_delaunay_volume_topology, validate_options, DelaunayConstraints,
-    DelaunayRecoveredSegmentNode, DelaunaySegmentRecovery, DelaunaySegmentRecoveryError,
-    DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions, DelaunayVolumeTopology,
-    RecoveryWork,
+    DelaunaySegmentRecovery, DelaunaySegmentRecoveryError, DelaunaySegmentRecoveryErrorKind,
+    DelaunaySegmentRecoveryOptions, DelaunayVolumeTopology, RecoveryWork,
 };
 use crate::cdt::insertion::validate_constrained_delaunay_volume_topology;
 
@@ -201,15 +200,4 @@ fn validate_steiner_evidence(
         ));
     }
     Ok(())
-}
-
-impl DelaunayRecoveredSegmentNode {
-    fn parameter(self) -> Result<f64, DelaunaySegmentRecoveryError> {
-        super::DyadicNode {
-            identity: self.identity,
-            numerator: self.parameter_numerator,
-            exponent: self.parameter_exponent,
-        }
-        .parameter()
-    }
 }

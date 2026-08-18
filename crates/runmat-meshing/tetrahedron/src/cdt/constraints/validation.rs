@@ -60,8 +60,23 @@ pub fn validate_delaunay_constraints(
                 "segments must be canonical, unique, distinct, and in range",
             ));
         }
-        if let Some(edge) = &segment.source_edge_id {
-            validate_kind(edge, PersistentEntityKind::Edge)?;
+        match (&segment.source_edge_id, segment.source_edge_parameters) {
+            (Some(edge), Some(parameters)) => {
+                validate_kind(edge, PersistentEntityKind::Edge)?;
+                if parameters.iter().any(|value| !value.is_finite())
+                    || parameters[0] == parameters[1]
+                {
+                    return Err(invalid_boundary(
+                        "exact constraint segment parameters must be finite and distinct",
+                    ));
+                }
+            }
+            (None, None) => {}
+            _ => {
+                return Err(invalid_boundary(
+                    "exact constraint segment identity and parameters must be present together",
+                ));
+            }
         }
     }
     if constraints

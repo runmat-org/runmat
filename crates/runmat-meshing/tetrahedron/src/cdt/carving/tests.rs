@@ -72,6 +72,7 @@ fn fixture(interface: bool) -> (DelaunayConstraints, DelaunayFacetRecovery) {
             .map(|vertex_indices| DelaunayConstraintSegment {
                 vertex_indices,
                 source_edge_id: None,
+                source_edge_parameters: None,
             })
             .collect(),
         facets: facet_vertices

@@ -35,11 +35,13 @@ pub struct DelaunayConstraintNode {
     pub coordinates_m: [f64; 3],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayConstraintSegment {
     pub vertex_indices: [u32; 2],
     /// Present exactly for segments on an authoritative exact curve.
     pub source_edge_id: Option<PersistentEntityId>,
+    /// Exact source-edge parameters aligned with the canonical vertex order.
+    pub source_edge_parameters: Option<[f64; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
