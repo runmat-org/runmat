@@ -425,6 +425,72 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         panic!("permissive exact-circle refinement must converge")
     };
     assert_eq!(converged.interior_insertion_count, 0);
+    let acceptance_options = crate::ExactFaceAcceptanceOptions {
+        minimum_subdivision_depth: 1,
+        maximum_subdivision_depth: 2,
+        refinement_margin_ratio: 0.5,
+        maximum_samples: 100_000,
+    };
+    let acceptance = crate::accept_exact_face_mesh(
+        &converged,
+        ExactFaceRefinementContext::new(
+            &topology,
+            &coarse_request,
+            &evaluator,
+            &Control,
+            &NeverCancelled,
+        ),
+        permissive_quality,
+        acceptance_options,
+    )
+    .unwrap();
+    assert_eq!(
+        acceptance.triangles.len(),
+        converged.geometry.triangles.len()
+    );
+    assert!(acceptance.sample_count > acceptance.triangles.len() as u64);
+    assert!(acceptance.maximum_chordal_deviation_m < 1.0e-12);
+    assert!(acceptance.maximum_normal_deviation_rad < 1.0e-7);
+    let mut tampered_acceptance = acceptance.clone();
+    tampered_acceptance.maximum_chordal_deviation_m = 1.0;
+    assert_eq!(
+        crate::validate_exact_face_acceptance(
+            &tampered_acceptance,
+            &converged,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            permissive_quality,
+            acceptance_options,
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceAcceptanceErrorKind::InvalidInput
+    );
+    assert_eq!(
+        crate::accept_exact_face_mesh(
+            &converged,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            permissive_quality,
+            crate::ExactFaceAcceptanceOptions {
+                maximum_samples: 1,
+                ..acceptance_options
+            },
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceAcceptanceErrorKind::ResourceLimit
+    );
 
     let strict_aspect = SurfaceQualityTargets {
         maximum_physical_aspect_ratio: 1.0,

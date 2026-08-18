@@ -74,6 +74,7 @@ pub struct ExactFaceRefinementPolicy {
     pub refinement: ExactFaceRefinementOptions,
 }
 
+#[derive(Clone, Copy)]
 pub struct ExactFaceRefinementContext<'a> {
     pub topology: &'a ExactBRepTopology,
     pub metric_request: &'a MetricFieldRequest,

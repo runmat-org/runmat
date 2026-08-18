@@ -2,6 +2,7 @@
 
 pub const CRATE_PURPOSE: &str = "face-domain triangulation, loop recovery, and surface validation";
 
+mod acceptance;
 mod exact_metric;
 mod face_geometry;
 mod math;
@@ -14,6 +15,11 @@ pub mod param_tri;
 pub mod recovery;
 pub mod validate;
 
+pub use acceptance::{
+    accept_exact_face_mesh, validate_exact_face_acceptance, ExactFaceAcceptanceError,
+    ExactFaceAcceptanceErrorKind, ExactFaceAcceptanceOptions, ExactFaceAcceptanceReport,
+    ExactFaceTriangleAcceptance,
+};
 pub use contract::build_surface_mesh_contract;
 pub use exact_boundary::{
     build_exact_surface_boundary, validate_exact_surface_boundary, ExactFaceBoundary,
