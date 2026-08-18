@@ -3,9 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     BoundaryEdgeOrder, BoundaryTriangleOrder, ElementOrder, MeshingContractError, MeshingRequest,
     PersistentEntityKind, SolverMeshTopology, SolverNodeExactParameter,
+    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
-
-const TETRAHEDRON_EDGES: [[usize; 2]; 6] = [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
 
 pub(super) fn validate_order_topology(
     topology: &SolverMeshTopology,
@@ -70,7 +69,7 @@ fn validate_quadratic(
     let mut midpoint_by_edge = BTreeMap::new();
     for element in &topology.volume_elements {
         corners.extend(element.node_ids[..4].iter().copied());
-        for (local_edge, endpoints) in TETRAHEDRON_EDGES.iter().enumerate() {
+        for (local_edge, endpoints) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
             let edge = sorted_pair([
                 element.node_ids[endpoints[0]],
                 element.node_ids[endpoints[1]],

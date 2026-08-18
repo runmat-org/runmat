@@ -3,7 +3,7 @@ use runmat_meshing_core::{
     SolverMeshTopology,
 };
 
-use super::{sorted_edge, MidpointMap, TETRAHEDRON_EDGES};
+use super::{sorted_edge, MidpointMap, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 use crate::cdt::solver_topology::{
     error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
 };
@@ -19,7 +19,7 @@ pub(super) fn elevate(
             .try_into()
             .map_err(|_| invalid("linear element does not have exactly four corner nodes"))?;
         element.order = ElementOrder::Tet10;
-        for edge in TETRAHEDRON_EDGES {
+        for edge in TETRAHEDRON_MIDSIDE_EDGE_CORNERS {
             element.node_ids.push(midpoint(
                 midpoint_by_edge,
                 [corners[edge[0]], corners[edge[1]]],

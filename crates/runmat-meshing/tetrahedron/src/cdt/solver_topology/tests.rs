@@ -318,7 +318,10 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
     assert!(topology.boundary_edges.iter().all(|edge| {
         edge.order == runmat_meshing_core::BoundaryEdgeOrder::Line3 && edge.node_ids.len() == 3
     }));
-    for (local_edge, endpoints) in super::order_elevation::TETRAHEDRON_EDGES.iter().enumerate() {
+    for (local_edge, endpoints) in runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
+        .iter()
+        .enumerate()
+    {
         let element = &topology.volume_elements[0];
         let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1].coordinates_m;
         let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1].coordinates_m;

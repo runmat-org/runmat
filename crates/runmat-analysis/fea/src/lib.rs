@@ -1,5 +1,6 @@
 //! FEA pipeline scaffolding for assembly, solve orchestration, and diagnostics.
 
+pub mod adaptation;
 pub mod assembly;
 pub mod contracts;
 pub mod diagnostics;

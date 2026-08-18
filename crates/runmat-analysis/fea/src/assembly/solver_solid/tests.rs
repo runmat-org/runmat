@@ -54,7 +54,7 @@ fn canonical_solver_assembly_revalidates_digest_and_uses_material_id() {
     ));
 }
 
-fn artifact(order: ElementOrder) -> SolverMeshArtifact {
+pub(crate) fn artifact(order: ElementOrder) -> SolverMeshArtifact {
     let solid = entity(PersistentEntityKind::Solid, "solid");
     let region = entity(PersistentEntityKind::Region, "region");
     let faces = (0..4)

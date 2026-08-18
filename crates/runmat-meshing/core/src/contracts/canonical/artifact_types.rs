@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
 pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 5;
+/// Tet10 midside-node order after the four corners: 01, 12, 20, 03, 13, 23.
+pub const TETRAHEDRON_MIDSIDE_EDGE_CORNERS: [[usize; 2]; 6] =
+    [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

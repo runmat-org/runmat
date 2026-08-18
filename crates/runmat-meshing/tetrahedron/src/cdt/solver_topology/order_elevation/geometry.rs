@@ -6,7 +6,7 @@ use runmat_meshing_core::{
     SolverMeshTopology, SolverNodeExactParameter, StableDigest,
 };
 
-use super::{sorted_edge, MidpointMap, TETRAHEDRON_EDGES};
+use super::{sorted_edge, MidpointMap, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 use crate::cdt::solver_topology::{
     checkpoint, error, DelaunayExactEvaluation, DelaunaySolverTopologyError,
     DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
@@ -40,7 +40,7 @@ pub(super) fn append_midpoint_nodes(
         .volume_elements
         .iter()
         .flat_map(|element| {
-            TETRAHEDRON_EDGES
+            TETRAHEDRON_MIDSIDE_EDGE_CORNERS
                 .map(|edge| sorted_edge([element.node_ids[edge[0]], element.node_ids[edge[1]]]))
         })
         .collect::<BTreeSet<_>>();

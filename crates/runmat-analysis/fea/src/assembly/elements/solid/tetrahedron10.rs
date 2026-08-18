@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
+
 use super::{
     material::{elasticity_matrix, SolidMaterialError},
     SolidMaterial,
@@ -19,7 +21,6 @@ const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
     [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ];
-const QUADRATIC_EDGES: [[usize; 2]; 6] = [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
 const QUADRATURE_A: f64 = 0.585_410_196_624_968_5;
 const QUADRATURE_B: f64 = 0.138_196_601_125_010_5;
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
@@ -109,7 +110,7 @@ fn reference_shape_gradients(
         let factor = 4.0 * barycentric[node] - 1.0;
         gradients[node] = BARYCENTRIC_DERIVATIVES[node].map(|derivative| factor * derivative);
     }
-    for (local_edge, [left, right]) in QUADRATIC_EDGES.into_iter().enumerate() {
+    for (local_edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
         gradients[4 + local_edge] = std::array::from_fn(|axis| {
             4.0 * (barycentric[right] * BARYCENTRIC_DERIVATIVES[left][axis]
                 + barycentric[left] * BARYCENTRIC_DERIVATIVES[right][axis])

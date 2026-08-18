@@ -130,4 +130,4 @@ fn element_failure(element_id: u64, failure: impl std::fmt::Display) -> SolverSo
 
 #[cfg(test)]
 #[path = "solver_solid/tests.rs"]
-mod tests;
+pub(crate) mod tests;

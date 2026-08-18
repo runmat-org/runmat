@@ -22,6 +22,7 @@ pub use artifact_types::{
     FieldTopologyMap, MaterialInterface, MeshNeighbor, MeshRegion, SolverBoundaryEdge,
     SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
     SolverNodeExactParameter, SolverVolumeElement, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};
 pub use chunk::{

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign},
-    MeshingCancellationSignal, SolverMeshTopology,
+    MeshingCancellationSignal, SolverMeshTopology, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 
 use crate::cdt::solver_topology::{
@@ -15,7 +15,6 @@ const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
     [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ];
-const QUADRATIC_EDGES: [[usize; 2]; 6] = [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
 const REFERENCE_TETRAHEDRON: [[f64; 4]; 4] = [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
@@ -162,7 +161,7 @@ fn jacobian_at(coordinates: [[f64; 3]; 10], barycentric: [f64; 4]) -> [[Interval
             }
         }
     }
-    for (local_edge, [left, right]) in QUADRATIC_EDGES.into_iter().enumerate() {
+    for (local_edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
         for reference_axis in 0..3 {
             let derivative = Interval::exact(4.0)
                 * (barycentric[right]

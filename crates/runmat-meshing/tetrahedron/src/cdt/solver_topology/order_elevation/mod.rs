@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::{MeshingCancellationSignal, SolverMeshTopology};
+use runmat_meshing_core::{
+    MeshingCancellationSignal, SolverMeshTopology, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+};
 
 use super::{
     error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
@@ -10,9 +12,6 @@ use super::{
 mod connectivity;
 mod geometry;
 mod jacobian;
-
-pub(super) const TETRAHEDRON_EDGES: [[usize; 2]; 6] =
-    [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
 
 pub(super) fn elevate(
     input: &DelaunaySolverTopologyInput<'_>,
