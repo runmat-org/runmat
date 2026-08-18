@@ -129,7 +129,7 @@ pub fn validate_delaunay_volume_refinement_step(
     Ok(())
 }
 
-fn candidate_error(
+pub(super) fn candidate_error(
     failure: DelaunayVolumeRefinementCandidateError,
 ) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
@@ -156,7 +156,9 @@ fn candidate_error(
     error(kind, failure.to_string())
 }
 
-fn insertion_error(failure: DelaunayInsertionError) -> DelaunayVolumeRefinementStepError {
+pub(super) fn insertion_error(
+    failure: DelaunayInsertionError,
+) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
         DelaunayInsertionErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
@@ -197,7 +199,9 @@ fn provenance_error(failure: DelaunayVolumeProvenanceError) -> DelaunayVolumeRef
     error(kind, failure.to_string())
 }
 
-fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayVolumeRefinementStepError {
+pub(super) fn quality_error(
+    failure: DelaunayVolumeQualityError,
+) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
@@ -223,7 +227,7 @@ fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayVolumeRefinemen
     error(kind, failure.to_string())
 }
 
-fn error(
+pub(super) fn error(
     kind: DelaunayVolumeRefinementStepErrorKind,
     reason: impl Into<String>,
 ) -> DelaunayVolumeRefinementStepError {

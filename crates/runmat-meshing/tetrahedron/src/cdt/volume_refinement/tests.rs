@@ -603,3 +603,107 @@ fn refinement_insertion_rejects_unprotected_region_boundary_and_tampering() {
         DelaunayVolumeRefinementStepErrorKind::InvalidQuality
     );
 }
+
+#[test]
+fn refinement_loop_preserves_converged_input_and_rejects_false_lineage() {
+    let topology = topology([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]);
+    let provenance = context(&topology);
+    let metric_request = metric();
+    let (quality, quality_options) = quality(&topology, &provenance, 10.0);
+    let input = refinement_input(
+        &topology,
+        &metric_request,
+        &provenance,
+        &quality,
+        quality_options,
+    );
+    let first = refine_delaunay_volume(
+        input,
+        DelaunayVolumeRefinementOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let second = refine_delaunay_volume(
+        input,
+        DelaunayVolumeRefinementOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.topology, topology);
+    assert_eq!(first.quality, quality);
+    assert!(first.inserted_node_identities.is_empty());
+
+    let mut tampered = first;
+    tampered
+        .inserted_node_identities
+        .push(StableDigest::from_bytes([9; 32]));
+    assert_eq!(
+        validate_delaunay_volume_refinement(
+            input,
+            &tampered,
+            DelaunayVolumeRefinementOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeRefinementStepErrorKind::InvalidInput
+    );
+}
+
+#[test]
+fn refinement_loop_fails_closed_on_nonconvergence_budget_and_cancellation() {
+    let topology = topology([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]);
+    let provenance = context(&topology);
+    let metric_request = metric();
+    let (quality, quality_options) = quality(&topology, &provenance, 0.5);
+    let input = refinement_input(
+        &topology,
+        &metric_request,
+        &provenance,
+        &quality,
+        quality_options,
+    );
+    let options = DelaunayVolumeRefinementOptions {
+        maximum_insertions: 1,
+        ..DelaunayVolumeRefinementOptions::default()
+    };
+    let first = refine_delaunay_volume(input, options, &NeverCancelled).unwrap_err();
+    let second = refine_delaunay_volume(input, options, &NeverCancelled).unwrap_err();
+    assert_eq!(first, second);
+    assert_eq!(
+        first.kind,
+        DelaunayVolumeRefinementStepErrorKind::ResourceLimit
+    );
+    assert!(first.reason.contains("exhausted 1 insertions"));
+    assert!(first.reason.contains("worst violation ratio"));
+    assert_eq!(
+        refine_delaunay_volume(
+            input,
+            DelaunayVolumeRefinementOptions {
+                maximum_insertions: 0,
+                ..DelaunayVolumeRefinementOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeRefinementStepErrorKind::InvalidOptions
+    );
+    assert_eq!(
+        refine_delaunay_volume(input, options, &Cancelled)
+            .unwrap_err()
+            .kind,
+        DelaunayVolumeRefinementStepErrorKind::Cancelled
+    );
+}

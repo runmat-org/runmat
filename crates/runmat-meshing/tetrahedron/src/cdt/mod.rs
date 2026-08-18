@@ -57,11 +57,13 @@ pub use volume_quality::{
     DelaunayVolumeQualityOptions,
 };
 pub use volume_refinement::{
-    insert_delaunay_volume_refinement_candidate, select_delaunay_volume_refinement_candidate,
+    insert_delaunay_volume_refinement_candidate, refine_delaunay_volume,
+    select_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement,
     validate_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_step,
-    DelaunayRefinementCandidateKind, DelaunayVolumeRefinementCandidate,
+    DelaunayRefinementCandidateKind, DelaunayVolumeRefinement, DelaunayVolumeRefinementCandidate,
     DelaunayVolumeRefinementCandidateError, DelaunayVolumeRefinementCandidateErrorKind,
     DelaunayVolumeRefinementCandidateOptions, DelaunayVolumeRefinementInput,
-    DelaunayVolumeRefinementStep, DelaunayVolumeRefinementStepError,
-    DelaunayVolumeRefinementStepErrorKind, DelaunayVolumeRefinementStepOptions,
+    DelaunayVolumeRefinementOptions, DelaunayVolumeRefinementStep,
+    DelaunayVolumeRefinementStepError, DelaunayVolumeRefinementStepErrorKind,
+    DelaunayVolumeRefinementStepOptions,
 };

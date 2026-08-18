@@ -11,6 +11,7 @@ use super::{
 
 mod candidate;
 mod insertion;
+mod iteration;
 mod validation;
 mod work;
 
@@ -18,6 +19,7 @@ use candidate::construct_candidate;
 pub use insertion::{
     insert_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_step,
 };
+pub use iteration::{refine_delaunay_volume, validate_delaunay_volume_refinement};
 pub use validation::validate_delaunay_volume_refinement_candidate;
 use work::CandidateWork;
 
@@ -83,6 +85,29 @@ pub enum DelaunayVolumeRefinementStepErrorKind {
 pub struct DelaunayVolumeRefinementStepError {
     pub kind: DelaunayVolumeRefinementStepErrorKind,
     pub reason: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DelaunayVolumeRefinementOptions {
+    pub step: DelaunayVolumeRefinementStepOptions,
+    pub maximum_insertions: u64,
+}
+
+impl Default for DelaunayVolumeRefinementOptions {
+    fn default() -> Self {
+        Self {
+            step: DelaunayVolumeRefinementStepOptions::default(),
+            maximum_insertions: 10_000_000,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DelaunayVolumeRefinement {
+    pub topology: DelaunayVolumeTopology,
+    pub quality: DelaunayVolumeQuality,
+    /// Canonically sorted inventory of nodes inserted by this refinement run.
+    pub inserted_node_identities: Vec<StableDigest>,
 }
 
 impl std::fmt::Display for DelaunayVolumeRefinementStepError {
