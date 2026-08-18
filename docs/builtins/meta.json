@@ -14867,7 +14867,7 @@
           "overflow": "Saturate",
           "backend": "HostAndGpu",
           "overload": "Multiple",
-          "notes": "The leftmost participating integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback. Public evidence leaves the narrow typed-empty class-dominance edge open."
+          "notes": "The leftmost nonempty integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Empty operands are omitted when a nonempty operand remains and therefore do not affect the result class. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback."
         },
         {
           "form": "B = cat(dim,complex_integer_A1,...,An)",

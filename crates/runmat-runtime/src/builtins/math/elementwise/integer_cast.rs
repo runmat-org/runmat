@@ -782,4 +782,55 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn complex_integer_cast_matrix_preserves_empty_shape_and_complex_metadata() {
+        for target in [
+            IntegerTarget::I8,
+            IntegerTarget::I16,
+            IntegerTarget::I32,
+            IntegerTarget::I64,
+            IntegerTarget::U8,
+            IntegerTarget::U16,
+            IntegerTarget::U32,
+            IntegerTarget::U64,
+        ] {
+            let empty = ComplexTensor::new(Vec::new(), vec![2, 0, 3]).expect("complex empty");
+            let Value::ComplexTensor(output) =
+                block_on(cast_value(Value::ComplexTensor(empty), target)).expect("empty cast")
+            else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            assert_eq!(output.shape, vec![2, 0, 3]);
+            let storage = output.integer_storage().expect("typed complex storage");
+            assert_eq!(storage.real, target.storage(Vec::new()));
+            assert_eq!(storage.imag, target.storage(Vec::new()));
+
+            let special = ComplexTensor::new(
+                vec![(f64::NAN, 0.0), (f64::INFINITY, f64::NEG_INFINITY)],
+                vec![1, 2],
+            )
+            .expect("complex special values");
+            let Value::ComplexTensor(output) =
+                block_on(cast_value(Value::ComplexTensor(special), target)).expect("special cast")
+            else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            let storage = output.integer_storage().expect("typed complex storage");
+            assert_eq!(
+                storage.real,
+                target.storage(vec![
+                    target.cast_scalar(f64::NAN),
+                    target.cast_scalar(f64::INFINITY)
+                ])
+            );
+            assert_eq!(
+                storage.imag,
+                target.storage(vec![
+                    target.cast_scalar(0.0),
+                    target.cast_scalar(f64::NEG_INFINITY)
+                ])
+            );
+        }
+    }
 }

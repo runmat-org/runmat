@@ -287,7 +287,7 @@ pub const CAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
         overflow: BuiltinIntegerOverflowRule::Saturate,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The leftmost participating integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback. Public evidence leaves the narrow typed-empty class-dominance edge open.",
+        notes: "The leftmost nonempty integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Empty operands are omitted when a nonempty operand remains and therefore do not affect the result class. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "B = cat(dim,complex_integer_A1,...,An)",
@@ -920,7 +920,7 @@ fn leftmost_integer_target(values: &[Value]) -> Option<IntegerTarget> {
             Value::Tensor(tensor) => {
                 if let Some(storage) = tensor.integer_storage() {
                     let target = IntegerTarget::from_storage(storage);
-                    if !is_true_empty_neutral_shape(&tensor.shape) {
+                    if !is_empty_concat_shape(&tensor.shape) {
                         return Some(target);
                     }
                     empty_integer_target.get_or_insert(target);
@@ -1086,7 +1086,7 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
             continue;
         };
         let target = IntegerTarget::from_storage(&storage.real);
-        if !is_true_empty_neutral_shape(&tensor.shape) {
+        if !is_empty_concat_shape(&tensor.shape) {
             return Some(target);
         }
         empty_target.get_or_insert(target);
@@ -1543,10 +1543,6 @@ fn concat_column_major<T: Clone>(
 
 fn is_empty_concat_shape(shape: &[usize]) -> bool {
     shape.contains(&0)
-}
-
-fn is_true_empty_neutral_shape(shape: &[usize]) -> bool {
-    shape.contains(&0) && shape.iter().all(|&dim| dim <= 1)
 }
 
 fn normalize_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> {
@@ -2191,7 +2187,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cat_omits_any_empty_geometry_without_resolving_typed_empty_dominance() {
+    fn cat_omits_shaped_empty_geometry_and_uses_the_nonempty_integer_class() {
         let shaped_empty =
             Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 4]).expect("empty");
         let nonempty = Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]), vec![2, 3])
@@ -2208,7 +2204,67 @@ pub(crate) mod tests {
         assert_eq!(output.shape, vec![2, 3]);
         assert_eq!(
             output.integer_storage(),
-            Some(&IntegerStorage::U16(vec![1, 2, 3, 4, 5, 6]))
+            Some(&IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]))
+        );
+    }
+
+    #[test]
+    fn cat_all_empty_inputs_keep_the_leftmost_integer_class() {
+        let left =
+            Tensor::new_integer(IntegerStorage::I16(Vec::new()), vec![0, 2]).expect("left empty");
+        let right =
+            Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 3]).expect("right empty");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::Tensor(left), Value::Tensor(right)],
+        )
+        .expect("all-empty concatenation");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![0, 5]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I16(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn cat_complex_integer_empty_inputs_follow_the_same_class_selection_rule() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let empty = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I16(Vec::new()),
+                IntegerStorage::I16(Vec::new()),
+            )
+            .expect("empty storage"),
+            vec![1, 0],
+        )
+        .expect("empty complex integer");
+        let value = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::U8(vec![7]), IntegerStorage::U8(vec![9]))
+                .expect("value storage"),
+            vec![1, 1],
+        )
+        .expect("complex integer value");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::ComplexTensor(empty), Value::ComplexTensor(value)],
+        )
+        .expect("complex empty omission");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(
+                &IntegerComplexStorage::new(
+                    IntegerStorage::U8(vec![7]),
+                    IntegerStorage::U8(vec![9]),
+                )
+                .expect("expected storage")
+            )
         );
     }
 

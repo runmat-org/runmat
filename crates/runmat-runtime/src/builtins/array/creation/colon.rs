@@ -1244,6 +1244,70 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn colon_accepts_each_integer_class_in_every_operand_position_with_scalar_doubles() {
+        let values = [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ];
+        for value in values {
+            let target = IntegerTarget::from_int_value(&value);
+            let typed_one = integer_value_from_i128(target, 1);
+            let typed_three = integer_value_from_i128(target, 3);
+            for result in [
+                colon_builtin(Value::Int(typed_one.clone()), Value::Num(3.0), Vec::new()),
+                colon_builtin(
+                    Value::Num(1.0),
+                    Value::Int(typed_one),
+                    vec![Value::Num(3.0)],
+                ),
+                colon_builtin(
+                    Value::Num(1.0),
+                    Value::Num(1.0),
+                    vec![Value::Int(typed_three)],
+                ),
+            ] {
+                let Value::Tensor(output) = result.expect("mixed scalar-double colon") else {
+                    panic!("expected typed tensor");
+                };
+                assert_eq!(
+                    output.integer_storage(),
+                    Some(&target.storage(vec![
+                        integer_value_from_i128(target, 1),
+                        integer_value_from_i128(target, 2),
+                        integer_value_from_i128(target, 3),
+                    ]))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn colon_rejects_single_and_unlike_integer_companions() {
+        let single = Tensor::from_f32(vec![3.0], vec![1, 1]).expect("single scalar");
+        let error = colon_builtin(
+            Value::Int(IntValue::I16(1)),
+            Value::Tensor(single),
+            Vec::new(),
+        )
+        .expect_err("single companion must reject");
+        assert!(error.message().contains("scalar double"));
+
+        let error = colon_builtin(
+            Value::Int(IntValue::U8(1)),
+            Value::Num(1.0),
+            vec![Value::Int(IntValue::I8(3))],
+        )
+        .expect_err("unlike integer classes must reject");
+        assert!(error.message().contains("same integer class"));
+    }
+
+    #[test]
     fn colon_type_is_row_vector() {
         assert_eq!(
             colon_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),

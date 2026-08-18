@@ -27,14 +27,11 @@ fn logical_mask_write_rows_scalar_broadcast() {
 }
 
 #[test]
-fn logical_mask_write_cols_vector_broadcast() {
-    // Select columns 2 and 4 by mask, assign a column vector broadcast across selected columns
-    // Use explicit literal to avoid range parsing differences in reshape
-    let src = "A=reshape([1 2 3 4 5 6 7 8],2,4); A(:, [false true false true]) = [8;9];"; // A is 2x4: columns are [1 2],[3 4],[5 6],[7 8]
-    let vars = execute_source(src).unwrap();
-    // Columns 2 and 4 replaced by [8;9]
-    // Expected columns: [1 2], [8 9], [5 6], [8 9] → data col-major [1,2,8,9,5,6,8,9]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![2, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 8.0, 9.0, 5.0, 6.0, 8.0, 9.0])));
+fn logical_mask_write_cols_rejects_vector_broadcast() {
+    let source = "A=reshape([1 2 3 4 5 6 7 8],2,4); A(:, [false true false true]) = [8;9];";
+    let error =
+        execute_source(source).expect_err("multi-subscript assignment requires exact shape");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }
 
 #[test]

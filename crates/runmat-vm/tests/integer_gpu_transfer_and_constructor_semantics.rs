@@ -61,3 +61,23 @@ fn compiled_gpudevice_facade_is_gated_in_matlab_mode() {
         Some("RunMat:compatibility:GpuDeviceProviderInfoExtension")
     );
 }
+
+#[test]
+fn compiled_typed_empty_construction_and_observers_preserve_class_and_shape() {
+    for class in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "a={class}.empty(2,0,3); if ~isa(a,'{class}') || ~isempty(a) || numel(a)~=0 || ~isequal(size(a),[2 0 3]); error('typed empty observer mismatch'); end; b=reshape(a,0,6); if ~isa(b,'{class}') || ~isequal(size(b),[0 6]); error('typed empty reshape mismatch'); end; c=cat(1,a,{class}.empty(4,0,3)); if ~isa(c,'{class}') || ~isequal(size(c),[6 0 3]); error('typed empty concatenation mismatch'); end;"
+        );
+        execute_source(&source).unwrap_or_else(|error| panic!("{class}: {error}"));
+    }
+}
+
+#[test]
+fn compiled_empty_concatenation_uses_only_nonempty_inputs_for_class_selection() {
+    execute_source(
+        "a=uint16.empty(0,4); b=uint8([1 2 3;4 5 6]); c=cat(1,a,b); if ~isa(c,'uint8') || ~isequal(c,b); error('empty class omission mismatch'); end; d=cat(2,int16.empty(0,2),uint8.empty(0,3)); if ~isa(d,'int16') || ~isequal(size(d),[0 5]); error('all-empty class selection mismatch'); end;",
+    )
+    .expect("compiled typed-empty concatenation semantics");
+}
