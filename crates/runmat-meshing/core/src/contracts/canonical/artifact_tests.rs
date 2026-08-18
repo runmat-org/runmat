@@ -93,6 +93,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
         node_id: index as u64 + 1,
         coordinates_m,
         provenance: vec![solid.clone()],
+        exact_parameters: Vec::new(),
     })
     .collect();
     let face_nodes = [[1, 2, 3], [1, 2, 4], [1, 3, 4], [2, 3, 4]];
@@ -294,6 +295,93 @@ fn artifact_rejects_noncanonical_or_dangling_connectivity() {
     let mut invalid = artifact();
     invalid.topology.boundary_edges[0].adjacent_boundary_face_ids = vec![12];
     assert_eq!(invalid.validate().unwrap_err().field, "boundary edge");
+}
+
+#[test]
+fn solver_node_exact_parameters_are_typed_bounded_and_canonical() {
+    let edge = entity(PersistentEntityKind::Edge, "edge:exact");
+    let face = entity(PersistentEntityKind::Face, "face:exact");
+    let chart = digest(42);
+    let mut valid = artifact();
+    valid.topology.nodes[0]
+        .provenance
+        .extend([edge.clone(), face.clone()]);
+    valid.topology.nodes[0].provenance.sort();
+    valid.topology.nodes[0].exact_parameters = vec![
+        SolverNodeExactParameter::Curve {
+            source_edge_id: edge.clone(),
+            parameter: 0.25,
+        },
+        SolverNodeExactParameter::Surface {
+            source_face_id: face.clone(),
+            chart_id: chart,
+            evaluator_uv: [0.1, 0.2],
+        },
+    ];
+    let validate = |candidate: &SolverMeshArtifact| {
+        validate_solver_mesh_topology(&candidate.topology, &candidate.resolved_request)
+    };
+    validate(&valid).unwrap();
+
+    let mut invalid = valid.clone();
+    invalid.topology.nodes[0].exact_parameters.swap(0, 1);
+    assert_eq!(
+        validate(&invalid).unwrap_err().field,
+        "mesh node exact parameters"
+    );
+
+    let mut invalid = valid.clone();
+    invalid.topology.nodes[0].exact_parameters[0] = SolverNodeExactParameter::Curve {
+        source_edge_id: edge.clone(),
+        parameter: f64::NAN,
+    };
+    assert_eq!(
+        validate(&invalid).unwrap_err().field,
+        "mesh node exact parameters"
+    );
+
+    let mut invalid = valid.clone();
+    invalid.topology.nodes[0].exact_parameters[0] = SolverNodeExactParameter::Curve {
+        source_edge_id: face.clone(),
+        parameter: 0.25,
+    };
+    assert_eq!(
+        validate(&invalid).unwrap_err().field,
+        "mesh node exact parameters"
+    );
+
+    let mut invalid = valid.clone();
+    invalid.topology.nodes[0]
+        .provenance
+        .retain(|entity| entity != &edge);
+    assert_eq!(
+        validate(&invalid).unwrap_err().field,
+        "mesh node exact parameters"
+    );
+
+    let mut invalid = valid.clone();
+    invalid.topology.nodes[0].exact_parameters[1] = SolverNodeExactParameter::Surface {
+        source_face_id: face.clone(),
+        chart_id: StableDigest::ZERO,
+        evaluator_uv: [0.1, 0.2],
+    };
+    assert_eq!(
+        validate(&invalid).unwrap_err().field,
+        "mesh node exact parameters"
+    );
+
+    let mut invalid = valid;
+    invalid.topology.nodes[0].exact_parameters = (1..=65)
+        .map(|value| SolverNodeExactParameter::Surface {
+            source_face_id: face.clone(),
+            chart_id: digest(value),
+            evaluator_uv: [0.1, 0.2],
+        })
+        .collect();
+    assert_eq!(
+        validate(&invalid).unwrap_err().field,
+        "mesh node exact parameters"
+    );
 }
 
 #[test]

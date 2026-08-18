@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
-pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 3;
+pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +35,21 @@ pub struct SolverMeshNode {
     pub node_id: u64,
     pub coordinates_m: [f64; 3],
     pub provenance: Vec<PersistentEntityId>,
+    pub exact_parameters: Vec<SolverNodeExactParameter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SolverNodeExactParameter {
+    Curve {
+        source_edge_id: PersistentEntityId,
+        parameter: f64,
+    },
+    Surface {
+        source_face_id: PersistentEntityId,
+        chart_id: StableDigest,
+        evaluator_uv: [f64; 2],
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -62,6 +62,7 @@ impl SolverMeshTopology {
                 validate_finite("mesh node coordinate", coordinate)?;
             }
             validate_provenance("mesh node", &node.provenance)?;
+            super::artifact_parameters::validate_node_exact_parameters(node)?;
         }
         for element in &self.volume_elements {
             if element.order != request.element_order

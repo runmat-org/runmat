@@ -131,6 +131,18 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
     assert!(result.material_interfaces.is_empty());
     assert!(result.contacts.is_empty());
     assert!(result.nodes.iter().all(|node| !node.provenance.is_empty()));
+    assert!(result.nodes.iter().all(|node| {
+        node.exact_parameters
+            .iter()
+            .filter(|parameter| {
+                matches!(
+                    parameter,
+                    runmat_meshing_core::SolverNodeExactParameter::Curve { .. }
+                )
+            })
+            .count()
+            == 3
+    }));
     for face in &result.boundary_faces {
         let element = &result.volume_elements[face.adjacent_volume_element_ids[0] as usize - 1];
         let opposite = element
@@ -151,6 +163,104 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
         );
     }
     runmat_meshing_core::validate_solver_mesh_topology(&result, &request).unwrap();
+}
+
+#[test]
+fn projection_retains_chart_aware_exact_surface_parameters() {
+    let (exact_topology, mut exact_surface) = crate::cdt::constraints::tests::tetrahedron();
+    let triangle = &exact_surface.triangles[0];
+    let source_face_id = triangle.source_face_id.clone();
+    let chart_id = triangle.chart_id;
+    let node_id = triangle.node_ids[0];
+    exact_surface
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_id == node_id)
+        .unwrap()
+        .uses
+        .push(runmat_meshing_surface::ExactFaceMeshNodeUse {
+            source_face_id: source_face_id.clone(),
+            chart_id,
+            uv: [0.2, 0.3],
+            evaluator_uv: [0.25, 0.35],
+            exact_edge_parameters: Vec::new(),
+        });
+    let request = request(ElementOrder::Tet4);
+    let volume_options = volume_options();
+    let volume_mesh = super::super::construct_delaunay_volume_mesh(
+        &exact_topology,
+        &exact_surface,
+        &request.metric,
+        volume_options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    let materials = [DelaunayRegionMaterial {
+        region_id: exact_topology.regions[0].id.clone(),
+        material_id: "steel".into(),
+    }];
+    let result = build_delaunay_solver_topology(
+        DelaunaySolverTopologyInput {
+            exact_topology: &exact_topology,
+            exact_surface: &exact_surface,
+            volume_mesh: &volume_mesh,
+            volume_options,
+            request: &request,
+            region_materials: &materials,
+        },
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let node = result
+        .nodes
+        .iter()
+        .find(|node| volume_mesh.topology.nodes[node.node_id as usize - 1].identity == node_id)
+        .unwrap();
+    assert!(node.exact_parameters.contains(
+        &runmat_meshing_core::SolverNodeExactParameter::Surface {
+            source_face_id,
+            chart_id,
+            evaluator_uv: [0.25, 0.35],
+        }
+    ));
+
+    let mut conflicting_surface = exact_surface.clone();
+    let segment = conflicting_surface
+        .boundary_segments
+        .iter()
+        .find(|segment| segment.node_ids.contains(&node_id))
+        .unwrap()
+        .clone();
+    conflicting_surface
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_id == node_id)
+        .unwrap()
+        .uses[0]
+        .exact_edge_parameters
+        .push(runmat_meshing_surface::ExactFaceMeshEdgeParameter {
+            source_coedge_id: segment.source_coedge_id,
+            source_edge_id: segment.source_edge_id,
+            parameter: 0.5,
+        });
+    assert_eq!(
+        build_delaunay_solver_topology(
+            DelaunaySolverTopologyInput {
+                exact_topology: &exact_topology,
+                exact_surface: &conflicting_surface,
+                volume_mesh: &volume_mesh,
+                volume_options,
+                request: &request,
+                region_materials: &materials,
+            },
+            DelaunaySolverTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunaySolverTopologyErrorKind::InvalidMesh
+    );
 }
 
 #[test]

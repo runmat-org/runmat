@@ -10,6 +10,7 @@ use super::{
     boundaries::{build_edges, build_faces},
     checkpoint, error,
     inventories::{build_contacts, build_interfaces, build_regions, field_topologies},
+    parameters::build_node_exact_parameters,
     DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput,
     DelaunaySolverTopologyOptions,
 };
@@ -158,13 +159,15 @@ fn build_nodes(
             &binding.entity_ids,
         )?;
     }
+    let exact_parameters = build_node_exact_parameters(input, indices)?;
     input
         .volume_mesh
         .topology
         .nodes
         .iter()
         .enumerate()
-        .map(|(index, node)| {
+        .zip(exact_parameters)
+        .map(|((index, node), exact_parameters)| {
             let provenance = provenance[index].iter().cloned().collect::<Vec<_>>();
             if provenance.is_empty() || provenance.len() > MAX_PROVENANCE_PER_ENTITY {
                 return Err(invalid_mesh(
@@ -175,6 +178,7 @@ fn build_nodes(
                 node_id: index as u64 + 1,
                 coordinates_m: node.coordinates_m,
                 provenance,
+                exact_parameters,
             })
         })
         .collect()

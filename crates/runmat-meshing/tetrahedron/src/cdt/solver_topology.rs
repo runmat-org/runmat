@@ -14,6 +14,7 @@ mod classification;
 mod construction;
 mod error;
 mod inventories;
+mod parameters;
 
 pub use error::{DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind};
 
