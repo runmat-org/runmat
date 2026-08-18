@@ -13,8 +13,7 @@ mod volume_sliver;
 
 pub use carving::{
     carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
-    DelaunayCarvingError, DelaunayCarvingErrorKind, DelaunayCarvingOptions, DelaunayCarvingSeeds,
-    DelaunayRegionSeed, DelaunayVoidSeed,
+    DelaunayCarvingError, DelaunayCarvingErrorKind, DelaunayCarvingOptions,
 };
 pub use constraints::{
     build_delaunay_constraints, validate_delaunay_constraints, DelaunayConstraintError,

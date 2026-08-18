@@ -1,11 +1,15 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use runmat_geometry_core::PersistentEntityId;
-use runmat_meshing_core::quality::predicate::{orient3d, PredicateSign};
+
+mod sides;
+
+use sides::classify_facet_sides;
 
 use super::{
     error, CarvingWork, DelaunayCarvedFacet, DelaunayCarving, DelaunayCarvingError,
-    DelaunayCarvingErrorKind, DelaunayCarvingSeeds, DelaunayFacetRecovery, DelaunayVolumeTopology,
+    DelaunayCarvingErrorKind, DelaunayConstraintFacetSide, DelaunayConstraints,
+    DelaunayFacetRecovery, DelaunayVolumeTopology,
 };
 use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
 
@@ -18,7 +22,7 @@ enum Classification {
 
 pub(super) fn classify_and_build(
     recovery: &DelaunayFacetRecovery,
-    seeds: &DelaunayCarvingSeeds,
+    constraints: &DelaunayConstraints,
     work: &mut CarvingWork<'_>,
 ) -> Result<DelaunayCarving, DelaunayCarvingError> {
     let topology = &recovery.segment_recovery.topology;
@@ -40,36 +44,15 @@ pub(super) fn classify_and_build(
         work,
     )?;
 
-    for (index, seed) in seeds.voids.iter().enumerate() {
-        let tetrahedron = locate_seed(topology, seed.coordinates_m, index as u32, work)?;
-        flood(
-            topology,
-            &blocked,
-            BTreeSet::from([tetrahedron]),
-            Classification::Void,
-            &mut classifications,
-            work,
-        )?;
-    }
-    for (index, seed) in seeds.regions.iter().enumerate() {
-        let tetrahedron = locate_seed(topology, seed.coordinates_m, index as u32, work)?;
-        flood(
-            topology,
-            &blocked,
-            BTreeSet::from([tetrahedron]),
-            Classification::Region(seed.region_id.clone()),
-            &mut classifications,
-            work,
-        )?;
-    }
+    classify_facet_sides(recovery, constraints, &blocked, &mut classifications, work)?;
     if classifications.iter().any(Option::is_none) {
         return Err(error(
             DelaunayCarvingErrorKind::AmbiguousClassification,
             None,
-            "one or more facet-bounded components have no exterior, void, or region seed",
+            "one or more facet-bounded components have no authoritative facet-side classification",
         ));
     }
-    let facets = classify_facets(recovery, &classifications)?;
+    let facets = classify_facets(recovery, constraints, &classifications)?;
 
     let mut retained = Vec::new();
     let mut removed_tetrahedra = Vec::new();
@@ -165,6 +148,7 @@ pub(super) fn classify_and_build(
 
 fn classify_facets(
     recovery: &DelaunayFacetRecovery,
+    constraints: &DelaunayConstraints,
     classifications: &[Option<Classification>],
 ) -> Result<Vec<DelaunayCarvedFacet>, DelaunayCarvingError> {
     let topology = &recovery.segment_recovery.topology;
@@ -240,6 +224,15 @@ fn classify_facets(
                 "recovered facet has no support triangles",
             )
         })?;
+        let constraint = &constraints.facets[facet.constraint_index as usize];
+        let authored = authored_signature(&constraint.positive_side, &constraint.negative_side);
+        if signature != authored {
+            return Err(error(
+                DelaunayCarvingErrorKind::AmbiguousClassification,
+                Some(facet.constraint_index),
+                "recovered facet adjacency disagrees with its authoritative side classification",
+            ));
+        }
         result.push(DelaunayCarvedFacet {
             constraint_index: facet.constraint_index,
             region_ids: signature.region_ids.into_iter().collect(),
@@ -248,6 +241,27 @@ fn classify_facets(
         });
     }
     Ok(result)
+}
+
+fn authored_signature(
+    positive: &DelaunayConstraintFacetSide,
+    negative: &DelaunayConstraintFacetSide,
+) -> FacetSignature {
+    let mut signature = FacetSignature {
+        region_ids: BTreeSet::new(),
+        borders_exterior: false,
+        borders_void: false,
+    };
+    for side in [positive, negative] {
+        match side {
+            DelaunayConstraintFacetSide::Region(region) => {
+                signature.region_ids.insert(region.clone());
+            }
+            DelaunayConstraintFacetSide::Exterior => signature.borders_exterior = true,
+            DelaunayConstraintFacetSide::Void => signature.borders_void = true,
+        }
+    }
+    signature
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -329,47 +343,4 @@ fn flood(
         }
     }
     Ok(())
-}
-
-fn locate_seed(
-    topology: &DelaunayVolumeTopology,
-    point: [f64; 3],
-    seed_index: u32,
-    work: &mut CarvingWork<'_>,
-) -> Result<u32, DelaunayCarvingError> {
-    for (tetrahedron_index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
-        work.location(seed_index)?;
-        let vertices = tetrahedron
-            .vertex_indices
-            .map(|index| topology.nodes[index as usize].coordinates_m);
-        let signs = (0..4)
-            .map(|slot| {
-                let mut candidate = vertices;
-                candidate[slot] = point;
-                orient3d(candidate)
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|predicate| {
-                error(
-                    DelaunayCarvingErrorKind::InvalidSeeds,
-                    Some(seed_index),
-                    format!("seed location predicate failed: {predicate:?}"),
-                )
-            })?;
-        if signs.iter().all(|sign| *sign != PredicateSign::Negative) {
-            if signs.contains(&PredicateSign::Zero) {
-                return Err(error(
-                    DelaunayCarvingErrorKind::AmbiguousClassification,
-                    Some(seed_index),
-                    "seed lies on tetrahedron boundary",
-                ));
-            }
-            return Ok(tetrahedron_index as u32);
-        }
-    }
-    Err(error(
-        DelaunayCarvingErrorKind::InvalidSeeds,
-        Some(seed_index),
-        "seed lies outside the tetrahedralized domain",
-    ))
 }

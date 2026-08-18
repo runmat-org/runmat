@@ -7,7 +7,11 @@ use runmat_meshing_surface::{
 };
 
 use super::*;
-use crate::cdt::{build_delaunay_volume_point_set, DelaunayPointSetOptions};
+use crate::cdt::{
+    build_delaunay_volume_point_set, carve_delaunay_volume, recover_delaunay_facets,
+    recover_delaunay_segments, DelaunayCarvingOptions, DelaunayFacetRecoveryOptions,
+    DelaunayPointSetOptions, DelaunaySegmentRecoveryOptions,
+};
 
 const FACETS: [[usize; 3]; 4] = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
 const EDGE_VERTICES: [[usize; 2]; 6] = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
@@ -48,6 +52,33 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
     .unwrap();
     assert_eq!(volume.tetrahedra.len(), 1);
     assert_eq!(volume.incidence.boundary_facets.len(), 4);
+
+    let segments = recover_delaunay_segments(
+        volume,
+        &constraints,
+        DelaunaySegmentRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let facets = recover_delaunay_facets(
+        segments,
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let carved = carve_delaunay_volume(
+        &facets,
+        &constraints,
+        DelaunayCarvingOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(carved.topology.incidence.regions.len(), 1);
+    assert_eq!(
+        carved.topology.incidence.regions[0].region_id,
+        entity(PersistentEntityKind::Region, "region")
+    );
 }
 
 #[test]

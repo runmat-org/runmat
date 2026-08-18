@@ -54,9 +54,9 @@ pub struct DelaunayConstraintFacet {
     pub facet_id: StableDigest,
     pub vertex_indices: [u32; 3],
     pub source_face_id: PersistentEntityId,
-    /// Side reached by an exact positive orientation against the oriented facet.
+    /// Half-space reached along the oriented facet's positive geometric normal.
     pub positive_side: DelaunayConstraintFacetSide,
-    /// Side reached by an exact negative orientation against the oriented facet.
+    /// Half-space opposite the oriented facet's positive geometric normal.
     pub negative_side: DelaunayConstraintFacetSide,
     /// Canonical exact contact identities authored on this face, if any.
     pub contact_ids: Vec<PersistentEntityId>,

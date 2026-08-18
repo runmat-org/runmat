@@ -1,5 +1,8 @@
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
-use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
+use runmat_meshing_core::{
+    quality::predicate::{orient3d, PredicateSign},
+    MeshingCancellationSignal, NeverCancelled, StableDigest,
+};
 
 use super::*;
 use crate::cdt::{
@@ -16,7 +19,7 @@ fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
     }
 }
 
-fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
+fn fixture(interface: bool) -> (DelaunayConstraints, DelaunayFacetRecovery) {
     let coordinates = [
         [5.0, 0.0, 0.0],
         [0.0, 5.0, 0.0],
@@ -24,7 +27,7 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
         [0.0, 0.0, 5.0],
         [0.0, 0.0, -5.0],
     ];
-    let facet_vertices = [
+    let all_facets = [
         [0, 1, 2],
         [0, 1, 3],
         [0, 1, 4],
@@ -33,6 +36,11 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
         [1, 2, 3],
         [1, 2, 4],
     ];
+    let facet_vertices = if interface {
+        all_facets.to_vec()
+    } else {
+        vec![all_facets[0], all_facets[1], all_facets[3], all_facets[5]]
+    };
     let mut segment_vertices = facet_vertices
         .iter()
         .flat_map(|facet| {
@@ -67,24 +75,47 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
             })
             .collect(),
         facets: facet_vertices
-            .into_iter()
+            .iter()
+            .copied()
             .enumerate()
             .map(|(index, vertex_indices)| DelaunayConstraintFacet {
                 facet_id: StableDigest::from_bytes([(index + 90) as u8; 32]),
                 vertex_indices,
                 source_face_id: entity(PersistentEntityKind::Face, &format!("face:{index}")),
-                positive_side: if index == 0 {
-                    DelaunayConstraintFacetSide::Region(entity(
-                        PersistentEntityKind::Region,
-                        "upper",
-                    ))
+                positive_side: if vertex_indices == [0, 1, 2] {
+                    DelaunayConstraintFacetSide::Region(region("upper"))
                 } else {
-                    DelaunayConstraintFacetSide::Exterior
+                    boundary_sides(
+                        coordinates,
+                        vertex_indices,
+                        opposite_vertex(vertex_indices),
+                        if vertex_indices.contains(&3) {
+                            "upper"
+                        } else {
+                            "lower"
+                        },
+                    )
+                    .0
                 },
-                negative_side: DelaunayConstraintFacetSide::Region(entity(
-                    PersistentEntityKind::Region,
-                    if index == 0 { "lower" } else { "solid" },
-                )),
+                negative_side: if vertex_indices == [0, 1, 2] {
+                    if interface {
+                        DelaunayConstraintFacetSide::Region(region("lower"))
+                    } else {
+                        DelaunayConstraintFacetSide::Exterior
+                    }
+                } else {
+                    boundary_sides(
+                        coordinates,
+                        vertex_indices,
+                        opposite_vertex(vertex_indices),
+                        if vertex_indices.contains(&3) {
+                            "upper"
+                        } else {
+                            "lower"
+                        },
+                    )
+                    .1
+                },
                 contact_ids: Vec::new(),
             })
             .collect(),
@@ -113,25 +144,12 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
     (constraints, facets)
 }
 
-fn seeds() -> DelaunayCarvingSeeds {
-    DelaunayCarvingSeeds {
-        regions: vec![DelaunayRegionSeed {
-            region_id: region("upper"),
-            coordinates_m: [0.5, 0.25, 1.0],
-        }],
-        voids: vec![DelaunayVoidSeed {
-            coordinates_m: [0.5, 0.25, -1.0],
-        }],
-    }
-}
-
 #[test]
 fn carving_floods_only_across_unconstrained_faces() {
-    let (constraints, recovery) = fixture();
+    let (constraints, recovery) = fixture(false);
     let carving = carve_delaunay_volume(
         &recovery,
         &constraints,
-        &seeds(),
         DelaunayCarvingOptions::default(),
         &NeverCancelled,
     )
@@ -151,12 +169,11 @@ fn carving_floods_only_across_unconstrained_faces() {
         .unassigned_tetrahedron_indices
         .is_empty());
     assert_eq!(carving.facets[0].region_ids, vec![region("upper")]);
-    assert!(carving.facets[0].borders_void);
-    assert!(!carving.facets[0].borders_exterior);
+    assert!(!carving.facets[0].borders_void);
+    assert!(carving.facets[0].borders_exterior);
     validate_delaunay_carving(
         &recovery,
         &constraints,
-        &seeds(),
         &carving,
         DelaunayCarvingOptions::default(),
         &NeverCancelled,
@@ -166,25 +183,11 @@ fn carving_floods_only_across_unconstrained_faces() {
 
 #[test]
 fn carving_classifies_conformal_region_interfaces() {
-    let (constraints, recovery) = fixture();
-    let seeds = DelaunayCarvingSeeds {
-        regions: vec![
-            DelaunayRegionSeed {
-                region_id: region("lower"),
-                coordinates_m: [0.5, 0.25, -1.0],
-            },
-            DelaunayRegionSeed {
-                region_id: region("upper"),
-                coordinates_m: [0.5, 0.25, 1.0],
-            },
-        ],
-        voids: Vec::new(),
-    };
+    let (constraints, recovery) = fixture(true);
 
     let carving = carve_delaunay_volume(
         &recovery,
         &constraints,
-        &seeds,
         DelaunayCarvingOptions::default(),
         &NeverCancelled,
     )
@@ -202,7 +205,6 @@ fn carving_classifies_conformal_region_interfaces() {
     validate_delaunay_carving(
         &recovery,
         &constraints,
-        &seeds,
         &carving,
         DelaunayCarvingOptions::default(),
         &NeverCancelled,
@@ -211,17 +213,13 @@ fn carving_classifies_conformal_region_interfaces() {
 }
 
 #[test]
-fn carving_rejects_missing_component_seeds_and_tampering() {
-    let (constraints, recovery) = fixture();
-    let missing_void = DelaunayCarvingSeeds {
-        regions: seeds().regions,
-        voids: Vec::new(),
-    };
+fn carving_rejects_contradictory_facet_sides_and_tampering() {
+    let (mut constraints, recovery) = fixture(false);
+    constraints.facets[0].negative_side = DelaunayConstraintFacetSide::Void;
     assert_eq!(
         carve_delaunay_volume(
             &recovery,
             &constraints,
-            &missing_void,
             DelaunayCarvingOptions::default(),
             &NeverCancelled,
         )
@@ -230,10 +228,10 @@ fn carving_rejects_missing_component_seeds_and_tampering() {
         DelaunayCarvingErrorKind::AmbiguousClassification
     );
 
+    let (constraints, recovery) = fixture(false);
     let mut carving = carve_delaunay_volume(
         &recovery,
         &constraints,
-        &seeds(),
         DelaunayCarvingOptions::default(),
         &NeverCancelled,
     )
@@ -243,7 +241,6 @@ fn carving_rejects_missing_component_seeds_and_tampering() {
         validate_delaunay_carving(
             &recovery,
             &constraints,
-            &seeds(),
             &carving,
             DelaunayCarvingOptions::default(),
             &NeverCancelled,
@@ -264,13 +261,27 @@ impl MeshingCancellationSignal for Cancelled {
 
 #[test]
 fn carving_enforces_work_limits_and_cancellation() {
-    let (constraints, recovery) = fixture();
+    let (constraints, recovery) = fixture(false);
+    assert_eq!(
+        carve_delaunay_volume(
+            &recovery,
+            &constraints,
+            DelaunayCarvingOptions {
+                maximum_flood_steps: 0,
+                ..DelaunayCarvingOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayCarvingErrorKind::InvalidOptions
+    );
     let bounded = DelaunayCarvingOptions {
         maximum_flood_steps: 1,
         ..DelaunayCarvingOptions::default()
     };
     assert_eq!(
-        carve_delaunay_volume(&recovery, &constraints, &seeds(), bounded, &NeverCancelled)
+        carve_delaunay_volume(&recovery, &constraints, bounded, &NeverCancelled)
             .unwrap_err()
             .kind,
         DelaunayCarvingErrorKind::ResourceLimit
@@ -289,11 +300,45 @@ fn carving_enforces_work_limits_and_cancellation() {
         ..DelaunayCarvingOptions::default()
     };
     assert_eq!(
-        carve_delaunay_volume(&recovery, &constraints, &seeds(), cancelled, &Cancelled)
+        carve_delaunay_volume(&recovery, &constraints, cancelled, &Cancelled)
             .unwrap_err()
             .kind,
         DelaunayCarvingErrorKind::Cancelled
     );
+}
+
+fn boundary_sides(
+    coordinates: [[f64; 3]; 5],
+    facet: [u32; 3],
+    opposite: u32,
+    region_id: &str,
+) -> (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide) {
+    let points = facet.map(|vertex| coordinates[vertex as usize]);
+    let region = DelaunayConstraintFacetSide::Region(region(region_id));
+    match orient3d([
+        points[0],
+        points[1],
+        points[2],
+        coordinates[opposite as usize],
+    ])
+    .unwrap()
+    {
+        PredicateSign::Negative => (region, DelaunayConstraintFacetSide::Exterior),
+        PredicateSign::Positive => (DelaunayConstraintFacetSide::Exterior, region),
+        PredicateSign::Zero => panic!("fixture facet must be nondegenerate"),
+    }
+}
+
+fn opposite_vertex(facet: [u32; 3]) -> u32 {
+    let tetrahedron = if facet.contains(&3) {
+        [0, 1, 2, 3]
+    } else {
+        [0, 1, 2, 4]
+    };
+    tetrahedron
+        .into_iter()
+        .find(|vertex| !facet.contains(vertex))
+        .unwrap()
 }
 
 fn region(value: &str) -> PersistentEntityId {
