@@ -12,10 +12,18 @@ pub struct ExactFaceChart {
     pub pslg: ExactFacePslg,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceCharts {
+    pub source_face_id: PersistentEntityId,
+    pub periodicity: [Option<f64>; 2],
+    pub charts: Vec<ExactFaceChart>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactFaceChartOptions {
     pub maximum_periodic_residual: f64,
     pub maximum_period_shifts: i32,
+    pub maximum_charts_per_face: u16,
 }
 
 impl Default for ExactFaceChartOptions {
@@ -23,6 +31,7 @@ impl Default for ExactFaceChartOptions {
         Self {
             maximum_periodic_residual: 1.0e-12,
             maximum_period_shifts: 1_000_000,
+            maximum_charts_per_face: 64,
         }
     }
 }

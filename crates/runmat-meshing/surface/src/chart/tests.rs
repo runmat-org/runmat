@@ -35,7 +35,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         [[3.0, 0.0], [-3.0, 0.0], [-3.0, 1.0], [3.0, 1.0]],
     );
 
-    let chart = build_exact_face_chart(
+    let charts = build_exact_face_charts(
         &source,
         &topology,
         &evaluator,
@@ -43,6 +43,10 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         ExactFaceChartOptions::default(),
     )
     .unwrap();
+    assert_eq!(charts.source_face_id, source.source_face_id);
+    assert_eq!(charts.charts.len(), 1);
+    assert_ne!(charts.charts[0].chart_id, StableDigest::ZERO);
+    let chart = &charts.charts[0];
     assert!(chart
         .boundary
         .outer_loop
@@ -54,8 +58,8 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         chart.boundary.outer_loop.segments[0].node_uv[0]
     );
     assert_eq!(chart.pslg.vertices.len(), 4);
-    validate_exact_face_chart(
-        &chart,
+    validate_exact_face_charts(
+        &charts,
         &source,
         &topology,
         &evaluator,
@@ -74,7 +78,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         ],
     );
     assert_eq!(
-        build_exact_face_chart(
+        build_exact_face_charts(
             &winding,
             &topology,
             &evaluator,
@@ -96,17 +100,30 @@ fn nonperiodic_chart_is_identity_and_tamper_evident() {
     let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
     let source = boundary(&topology, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
     let options = ExactFaceChartOptions::default();
-    let chart = build_exact_face_chart(&source, &topology, &evaluator, &Control, options).unwrap();
+    let charts =
+        build_exact_face_charts(&source, &topology, &evaluator, &Control, options).unwrap();
+    let chart = &charts.charts[0];
     assert_eq!(chart.boundary, source);
     assert_eq!(chart.periodicity, [None, None]);
 
-    let mut tampered = chart;
-    tampered.boundary.outer_loop.segments[0].node_uv[0][0] += 0.25;
+    let mut tampered = charts;
+    tampered.charts[0].boundary.outer_loop.segments[0].node_uv[0][0] += 0.25;
     assert_eq!(
-        validate_exact_face_chart(&tampered, &source, &topology, &evaluator, &Control, options,)
+        validate_exact_face_charts(&tampered, &source, &topology, &evaluator, &Control, options,)
             .unwrap_err()
             .kind,
         ExactFaceChartErrorKind::InvalidInput
+    );
+
+    let invalid_options = ExactFaceChartOptions {
+        maximum_charts_per_face: 0,
+        ..options
+    };
+    assert_eq!(
+        build_exact_face_charts(&source, &topology, &evaluator, &Control, invalid_options,)
+            .unwrap_err()
+            .kind,
+        ExactFaceChartErrorKind::InvalidOptions
     );
 }
 

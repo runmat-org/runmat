@@ -22,8 +22,8 @@ pub use acceptance::{
     ExactFaceTriangleAcceptance,
 };
 pub use chart::{
-    build_exact_face_chart, validate_exact_face_chart, ExactFaceChart, ExactFaceChartError,
-    ExactFaceChartErrorKind, ExactFaceChartOptions,
+    build_exact_face_charts, validate_exact_face_charts, ExactFaceChart, ExactFaceChartError,
+    ExactFaceChartErrorKind, ExactFaceChartOptions, ExactFaceCharts,
 };
 pub use contract::build_surface_mesh_contract;
 pub use exact_boundary::{

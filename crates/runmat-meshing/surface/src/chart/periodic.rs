@@ -4,22 +4,25 @@ use sha2::{Digest, Sha256};
 
 use crate::{build_exact_face_pslg, ExactFaceBoundary, ExactFaceBoundaryLoop};
 
-use super::{ExactFaceChart, ExactFaceChartError, ExactFaceChartErrorKind, ExactFaceChartOptions};
+use super::{
+    ExactFaceChart, ExactFaceChartError, ExactFaceChartErrorKind, ExactFaceChartOptions,
+    ExactFaceCharts,
+};
 
-pub fn build_exact_face_chart(
+pub fn build_exact_face_charts(
     source: &ExactFaceBoundary,
     topology: &ExactBRepTopology,
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
     options: ExactFaceChartOptions,
-) -> Result<ExactFaceChart, ExactFaceChartError> {
-    let chart = build_without_validation(source, topology, evaluator, control, options)?;
-    validate_exact_face_chart(&chart, source, topology, evaluator, control, options)?;
-    Ok(chart)
+) -> Result<ExactFaceCharts, ExactFaceChartError> {
+    let charts = build_without_validation(source, topology, evaluator, control, options)?;
+    validate_exact_face_charts(&charts, source, topology, evaluator, control, options)?;
+    Ok(charts)
 }
 
-pub fn validate_exact_face_chart(
-    chart: &ExactFaceChart,
+pub fn validate_exact_face_charts(
+    charts: &ExactFaceCharts,
     source: &ExactFaceBoundary,
     topology: &ExactBRepTopology,
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
@@ -27,7 +30,7 @@ pub fn validate_exact_face_chart(
     options: ExactFaceChartOptions,
 ) -> Result<(), ExactFaceChartError> {
     let expected = build_without_validation(source, topology, evaluator, control, options)?;
-    if chart != &expected {
+    if charts != &expected {
         return Err(invalid(
             source,
             "face chart differs from canonical periodic reconstruction",
@@ -42,7 +45,7 @@ fn build_without_validation(
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
     options: ExactFaceChartOptions,
-) -> Result<ExactFaceChart, ExactFaceChartError> {
+) -> Result<ExactFaceCharts, ExactFaceChartError> {
     validate_options(source, options)?;
     control.checkpoint().map_err(|failure| {
         ExactFaceChartError::new(
@@ -88,12 +91,17 @@ fn build_without_validation(
             failure.to_string(),
         )
     })?;
-    Ok(ExactFaceChart {
-        chart_id: chart_id(&source.source_face_id),
+    let chart = ExactFaceChart {
+        chart_id: chart_id(&source.source_face_id, 0),
         source_face_id: source.source_face_id.clone(),
         periodicity,
         boundary,
         pslg,
+    };
+    Ok(ExactFaceCharts {
+        source_face_id: source.source_face_id.clone(),
+        periodicity,
+        charts: vec![chart],
     })
 }
 
@@ -216,11 +224,12 @@ fn validate_options(
     if !options.maximum_periodic_residual.is_finite()
         || options.maximum_periodic_residual <= 0.0
         || options.maximum_period_shifts <= 0
+        || options.maximum_charts_per_face == 0
     {
         return Err(ExactFaceChartError::new(
             ExactFaceChartErrorKind::InvalidOptions,
             &source.source_face_id,
-            "chart residual and shift bounds must be positive",
+            "chart residual, shift, and per-face chart bounds must be positive",
         ));
     }
     Ok(())
@@ -230,9 +239,10 @@ fn scaled_tolerance(left: f64, right: f64, options: ExactFaceChartOptions) -> f6
     options.maximum_periodic_residual * left.abs().max(right.abs()).max(1.0)
 }
 
-fn chart_id(face_id: &runmat_geometry_core::PersistentEntityId) -> StableDigest {
+fn chart_id(face_id: &runmat_geometry_core::PersistentEntityId, chart_index: u32) -> StableDigest {
     let mut digest = Sha256::new();
     digest.update(b"runmat.exact-face-chart\0");
+    digest.update(1u16.to_be_bytes());
     digest.update((face_id.source_topology_id.len() as u64).to_be_bytes());
     digest.update(face_id.source_topology_id.as_bytes());
     digest.update((face_id.assembly_path.len() as u64).to_be_bytes());
@@ -240,7 +250,7 @@ fn chart_id(face_id: &runmat_geometry_core::PersistentEntityId) -> StableDigest 
         digest.update((segment.len() as u64).to_be_bytes());
         digest.update(segment.as_bytes());
     }
-    digest.update(0u32.to_be_bytes());
+    digest.update(chart_index.to_be_bytes());
     StableDigest::from_bytes(digest.finalize().into())
 }
 
