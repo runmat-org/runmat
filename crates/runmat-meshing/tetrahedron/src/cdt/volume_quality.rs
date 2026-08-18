@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
+use runmat_meshing_size::grading::grade_metric_evaluations;
 use runmat_meshing_size::metric::{
     MetricContractError, MetricFieldRequest, MetricSourceKind, MetricTensor3, ResolvedMetricField,
 };
@@ -116,6 +117,40 @@ pub fn evaluate_delaunay_volume_quality(
     let metric_contexts =
         validate_inputs(topology, metric_request, provenance, options, cancellation)?;
     let field = ResolvedMetricField::new(metric_request).map_err(metric_error)?;
+    let mut resolved_metrics = BTreeMap::new();
+    let mut adjacency = BTreeMap::new();
+    for (tetrahedron, context) in topology.tetrahedra.iter().zip(&metric_contexts) {
+        let identity = context.tetrahedron_node_identities;
+        let incident_entities = context
+            .incident_entity_ids
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        resolved_metrics.insert(
+            identity,
+            field.resolve(&incident_entities).map_err(metric_error)?,
+        );
+        adjacency.insert(
+            identity,
+            tetrahedron
+                .neighbors
+                .iter()
+                .flatten()
+                .map(|neighbor| {
+                    let neighbor = &topology.tetrahedra[*neighbor as usize];
+                    neighbor
+                        .vertex_indices
+                        .map(|vertex| topology.nodes[vertex as usize].identity)
+                })
+                .collect::<BTreeSet<_>>(),
+        );
+    }
+    grade_metric_evaluations(
+        metric_request.maximum_grading_ratio,
+        &adjacency,
+        &mut resolved_metrics,
+    )
+    .map_err(metric_error)?;
     let mut tetrahedra = Vec::with_capacity(topology.tetrahedra.len());
     let mut worst = None::<(f64, [StableDigest; 4])>;
     let mut maximum_metric_edge_length = 0.0_f64;
@@ -132,12 +167,15 @@ pub fn evaluate_delaunay_volume_quality(
                 "every evaluated tetrahedron must have one assigned region",
             )
         })?;
-        let incident_entities = context
-            .incident_entity_ids
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let metric = field.resolve(&incident_entities).map_err(metric_error)?;
+        let metric = resolved_metrics
+            .remove(&context.tetrahedron_node_identities)
+            .ok_or_else(|| {
+                error(
+                    DelaunayVolumeQualityErrorKind::InvalidMetricContext,
+                    Some(index),
+                    "graded metric inventory lost a tetrahedron",
+                )
+            })?;
         let quality = evaluate_tetrahedron(
             topology,
             index,

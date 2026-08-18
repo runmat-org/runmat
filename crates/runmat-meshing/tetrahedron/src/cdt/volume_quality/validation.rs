@@ -1,6 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::MeshingCancellationSignal;
+use runmat_meshing_size::grading::grade_metric_evaluations;
 use runmat_meshing_size::metric::{MetricTensor3, ResolvedMetricField};
 
 use super::{
@@ -38,6 +39,38 @@ pub fn validate_delaunay_volume_quality(
         ));
     }
     let field = ResolvedMetricField::new(metric_request).map_err(super::metric_error)?;
+    let mut resolved_metrics = BTreeMap::new();
+    let mut adjacency = BTreeMap::new();
+    for (tetrahedron, context) in topology.tetrahedra.iter().zip(&metric_contexts) {
+        let incident_entities = context
+            .incident_entity_ids
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        resolved_metrics.insert(
+            context.tetrahedron_node_identities,
+            field
+                .resolve(&incident_entities)
+                .map_err(super::metric_error)?,
+        );
+        let neighbors = tetrahedron
+            .neighbors
+            .iter()
+            .flatten()
+            .map(|neighbor| {
+                topology.tetrahedra[*neighbor as usize]
+                    .vertex_indices
+                    .map(|vertex| topology.nodes[vertex as usize].identity)
+            })
+            .collect::<BTreeSet<_>>();
+        adjacency.insert(context.tetrahedron_node_identities, neighbors);
+    }
+    grade_metric_evaluations(
+        metric_request.maximum_grading_ratio,
+        &adjacency,
+        &mut resolved_metrics,
+    )
+    .map_err(super::metric_error)?;
     let mut maximum_edge = 0.0_f64;
     let mut maximum_ratio = 0.0_f64;
     let mut worst = None::<(f64, [runmat_meshing_core::StableDigest; 4])>;
@@ -56,14 +89,9 @@ pub fn validate_delaunay_volume_quality(
                 "quality cannot describe an unassigned tetrahedron",
             )
         })?;
-        let incident_entities = context
-            .incident_entity_ids
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let resolved = field
-            .resolve(&incident_entities)
-            .map_err(super::metric_error)?;
+        let resolved = resolved_metrics
+            .remove(&context.tetrahedron_node_identities)
+            .ok_or_else(|| invalid(Some(index), "graded metric inventory is incomplete"))?;
         let points = tetrahedron
             .vertex_indices
             .map(|vertex| topology.nodes[vertex as usize].coordinates_m);

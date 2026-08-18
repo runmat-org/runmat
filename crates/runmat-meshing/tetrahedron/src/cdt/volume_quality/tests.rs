@@ -132,6 +132,18 @@ fn quality_resolves_region_metrics_and_selects_the_worst_cell() {
         ]
     );
     assert_eq!(quality.tetrahedra[1].applied_metric_contribution_count, 2);
+    assert_eq!(quality.tetrahedra[0].clipped_metric_contribution_count, 1);
+    assert_eq!(quality.tetrahedra[1].clipped_metric_contribution_count, 0);
+    let characteristic_lengths = [0, 1].map(|index| {
+        quality.tetrahedra[index]
+            .resolved_metric
+            .conservative_minimum_length_m()
+            .unwrap()
+    });
+    assert!(
+        characteristic_lengths[0].max(characteristic_lengths[1])
+            <= 1.5 * characteristic_lengths[0].min(characteristic_lengths[1])
+    );
     assert!(
         quality.tetrahedra[1].maximum_metric_edge_length
             > quality.tetrahedra[0].maximum_metric_edge_length

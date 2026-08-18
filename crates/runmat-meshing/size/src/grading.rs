@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::PersistentEntityId;
-
 use crate::metric::{MetricContractError, MetricTensor3, ResolvedMetricEvaluation};
 
 /// Applies a conservative Lipschitz-like size bound over a canonical entity-adjacency graph.
@@ -9,10 +7,10 @@ use crate::metric::{MetricContractError, MetricTensor3, ResolvedMetricEvaluation
 /// A fine metric may constrain a graph neighbor to at most `maximum_grading_ratio` times its
 /// characteristic size. Tightening is isotropic, so it cannot weaken an existing anisotropic
 /// tensor in any direction. The result is independent of map construction and traversal order.
-pub fn grade_metric_evaluations(
+pub fn grade_metric_evaluations<Identity: Clone + Ord>(
     maximum_grading_ratio: f64,
-    adjacency: &BTreeMap<PersistentEntityId, BTreeSet<PersistentEntityId>>,
-    evaluations: &mut BTreeMap<PersistentEntityId, ResolvedMetricEvaluation>,
+    adjacency: &BTreeMap<Identity, BTreeSet<Identity>>,
+    evaluations: &mut BTreeMap<Identity, ResolvedMetricEvaluation>,
 ) -> Result<(), MetricContractError> {
     if !maximum_grading_ratio.is_finite() || maximum_grading_ratio < 1.0 {
         return Err(invalid(
@@ -57,7 +55,7 @@ pub fn grade_metric_evaluations(
             let grading_metric = MetricTensor3::isotropic_length_m(size_cap)?;
             let evaluation = evaluations
                 .get_mut(&entity)
-                .expect("validated graph entity");
+                .ok_or_else(|| invalid("metric grading graph", "lost a validated entity"))?;
             evaluation.metric = add(evaluation.metric, grading_metric)?;
             evaluation.clipped_contribution_count = evaluation
                 .clipped_contribution_count
@@ -68,9 +66,9 @@ pub fn grade_metric_evaluations(
     Ok(())
 }
 
-fn validate_graph(
-    adjacency: &BTreeMap<PersistentEntityId, BTreeSet<PersistentEntityId>>,
-    evaluations: &BTreeMap<PersistentEntityId, ResolvedMetricEvaluation>,
+fn validate_graph<Identity: Ord>(
+    adjacency: &BTreeMap<Identity, BTreeSet<Identity>>,
+    evaluations: &BTreeMap<Identity, ResolvedMetricEvaluation>,
 ) -> Result<(), MetricContractError> {
     if adjacency.len() != evaluations.len()
         || adjacency.keys().ne(evaluations.keys())
@@ -116,7 +114,7 @@ fn invalid(field: &str, reason: &str) -> MetricContractError {
 mod tests {
     use super::*;
     use crate::metric::MetricSourceKind;
-    use runmat_geometry_core::PersistentEntityKind;
+    use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 
     #[test]
     fn grading_propagates_canonical_size_caps_and_records_clipping() {
