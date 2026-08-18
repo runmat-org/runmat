@@ -7,6 +7,7 @@ mod point_set;
 mod segment_recovery;
 mod topology;
 mod volume_quality;
+mod volume_refinement;
 
 pub use carving::{
     carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
@@ -48,4 +49,10 @@ pub use volume_quality::{
     evaluate_delaunay_volume_quality, validate_delaunay_volume_quality, DelaunayTetrahedronQuality,
     DelaunayVolumeMetricContext, DelaunayVolumeQuality, DelaunayVolumeQualityError,
     DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions,
+};
+pub use volume_refinement::{
+    select_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_candidate,
+    DelaunayRefinementCandidateKind, DelaunayVolumeRefinementCandidate,
+    DelaunayVolumeRefinementCandidateError, DelaunayVolumeRefinementCandidateErrorKind,
+    DelaunayVolumeRefinementCandidateOptions, DelaunayVolumeRefinementInput,
 };
