@@ -6875,6 +6875,7 @@ dependencies = [
  "runmat-meshing-cad",
  "runmat-meshing-core",
  "runmat-meshing-curve",
+ "runmat-meshing-size",
  "serde",
 ]
 
