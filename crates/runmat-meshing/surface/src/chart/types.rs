@@ -3,7 +3,10 @@ use runmat_geometry_core::{
 };
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
-use crate::{ExactFaceBoundary, ExactFaceDelaunay, ExactFaceDelaunayErrorKind, ExactFacePslg};
+use crate::{
+    ExactFaceBoundary, ExactFaceConstrainedDelaunay, ExactFaceDelaunay, ExactFaceDelaunayErrorKind,
+    ExactFacePslg, ExactFaceTrimmedDelaunay,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceChart {
@@ -25,6 +28,14 @@ pub struct ExactFaceCharts {
 pub struct ExactFaceChartDelaunay {
     pub chart_id: StableDigest,
     pub triangulation: ExactFaceDelaunay,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExactFaceChartConstrainedDomain {
+    pub chart_id: StableDigest,
+    pub delaunay: ExactFaceDelaunay,
+    pub constrained: ExactFaceConstrainedDelaunay,
+    pub trimmed: ExactFaceTrimmedDelaunay,
 }
 
 #[derive(Clone, Copy)]

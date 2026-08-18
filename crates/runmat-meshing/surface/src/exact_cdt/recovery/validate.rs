@@ -20,7 +20,6 @@ pub fn validate_exact_face_constrained_delaunay(
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceDelaunayError> {
-    validate_options(pslg, options)?;
     validate_exact_face_pslg(pslg, boundary).map_err(|error| {
         invalid(
             pslg,
@@ -28,6 +27,16 @@ pub fn validate_exact_face_constrained_delaunay(
             error.to_string(),
         )
     })?;
+    validate_face_constrained_topology(constrained, pslg, cancellation, options)
+}
+
+pub(crate) fn validate_face_constrained_topology(
+    constrained: &ExactFaceConstrainedDelaunay,
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<(), ExactFaceDelaunayError> {
+    validate_options(pslg, options)?;
     checkpoint(cancellation, pslg)?;
     if constrained.source_face_id != pslg.source_face_id
         || constrained.triangles.is_empty()

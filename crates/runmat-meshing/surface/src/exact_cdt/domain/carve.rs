@@ -17,6 +17,16 @@ pub fn carve_exact_face_domain(
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceTrimmedDelaunay, ExactFaceDelaunayError> {
     validate_exact_face_constrained_delaunay(constrained, pslg, boundary, cancellation, options)?;
+    carve_validated_face_domain(constrained, pslg, cancellation, options)
+}
+
+pub(crate) fn carve_validated_face_domain(
+    constrained: &ExactFaceConstrainedDelaunay,
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<ExactFaceTrimmedDelaunay, ExactFaceDelaunayError> {
+    crate::exact_cdt::validate_face_constrained_topology(constrained, pslg, cancellation, options)?;
     let mut control = CarvingControl::new(pslg, cancellation, options);
     control.checkpoint()?;
     let protected = constrained
@@ -117,11 +127,10 @@ pub fn carve_exact_face_domain(
         removed_exterior_triangle_count,
         removed_hole_triangle_count,
     };
-    super::validate_exact_face_trimmed_delaunay(
+    super::validate::validate_face_trimmed_topology(
         &result,
         constrained,
         pslg,
-        boundary,
         cancellation,
         options,
     )?;

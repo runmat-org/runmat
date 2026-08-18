@@ -22,10 +22,11 @@ pub use acceptance::{
     ExactFaceTriangleAcceptance,
 };
 pub use chart::{
-    build_exact_face_charts, triangulate_exact_face_charts, validate_exact_face_chart_delaunay,
-    validate_exact_face_charts, ExactFaceChart, ExactFaceChartDelaunay,
-    ExactFaceChartDelaunayContext, ExactFaceChartError, ExactFaceChartErrorKind,
-    ExactFaceChartOptions, ExactFaceCharts,
+    build_exact_face_charts, recover_exact_face_chart_domains, triangulate_exact_face_charts,
+    validate_exact_face_chart_delaunay, validate_exact_face_chart_domains,
+    validate_exact_face_charts, ExactFaceChart, ExactFaceChartConstrainedDomain,
+    ExactFaceChartDelaunay, ExactFaceChartDelaunayContext, ExactFaceChartError,
+    ExactFaceChartErrorKind, ExactFaceChartOptions, ExactFaceCharts,
 };
 pub use contract::build_surface_mesh_contract;
 pub use exact_boundary::{

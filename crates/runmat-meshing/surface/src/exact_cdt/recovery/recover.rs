@@ -10,8 +10,7 @@ use crate::{
 };
 
 use super::{
-    cavity::recover_segment_cavity, validate_exact_face_constrained_delaunay,
-    ExactFaceConstrainedDelaunay, ExactFaceRecoveredSegment,
+    cavity::recover_segment_cavity, ExactFaceConstrainedDelaunay, ExactFaceRecoveredSegment,
 };
 use crate::exact_cdt::topology::{edge_uses, flip_edge, properly_crosses, sorted_edge};
 
@@ -23,6 +22,16 @@ pub fn recover_exact_face_segments(
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceConstrainedDelaunay, ExactFaceDelaunayError> {
     validate_exact_face_delaunay(delaunay, pslg, boundary, cancellation, options)?;
+    recover_validated_face_segments(delaunay, pslg, cancellation, options)
+}
+
+pub(crate) fn recover_validated_face_segments(
+    delaunay: &ExactFaceDelaunay,
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<ExactFaceConstrainedDelaunay, ExactFaceDelaunayError> {
+    crate::exact_cdt::validate_face_delaunay_topology(delaunay, pslg, cancellation, options)?;
     let mut control = RecoveryControl::new(pslg, cancellation, options);
     let mut triangles = delaunay.triangles.clone();
     let mut protected = BTreeSet::new();
@@ -91,7 +100,7 @@ pub fn recover_exact_face_segments(
         cavity_retriangulation_count,
         delaunay_restoration_flip_count,
     };
-    validate_exact_face_constrained_delaunay(&result, pslg, boundary, cancellation, options)?;
+    super::validate::validate_face_constrained_topology(&result, pslg, cancellation, options)?;
     Ok(result)
 }
 

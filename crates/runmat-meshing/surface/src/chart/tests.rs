@@ -166,6 +166,42 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         crate::ExactFaceDelaunayOptions::default(),
     )
     .unwrap();
+    let domains = recover_exact_face_chart_domains(
+        &triangulations,
+        &annulus_charts,
+        &annulus,
+        delaunay_context,
+        ExactFaceChartOptions::default(),
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(domains.len(), 1);
+    assert_eq!(domains[0].constrained.protected_segments.len(), 10);
+    assert!(!domains[0].trimmed.triangles.is_empty());
+    validate_exact_face_chart_domains(
+        &domains,
+        &annulus_charts,
+        &annulus,
+        delaunay_context,
+        ExactFaceChartOptions::default(),
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    let mut tampered_domains = domains;
+    tampered_domains[0].constrained.protected_segments.pop();
+    assert!(matches!(
+        validate_exact_face_chart_domains(
+            &tampered_domains,
+            &annulus_charts,
+            &annulus,
+            delaunay_context,
+            ExactFaceChartOptions::default(),
+            crate::ExactFaceDelaunayOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceChartErrorKind::Delaunay(_)
+    ));
     let mut tampered_triangulations = triangulations;
     tampered_triangulations[0].triangulation.triangles[0]
         .vertex_indices

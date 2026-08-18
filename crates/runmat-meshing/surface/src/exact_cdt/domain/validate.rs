@@ -18,6 +18,17 @@ pub fn validate_exact_face_trimmed_delaunay(
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceDelaunayError> {
     validate_exact_face_constrained_delaunay(constrained, pslg, boundary, cancellation, options)?;
+    validate_face_trimmed_topology(trimmed, constrained, pslg, cancellation, options)
+}
+
+pub(crate) fn validate_face_trimmed_topology(
+    trimmed: &ExactFaceTrimmedDelaunay,
+    constrained: &ExactFaceConstrainedDelaunay,
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<(), ExactFaceDelaunayError> {
+    crate::exact_cdt::validate_face_constrained_topology(constrained, pslg, cancellation, options)?;
     let mut control = ValidationControl::new(pslg, cancellation, options);
     control.checkpoint()?;
     if trimmed.source_face_id != pslg.source_face_id
