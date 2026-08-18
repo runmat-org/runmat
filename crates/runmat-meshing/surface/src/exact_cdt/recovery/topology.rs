@@ -85,7 +85,7 @@ pub(super) fn sorted_edge(mut edge: [u32; 2]) -> [u32; 2] {
     edge
 }
 
-fn oriented_triangle(
+pub(super) fn oriented_triangle(
     mut triangle: [u32; 3],
     pslg: &ExactFacePslg,
 ) -> Result<Option<[u32; 3]>, runmat_meshing_core::PlanarPredicateError> {
@@ -99,7 +99,7 @@ fn oriented_triangle(
     }
 }
 
-fn canonical_triangle(triangle: [u32; 3]) -> [u32; 3] {
+pub(super) fn canonical_triangle(triangle: [u32; 3]) -> [u32; 3] {
     let position = triangle
         .iter()
         .enumerate()

@@ -1,3 +1,5 @@
+mod cavity;
+mod ear;
 mod planarity;
 mod recover;
 mod topology;

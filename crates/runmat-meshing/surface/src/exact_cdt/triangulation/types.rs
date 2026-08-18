@@ -17,6 +17,7 @@ pub struct ExactFaceDelaunayOptions {
     pub maximum_triangles: usize,
     pub maximum_predicate_evaluations: u64,
     pub maximum_edge_flips: u64,
+    pub maximum_cavity_retriangulations: u64,
     pub cancellation_check_interval: u64,
 }
 
@@ -26,6 +27,7 @@ impl Default for ExactFaceDelaunayOptions {
             maximum_triangles: 10_000_000,
             maximum_predicate_evaluations: 100_000_000,
             maximum_edge_flips: 100_000_000,
+            maximum_cavity_retriangulations: 10_000_000,
             cancellation_check_interval: 1_024,
         }
     }

@@ -10,6 +10,7 @@ use crate::{
 };
 
 use super::{
+    cavity::recover_segment_cavity,
     topology::{edge_uses, flip_edge, properly_crosses, sorted_edge},
     validate_exact_face_constrained_delaunay, ExactFaceConstrainedDelaunay,
     ExactFaceRecoveredSegment,
@@ -28,6 +29,7 @@ pub fn recover_exact_face_segments(
     let mut protected = BTreeSet::new();
     let mut protected_segments = Vec::with_capacity(pslg.segments.len());
     let mut recovery_edge_flip_count = 0u64;
+    let mut cavity_retriangulation_count = 0u64;
 
     for (pslg_segment_index, segment) in pslg.segments.iter().enumerate() {
         control.checkpoint()?;
@@ -63,9 +65,13 @@ pub fn recover_exact_face_segments(
                 }
             }
             if !flipped {
-                return Err(control.unsatisfied(
-                    "protected segment cannot be recovered by a deterministic legal edge flip",
-                ));
+                if recover_segment_cavity(&mut triangles, pslg, target, &protected, &mut control)? {
+                    cavity_retriangulation_count = cavity_retriangulation_count.saturating_add(1);
+                } else {
+                    return Err(control.unsatisfied(
+                        "protected segment has no valid deterministic recovery cavity",
+                    ));
+                }
             }
         }
         protected.insert(target);
@@ -84,6 +90,7 @@ pub fn recover_exact_face_segments(
         triangles,
         protected_segments,
         recovery_edge_flip_count,
+        cavity_retriangulation_count,
         delaunay_restoration_flip_count,
     };
     validate_exact_face_constrained_delaunay(&result, pslg, boundary, cancellation, options)?;
@@ -141,17 +148,19 @@ fn restore_delaunay(
     }
 }
 
-struct RecoveryControl<'a> {
+pub(super) struct RecoveryControl<'a> {
     pslg: &'a ExactFacePslg,
     cancellation: &'a dyn MeshingCancellationSignal,
     predicates_remaining: u64,
     flips_remaining: u64,
+    cavities_remaining: u64,
+    maximum_triangles: usize,
     check_interval: u64,
     work_since_check: u64,
 }
 
 impl<'a> RecoveryControl<'a> {
-    fn new(
+    pub(super) fn new(
         pslg: &'a ExactFacePslg,
         cancellation: &'a dyn MeshingCancellationSignal,
         options: ExactFaceDelaunayOptions,
@@ -161,12 +170,14 @@ impl<'a> RecoveryControl<'a> {
             cancellation,
             predicates_remaining: options.maximum_predicate_evaluations,
             flips_remaining: options.maximum_edge_flips,
+            cavities_remaining: options.maximum_cavity_retriangulations,
+            maximum_triangles: options.maximum_triangles,
             check_interval: options.cancellation_check_interval,
             work_since_check: 0,
         }
     }
 
-    fn consume_predicates(&mut self, count: u64) -> Result<(), ExactFaceDelaunayError> {
+    pub(super) fn consume_predicates(&mut self, count: u64) -> Result<(), ExactFaceDelaunayError> {
         self.predicates_remaining =
             self.predicates_remaining
                 .checked_sub(count)
@@ -193,7 +204,31 @@ impl<'a> RecoveryControl<'a> {
         Ok(())
     }
 
-    fn checkpoint(&mut self) -> Result<(), ExactFaceDelaunayError> {
+    pub(super) fn consume_cavity(&mut self) -> Result<(), ExactFaceDelaunayError> {
+        self.cavities_remaining = self.cavities_remaining.checked_sub(1).ok_or_else(|| {
+            self.error(
+                ExactFaceDelaunayErrorKind::ResourceLimit,
+                "segment recovery cavity hard limit exceeded",
+            )
+        })?;
+        Ok(())
+    }
+
+    pub(super) fn ensure_triangle_limit(
+        &self,
+        triangle_count: usize,
+    ) -> Result<(), ExactFaceDelaunayError> {
+        if triangle_count > self.maximum_triangles {
+            Err(self.error(
+                ExactFaceDelaunayErrorKind::ResourceLimit,
+                "segment recovery triangle hard limit exceeded",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(super) fn checkpoint(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.work_since_check = 0;
         if self.cancellation.is_cancelled() {
             Err(self.error(
@@ -205,7 +240,7 @@ impl<'a> RecoveryControl<'a> {
         }
     }
 
-    fn predicate_error(
+    pub(super) fn predicate_error(
         &self,
         error: runmat_meshing_core::PlanarPredicateError,
     ) -> ExactFaceDelaunayError {
@@ -215,7 +250,7 @@ impl<'a> RecoveryControl<'a> {
         )
     }
 
-    fn unsatisfied(&self, reason: &str) -> ExactFaceDelaunayError {
+    pub(super) fn unsatisfied(&self, reason: &str) -> ExactFaceDelaunayError {
         self.error(ExactFaceDelaunayErrorKind::UnsatisfiedConstraint, reason)
     }
 

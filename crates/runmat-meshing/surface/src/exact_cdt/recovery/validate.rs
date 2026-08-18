@@ -54,6 +54,13 @@ pub fn validate_exact_face_constrained_delaunay(
             "reported constrained edge flips exceed the hard limit",
         ));
     }
+    if constrained.cavity_retriangulation_count > options.maximum_cavity_retriangulations {
+        return Err(invalid(
+            pslg,
+            ExactFaceDelaunayErrorKind::ResourceLimit,
+            "reported cavity retriangulations exceed the hard limit",
+        ));
+    }
 
     let mut referenced = BTreeSet::new();
     let mut prior = None;
@@ -185,6 +192,7 @@ fn validate_options(
     if options.maximum_triangles == 0
         || options.maximum_predicate_evaluations == 0
         || options.maximum_edge_flips == 0
+        || options.maximum_cavity_retriangulations == 0
         || options.cancellation_check_interval == 0
     {
         Err(invalid(

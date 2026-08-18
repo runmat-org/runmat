@@ -8,6 +8,7 @@ pub struct ExactFaceConstrainedDelaunay {
     pub triangles: Vec<ExactFaceDelaunayTriangle>,
     pub protected_segments: Vec<ExactFaceRecoveredSegment>,
     pub recovery_edge_flip_count: u64,
+    pub cavity_retriangulation_count: u64,
     pub delaunay_restoration_flip_count: u64,
 }
 

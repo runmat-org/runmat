@@ -39,6 +39,68 @@ fn concave_face_recovers_every_missing_protected_segment() {
 }
 
 #[test]
+fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
+    let (boundary, pslg) = concave_fixture();
+    let options = ExactFaceDelaunayOptions {
+        maximum_cavity_retriangulations: 1,
+        ..ExactFaceDelaunayOptions::default()
+    };
+    let delaunay = triangulate_exact_face_pslg(&pslg, &boundary, &NeverCancelled, options).unwrap();
+    let initial_edges = triangle_edges(&delaunay.triangles);
+    let target = pslg
+        .segments
+        .iter()
+        .map(|segment| sorted(segment.vertex_indices))
+        .find(|edge| !initial_edges.contains(edge))
+        .expect("fixture must have a missing protected segment");
+    let mut control = super::recover::RecoveryControl::new(&pslg, &NeverCancelled, options);
+    let mut triangles = delaunay.triangles.clone();
+
+    assert!(super::cavity::recover_segment_cavity(
+        &mut triangles,
+        &pslg,
+        target,
+        &BTreeSet::new(),
+        &mut control,
+    )
+    .unwrap());
+    assert_eq!(triangles.len(), delaunay.triangles.len());
+    assert!(triangle_edges(&triangles).contains(&target));
+    super::planarity::validate_planar_edges(
+        &super::topology::edge_uses(&triangles),
+        &pslg,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+
+    let mut repeated_control =
+        super::recover::RecoveryControl::new(&pslg, &NeverCancelled, options);
+    let mut repeated = delaunay.triangles.clone();
+    assert!(super::cavity::recover_segment_cavity(
+        &mut repeated,
+        &pslg,
+        target,
+        &BTreeSet::new(),
+        &mut repeated_control,
+    )
+    .unwrap());
+    assert_eq!(repeated, triangles);
+
+    let mut second_attempt = delaunay.triangles.clone();
+    let error = super::cavity::recover_segment_cavity(
+        &mut second_attempt,
+        &pslg,
+        target,
+        &BTreeSet::new(),
+        &mut control,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, crate::ExactFaceDelaunayErrorKind::ResourceLimit);
+    assert_eq!(second_attempt, delaunay.triangles);
+}
+
+#[test]
 fn independent_validation_rejects_missing_protected_provenance() {
     let (boundary, pslg) = concave_fixture();
     let options = ExactFaceDelaunayOptions::default();
@@ -59,6 +121,26 @@ fn independent_validation_rejects_missing_protected_provenance() {
         error.kind,
         crate::ExactFaceDelaunayErrorKind::InvalidTopology
     );
+}
+
+#[test]
+fn independent_validation_rejects_excess_cavity_evidence() {
+    let (boundary, pslg) = concave_fixture();
+    let options = ExactFaceDelaunayOptions::default();
+    let delaunay = triangulate_exact_face_pslg(&pslg, &boundary, &NeverCancelled, options).unwrap();
+    let mut constrained =
+        recover_exact_face_segments(&delaunay, &pslg, &boundary, &NeverCancelled, options).unwrap();
+    constrained.cavity_retriangulation_count = options.maximum_cavity_retriangulations + 1;
+
+    let error = validate_exact_face_constrained_delaunay(
+        &constrained,
+        &pslg,
+        &boundary,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, crate::ExactFaceDelaunayErrorKind::ResourceLimit);
 }
 
 fn concave_fixture() -> (ExactFaceBoundary, crate::ExactFacePslg) {
