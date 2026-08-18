@@ -312,6 +312,7 @@ pub(crate) mod tests {
                 shape: Vec::new(),
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: Default::default(),
             };
             let result = ismatrix_builtin(Value::GpuTensor(handle)).expect("ismatrix gpu scalar");
             assert_eq!(result, Value::Bool(true));
@@ -326,6 +327,7 @@ pub(crate) mod tests {
                 shape: Vec::new(),
                 device_id: provider.device_id(),
                 buffer_id: u64::MAX,
+                descriptor: Default::default(),
             };
             assert_eq!(
                 ismatrix_builtin(Value::GpuTensor(handle)).expect("metadata-only predicate"),

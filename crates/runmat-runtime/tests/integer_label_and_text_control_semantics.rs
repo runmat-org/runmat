@@ -19,6 +19,7 @@ fn resident_handle(buffer_id: u64, provenance: GpuHandleProvenance) -> GpuTensor
         shape: vec![1, 1],
         device_id: u32::MAX - 440,
         buffer_id,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_provenance(&handle, provenance);
     handle
@@ -143,6 +144,7 @@ fn explicit_resident_fallbacks_reject_before_provider_access_in_strict_mode() {
             shape: vec![1, 1],
             device_id: u32::MAX - 440,
             buffer_id,
+            descriptor: Default::default(),
         });
     }
 }

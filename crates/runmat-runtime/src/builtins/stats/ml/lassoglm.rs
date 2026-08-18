@@ -2164,6 +2164,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: 42_001,
+            descriptor: Default::default(),
         };
         let value = Value::GpuTensor(handle.clone());
         let host = tensor(vec![1.0], vec![1, 1]);
@@ -2196,6 +2197,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: 42_002,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_provenance(
             &handle,

@@ -611,7 +611,6 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinRes
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;

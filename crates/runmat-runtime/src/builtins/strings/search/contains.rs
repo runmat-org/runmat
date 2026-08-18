@@ -791,6 +791,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).expect("cell"));
         for (text, pattern) in [

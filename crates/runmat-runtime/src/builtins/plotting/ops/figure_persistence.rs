@@ -1393,6 +1393,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         assert!(block_on(hgload_builtin(vec![resident.clone()])).is_err());
         assert!(block_on(hgsave_builtin(vec![resident, Value::from("unused.fig")])).is_err());
@@ -1404,6 +1405,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = block_on(openfig_builtin(vec![resident])).expect_err("resident filename");
 

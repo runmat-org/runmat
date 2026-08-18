@@ -489,6 +489,7 @@ mod tests {
             shape: vec![1, 1, 3],
             device_id: u32::MAX - 12,
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,

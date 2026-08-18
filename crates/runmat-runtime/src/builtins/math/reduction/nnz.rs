@@ -957,6 +957,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_419_008,
+            descriptor: Default::default(),
         });
         let error = block_on(nnz_builtin(source, vec![Value::Int(IntValue::U8(1))]))
             .expect_err("undocumented dimension overload must gate");

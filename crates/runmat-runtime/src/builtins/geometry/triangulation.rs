@@ -1108,6 +1108,7 @@ mod tests {
                 shape: vec![3, 2],
                 device_id: 0,
                 buffer_id: 9_307_001,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_integer_type(
                 &resident_points,
@@ -1127,6 +1128,7 @@ mod tests {
                 shape: vec![0, 2],
                 device_id: 0,
                 buffer_id: 9_307_002,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_integer_type(
                 &resident_topology,

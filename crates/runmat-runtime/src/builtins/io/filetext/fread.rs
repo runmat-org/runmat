@@ -2449,6 +2449,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 901,
+            descriptor: Default::default(),
         });
         let precision = Value::from("uint8");
         let args = [&resident, &precision, &resident];
@@ -2469,6 +2470,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 902,
             buffer_id: 902,
+            descriptor: Default::default(),
         });
         let args = [Value::from("like"), Value::Num(0.0)];
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);

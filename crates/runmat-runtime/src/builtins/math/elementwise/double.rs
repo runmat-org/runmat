@@ -1146,6 +1146,7 @@ pub(crate) mod tests {
                 device_id: prototype.device_id.wrapping_add(10_000),
                 buffer_id: prototype.buffer_id,
                 shape: vec![2, 1],
+                descriptor: Default::default(),
             };
             assert!(!valid_double_like_output(
                 &unowned_rejection,

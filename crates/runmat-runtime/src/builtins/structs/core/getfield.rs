@@ -2033,6 +2033,7 @@ pub(crate) mod tests {
             shape: vec![2, 1],
             device_id: u32::MAX - 1,
             buffer_id: u64::MAX - 1,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,

@@ -1991,6 +1991,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: 0,
             buffer_id: 9_399_001,
+            descriptor: Default::default(),
         });
         let error = block_on(dummyvar_builtin(resident)).expect_err("GPU extension gate");
         assert_eq!(

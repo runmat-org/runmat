@@ -1163,6 +1163,7 @@ pub(crate) mod tests {
             shape: rejected.shape.clone(),
             device_id: invoked.device_id(),
             buffer_id: rejected.buffer_id,
+            descriptor: Default::default(),
         };
         assert!(!same_owned_buffer(
             &rejected,

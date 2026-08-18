@@ -3684,6 +3684,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let nested = Value::Cell(CellArray::new(vec![resident.clone()], 1, 1).unwrap());
         let Value::Cell(preserved) = block(convert_contained_strings_to_chars_builtin(
@@ -3820,6 +3821,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let resident_error = block(digits_pattern_builtin(vec![resident])).unwrap_err();
         assert_eq!(

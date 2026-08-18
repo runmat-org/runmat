@@ -44,6 +44,7 @@ fn synthetic_resident_integer(buffer_id: u64, shape: Vec<usize>) -> GpuTensorHan
         shape,
         device_id: u32::MAX - 17,
         buffer_id,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U64);
     runmat_accelerate_api::set_handle_provenance(&handle, GpuHandleProvenance::Explicit);

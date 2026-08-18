@@ -1499,6 +1499,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 396,
+            descriptor: Default::default(),
         });
         let error = csvread_builtin(Value::from("does-not-exist.csv"), vec![resident]).unwrap_err();
         assert_eq!(

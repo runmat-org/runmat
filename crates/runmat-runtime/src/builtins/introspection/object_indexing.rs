@@ -1072,6 +1072,7 @@ mod tests {
             shape: vec![2, 3],
             device_id: 0,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let descriptor = substruct(
             crate::OBJECT_INDEX_BRACE,
@@ -1126,6 +1127,7 @@ mod tests {
             shape: vec![usize::MAX, 2],
             device_id: 0,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let descriptor = substruct(
             crate::OBJECT_INDEX_BRACE,

@@ -431,6 +431,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 2,
+                descriptor: Default::default(),
             })
         }
 
@@ -465,6 +466,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -500,6 +502,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 3,
+                descriptor: Default::default(),
             })
         }
 
@@ -717,6 +720,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_300_005,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,
@@ -782,6 +786,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: provider.device_id(),
             buffer_id: 2,
+            descriptor: Default::default(),
         };
         let result = call(Value::GpuTensor(handle)).expect("sinc gpu fallback");
         match result {
@@ -805,6 +810,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: provider.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         let err = call(Value::GpuTensor(handle)).expect_err("provider error should surface");
         assert!(err
@@ -824,6 +830,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: provider.device_id(),
             buffer_id: 3,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
 
@@ -847,6 +854,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: provider.device_id(),
             buffer_id: 4,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
 

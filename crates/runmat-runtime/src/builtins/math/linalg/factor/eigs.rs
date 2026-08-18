@@ -1767,6 +1767,7 @@ mod tests {
             shape: vec![2, 2],
             device_id: 0,
             buffer_id: 9_300_002,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,
@@ -1823,6 +1824,7 @@ mod tests {
                 shape: vec![2, 1],
                 device_id: u32::MAX,
                 buffer_id: u64::MAX,
+                descriptor: Default::default(),
             }),
         );
         let error = call(a, vec![Value::Num(1.0), Value::Struct(options)])

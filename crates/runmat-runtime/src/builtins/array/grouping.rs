@@ -4691,6 +4691,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_automatic(&handle);
         ensure_groupcounts_residency_extension(&Value::GpuTensor(handle.clone()), &[])
@@ -4918,6 +4919,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = block_on(findgroups_builtin(resident, Vec::new()))
             .expect_err("resident form must gate before provider lookup");
@@ -5092,6 +5094,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 99,
             buffer_id: 77,
+            descriptor: Default::default(),
         });
         let error = block_on(combinations_builtin(resident, Vec::new())).unwrap_err();
         assert_eq!(

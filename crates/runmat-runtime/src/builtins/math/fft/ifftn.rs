@@ -827,6 +827,7 @@ mod tests {
             shape: frequency.shape.clone(),
             device_id: raw.device_id,
             buffer_id: raw.buffer_id,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_storage(
             &source,

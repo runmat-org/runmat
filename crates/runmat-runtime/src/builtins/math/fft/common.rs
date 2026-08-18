@@ -1395,6 +1395,7 @@ mod tests {
             shape: vec![2],
             device_id: 1,
             buffer_id: 7,
+            descriptor: Default::default(),
         };
         let same = left.clone();
         let other_device = GpuTensorHandle {

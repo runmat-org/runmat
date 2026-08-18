@@ -1616,6 +1616,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: 0,
             buffer_id: 9_451_001,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&handle);
         let error = stackedplot_builtin(vec![Value::GpuTensor(handle)])

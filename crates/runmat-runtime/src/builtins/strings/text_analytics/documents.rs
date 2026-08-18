@@ -3783,6 +3783,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_363_001,
+            descriptor: Default::default(),
         };
         let error =
             run_bag(vec![Value::GpuTensor(resident)]).expect_err("resident input must reject");
@@ -4040,6 +4041,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_446_002,
+            descriptor: Default::default(),
         });
         for invalid in [Value::Int(runmat_builtins::IntValue::U8(1)), resident] {
             let error = run_remove_stop(vec![invalid]).expect_err("numeric input must reject");

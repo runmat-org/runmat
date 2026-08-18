@@ -456,8 +456,11 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         if let Value::GpuTensor(handle) = &value {
             // gpuArray(G) is an identity operation. In particular, do not download,
             // re-upload, or release the storage owned by the caller's handle.
-            runmat_accelerate_api::mark_handle_explicit(handle);
-            return Ok(Value::GpuTensor(handle.clone()));
+            let explicit = handle
+                .clone()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            return Ok(Value::GpuTensor(explicit));
         }
     }
     let dtype = resolve_dtype(&value, &options)?;
@@ -502,6 +505,7 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
     }
     runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
     runmat_accelerate_api::set_handle_class_name(&handle, dtype.class_name());
+    handle.descriptor.provenance = Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
     runmat_accelerate_api::mark_handle_explicit(&handle);
 
     Ok(Value::GpuTensor(handle))
@@ -1533,6 +1537,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: mislabeled_owner.device_id(),
             buffer_id: 991,
+            descriptor: Default::default(),
         };
 
         let error = validate_prepared_handle(
@@ -1704,6 +1709,10 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_identity(&identity),
                 runmat_accelerate_api::handle_identity(&handle)
             );
+            assert_eq!(
+                identity.descriptor.provenance,
+                Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            );
             let gathered = test_support::gather(Value::GpuTensor(handle.clone()))
                 .expect("source remains valid");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
@@ -1725,6 +1734,10 @@ pub(crate) mod tests {
                 panic!("expected resident plus output");
             };
             assert!(runmat_accelerate_api::handle_is_explicit(handle));
+            assert_eq!(
+                handle.descriptor.provenance,
+                Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            );
             assert_eq!(
                 crate::call_builtin("isgpuarray", &[output]).expect("isgpuarray"),
                 Value::Bool(true)

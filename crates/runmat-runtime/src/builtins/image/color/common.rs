@@ -630,6 +630,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: provider.device_id().wrapping_add(1000),
                 buffer_id: u64::MAX - 21,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
             let error = resident_numeric_dtype(&handle, "color-test")

@@ -1845,13 +1845,12 @@ impl InProcessProvider {
             shape,
             device_id: self.device_id,
             buffer_id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::F64,
+                storage,
+            ),
         };
-        runmat_accelerate_api::set_handle_storage(&handle, storage);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            runmat_accelerate_api::ProviderPrecision::F64,
-        );
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         handle
     }
 
@@ -1865,13 +1864,12 @@ impl InProcessProvider {
             shape,
             device_id: self.device_id,
             buffer_id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::F32,
+                storage,
+            ),
         };
-        runmat_accelerate_api::set_handle_storage(&handle, storage);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            runmat_accelerate_api::ProviderPrecision::F32,
-        );
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         handle
     }
 
@@ -1901,10 +1899,12 @@ impl InProcessProvider {
             shape,
             device_id: self.device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::from(element_type),
+                GpuTensorStorage::Real,
+            ),
         };
-        runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         handle
     }
 
@@ -3928,10 +3928,12 @@ impl AccelProvider for InProcessProvider {
                 shape: output_shape.to_vec(),
                 device_id: self.device_id,
                 buffer_id: id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    NumericElementType::from(integer_type),
+                    GpuTensorStorage::Real,
+                ),
             };
-            runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
-            runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-            runmat_accelerate_api::set_handle_logical(&handle, false);
+            runmat_accelerate_api::clear_handle_metadata(&handle);
             return Ok(handle);
         }
 
@@ -4098,38 +4100,17 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .insert(id, data);
+        let element_type = host.element_type();
         let handle = GpuTensorHandle {
             shape: host.shape.to_vec(),
             device_id: self.device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                element_type,
+                host.storage,
+            ),
         };
-        let element_type = host.element_type();
-        match element_type {
-            NumericElementType::F64 => {
-                runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
-            }
-            NumericElementType::F32 => {
-                runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
-            }
-            NumericElementType::I8
-            | NumericElementType::I16
-            | NumericElementType::I32
-            | NumericElementType::I64
-            | NumericElementType::U8
-            | NumericElementType::U16
-            | NumericElementType::U32
-            | NumericElementType::U64 => {
-                runmat_accelerate_api::set_handle_integer_type(
-                    &handle,
-                    element_type
-                        .integer_type()
-                        .expect("integer numeric element type"),
-                );
-            }
-        }
-        runmat_accelerate_api::set_handle_class_name(&handle, element_type.class_name());
-        runmat_accelerate_api::set_handle_storage(&handle, host.storage);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         Ok(handle)
     }
 
@@ -4165,10 +4146,15 @@ impl AccelProvider for InProcessProvider {
             shape: host.shape.to_vec(),
             device_id: self.device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                match self.precision() {
+                    ProviderPrecision::F32 => NumericElementType::F32,
+                    ProviderPrecision::F64 => NumericElementType::F64,
+                },
+                GpuTensorStorage::Real,
+            ),
         };
-        runmat_accelerate_api::set_handle_precision(&handle, self.precision());
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         Ok(handle)
     }
 
@@ -4218,10 +4204,12 @@ impl AccelProvider for InProcessProvider {
             shape: host.shape.to_vec(),
             device_id: self.device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::from(host.data.element_type()),
+                GpuTensorStorage::Real,
+            ),
         };
-        runmat_accelerate_api::set_handle_integer_type(&handle, host.data.element_type());
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         Ok(handle)
     }
 
@@ -10291,6 +10279,12 @@ mod tests {
                 let handle = provider
                     .upload_numeric(&transfer)
                     .expect("shared native upload");
+                assert_eq!(handle.descriptor.element_type, Some(expected_type));
+                assert_eq!(handle.descriptor.storage, Some(storage));
+                runmat_accelerate_api::clear_handle_precision(&handle);
+                runmat_accelerate_api::clear_handle_integer_type(&handle);
+                runmat_accelerate_api::clear_handle_storage(&handle);
+                runmat_accelerate_api::clear_handle_class_name(&handle);
                 assert_eq!(runmat_accelerate_api::handle_storage(&handle), storage);
                 assert_eq!(
                     runmat_accelerate_api::handle_class_name(&handle).as_deref(),
@@ -11411,6 +11405,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: provider.device_id(),
             buffer_id: 9_000_000,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_precision(&stale, ProviderPrecision::F32);
         runmat_accelerate_api::set_handle_storage(&stale, GpuTensorStorage::ComplexInterleaved);
@@ -11436,7 +11431,10 @@ mod tests {
         assert!(!runmat_accelerate_api::handle_is_logical(&handle));
 
         provider.free(&handle).expect("free");
-        assert_eq!(runmat_accelerate_api::handle_precision(&handle), None);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&handle),
+            Some(ProviderPrecision::F64)
+        );
         assert_eq!(
             runmat_accelerate_api::handle_storage(&handle),
             GpuTensorStorage::Real

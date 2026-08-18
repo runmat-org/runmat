@@ -1295,6 +1295,7 @@ pub(crate) mod tests {
                 shape,
                 device_id: u32::MAX,
                 buffer_id,
+                descriptor: Default::default(),
             };
             if integer {
                 runmat_accelerate_api::set_handle_integer_type(

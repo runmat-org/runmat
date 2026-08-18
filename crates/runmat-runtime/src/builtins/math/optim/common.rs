@@ -617,6 +617,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_408_001,
+            descriptor: Default::default(),
         });
         let error = block_on(prepare_floating_value(
             "fminunc",

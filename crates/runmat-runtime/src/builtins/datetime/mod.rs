@@ -4993,6 +4993,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_419_002,
+            descriptor: Default::default(),
         });
         let resident = futures::executor::block_on(hour_builtin(resident, Vec::new()))
             .expect_err("resident legacy input must gate before provider access");
@@ -5079,6 +5080,7 @@ mod tests {
                     shape: vec![1, 1],
                     device_id: 0,
                     buffer_id: 9_419_003,
+                    descriptor: Default::default(),
                 }),
                 Vec::new(),
             )),
@@ -5087,6 +5089,7 @@ mod tests {
                     shape: vec![1, 1],
                     device_id: 0,
                     buffer_id: 9_419_004,
+                    descriptor: Default::default(),
                 }),
                 Vec::new(),
             )),
@@ -5262,6 +5265,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: 0,
             buffer_id: 9_397_001,
+            descriptor: Default::default(),
         });
         let resident = futures::executor::block_on(datetime_builtin(vec![resident]))
             .expect_err("resident input is gated before provider access");

@@ -1362,6 +1362,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 903,
             buffer_id: 903,
+            descriptor: Default::default(),
         });
         let args = vec![Value::from("uint8"), resident];
         let (_, skip, _) = classify_arguments(&args).expect("classified controls");

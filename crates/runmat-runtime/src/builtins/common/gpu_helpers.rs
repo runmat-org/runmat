@@ -710,107 +710,112 @@ pub fn restore_class_preserving_value(
     })?;
     let source_guard = HandleMetadataRestoreGuard::new(source);
 
-    let (output, expected_shape, expected_storage, expected_precision, expected_integer, logical) =
-        match &value {
-            Value::Tensor(tensor) => {
-                let expected_integer = tensor.integer_storage().map(integer_element_type);
-                let expected_precision = if expected_integer.is_some() {
-                    None
-                } else {
-                    Some(match tensor.numeric_dtype() {
-                        NumericDType::F32 => ProviderPrecision::F32,
-                        _ => ProviderPrecision::F64,
-                    })
-                };
-                let output = match upload_tensor(provider, tensor) {
-                    Ok(output) => output,
-                    Err(_) if expected_precision != Some(provider.precision()) => return Ok(value),
-                    Err(error) => {
-                        return Err(build_runtime_error(format!(
-                            "{builtin}: failed to restore GPU result: {error}"
-                        ))
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build())
-                    }
-                };
-                (
-                    output,
-                    tensor.shape.clone(),
-                    GpuTensorStorage::Real,
-                    expected_precision,
-                    expected_integer,
-                    false,
-                )
-            }
-            Value::LogicalArray(array) => {
-                let storage = match provider.precision() {
-                    ProviderPrecision::F32 => NumericStorage::F32(
-                        array.data.iter().map(|bit| f32::from(*bit != 0)).collect(),
-                    ),
-                    ProviderPrecision::F64 => NumericStorage::F64(
-                        array.data.iter().map(|bit| f64::from(*bit != 0)).collect(),
-                    ),
-                };
-                let tensor = Tensor::from_numeric_storage(storage, array.shape.clone()).map_err(
-                    |error| {
-                        build_runtime_error(format!("{builtin}: invalid logical result: {error}"))
-                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                            .build()
-                    },
-                )?;
-                let output = upload_tensor(provider, &tensor).map_err(|error| {
-                    build_runtime_error(format!("{builtin}: failed to restore GPU result: {error}"))
+    let (
+        mut output,
+        expected_shape,
+        expected_storage,
+        expected_precision,
+        expected_integer,
+        logical,
+    ) = match &value {
+        Value::Tensor(tensor) => {
+            let expected_integer = tensor.integer_storage().map(integer_element_type);
+            let expected_precision = if expected_integer.is_some() {
+                None
+            } else {
+                Some(match tensor.numeric_dtype() {
+                    NumericDType::F32 => ProviderPrecision::F32,
+                    _ => ProviderPrecision::F64,
+                })
+            };
+            let output = match upload_tensor(provider, tensor) {
+                Ok(output) => output,
+                Err(_) if expected_precision != Some(provider.precision()) => return Ok(value),
+                Err(error) => {
+                    return Err(build_runtime_error(format!(
+                        "{builtin}: failed to restore GPU result: {error}"
+                    ))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build())
+                }
+            };
+            (
+                output,
+                tensor.shape.clone(),
+                GpuTensorStorage::Real,
+                expected_precision,
+                expected_integer,
+                false,
+            )
+        }
+        Value::LogicalArray(array) => {
+            let storage = match provider.precision() {
+                ProviderPrecision::F32 => {
+                    NumericStorage::F32(array.data.iter().map(|bit| f32::from(*bit != 0)).collect())
+                }
+                ProviderPrecision::F64 => {
+                    NumericStorage::F64(array.data.iter().map(|bit| f64::from(*bit != 0)).collect())
+                }
+            };
+            let tensor =
+                Tensor::from_numeric_storage(storage, array.shape.clone()).map_err(|error| {
+                    build_runtime_error(format!("{builtin}: invalid logical result: {error}"))
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                         .build()
                 })?;
-                runmat_accelerate_api::set_handle_logical(&output, true);
-                (
-                    output,
-                    array.shape.clone(),
-                    GpuTensorStorage::Real,
-                    Some(provider.precision()),
-                    None,
-                    true,
-                )
-            }
-            Value::ComplexTensor(tensor) => {
-                let expected_integer = tensor
-                    .integer_storage()
-                    .map(|storage| integer_element_type(&storage.real));
-                let expected_precision =
-                    expected_integer
-                        .is_none()
-                        .then(|| match tensor.numeric_dtype() {
-                            NumericDType::F32 => ProviderPrecision::F32,
-                            _ => ProviderPrecision::F64,
-                        });
-                let output = match upload_complex_tensor(provider, tensor) {
-                    Ok(output) => output,
-                    Err(_)
-                        if expected_integer.is_some()
-                            || expected_precision != Some(provider.precision()) =>
-                    {
-                        return Ok(value)
-                    }
-                    Err(error) => {
-                        return Err(build_runtime_error(format!(
-                            "{builtin}: failed to restore GPU result: {error}"
-                        ))
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build())
-                    }
-                };
-                (
-                    output,
-                    tensor.shape.clone(),
-                    GpuTensorStorage::ComplexInterleaved,
-                    expected_precision,
-                    expected_integer,
-                    false,
-                )
-            }
-            _ => return Ok(value),
-        };
+            let output = upload_tensor(provider, &tensor).map_err(|error| {
+                build_runtime_error(format!("{builtin}: failed to restore GPU result: {error}"))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+            })?;
+            runmat_accelerate_api::set_handle_logical(&output, true);
+            (
+                output,
+                array.shape.clone(),
+                GpuTensorStorage::Real,
+                Some(provider.precision()),
+                None,
+                true,
+            )
+        }
+        Value::ComplexTensor(tensor) => {
+            let expected_integer = tensor
+                .integer_storage()
+                .map(|storage| integer_element_type(&storage.real));
+            let expected_precision =
+                expected_integer
+                    .is_none()
+                    .then(|| match tensor.numeric_dtype() {
+                        NumericDType::F32 => ProviderPrecision::F32,
+                        _ => ProviderPrecision::F64,
+                    });
+            let output = match upload_complex_tensor(provider, tensor) {
+                Ok(output) => output,
+                Err(_)
+                    if expected_integer.is_some()
+                        || expected_precision != Some(provider.precision()) =>
+                {
+                    return Ok(value)
+                }
+                Err(error) => {
+                    return Err(build_runtime_error(format!(
+                        "{builtin}: failed to restore GPU result: {error}"
+                    ))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build())
+                }
+            };
+            (
+                output,
+                tensor.shape.clone(),
+                GpuTensorStorage::ComplexInterleaved,
+                expected_precision,
+                expected_integer,
+                false,
+            )
+        }
+        _ => return Ok(value),
+    };
 
     let aliases_source = same_gpu_handle(&output, source);
     if aliases_source {
@@ -839,13 +844,12 @@ pub fn restore_class_preserving_value(
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build());
     }
-    runmat_accelerate_api::set_handle_provenance(
-        &output,
-        source_guard
-            .snapshot
-            .provenance
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-    );
+    let provenance = source_guard
+        .snapshot
+        .provenance
+        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    output.descriptor.provenance = Some(provenance);
+    runmat_accelerate_api::set_handle_provenance(&output, provenance);
     runmat_accelerate_api::mark_residency(&output);
     Ok(Value::GpuTensor(output))
 }
@@ -908,7 +912,11 @@ pub fn upload_exact_integer_scalar_like(
 
 /// Wrap a GPU tensor handle, marking it as resident for downstream fusion-aware
 /// consumers and tests.
-pub fn resident_gpu_value(handle: GpuTensorHandle) -> Value {
+pub fn resident_gpu_value(mut handle: GpuTensorHandle) -> Value {
+    let provenance = runmat_accelerate_api::handle_provenance(&handle)
+        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    handle.descriptor.provenance = Some(provenance);
+    runmat_accelerate_api::set_handle_provenance(&handle, provenance);
     runmat_accelerate_api::mark_residency(&handle);
     Value::GpuTensor(handle)
 }
@@ -1149,6 +1157,7 @@ mod preserving_download_tests {
                 shape: vec![1, 1],
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 426,
+                descriptor: Default::default(),
             };
             let error = select_resident_output_source([stale], "test")
                 .expect_err("unowned handle must reject");
@@ -1328,6 +1337,7 @@ mod preserving_download_tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: u64::MAX - 8,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
         runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
@@ -1352,6 +1362,7 @@ mod preserving_download_tests {
             shape: vec![1, 2],
             device_id: 0,
             buffer_id: u64::MAX - 7,
+            descriptor: Default::default(),
         };
         let error = block_on(download_value_preserving_residency_async(
             &MalformedDownloadProvider,
@@ -1393,7 +1404,8 @@ mod preserving_download_tests {
 }
 
 /// Wrap a GPU tensor handle as a complex gpuArray value.
-pub fn complex_gpu_value(handle: GpuTensorHandle) -> Value {
+pub fn complex_gpu_value(mut handle: GpuTensorHandle) -> Value {
+    handle.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
     runmat_accelerate_api::set_handle_logical(&handle, false);
     runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
     resident_gpu_value(handle)

@@ -794,6 +794,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: self.next_buffer_id.fetch_add(1, Ordering::SeqCst),
+                descriptor: Default::default(),
             })
         }
 

@@ -128,6 +128,7 @@ pub(crate) mod tests {
             shape: vec![4, 5, 6],
             device_id: 0,
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         assert_eq!(
             block_on(value_numel(&Value::GpuTensor(handle))).unwrap(),
@@ -141,6 +142,7 @@ pub(crate) mod tests {
             shape: Vec::new(),
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         };
         let value = Value::GpuTensor(handle);
         assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 1]);

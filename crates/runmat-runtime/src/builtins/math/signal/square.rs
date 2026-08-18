@@ -552,6 +552,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: 0,
             buffer_id: 9_300_004,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&handle);
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);

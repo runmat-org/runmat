@@ -194,20 +194,9 @@ impl WgpuProvider {
             shape,
             device_id: self.runtime_device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(element_type, storage),
         };
-        runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_storage(&handle, storage);
-        runmat_accelerate_api::set_handle_class_name(&handle, element_type.class_name());
-        if let Some(precision) = element_type.precision() {
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
-        } else {
-            runmat_accelerate_api::clear_handle_precision(&handle);
-        }
-        if let Some(integer_type) = element_type.integer_type() {
-            runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
-        } else {
-            runmat_accelerate_api::clear_handle_integer_type(&handle);
-        }
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
     }

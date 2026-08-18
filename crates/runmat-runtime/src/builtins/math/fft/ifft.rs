@@ -1077,6 +1077,7 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_storage(
                 &spectrum_handle,
@@ -1119,6 +1120,7 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_storage(
                 &spectrum_handle,
@@ -1162,6 +1164,7 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_storage(
                 &spectrum_handle,
@@ -1269,6 +1272,7 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: uploaded.device_id,
                 buffer_id: uploaded.buffer_id,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_storage(
                 &input,

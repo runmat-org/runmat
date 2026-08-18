@@ -555,6 +555,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 396,
+            descriptor: Default::default(),
         });
         assert!(set_daspect(vec![resident]).is_err());
     }

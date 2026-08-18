@@ -771,6 +771,7 @@ pub(crate) mod tests {
             shape: vec![2, 2],
             device_id: 1,
             buffer_id: 99,
+            descriptor: Default::default(),
         };
         let args = vec![Value::from("data"), Value::GpuTensor(handle.clone())];
         let Value::Struct(s) = run_struct(args).expect("struct") else {
@@ -786,11 +787,13 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 2,
             buffer_id: 11,
+            descriptor: Default::default(),
         };
         let second = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 2,
             buffer_id: 12,
+            descriptor: Default::default(),
         };
         let cell = CellArray::new(
             vec![

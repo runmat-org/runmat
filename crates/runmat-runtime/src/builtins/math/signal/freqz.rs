@@ -843,6 +843,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(resident, Value::Num(1.0), &[], None)

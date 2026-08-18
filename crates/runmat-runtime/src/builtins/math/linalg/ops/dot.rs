@@ -1206,6 +1206,7 @@ pub(crate) mod tests {
                 device_id: lhs.device_id.wrapping_add(10_000),
                 buffer_id: lhs.buffer_id,
                 shape: vec![1, 3],
+                descriptor: Default::default(),
             };
             assert!(!valid_provider_dot_output(
                 &unowned_rejection,

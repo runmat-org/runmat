@@ -378,6 +378,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: 999_991,
                 buffer_id: 999_991,
+                descriptor: Default::default(),
             }),
         ] {
             let error = block_on(gobjects_builtin(vec![value])).unwrap_err();

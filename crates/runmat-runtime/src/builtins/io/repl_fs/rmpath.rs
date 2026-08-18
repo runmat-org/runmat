@@ -471,6 +471,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_446_001,
+            descriptor: Default::default(),
         });
         for invalid in [Value::Int(runmat_builtins::IntValue::U8(1)), resident] {
             let error = rmpath_builtin(vec![invalid]).expect_err("numeric path must reject");

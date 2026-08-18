@@ -61,6 +61,7 @@ fn bitand_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 70,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_integer_type(
         &signed,
@@ -81,6 +82,7 @@ fn bitand_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 71,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_integer_type(
         &unsigned,
@@ -251,6 +253,7 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 72,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_integer_type(
         &signed,
@@ -271,6 +274,7 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 73,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_integer_type(
         &unsigned,
@@ -425,6 +429,7 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 74,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_integer_type(
         &signed_value,
@@ -444,6 +449,7 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 75,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::set_handle_integer_type(
         &unsigned_value,
@@ -463,6 +469,7 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 76,
+        descriptor: Default::default(),
     };
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(double_value),
@@ -1854,6 +1861,7 @@ fn swapbytes_declares_exact_integer_contract_and_gates_explicit_gpu_fallback() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX - 454,
+        descriptor: Default::default(),
     };
     runmat_accelerate_api::mark_handle_explicit(&handle);
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);

@@ -992,6 +992,7 @@ pub(crate) mod tests {
                 shape: vec![1, codes.len()],
                 device_id: 0,
                 buffer_id: 9_343_001,
+                descriptor: Default::default(),
             });
             let err =
                 addpath_builtin(vec![resident]).expect_err("resident form rejects before gather");

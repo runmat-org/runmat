@@ -141,6 +141,10 @@ impl TestProvider {
             shape,
             device_id: 0,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            ),
         };
         runmat_accelerate_api::mark_residency(&handle);
         handle

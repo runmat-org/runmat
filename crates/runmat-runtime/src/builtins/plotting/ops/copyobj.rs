@@ -604,6 +604,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 510 - offset,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
             let result = copyobj_builtin(vec![Value::GpuTensor(handle.clone()), Value::Num(1.0)]);
@@ -635,6 +636,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 610 - offset,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
             let result =

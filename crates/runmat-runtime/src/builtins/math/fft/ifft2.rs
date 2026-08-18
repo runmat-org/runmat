@@ -1196,6 +1196,7 @@ pub(crate) mod tests {
                 shape: spectrum.shape.clone(),
                 device_id: raw.device_id,
                 buffer_id: raw.buffer_id,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_storage(
                 &second,
@@ -1300,6 +1301,7 @@ pub(crate) mod tests {
             shape: spectrum.shape.clone(),
             device_id: raw.device_id,
             buffer_id: raw.buffer_id,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_storage(
             &second,

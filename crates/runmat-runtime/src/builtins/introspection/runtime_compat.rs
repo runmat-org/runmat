@@ -204,7 +204,7 @@ mod tests {
         assert!(version_builtin(vec![Value::Int(runmat_builtins::IntValue::I32(1))]).is_err());
         assert!(ver_less_than_builtin(
             Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::from("26.1"),
+            Value::from(crate::compatibility::MATLAB_COMPATIBILITY_VERSION),
         )
         .is_err());
         assert!(ver_less_than_builtin(

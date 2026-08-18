@@ -138,6 +138,12 @@ pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
         .read()
         .ok()
         .and_then(|guard| guard.get(&handle_identity(handle)).copied())
+        .or_else(|| {
+            handle
+                .descriptor
+                .element_type
+                .and_then(NumericElementType::precision)
+        })
 }
 
 /// Clear any recorded precision metadata for a GPU tensor handle.
@@ -164,6 +170,12 @@ pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
         .read()
         .ok()
         .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
+        .or_else(|| {
+            handle
+                .descriptor
+                .element_type
+                .map(|element_type| element_type.class_name().to_string())
+        })
 }
 
 /// Clear any recorded MATLAB underlying class metadata for a GPU tensor handle.
@@ -310,6 +322,12 @@ pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementTyp
         .read()
         .ok()
         .and_then(|guard| guard.get(&handle_identity(handle)).copied())
+        .or_else(|| {
+            handle
+                .descriptor
+                .element_type
+                .and_then(NumericElementType::integer_type)
+        })
 }
 
 /// Clear the native integer class annotation for a released handle.
@@ -325,6 +343,30 @@ impl Default for GpuTensorStorage {
     }
 }
 
+/// Durable physical description of a provider-owned numeric buffer.
+///
+/// Legacy and synthetic handles may leave fields unset while their creation
+/// sites migrate. Provider-created handles populate element type and storage
+/// at allocation time so cloning or serializing a handle does not discard its
+/// physical interpretation. Provenance is populated by ownership-aware
+/// runtime boundaries as those call sites migrate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuTensorDescriptor {
+    pub element_type: Option<NumericElementType>,
+    pub storage: Option<GpuTensorStorage>,
+    pub provenance: Option<GpuHandleProvenance>,
+}
+
+impl GpuTensorDescriptor {
+    pub const fn numeric(element_type: NumericElementType, storage: GpuTensorStorage) -> Self {
+        Self {
+            element_type: Some(element_type),
+            storage: Some(storage),
+            provenance: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {
     pub shape: Vec<usize>,
@@ -333,6 +375,34 @@ pub struct GpuTensorHandle {
     /// provider routing is keyed by this value.
     pub device_id: u32,
     pub buffer_id: u64,
+    #[serde(default)]
+    pub descriptor: GpuTensorDescriptor,
+}
+
+impl GpuTensorHandle {
+    pub fn new(shape: Vec<usize>, device_id: u32, buffer_id: u64) -> Self {
+        Self {
+            shape,
+            device_id,
+            buffer_id,
+            descriptor: GpuTensorDescriptor::default(),
+        }
+    }
+
+    pub fn with_numeric_descriptor(
+        mut self,
+        element_type: NumericElementType,
+        storage: GpuTensorStorage,
+    ) -> Self {
+        self.descriptor.element_type = Some(element_type);
+        self.descriptor.storage = Some(storage);
+        self
+    }
+
+    pub fn with_provenance(mut self, provenance: GpuHandleProvenance) -> Self {
+        self.descriptor.provenance = Some(provenance);
+        self
+    }
 }
 
 /// Semantic origin of a resident handle.
@@ -357,6 +427,7 @@ pub fn handle_provenance(handle: &GpuTensorHandle) -> Option<GpuHandleProvenance
         .read()
         .ok()
         .and_then(|guard| guard.get(&handle_identity(handle)).copied())
+        .or(handle.descriptor.provenance)
 }
 
 pub fn clear_handle_provenance(handle: &GpuTensorHandle) {
@@ -377,8 +448,10 @@ pub fn handle_is_explicit(handle: &GpuTensorHandle) -> bool {
     handle_provenance(handle) == Some(GpuHandleProvenance::Explicit)
 }
 
-/// Clear every API-owned annotation for a released handle, including backend
-/// residency tracking registered through [`register_residency_clear`].
+/// Clear mutable API side annotations for a released or freshly reused handle,
+/// including backend residency tracking registered through
+/// [`register_residency_clear`]. The handle-owned physical descriptor remains
+/// available on existing handle values.
 pub fn clear_handle_metadata(handle: &GpuTensorHandle) {
     clear_residency(handle);
     clear_handle_precision(handle);
@@ -716,6 +789,7 @@ pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
         .read()
         .ok()
         .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
+        .or(handle.descriptor.storage)
         .unwrap_or(GpuTensorStorage::Real)
 }
 
@@ -4396,6 +4470,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: 404,
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -4415,6 +4490,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: 404,
                 buffer_id: 2,
+                descriptor: Default::default(),
             };
             set_handle_integer_type(&handle, IntegerElementType::U64);
             Ok(handle)
@@ -4507,11 +4583,7 @@ mod tests {
     }
 
     fn test_handle(device_id: u32) -> GpuTensorHandle {
-        GpuTensorHandle {
-            shape: vec![1],
-            device_id,
-            buffer_id: 42,
-        }
+        GpuTensorHandle::new(vec![1], device_id, 42)
     }
 
     #[test]
@@ -4630,6 +4702,40 @@ mod tests {
     }
 
     #[test]
+    fn gpu_handle_descriptor_survives_clone_serialization_and_side_table_cleanup() {
+        let handle = GpuTensorHandle::new(vec![2, 3], 17, 29)
+            .with_numeric_descriptor(
+                NumericElementType::U64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .with_provenance(GpuHandleProvenance::Explicit);
+        let cloned = handle.clone();
+        clear_handle_metadata(&handle);
+        assert_eq!(handle_integer_type(&cloned), Some(IntegerElementType::U64));
+        assert_eq!(handle_precision(&cloned), None);
+        assert_eq!(
+            handle_storage(&cloned),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            handle_provenance(&cloned),
+            Some(GpuHandleProvenance::Explicit)
+        );
+        assert_eq!(handle_class_name(&cloned).as_deref(), Some("uint64"));
+
+        let encoded = serde_json::to_string(&cloned).expect("serialize durable handle");
+        let decoded: GpuTensorHandle =
+            serde_json::from_str(&encoded).expect("deserialize durable handle");
+        assert_eq!(decoded, cloned);
+
+        let legacy: GpuTensorHandle =
+            serde_json::from_str(r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#)
+                .expect("deserialize legacy handle");
+        assert_eq!(legacy.descriptor, GpuTensorDescriptor::default());
+        assert_eq!(handle_storage(&legacy), GpuTensorStorage::Real);
+    }
+
+    #[test]
     fn numeric_transfer_default_adapter_preserves_double_and_integer_storage() {
         let provider = LegacyNumericProvider;
         let double = HostNumericTensorView {
@@ -4685,6 +4791,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: 404,
             buffer_id: 3,
+            descriptor: Default::default(),
         };
         set_handle_precision(&single_handle, ProviderPrecision::F32);
         let error = resolve_ready(provider.download_numeric(&single_handle))
@@ -4696,6 +4803,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: 404,
             buffer_id: 4,
+            descriptor: Default::default(),
         };
         set_handle_integer_type(&complex_integer_handle, IntegerElementType::I16);
         set_handle_storage(

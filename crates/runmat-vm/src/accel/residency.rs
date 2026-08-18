@@ -246,11 +246,13 @@ mod tests {
             shape: vec![1],
             device_id: 101,
             buffer_id: 7,
+            descriptor: Default::default(),
         };
         let second = GpuTensorHandle {
             shape: vec![1],
             device_id: 202,
             buffer_id: 7,
+            descriptor: Default::default(),
         };
         let value = Value::OutputList(vec![
             Value::GpuTensor(first.clone()),
@@ -271,6 +273,7 @@ mod tests {
             shape: vec![1],
             device_id: 7,
             buffer_id: 7001,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&handle);
         assert!(fusion_residency::is_resident(&handle));
@@ -291,6 +294,7 @@ mod tests {
             shape: vec![1],
             device_id: 8,
             buffer_id: 8001,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&handle);
         assert!(fusion_residency::is_resident(&handle));

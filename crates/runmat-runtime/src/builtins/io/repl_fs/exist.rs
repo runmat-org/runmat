@@ -824,6 +824,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = exist_builtin(resident, Vec::new()).expect_err("resident name must reject");
         assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);

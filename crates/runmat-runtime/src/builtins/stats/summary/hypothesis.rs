@@ -1944,6 +1944,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: 0,
             buffer_id: 9_421_001,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_automatic(&automatic);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -1955,6 +1956,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: 0,
             buffer_id: 9_421_002,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&explicit);
         let err = ensure_kstest_extensions(&Value::GpuTensor(explicit.clone()), &[])
@@ -1984,6 +1986,7 @@ mod tests {
             shape: vec![2, 2],
             device_id: 0,
             buffer_id: 9_421_003,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&explicit);
         let resident_cdf = Value::Cell(
@@ -2005,6 +2008,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 9_421,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&poison);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);

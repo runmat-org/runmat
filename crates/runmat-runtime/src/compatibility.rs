@@ -142,26 +142,33 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_release_label_is_centralized_in_the_repository() {
+    fn compatibility_pin_is_centralized_in_the_repository() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let canonical_policy = workspace_root.join("docs/development/backwards-compat.md");
         let runtime_policy = workspace_root.join("crates/runmat-runtime/src/compatibility.rs");
         let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
         let bare_release_label = release_label.strip_prefix('r').unwrap_or(&release_label);
-        let contains_release_token = |contents: &str| {
+        let product_version = MATLAB_COMPATIBILITY_VERSION.to_ascii_lowercase();
+        let contains_pin_token = |contents: &str| {
             let contents = contents.to_ascii_lowercase();
-            [release_label.as_str(), bare_release_label]
-                .into_iter()
-                .any(|needle| {
-                    contents.match_indices(needle).any(|(start, _)| {
-                        let end = start + needle.len();
-                        let starts_at_boundary =
-                            start == 0 || !contents.as_bytes()[start - 1].is_ascii_alphanumeric();
-                        let ends_at_boundary = end == contents.len()
-                            || !contents.as_bytes()[end].is_ascii_alphanumeric();
-                        starts_at_boundary && ends_at_boundary
-                    })
+            [
+                release_label.as_str(),
+                bare_release_label,
+                product_version.as_str(),
+            ]
+            .into_iter()
+            .any(|needle| {
+                contents.match_indices(needle).any(|(start, _)| {
+                    let end = start + needle.len();
+                    let is_version_character =
+                        |byte: u8| byte.is_ascii_alphanumeric() || byte == b'.';
+                    let starts_at_boundary =
+                        start == 0 || !is_version_character(contents.as_bytes()[start - 1]);
+                    let ends_at_boundary =
+                        end == contents.len() || !is_version_character(contents.as_bytes()[end]);
+                    starts_at_boundary && ends_at_boundary
                 })
+            })
         };
         let mut pending = vec![workspace_root.clone()];
         while let Some(directory) = pending.pop() {
@@ -179,8 +186,8 @@ mod tests {
                         continue;
                     };
                     assert!(
-                        !contains_release_token(&contents),
-                        "the compatibility release label must appear only in {} and the runtime policy: {}",
+                        !contains_pin_token(&contents),
+                        "the compatibility pin must appear only in {} and the runtime policy: {}",
                         canonical_policy.display(),
                         path.display()
                     );

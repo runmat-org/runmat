@@ -765,6 +765,12 @@ mod tests {
                     .upload_numeric(&expected.as_view())
                     .expect("shared WGPU numeric upload");
                 let element_type = expected.data.element_type();
+                assert_eq!(handle.descriptor.element_type, Some(element_type));
+                assert_eq!(handle.descriptor.storage, Some(storage));
+                runmat_accelerate_api::clear_handle_precision(&handle);
+                runmat_accelerate_api::clear_handle_integer_type(&handle);
+                runmat_accelerate_api::clear_handle_storage(&handle);
+                runmat_accelerate_api::clear_handle_class_name(&handle);
                 assert_eq!(
                     provider
                         .get_entry_raw(&handle)

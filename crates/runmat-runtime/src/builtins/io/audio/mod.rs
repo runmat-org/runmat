@@ -2110,6 +2110,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: 0,
             buffer_id: 9_359_001,
+            descriptor: Default::default(),
         });
         let error = block_on(audioread_builtin(Value::from("unused.wav"), vec![resident]))
             .expect_err("resident sample range must reject");

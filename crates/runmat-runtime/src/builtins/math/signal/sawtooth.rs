@@ -663,6 +663,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: 0,
             buffer_id: 9_300_003,
+            descriptor: Default::default(),
         };
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(Value::GpuTensor(handle))

@@ -1466,6 +1466,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: 0,
             buffer_id: 9_399_002,
+            descriptor: Default::default(),
         });
         let error = futures::executor::block_on(duration_builtin(vec![resident]))
             .expect_err("GPU extension gate");

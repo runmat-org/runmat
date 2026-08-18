@@ -897,6 +897,7 @@ pub(crate) mod tests {
             shape: vec![1, 2],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 388,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &resident,

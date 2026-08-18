@@ -1003,6 +1003,7 @@ mod tests {
             shape: vec![2, 2],
             device_id: 0,
             buffer_id: u64::MAX - 155,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,
@@ -1211,6 +1212,7 @@ mod tests {
             shape: vec![1, 1, 4],
             device_id: 0,
             buffer_id: u64::MAX - 156,
+            descriptor: Default::default(),
         };
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = futures::executor::block_on(imshow_builtin(vec![Value::GpuTensor(handle)]))
@@ -1227,6 +1229,7 @@ mod tests {
             shape: vec![1, 1, 3],
             device_id: 0,
             buffer_id: u64::MAX - 157,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         let error =

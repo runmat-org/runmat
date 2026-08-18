@@ -819,6 +819,13 @@ pub(crate) mod tests {
                 shape,
                 device_id,
                 buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    match precision {
+                        ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                        ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+                    },
+                    storage,
+                ),
             };
             runmat_accelerate_api::set_handle_precision(&handle, precision);
             runmat_accelerate_api::set_handle_storage(&handle, storage);

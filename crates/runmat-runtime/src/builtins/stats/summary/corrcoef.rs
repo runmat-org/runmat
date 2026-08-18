@@ -1332,7 +1332,6 @@ fn set_hermitian(buffer: &mut [Complex64], dim: usize, row: usize, col: usize, v
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    #[cfg(feature = "wgpu")]
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;

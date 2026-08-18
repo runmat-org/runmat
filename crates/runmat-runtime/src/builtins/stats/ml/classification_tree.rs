@@ -2187,6 +2187,7 @@ mod tests {
             shape: vec![4, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = block_on(fitctree_builtin(
             poison,

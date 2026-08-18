@@ -3036,6 +3036,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let control_err = run_diag(vector(), vec![resident_control]).unwrap_err();
         assert_eq!(
@@ -3046,6 +3047,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 1,
+            descriptor: Default::default(),
         });
         let like_err = run_diag(vector(), vec![Value::from("like"), resident_like]).unwrap_err();
         assert_eq!(like_err.identifier(), DIAG_LIKE_EXTENSION.error_identifier);

@@ -888,6 +888,7 @@ fn detect_import_options_rejects_nested_resident_input_before_provider_access() 
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     });
     let mut options = runmat_builtins::StructValue::new();
     options.fields.insert("Range".to_string(), resident);
@@ -2894,6 +2895,7 @@ fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
         shape: vec![2, 2],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     });
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let count_error = block_on(head_builtin(Value::Num(1.0), vec![resident]))
@@ -3007,6 +3009,7 @@ fn height_reads_resident_shape_without_provider_or_data_access() {
         shape: vec![13, 4],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     };
     assert!(matches!(
         block_on(height_builtin(Value::GpuTensor(handle))).unwrap(),
@@ -3085,6 +3088,7 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     });
     let nested = crate::make_cell(vec![resident], 1, 1).unwrap();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -4355,6 +4359,7 @@ fn vartype_accepts_text_and_rejects_integer_or_resident_values_before_gather() {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
+        descriptor: Default::default(),
     });
     for invalid in [Value::Int(IntValue::U64(u64::MAX)), resident] {
         let error = block_on(vartype_builtin(invalid)).expect_err("invalid vartype input");

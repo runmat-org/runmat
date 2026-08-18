@@ -2548,6 +2548,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 1,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U32);
         assert!(native_integer_value_is_exact_f64(&Value::GpuTensor(
@@ -2699,6 +2700,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX - 1,
             buffer_id: u64::MAX - 2,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I32);
         for builtin in ["mustBeText", "mustBeTextScalar", "mustBeValidVariableName"] {
@@ -3231,6 +3233,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_419_006,
+            descriptor: Default::default(),
         });
         assert!(namedargs2cell_value(resident).is_err());
     }
@@ -3834,6 +3837,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = dispatch_validator("validateFunctionSignaturesJSON", vec![resident])
             .expect_err("resident numeric input must reject as invalid text");

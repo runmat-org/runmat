@@ -734,6 +734,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let err = run_error(vec![resident]).expect_err("resident msg is not text");
         assert_eq!(err.identifier(), ERROR_ERROR_INVALID_INPUT.identifier);

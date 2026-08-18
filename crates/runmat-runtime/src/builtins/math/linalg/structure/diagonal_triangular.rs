@@ -1055,6 +1055,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id,
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -1103,6 +1104,7 @@ mod tests {
             shape: vec![3, 3],
             device_id: provider.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         })
     }
 
@@ -1115,6 +1117,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -1196,6 +1199,7 @@ mod tests {
             shape: vec![2, 2],
             device_id: FALLBACK_PROVIDER.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
         runmat_accelerate_api::set_handle_precision(

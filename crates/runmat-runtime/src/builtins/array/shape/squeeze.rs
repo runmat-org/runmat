@@ -312,7 +312,6 @@ fn squeeze_shape(shape: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
     use futures::executor::block_on;
 
     fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {

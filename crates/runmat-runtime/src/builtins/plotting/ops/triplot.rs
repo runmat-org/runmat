@@ -805,6 +805,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: 0,
             buffer_id: 9_462_001,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&handle);
         let error = block_on(triplot_builtin(vec![

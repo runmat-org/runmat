@@ -1682,6 +1682,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&handle);
         let error = block_on(evaluate(&[Value::GpuTensor(handle.clone())]))

@@ -621,6 +621,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_347_001,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_storage(
             &complex_handle,

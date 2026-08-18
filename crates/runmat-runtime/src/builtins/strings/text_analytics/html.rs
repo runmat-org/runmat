@@ -2282,6 +2282,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_419_001,
+            descriptor: Default::default(),
         });
         let resident = futures::executor::block_on(html_tree_builtin(vec![resident]))
             .expect_err("resident input must reject before provider access");
@@ -2632,6 +2633,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = futures::executor::block_on(find_element_builtin(vec![
             resident,
@@ -2676,6 +2678,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = futures::executor::block_on(get_attribute_builtin(vec![
             resident,
@@ -2739,6 +2742,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = futures::executor::block_on(extract_html_text_builtin(vec![resident]))
             .expect_err("resident HTML input");

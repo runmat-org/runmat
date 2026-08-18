@@ -1058,6 +1058,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,
@@ -1083,6 +1084,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 1,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_automatic(&automatic);
         let input = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
@@ -1100,6 +1102,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 2,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&explicit);
         let explicit_error = join_builtin(

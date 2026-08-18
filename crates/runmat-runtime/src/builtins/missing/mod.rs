@@ -3041,6 +3041,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_419_005,
+            descriptor: Default::default(),
         });
         let error = block_on(missing_builtin(vec![value]))
             .expect_err("MATLAB-compatible mode must reject shaped missing");
@@ -3683,6 +3684,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_451_002,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&handle);
         let error = block_on(standardize_missing_builtin(

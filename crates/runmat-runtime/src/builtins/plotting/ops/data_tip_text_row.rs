@@ -454,6 +454,7 @@ mod tests {
             shape: vec![1, 3],
             device_id: 7,
             buffer_id: 42,
+            descriptor: Default::default(),
         };
         let row = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),
@@ -546,6 +547,7 @@ mod tests {
             shape: vec![1, 2],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 397,
+            descriptor: Default::default(),
         };
         let error = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),

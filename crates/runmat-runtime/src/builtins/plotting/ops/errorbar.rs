@@ -1611,6 +1611,7 @@ mod tests {
                 shape: vec![1, 2],
                 device_id: 0,
                 buffer_id,
+                descriptor: Default::default(),
             })
         };
         let x = make(9_401_001);

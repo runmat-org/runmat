@@ -2160,6 +2160,13 @@ mod tests {
                 shape,
                 device_id,
                 buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    match precision {
+                        ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                        ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+                    },
+                    storage,
+                ),
             };
             runmat_accelerate_api::set_handle_precision(&handle, precision);
             runmat_accelerate_api::set_handle_storage(&handle, storage);
@@ -2703,6 +2710,7 @@ mod tests {
             shape: input.shape.clone(),
             device_id: input.device_id.wrapping_add(10_000),
             buffer_id: input.buffer_id,
+            descriptor: Default::default(),
         };
         let frees_before = provider.frees.load(Ordering::Relaxed);
 
@@ -2758,6 +2766,7 @@ mod tests {
                     shape: vec![1, 2],
                     device_id: provider.device_id.wrapping_add(10_000),
                     buffer_id: provider.last_output.load(Ordering::Relaxed),
+                    descriptor: Default::default(),
                 };
                 provider.free(&unknown).expect("test cleanup");
             } else {

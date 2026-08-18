@@ -1248,6 +1248,7 @@ pub(crate) mod tests {
             shape: vec![2, 2],
             device_id: ambient.device_id().wrapping_add(1),
             buffer_id: u64::MAX - 396,
+            descriptor: Default::default(),
         };
         assert!(runmat_accelerate_api::provider_for_handle(&handle).is_none());
         call_ctranspose(Value::GpuTensor(handle))

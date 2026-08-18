@@ -600,7 +600,6 @@ fn validate_size_argument(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
-    #[cfg(feature = "wgpu")]
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntegerStorage;

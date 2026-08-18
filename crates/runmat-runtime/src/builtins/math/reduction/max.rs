@@ -3441,6 +3441,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 42,
+            descriptor: Default::default(),
         });
         let err = evaluate(Value::Tensor(tensor), &[placeholder(), dim_handle])
             .expect_err("expected error");

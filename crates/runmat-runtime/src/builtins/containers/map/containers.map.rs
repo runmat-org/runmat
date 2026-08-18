@@ -3667,6 +3667,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 77,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let char_map = containers_map_builtin(Vec::new()).unwrap();
         let checks = [

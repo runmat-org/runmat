@@ -1237,16 +1237,19 @@ mod tests {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         let automatic_output = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 2,
+            descriptor: Default::default(),
         };
         let explicit_output = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 901,
             buffer_id: 3,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&explicit_input);
 

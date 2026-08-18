@@ -265,6 +265,7 @@ pub(crate) mod tests {
                 shape: vec![],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: Default::default(),
             };
             let result = ndims_builtin(Value::GpuTensor(handle)).expect("ndims");
             assert_eq!(result, Value::Num(2.0));

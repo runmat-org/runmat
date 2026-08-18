@@ -1247,6 +1247,7 @@ mod integer_compatibility_tests {
             shape: vec![2, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::mark_handle_explicit(&handle);
         let resident = Value::GpuTensor(handle.clone());
@@ -1475,6 +1476,7 @@ mod integer_compatibility_tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 426,
+            descriptor: Default::default(),
         };
         let value = Value::GpuTensor(handle.clone());
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);

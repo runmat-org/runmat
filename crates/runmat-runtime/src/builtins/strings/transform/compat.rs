@@ -2522,6 +2522,7 @@ mod tests {
                 shape: vec![1, 1],
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 350 - offset,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
             let result = block(append_builtin(vec![
@@ -2777,6 +2778,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = block(insert_after_builtin(
             Value::String("abc".into()),
@@ -2969,6 +2971,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let url_error = block(erase_urls_builtin(resident.clone())).unwrap_err();
         assert_eq!(
@@ -3070,6 +3073,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let after = block(extract_after_builtin(
             Value::String("abc".into()),
@@ -3203,6 +3207,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
         let err = block(deblank_builtin(nested)).unwrap_err();

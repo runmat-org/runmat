@@ -2426,6 +2426,7 @@ mod tests {
             shape: vec![1],
             device_id: 41,
             buffer_id: 7,
+            descriptor: Default::default(),
         });
         let err = enforce_spawn_value_concurrency_policy(&value)
             .expect_err("reject policy should block spawn capture");
@@ -2443,6 +2444,7 @@ mod tests {
             shape: vec![1],
             device_id: 42,
             buffer_id: 9,
+            descriptor: Default::default(),
         });
         enforce_spawn_value_concurrency_policy(&value)
             .expect("immutable sharing policy should allow spawn capture");
@@ -2458,6 +2460,7 @@ mod tests {
                     shape: vec![1],
                     device_id: 41,
                     buffer_id: 11,
+                    descriptor: Default::default(),
                 }),
             ],
             1,
@@ -2481,6 +2484,7 @@ mod tests {
             shape: vec![1],
             device_id: 99,
             buffer_id: 13,
+            descriptor: Default::default(),
         });
         let err = enforce_spawn_value_concurrency_policy(&value)
             .expect_err("missing provider should reject spawn GPU handle capture");
@@ -2503,6 +2507,7 @@ mod tests {
                     shape: vec![1],
                     device_id: 41,
                     buffer_id: 21,
+                    descriptor: Default::default(),
                 }),
             ],
         });
@@ -2525,6 +2530,7 @@ mod tests {
                 shape: vec![1],
                 device_id: 41,
                 buffer_id: 31,
+                descriptor: Default::default(),
             }),
         );
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");

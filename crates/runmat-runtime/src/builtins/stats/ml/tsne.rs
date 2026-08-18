@@ -1507,6 +1507,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_provenance(
             &explicit,

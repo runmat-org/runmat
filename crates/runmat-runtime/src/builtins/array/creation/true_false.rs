@@ -1098,6 +1098,7 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX,
+            descriptor: Default::default(),
         });
         let error = block_on(false_builtin(vec![invalid])).unwrap_err();
         assert_eq!(

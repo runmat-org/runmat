@@ -914,6 +914,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 98,
             buffer_id: 419_001,
+            descriptor: Default::default(),
         });
         let error = block_on(importdata_builtin(resident, Vec::new()))
             .expect_err("resident filename must reject");

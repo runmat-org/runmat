@@ -689,6 +689,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 9_419_007,
+            descriptor: Default::default(),
         });
         let nargin = dispatch_narginchk(vec![resident.clone(), Value::Num(2.0)])
             .expect_err("resident nargin bound must reject");

@@ -602,6 +602,7 @@ mod tests {
             shape: vec![1, 0],
             device_id: 0,
             buffer_id: 0,
+            descriptor: Default::default(),
         };
         let len = gpu_vector_len("test", "x", &handle).expect("vector length");
         assert_eq!(len, 0);

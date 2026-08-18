@@ -514,6 +514,7 @@ pub(crate) mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 2,
+                descriptor: Default::default(),
             };
             runmat_accelerate_api::set_handle_precision(&handle, self.precision());
             runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
@@ -556,6 +557,7 @@ pub(crate) mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -805,6 +807,7 @@ pub(crate) mod tests {
             shape: vec![1, 3],
             device_id: provider.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         let source_metadata = (
             runmat_accelerate_api::handle_storage(&handle),
@@ -847,6 +850,7 @@ pub(crate) mod tests {
             shape: vec![1, 3],
             device_id: provider.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         };
         let err =
             heaviside_builtin(Value::GpuTensor(handle)).expect_err("provider error should surface");

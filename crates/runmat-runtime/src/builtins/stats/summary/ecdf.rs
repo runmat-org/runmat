@@ -1720,6 +1720,7 @@ mod tests {
             shape: vec![2, 1],
             device_id: 0,
             buffer_id: 9_300_041,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,
@@ -1742,6 +1743,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 3,
+            descriptor: Default::default(),
         });
         let prepared = block_on(runmat_accelerate::prepare_builtin_args(
             "cdfplot",

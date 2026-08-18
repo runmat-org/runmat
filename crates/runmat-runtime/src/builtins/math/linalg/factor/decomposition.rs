@@ -2286,6 +2286,7 @@ mod tests {
             shape: vec![2, 2],
             device_id: 0,
             buffer_id: 9_300_001,
+            descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_integer_type(
             &handle,
@@ -2449,6 +2450,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: u32::MAX - 397,
             buffer_id: u64::MAX - 397,
+            descriptor: Default::default(),
         });
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         for error in [

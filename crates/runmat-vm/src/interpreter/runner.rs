@@ -1754,6 +1754,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 777_001,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&handle);
         assert!(fusion_residency::is_resident(&handle));
@@ -1782,6 +1783,7 @@ mod tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: 777_002,
+            descriptor: Default::default(),
         };
         fusion_residency::mark(&handle);
         assert!(fusion_residency::is_resident(&handle));
