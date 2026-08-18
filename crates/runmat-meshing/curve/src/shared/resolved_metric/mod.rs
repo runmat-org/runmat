@@ -1,11 +1,9 @@
-mod incidence;
-
 use std::collections::BTreeMap;
 
-use incidence::TopologyIncidence;
 use runmat_geometry_core::{ExactBRepTopology, PersistentEntityId};
 use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
 use runmat_meshing_size::grading::grade_metric_evaluations;
+use runmat_meshing_size::incidence::TopologyMetricIncidence;
 use runmat_meshing_size::metric::{ResolvedMetricEvaluation, ResolvedMetricField};
 
 use super::{
@@ -33,7 +31,7 @@ impl ResolvedCurveMetricField {
         let resolver = ResolvedMetricField::new(request).map_err(|error| {
             SharedCurveError::invalid_request("resolved curve metric", error.to_string())
         })?;
-        let incidence = TopologyIncidence::new(topology);
+        let incidence = TopologyMetricIncidence::new(topology);
         for contribution in &request.contributions {
             let entity_id = match &contribution.scope {
                 MetricContributionScope::Region { region_id } => region_id,
@@ -48,7 +46,7 @@ impl ResolvedCurveMetricField {
         }
         let mut by_edge = BTreeMap::new();
         for edge in &topology.edges {
-            let incident = incidence.incident_entities(edge);
+            let incident = incidence.incident_edge_entities(edge);
             let resolved = resolver.resolve(&incident).map_err(|error| {
                 SharedCurveError::invalid_request(
                     "resolved curve metric intersection",
@@ -60,7 +58,7 @@ impl ResolvedCurveMetricField {
         }
         grade_metric_evaluations(
             request.maximum_grading_ratio,
-            &TopologyIncidence::edge_adjacency(topology),
+            &TopologyMetricIncidence::edge_adjacency(topology),
             &mut by_edge,
         )
         .map_err(|error| {

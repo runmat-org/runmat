@@ -6861,6 +6861,7 @@ name = "runmat-meshing-size"
 version = "0.6.1"
 dependencies = [
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "serde",
  "serde_json",
 ]
