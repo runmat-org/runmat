@@ -54,7 +54,7 @@ pub(super) fn try_binary_hook(
     {
         return None;
     }
-    let output = match operation {
+    let mut output = match operation {
         LogicalBinaryOp::Or => owner.logical_or(lhs, rhs),
         LogicalBinaryOp::Xor => owner.logical_xor(lhs, rhs),
     }
@@ -63,7 +63,7 @@ pub(super) fn try_binary_hook(
         free_rejected_output(&output, &[lhs, rhs]);
         return None;
     }
-    annotate_logical_output(&output, [lhs, rhs]);
+    annotate_logical_output(&mut output, [lhs, rhs]);
     Some(gpu_helpers::logical_gpu_value(output))
 }
 
@@ -72,12 +72,12 @@ pub(super) fn try_unary_hook(input: &GpuTensorHandle) -> Option<Value> {
         return None;
     }
     let owner = gpu_helpers::exact_provider_for_handle(input)?;
-    let output = owner.logical_not(input).ok()?;
+    let mut output = owner.logical_not(input).ok()?;
     if !valid_unary_output(&output, input, owner) {
         free_rejected_output(&output, &[input]);
         return None;
     }
-    annotate_logical_output(&output, [input]);
+    annotate_logical_output(&mut output, [input]);
     Some(gpu_helpers::logical_gpu_value(output))
 }
 
@@ -155,7 +155,7 @@ fn valid_output(
 }
 
 fn annotate_logical_output<'a>(
-    output: &GpuTensorHandle,
+    output: &mut GpuTensorHandle,
     inputs: impl IntoIterator<Item = &'a GpuTensorHandle>,
 ) {
     runmat_accelerate_api::set_handle_logical(output, true);

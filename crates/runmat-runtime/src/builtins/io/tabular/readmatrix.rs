@@ -1342,7 +1342,7 @@ fn tensor_to_gpu(
         tensor::coerce_tensor_dtype(tensor, target_dtype)
     };
     let expected_shape = tensor.shape.clone();
-    let uploaded = gpu_helpers::upload_tensor(owner, &tensor).map_err(|error| {
+    let mut uploaded = gpu_helpers::upload_tensor(owner, &tensor).map_err(|error| {
         readmatrix_error_with(
             &READMATRIX_ERROR_OUTPUT_TYPE,
             format!("readmatrix: failed to restore Like output to its owning provider: {error}"),
@@ -1352,7 +1352,7 @@ fn tensor_to_gpu(
         runmat_accelerate_api::set_handle_logical(&uploaded, true);
     }
     runmat_accelerate_api::set_handle_provenance(
-        &uploaded,
+        &mut uploaded,
         runmat_accelerate_api::GpuHandleProvenance::Explicit,
     );
     let valid = uploaded.buffer_id != prototype.buffer_id

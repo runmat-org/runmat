@@ -2635,7 +2635,8 @@ mod tests {
             let parameter = Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1])
                 .expect("integer parameter");
             let parameter = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&parameter);
+            let parameter =
+                parameter.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let output = block_on(random_builtin(
                 Value::String("Normal".into()),
                 vec![
@@ -2659,7 +2660,7 @@ mod tests {
             let size =
                 Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).expect("integer size");
             let size = gpu_helpers::upload_tensor(provider, &size).expect("upload size");
-            runmat_accelerate_api::mark_handle_explicit(&size);
+            let size = size.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let output = block_on(random_builtin(
                 Value::String("Normal".into()),
                 vec![Value::Num(0.0), Value::Num(1.0), Value::GpuTensor(size)],
@@ -2685,7 +2686,8 @@ mod tests {
         for storage in all_cdf_integer_storages(0) {
             let parameter = Tensor::new_integer(storage, vec![1, 1]).expect("integer parameter");
             let handle = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = block_on(random_builtin(
                 Value::String("Normal".into()),
                 vec![Value::GpuTensor(handle), Value::Num(1.0), Value::Num(2.0)],
@@ -2734,10 +2736,8 @@ mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let integer = Tensor::new_integer(IntegerStorage::I16(vec![0, 1]), vec![2, 1]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
-            runmat_accelerate_api::set_handle_provenance(
-                &handle,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let density = block_on(pdf_builtin(
                 Value::String("Normal".into()),
                 Value::GpuTensor(handle),
@@ -2943,7 +2943,8 @@ mod tests {
         for storage in all_cdf_integer_storages(1) {
             let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer x");
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = block_on(pdf_builtin(
                 Value::String("Normal".into()),
                 Value::GpuTensor(handle),

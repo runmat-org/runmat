@@ -1863,7 +1863,7 @@ fn swapbytes_declares_exact_integer_contract_and_gates_explicit_gpu_fallback() {
         buffer_id: u64::MAX - 454,
         descriptor: Default::default(),
     };
-    runmat_accelerate_api::mark_handle_explicit(&handle);
+    let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(swapbytes_builtin(Value::GpuTensor(handle)))
         .expect_err("strict mode rejects explicit GPU fallback before provider access");

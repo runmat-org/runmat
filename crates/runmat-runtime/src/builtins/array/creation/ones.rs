@@ -582,7 +582,7 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
                 tensor::ones(shape).map_err(|error| builtin_error(format!("ones: {error}")))?;
             let gpu = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|error| builtin_error(format!("ones: {error}")))?;
-            let gpu = validate_constructor_gpu_output(
+            let mut gpu = validate_constructor_gpu_output(
                 "ones",
                 provider,
                 gpu,
@@ -593,7 +593,7 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
                 true,
             )
             .map_err(builtin_error)?;
-            runmat_accelerate_api::mark_handle_explicit(&gpu);
+            runmat_accelerate_api::mark_handle_explicit(&mut gpu);
             return Ok(Value::GpuTensor(gpu));
         }
         OutputTemplate::GpuArray(_) | OutputTemplate::Like(_) => {
@@ -611,7 +611,7 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
         };
         (Some(precision), None)
     };
-    let output = validate_constructor_gpu_output(
+    let mut output = validate_constructor_gpu_output(
         "ones",
         provider,
         output,
@@ -622,7 +622,7 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
         false,
     )
     .map_err(builtin_error)?;
-    runmat_accelerate_api::mark_handle_explicit(&output);
+    runmat_accelerate_api::mark_handle_explicit(&mut output);
     Ok(Value::GpuTensor(output))
 }
 

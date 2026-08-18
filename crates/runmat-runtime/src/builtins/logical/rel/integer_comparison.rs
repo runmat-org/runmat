@@ -48,7 +48,7 @@ pub(crate) async fn try_gpu_equality_comparison(
         _ => unreachable!("equality helper only supports eq and ne"),
     };
     match result {
-        Ok(handle) if valid_equality_output(&handle, lhs, rhs, provider) => {
+        Ok(mut handle) if valid_equality_output(&handle, lhs, rhs, provider) => {
             let provenance = [lhs, rhs]
                 .into_iter()
                 .filter_map(runmat_accelerate_api::handle_provenance)
@@ -56,7 +56,7 @@ pub(crate) async fn try_gpu_equality_comparison(
                     *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit
                 })
                 .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-            runmat_accelerate_api::set_handle_provenance(&handle, provenance);
+            runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
             Some(Ok(gpu_helpers::logical_gpu_value(handle)))
         }
         Ok(handle) => {
@@ -193,7 +193,7 @@ pub(crate) async fn try_gpu_ordering_comparison(
         }
     };
     let result = match result {
-        Ok(handle) if valid_ordering_output(&handle, lhs_real, rhs_real, provider) => {
+        Ok(mut handle) if valid_ordering_output(&handle, lhs_real, rhs_real, provider) => {
             let provenance = [lhs, rhs]
                 .into_iter()
                 .filter_map(runmat_accelerate_api::handle_provenance)
@@ -201,7 +201,7 @@ pub(crate) async fn try_gpu_ordering_comparison(
                     *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit
                 })
                 .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-            runmat_accelerate_api::set_handle_provenance(&handle, provenance);
+            runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
             Some(gpu_helpers::logical_gpu_value(handle))
         }
         Ok(handle) => {

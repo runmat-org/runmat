@@ -945,7 +945,8 @@ pub(crate) mod tests {
             )
             .expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = run_ne(Value::GpuTensor(handle), Value::Num(0.0)).expect("ne");
             let Value::GpuTensor(output) = &result else {
                 panic!("explicit gpuArray result must remain resident");
@@ -979,7 +980,7 @@ pub(crate) mod tests {
             .expect("rhs");
         let lhs = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
         let rhs = gpu_helpers::upload_tensor(provider, &rhs).expect("upload rhs");
-        runmat_accelerate_api::mark_handle_explicit(&lhs);
+        let lhs = lhs.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let result = run_ne(Value::GpuTensor(lhs), Value::GpuTensor(rhs)).expect("ne");
         let Value::GpuTensor(output) = &result else {
             panic!("resident comparison must remain resident");

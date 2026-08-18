@@ -596,10 +596,8 @@ mod tests {
             )
             .expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
-            runmat_accelerate_api::set_handle_provenance(
-                &handle,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let output = call(Value::GpuTensor(handle)).expect("resident perms");
             let Value::GpuTensor(output_handle) = &output else {
                 panic!("expected resident output");
@@ -668,7 +666,8 @@ mod tests {
         for (input, expected) in cases {
             let tensor = Tensor::new_integer(input, vec![1, 2]).expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let output = call(Value::GpuTensor(handle)).expect("resident integer perms");
             let Value::GpuTensor(output_handle) = &output else {
                 panic!("expected resident output");

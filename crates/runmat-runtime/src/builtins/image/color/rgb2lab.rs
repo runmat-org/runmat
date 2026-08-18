@@ -715,7 +715,7 @@ mod tests {
             &handle,
             runmat_accelerate_api::ProviderPrecision::F64,
         );
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(rgb2lab_builtin(
             Value::GpuTensor(handle.clone()),
@@ -735,7 +735,8 @@ mod tests {
             let rgb = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3])
                 .expect("RGB");
             let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload RGB");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
             let value = block_on(rgb2lab_builtin(
                 Value::GpuTensor(source.clone()),

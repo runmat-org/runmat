@@ -1946,7 +1946,8 @@ mod tests {
             buffer_id: 9_421_001,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_automatic(&automatic);
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         ensure_kstest_extensions(&Value::GpuTensor(automatic.clone()), &[])
             .expect("automatic residency must retain transparent gather fallback");
@@ -1958,7 +1959,8 @@ mod tests {
             buffer_id: 9_421_002,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&explicit);
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let err = ensure_kstest_extensions(&Value::GpuTensor(explicit.clone()), &[])
             .expect_err("explicit gpuArray input must retain its compatibility gate");
         runmat_accelerate_api::clear_handle_metadata(&explicit);
@@ -1988,7 +1990,8 @@ mod tests {
             buffer_id: 9_421_003,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&explicit);
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let resident_cdf = Value::Cell(
             runmat_builtins::CellArray::new(vec![Value::GpuTensor(explicit.clone())], 1, 1)
                 .expect("singleton cell"),
@@ -2010,7 +2013,7 @@ mod tests {
             buffer_id: u64::MAX - 9_421,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&poison);
+        let poison = poison.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
 
         let err = block_on(kstest_builtin(

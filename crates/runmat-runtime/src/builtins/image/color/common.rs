@@ -92,7 +92,6 @@ struct ResidentMetadata {
     logical: bool,
     transpose: Option<runmat_accelerate_api::TransposeInfo>,
     class_name: Option<String>,
-    provenance: Option<GpuHandleProvenance>,
 }
 
 pub(crate) struct ResidentInputGuard {
@@ -135,7 +134,6 @@ impl ResidentMetadata {
             logical: runmat_accelerate_api::handle_is_logical(handle),
             transpose: runmat_accelerate_api::handle_transpose_info(handle),
             class_name: runmat_accelerate_api::handle_class_name(handle),
-            provenance: runmat_accelerate_api::handle_provenance(handle),
         }
     }
 
@@ -161,10 +159,6 @@ impl ResidentMetadata {
         match self.class_name.as_ref() {
             Some(value) => runmat_accelerate_api::set_handle_class_name(handle, value.clone()),
             None => runmat_accelerate_api::clear_handle_class_name(handle),
-        }
-        match self.provenance {
-            Some(value) => runmat_accelerate_api::set_handle_provenance(handle, value),
-            None => runmat_accelerate_api::clear_handle_provenance(handle),
         }
         runmat_accelerate_api::mark_residency(handle);
     }
@@ -253,7 +247,7 @@ pub(crate) fn restore_resident_numeric_result_for_sources(
         }
         return Ok(value);
     }
-    let output = match crate::builtins::common::gpu_helpers::upload_tensor(owner, &tensor) {
+    let mut output = match crate::builtins::common::gpu_helpers::upload_tensor(owner, &tensor) {
         Ok(output) => output,
         Err(error) => {
             for (input, snapshot) in sources.iter().zip(&snapshots) {
@@ -314,7 +308,7 @@ pub(crate) fn restore_resident_numeric_result_for_sources(
         snapshot.restore(input);
     }
     runmat_accelerate_api::set_handle_provenance(
-        &output,
+        &mut output,
         runmat_accelerate_api::handle_provenance(source).unwrap_or(GpuHandleProvenance::Automatic),
     );
     runmat_accelerate_api::mark_residency(&output);
@@ -648,14 +642,16 @@ mod tests {
             let source = gpu_helpers::upload_tensor(provider, &source_tensor).unwrap();
             let single = Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap());
 
-            runmat_accelerate_api::mark_handle_automatic(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             assert!(matches!(
                 restore_resident_numeric_result(Some(&source), single.clone(), "color-test")
                     .unwrap(),
                 Value::Tensor(_)
             ));
 
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let error = restore_resident_numeric_result(Some(&source), single, "color-test")
                 .expect_err("explicit residency cannot silently become host");
             assert!(error

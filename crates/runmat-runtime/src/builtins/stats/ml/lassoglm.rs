@@ -2166,29 +2166,27 @@ mod tests {
             buffer_id: 42_001,
             descriptor: Default::default(),
         };
-        let value = Value::GpuTensor(handle.clone());
         let host = tensor(vec![1.0], vec![1, 1]);
         let distr = Value::from("normal");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
 
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Automatic,
+        let automatic = Value::GpuTensor(
+            handle
+                .clone()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic),
         );
-        ensure_extensions(&value, &host, &distr, &[])
+        ensure_extensions(&automatic, &host, &distr, &[])
             .expect("automatic residency must remain transparent to compatibility policy");
 
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
+        let explicit = Value::GpuTensor(
+            handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
         );
-        let err = ensure_extensions(&value, &host, &distr, &[])
+        let err = ensure_extensions(&explicit, &host, &distr, &[])
             .expect_err("an explicit gpuArray must require the resident-input extension");
         assert_eq!(
             err.identifier(),
             Some("RunMat:compatibility:LassoglmResidentInputExtension")
         );
-        runmat_accelerate_api::clear_handle_provenance(&handle);
     }
 
     #[test]
@@ -2198,11 +2196,8 @@ mod tests {
             device_id: u32::MAX,
             buffer_id: 42_002,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        }
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(lassoglm_builtin(
             Value::GpuTensor(handle.clone()),
@@ -2212,7 +2207,6 @@ mod tests {
         ))
         .expect_err("invalid distribution text must fail without provider access");
         assert_eq!(err.identifier(), Some("RunMat:lassoglm:InvalidArgument"));
-        runmat_accelerate_api::clear_handle_provenance(&handle);
     }
 
     #[test]

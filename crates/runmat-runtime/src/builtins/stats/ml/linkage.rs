@@ -1142,7 +1142,7 @@ mod tests {
             buffer_id: 9_426_001,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error =
             block_on(linkage_builtin(Value::GpuTensor(handle.clone()), vec![])).unwrap_err();
         assert_eq!(
@@ -1159,7 +1159,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0, 2.0], 3, 1);
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let Value::Tensor(output) = block_on(linkage_builtin(Value::GpuTensor(handle), vec![]))
                 .expect("automatic residency may gather transparently")

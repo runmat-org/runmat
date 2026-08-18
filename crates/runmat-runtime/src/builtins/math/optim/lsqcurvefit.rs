@@ -1154,7 +1154,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let result = block_on(lsqcurvefit_builtin(
                 Value::BoundFunctionHandle {
                     name: "zero_model".to_string(),
@@ -1179,7 +1180,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(lsqcurvefit_builtin(
                 Value::FunctionHandle("unused".into()),

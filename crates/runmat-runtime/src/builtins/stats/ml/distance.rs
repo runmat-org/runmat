@@ -2379,7 +2379,8 @@ mod tests {
             let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
                 .expect("upload observations");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let output = block_on(knnsearch_builtin(
                 Value::GpuTensor(handle),
                 tensor(vec![1.0, 4.0], 2, 1),
@@ -2401,7 +2402,7 @@ mod tests {
         let x = Tensor::new(vec![0.0, 2.0, 5.0], vec![3, 1]).unwrap();
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x)
             .expect("upload observations");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let result = block_on(knnsearch_builtin(
             Value::GpuTensor(handle.clone()),

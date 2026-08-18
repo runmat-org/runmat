@@ -768,8 +768,8 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
     }
 
     match result {
-        Ok(output) if valid => {
-            runmat_accelerate_api::set_handle_provenance(&output, provenance);
+        Ok(mut output) if valid => {
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
             Ok(Some(gpu_helpers::resident_gpu_value(output)))
         }
         Ok(output) => {
@@ -1227,10 +1227,7 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("upload xq");
-            runmat_accelerate_api::set_handle_provenance(
-                &xq,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            let xq = xq.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = run(vec![
                 Value::GpuTensor(y.clone()),
                 Value::GpuTensor(xq.clone()),

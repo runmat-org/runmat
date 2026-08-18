@@ -507,7 +507,7 @@ fn try_gpu_normrnd(
     let provider_result = provider.random_normrnd(mu, sigma, shape);
     gpu_helpers::restore_handle_metadata(source, &source_metadata);
     match provider_result {
-        Ok(handle) => {
+        Ok(mut handle) => {
             let valid = !gpu_helpers::same_gpu_handle(source, &handle)
                 && handle.shape == shape
                 && handle.device_id == provider.device_id()
@@ -535,7 +535,7 @@ fn try_gpu_normrnd(
             let uniform_count = len.saturating_add(1) / 2 * 2;
             random::skip_uniform(uniform_count, "normrnd")?;
             runmat_accelerate_api::set_handle_provenance(
-                &handle,
+                &mut handle,
                 runmat_accelerate_api::handle_provenance(source)
                     .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
             );
@@ -693,10 +693,7 @@ mod tests {
         };
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
         assert_eq!(host.shape, vec![2, 2]);
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = block_on(normrnd_builtin(vec![
             Value::GpuTensor(handle),
             Value::Num(1.0),

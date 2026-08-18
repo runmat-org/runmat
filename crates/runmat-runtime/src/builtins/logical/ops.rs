@@ -348,8 +348,8 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 trace!("logical: provider logical_islogical hook unavailable, falling back ({err})")
             }
         }
-        if let Some(result) = try_gpu_cast(p, &handle).await {
-            copy_logical_provenance(&result, &handle);
+        if let Some(mut result) = try_gpu_cast(p, &handle).await {
+            copy_logical_provenance(&mut result, &handle);
             return Ok(gpu_helpers::logical_gpu_value(result));
         } else {
             trace!(
@@ -462,11 +462,11 @@ fn logical_buffer_to_gpu(
             shape: &buffer.shape,
         };
         match p.upload(&view) {
-            Ok(handle) => {
+            Ok(mut handle) => {
                 if explicit {
-                    runmat_accelerate_api::mark_handle_explicit(&handle);
+                    runmat_accelerate_api::mark_handle_explicit(&mut handle);
                 } else {
-                    runmat_accelerate_api::mark_handle_automatic(&handle);
+                    runmat_accelerate_api::mark_handle_automatic(&mut handle);
                 }
                 Ok(gpu_helpers::logical_gpu_value(handle))
             }
@@ -532,7 +532,7 @@ async fn try_gpu_cast(
     result
 }
 
-fn copy_logical_provenance(output: &GpuTensorHandle, input: &GpuTensorHandle) {
+fn copy_logical_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
     runmat_accelerate_api::set_handle_provenance(
         output,
         runmat_accelerate_api::handle_provenance(input)

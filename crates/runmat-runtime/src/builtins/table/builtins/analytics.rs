@@ -1249,7 +1249,7 @@ mod integer_compatibility_tests {
             buffer_id: u64::MAX,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let resident = Value::GpuTensor(handle.clone());
         let group_summary =
             ensure_groupsummary_extensions(&resident, &Value::from("G"), &Value::from("mean"), &[])
@@ -1478,15 +1478,23 @@ mod integer_compatibility_tests {
             buffer_id: u64::MAX - 426,
             descriptor: Default::default(),
         };
-        let value = Value::GpuTensor(handle.clone());
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        runmat_accelerate_api::mark_handle_automatic(&handle);
-        ensure_groupsummary_extensions(&value, &Value::from("G"), &Value::from("mean"), &[])
-            .expect("automatic residency remains transparent");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
-        let error =
-            ensure_groupsummary_extensions(&value, &Value::from("G"), &Value::from("mean"), &[])
-                .expect_err("explicit residency must gate");
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        ensure_groupsummary_extensions(
+            &Value::GpuTensor(handle.clone()),
+            &Value::from("G"),
+            &Value::from("mean"),
+            &[],
+        )
+        .expect("automatic residency remains transparent");
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = ensure_groupsummary_extensions(
+            &Value::GpuTensor(handle.clone()),
+            &Value::from("G"),
+            &Value::from("mean"),
+            &[],
+        )
+        .expect_err("explicit residency must gate");
         assert_eq!(
             error.identifier(),
             GROUPSUMMARY_RESIDENT_INPUT_EXTENSION.error_identifier

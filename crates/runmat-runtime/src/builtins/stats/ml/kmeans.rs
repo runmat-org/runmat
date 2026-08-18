@@ -1500,7 +1500,8 @@ mod tests {
             let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
                 .expect("upload observations");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let output = block_on(kmeans_builtin(
                 Value::GpuTensor(handle),
                 Value::Num(2.0),
@@ -1526,7 +1527,7 @@ mod tests {
         let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
             .expect("upload observations");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let result = block_on(kmeans_builtin(
             Value::GpuTensor(handle.clone()),

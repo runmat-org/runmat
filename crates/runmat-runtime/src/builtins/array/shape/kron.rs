@@ -209,21 +209,21 @@ async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
     validate_kron_integer_admission(&a, &b)?;
     let source = preferred_kron_source(&a, &b);
     if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (&a, &b) {
-        if let Some(result) = try_kron_gpu_pair(left, right)? {
-            set_kron_output_provenance(&result, left, Some(right));
+        if let Some(mut result) = try_kron_gpu_pair(left, right)? {
+            set_kron_output_provenance(&mut result, left, Some(right));
             return Ok(gpu_helpers::resident_gpu_value(result));
         }
     }
     match (&a, &b) {
         (Value::GpuTensor(source), host) => {
-            if let Some(result) = try_kron_gpu_host(source, host, true)? {
-                set_kron_output_provenance(&result, source, None);
+            if let Some(mut result) = try_kron_gpu_host(source, host, true)? {
+                set_kron_output_provenance(&mut result, source, None);
                 return Ok(gpu_helpers::resident_gpu_value(result));
             }
         }
         (host, Value::GpuTensor(source)) => {
-            if let Some(result) = try_kron_gpu_host(source, host, false)? {
-                set_kron_output_provenance(&result, source, None);
+            if let Some(mut result) = try_kron_gpu_host(source, host, false)? {
+                set_kron_output_provenance(&mut result, source, None);
                 return Ok(gpu_helpers::resident_gpu_value(result));
             }
         }
@@ -252,7 +252,7 @@ fn preferred_kron_source(left: &Value, right: &Value) -> Option<GpuTensorHandle>
 }
 
 fn set_kron_output_provenance(
-    output: &GpuTensorHandle,
+    output: &mut GpuTensorHandle,
     source: &GpuTensorHandle,
     other: Option<&GpuTensorHandle>,
 ) {
@@ -1336,7 +1336,8 @@ pub(crate) mod tests {
             let source_tensor = Tensor::new_integer(IntegerStorage::I32(vec![2, 3]), vec![2, 1])
                 .expect("integer source");
             let source = gpu_helpers::upload_tensor(provider, &source_tensor).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = kron_builtin(
                 Value::GpuTensor(source.clone()),
                 Value::Num(2.0),
@@ -1361,11 +1362,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let scalar = Tensor::new(vec![2.0], vec![1, 1]).expect("scalar");
             let automatic = gpu_helpers::upload_tensor(provider, &scalar).expect("automatic");
-            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let integer =
                 Tensor::new_integer(IntegerStorage::I32(vec![3, 4]), vec![2, 1]).expect("integer");
             let explicit = gpu_helpers::upload_tensor(provider, &integer).expect("explicit");
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
 
             let result = kron_builtin(
                 Value::GpuTensor(automatic),

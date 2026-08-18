@@ -4,7 +4,7 @@ use runmat_builtins::{ComplexTensor, IntValue, NumericScalar, Value};
 pub(crate) fn validate_constructor_gpu_output(
     label: &str,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    output: runmat_accelerate_api::GpuTensorHandle,
+    mut output: runmat_accelerate_api::GpuTensorHandle,
     expected_shape: &[usize],
     expected_storage: runmat_accelerate_api::GpuTensorStorage,
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
@@ -60,7 +60,7 @@ pub(crate) fn validate_constructor_gpu_output(
     }
     runmat_accelerate_api::set_handle_logical(&output, expected_logical);
     runmat_accelerate_api::set_handle_class_name(&output, expected_class);
-    runmat_accelerate_api::mark_handle_explicit(&output);
+    runmat_accelerate_api::mark_handle_explicit(&mut output);
     Ok(output)
 }
 

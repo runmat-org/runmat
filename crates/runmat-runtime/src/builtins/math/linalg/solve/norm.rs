@@ -369,9 +369,9 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
         let provider_result = provider.norm(&handle, provider_order).await;
         gpu_helpers::restore_handle_metadata(&handle, &source_metadata);
         match provider_result {
-            Ok(result) if valid_provider_norm_result(provider, &handle, &result) => {
+            Ok(mut result) if valid_provider_norm_result(provider, &handle, &result) => {
                 runmat_accelerate_api::set_handle_provenance(
-                    &result,
+                    &mut result,
                     runmat_accelerate_api::handle_provenance(&handle)
                         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
                 );
@@ -1452,10 +1452,7 @@ pub(crate) mod tests {
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
         let out = norm_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("norm");
         assert!(matches!(out, Value::Num(value) if (value - 5.0).abs() < 1.0e-12));
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = norm_builtin(Value::GpuTensor(handle), Vec::new())
             .expect_err("explicit output class mismatch must reject");
         assert!(error.message.contains("cannot preserve explicit gpuArray"));

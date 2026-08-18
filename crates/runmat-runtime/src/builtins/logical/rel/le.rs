@@ -657,7 +657,8 @@ pub(crate) mod tests {
             )
             .expect("lhs");
             let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = run_le(Value::GpuTensor(handle), Value::Num((1_u64 << 53) as f64))
                 .expect("mixed le");
             let Value::GpuTensor(output) = result else {

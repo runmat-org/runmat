@@ -1684,7 +1684,7 @@ pub(crate) mod tests {
             buffer_id: u64::MAX,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = block_on(evaluate(&[Value::GpuTensor(handle.clone())]))
             .expect_err("explicit resident filename must reject");
         runmat_accelerate_api::clear_handle_metadata(&handle);

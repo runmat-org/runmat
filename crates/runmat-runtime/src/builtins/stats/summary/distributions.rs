@@ -3163,10 +3163,7 @@ mod tests {
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
         assert_close(host.materialize_f64()[0], 0.5, 1.0e-12);
 
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = block_on(normcdf::normcdf_builtin(
             Value::GpuTensor(handle),
             Vec::new(),
@@ -4461,7 +4458,8 @@ mod tests {
             assert!(gpu_helpers::exact_provider_for_handle(&output)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
 
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(wblinv::wblinv_builtin(Value::GpuTensor(source), Vec::new()))
                 .expect_err("explicit gpu gate");

@@ -459,7 +459,6 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             let explicit = handle
                 .clone()
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
             return Ok(Value::GpuTensor(explicit));
         }
     }
@@ -506,7 +505,6 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
     runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
     runmat_accelerate_api::set_handle_class_name(&handle, dtype.class_name());
     handle.descriptor.provenance = Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-    runmat_accelerate_api::mark_handle_explicit(&handle);
 
     Ok(Value::GpuTensor(handle))
 }
@@ -1554,7 +1552,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gpu_array_rejects_integer_handle_with_floating_precision_metadata() {
+    fn gpu_array_ignores_stale_floating_annotation_on_durable_integer_handle() {
         test_support::with_test_provider(|provider| {
             let values = [1_i32, 2_i32];
             let handle = provider
@@ -1564,7 +1562,7 @@ pub(crate) mod tests {
                 })
                 .expect("integer upload");
             runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
-            let error = validate_prepared_handle(
+            validate_prepared_handle(
                 &handle,
                 provider,
                 &[1, 2],
@@ -1572,8 +1570,7 @@ pub(crate) mod tests {
                 DataClass::Int32,
                 false,
             )
-            .expect_err("integer output cannot carry floating precision metadata");
-            assert_eq!(error.identifier(), Some("RunMat:gpuArray:ProviderIO"));
+            .expect("durable integer descriptor takes precedence over a stale annotation");
             let _ = provider.free(&handle);
         });
     }

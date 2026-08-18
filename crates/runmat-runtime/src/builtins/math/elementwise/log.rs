@@ -323,8 +323,9 @@ fn validate_log_gpu_output(
             "provider returned malformed log output",
         ));
     }
+    let mut out = out;
     runmat_accelerate_api::set_handle_provenance(
-        &out,
+        &mut out,
         runmat_accelerate_api::handle_provenance(source)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
     );

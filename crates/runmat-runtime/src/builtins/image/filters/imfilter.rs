@@ -276,7 +276,6 @@ struct ProtectedGpuMetadata {
     numeric: crate::builtins::math::fft::common::GpuMetadataSnapshot,
     class_name: Option<String>,
     transpose: Option<runmat_accelerate_api::TransposeInfo>,
-    provenance: Option<GpuHandleProvenance>,
 }
 
 fn protected_gpu_metadata(handle: &GpuTensorHandle) -> ProtectedGpuMetadata {
@@ -284,7 +283,6 @@ fn protected_gpu_metadata(handle: &GpuTensorHandle) -> ProtectedGpuMetadata {
         numeric: gpu_metadata_snapshot(handle),
         class_name: runmat_accelerate_api::handle_class_name(handle),
         transpose: runmat_accelerate_api::handle_transpose_info(handle),
-        provenance: runmat_accelerate_api::handle_provenance(handle),
     }
 }
 
@@ -301,10 +299,6 @@ fn restore_protected_gpu_metadata(handle: &GpuTensorHandle, metadata: ProtectedG
             transpose.base_cols,
         ),
         None => runmat_accelerate_api::clear_handle_transpose(handle),
-    }
-    match metadata.provenance {
-        Some(provenance) => runmat_accelerate_api::set_handle_provenance(handle, provenance),
-        None => runmat_accelerate_api::clear_handle_provenance(handle),
     }
     runmat_accelerate_api::mark_residency(handle);
 }
@@ -609,7 +603,7 @@ async fn imfilter_gpu(
     }
 
     match provider_result {
-        Ok(output) => {
+        Ok(mut output) => {
             if !valid_provider_output(
                 &output,
                 &image_handle,
@@ -625,7 +619,7 @@ async fn imfilter_gpu(
                 ));
             }
             runmat_accelerate_api::set_handle_provenance(
-                &output,
+                &mut output,
                 runmat_accelerate_api::handle_provenance(&image_handle)
                     .unwrap_or(GpuHandleProvenance::Automatic),
             );
@@ -1481,7 +1475,6 @@ pub(crate) mod tests {
             runmat_accelerate_api::set_handle_logical(image, true);
             runmat_accelerate_api::set_handle_class_name(image, "single");
             runmat_accelerate_api::clear_handle_transpose(image);
-            runmat_accelerate_api::mark_handle_automatic(image);
             runmat_accelerate_api::set_handle_precision(kernel, ProviderPrecision::F32);
             Box::pin(async move { Ok(image.clone()) })
         }
@@ -1733,7 +1726,7 @@ pub(crate) mod tests {
         runmat_accelerate_api::set_handle_storage(&image, GpuTensorStorage::Real);
         runmat_accelerate_api::set_handle_class_name(&image, "double");
         runmat_accelerate_api::record_handle_transpose(&image, 2, 2);
-        runmat_accelerate_api::mark_handle_explicit(&image);
+        let image = image.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
 
         let error = block_on(imfilter_builtin(
             Value::GpuTensor(image.clone()),

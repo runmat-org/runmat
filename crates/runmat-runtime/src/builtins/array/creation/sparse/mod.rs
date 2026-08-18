@@ -4332,7 +4332,7 @@ pub(crate) mod tests {
         )
         .expect("integer source");
         let handle = gpu_helpers::upload_tensor(provider, &source).expect("upload integer source");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let output =
             nonzeros_builtin(Value::GpuTensor(handle.clone())).expect("resident integer nonzeros");
         let Value::GpuTensor(output) = output else {

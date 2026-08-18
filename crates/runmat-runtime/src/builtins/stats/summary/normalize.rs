@@ -1814,10 +1814,7 @@ mod tests {
         };
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
         assert_close(host.materialize_f64()[0], -1.0);
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = call(Value::GpuTensor(handle), Vec::new())
             .expect_err("explicit output class mismatch must reject");
         assert!(error.message.contains("cannot preserve explicit gpuArray"));

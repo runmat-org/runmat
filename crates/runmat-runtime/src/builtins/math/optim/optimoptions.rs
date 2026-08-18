@@ -1417,7 +1417,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let options = struct_result(
                 run_optimoptions(vec![
                     Value::from("fsolve"),
@@ -1434,7 +1435,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = run_optimoptions(vec![
                 Value::from("fsolve"),

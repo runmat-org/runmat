@@ -1728,7 +1728,8 @@ pub(crate) mod tests {
             )
             .expect("axis");
             let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
-            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let eval = evaluate(&[Value::GpuTensor(automatic)]).expect("automatic gather");
             let Value::Tensor(output) = eval_first(&eval).expect("host grid") else {
                 panic!("automatic integer residency must return exact host output");
@@ -1744,7 +1745,8 @@ pub(crate) mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let error = match evaluate(&[Value::GpuTensor(explicit)]) {
                 Ok(_) => panic!("explicit integer gpuArray must reject"),
                 Err(error) => error,
@@ -2139,7 +2141,8 @@ pub(crate) mod tests {
         .expect("axis");
 
         let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("automatic upload");
-        runmat_accelerate_api::mark_handle_automatic(&automatic);
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         let eval = evaluate(&[Value::GpuTensor(automatic)]).expect("automatic gather");
         let Value::Tensor(output) = eval_first(&eval).expect("exact host output") else {
             panic!("automatic integer residency must become host output");
@@ -2155,7 +2158,8 @@ pub(crate) mod tests {
         );
 
         let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("explicit upload");
-        runmat_accelerate_api::mark_handle_explicit(&explicit);
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = match evaluate(&[Value::GpuTensor(explicit)]) {
             Ok(_) => panic!("explicit integer gpuArray must reject"),
             Err(error) => error,

@@ -807,7 +807,7 @@ mod tests {
             buffer_id: 9_462_001,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = block_on(triplot_builtin(vec![
             Value::GpuTensor(handle),
             tensor(&[0.0, 1.0, 0.0], 1, 3),

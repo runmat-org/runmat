@@ -226,7 +226,8 @@ mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             assert_eq!(call(Value::GpuTensor(handle.clone())), "double");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             assert_eq!(call(Value::GpuTensor(handle)), "gpuArray");
         });
     }

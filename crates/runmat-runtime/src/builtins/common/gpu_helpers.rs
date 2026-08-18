@@ -110,14 +110,6 @@ pub fn restore_handle_metadata(handle: &GpuTensorHandle, snapshot: &GpuHandleMet
         Some(class_name) => runmat_accelerate_api::set_handle_class_name(handle, class_name),
         None => runmat_accelerate_api::clear_handle_class_name(handle),
     }
-    if handle.descriptor.provenance.is_none() {
-        match snapshot.provenance {
-            Some(provenance) => runmat_accelerate_api::set_handle_provenance(handle, provenance),
-            None => runmat_accelerate_api::clear_handle_provenance(handle),
-        }
-    } else {
-        runmat_accelerate_api::clear_handle_provenance(handle);
-    }
     runmat_accelerate_api::mark_residency(handle);
 }
 
@@ -862,7 +854,6 @@ pub fn restore_class_preserving_value(
         .provenance
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     output.descriptor.provenance = Some(provenance);
-    runmat_accelerate_api::clear_handle_provenance(&output);
     runmat_accelerate_api::mark_residency(&output);
     Ok(Value::GpuTensor(output))
 }
@@ -929,7 +920,6 @@ pub fn resident_gpu_value(mut handle: GpuTensorHandle) -> Value {
     let provenance = runmat_accelerate_api::handle_provenance(&handle)
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     handle.descriptor.provenance = Some(provenance);
-    runmat_accelerate_api::clear_handle_provenance(&handle);
     runmat_accelerate_api::mark_residency(&handle);
     Value::GpuTensor(handle)
 }
@@ -1025,7 +1015,8 @@ mod preserving_download_tests {
         test_support::with_test_provider(|provider| {
             let source =
                 upload_tensor(provider, &Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()).unwrap();
-            runmat_accelerate_api::mark_handle_automatic(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
 
             let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).unwrap();
             let restored =
@@ -1112,7 +1103,8 @@ mod preserving_download_tests {
                 &Tensor::from_f32(vec![0.0, 0.0], vec![1, 2]).unwrap(),
             )
             .unwrap();
-            runmat_accelerate_api::mark_handle_automatic(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
             let restored = restore_class_preserving_value(
                 &source,
@@ -1146,8 +1138,10 @@ mod preserving_download_tests {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let automatic = upload_tensor(provider, &tensor).unwrap();
             let explicit = upload_tensor(provider, &tensor).unwrap();
-            runmat_accelerate_api::mark_handle_automatic(&automatic);
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             for handles in [
                 vec![automatic.clone(), explicit.clone()],
                 vec![explicit.clone(), automatic.clone()],
@@ -1307,7 +1301,8 @@ mod preserving_download_tests {
             )
             .expect("wide integer source");
             let handle = upload_tensor(provider, &source).expect("wide integer upload");
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
 
             let native = block_on(download_native_values_async(provider, &handle))
                 .expect("native-value download");

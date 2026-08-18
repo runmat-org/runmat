@@ -204,7 +204,8 @@ mod tests {
                 isobject_builtin(Value::GpuTensor(handle.clone())).unwrap(),
                 Value::Bool(false)
             );
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             assert_eq!(
                 isobject_builtin(Value::GpuTensor(handle)).unwrap(),
                 Value::Bool(true)

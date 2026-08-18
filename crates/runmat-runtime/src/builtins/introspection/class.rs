@@ -345,7 +345,8 @@ pub(crate) mod tests {
                 class_builtin(Value::GpuTensor(handle.clone())).expect("automatic class"),
                 "double"
             );
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             assert_eq!(
                 class_builtin(Value::GpuTensor(handle)).expect("explicit class"),
                 "gpuArray"
@@ -412,7 +413,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("wgpu upload");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let name = class_builtin(Value::GpuTensor(handle)).expect("class");
         assert_eq!(name, "gpuArray");
     }

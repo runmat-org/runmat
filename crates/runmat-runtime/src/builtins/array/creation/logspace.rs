@@ -651,7 +651,7 @@ fn valid_uploaded_sequence_handle(
 }
 
 fn finalize_sequence_handle(
-    handle: runmat_accelerate_api::GpuTensorHandle,
+    mut handle: runmat_accelerate_api::GpuTensorHandle,
     source: Option<SourceResidency>,
 ) -> Value {
     let provenance = if source.is_some_and(|source| source.explicit) {
@@ -659,7 +659,7 @@ fn finalize_sequence_handle(
     } else {
         runmat_accelerate_api::GpuHandleProvenance::Automatic
     };
-    runmat_accelerate_api::set_handle_provenance(&handle, provenance);
+    runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
     gpu_helpers::resident_gpu_value(handle)
 }
 

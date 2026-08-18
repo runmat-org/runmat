@@ -889,7 +889,7 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     }
     match provider.zeros(shape) {
         Ok(handle) => {
-            let handle = validate_constructor_gpu_output(
+            let mut handle = validate_constructor_gpu_output(
                 "zeros",
                 provider,
                 handle,
@@ -900,7 +900,7 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
                 false,
             )
             .map_err(builtin_error)?;
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            runmat_accelerate_api::mark_handle_automatic(&mut handle);
             Ok(Some(Value::GpuTensor(handle)))
         }
         Err(err) => {

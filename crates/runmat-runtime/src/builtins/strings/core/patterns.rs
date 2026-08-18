@@ -461,7 +461,8 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("automatic integer count");
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             assert_eq!(
                 block_on(bounded_regex(
                     vec![Value::GpuTensor(handle.clone())],
@@ -473,7 +474,8 @@ mod tests {
                 r"\p{Alphabetic}{3}"
             );
 
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let error = block_on(bounded_regex(
                 vec![Value::GpuTensor(handle.clone())],
                 r"\p{Alphabetic}",

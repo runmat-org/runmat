@@ -1509,10 +1509,8 @@ mod tests {
             buffer_id: u64::MAX,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::set_handle_provenance(
-            &explicit,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = ensure_tsne_extensions(&Value::GpuTensor(explicit), &[])
             .expect_err("explicit residency must gate before provider access");
         assert_eq!(

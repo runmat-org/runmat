@@ -593,7 +593,7 @@ async fn try_gpu_linsolve(
         .ok();
 
     if let Some(ProviderLinsolveResult {
-        solution,
+        mut solution,
         reciprocal_condition,
     }) = result
     {
@@ -630,7 +630,7 @@ async fn try_gpu_linsolve(
             .filter_map(|handle| runmat_accelerate_api::handle_provenance(handle))
             .find(|provenance| *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-        runmat_accelerate_api::set_handle_provenance(&solution, provenance);
+        runmat_accelerate_api::set_handle_provenance(&mut solution, provenance);
         runmat_accelerate_api::mark_residency(&solution);
         release_operand(provider, &mut lhs_operand);
         release_operand(provider, &mut rhs_operand);

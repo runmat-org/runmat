@@ -249,7 +249,7 @@ fn restore_explicit_logical_result(
             .with_builtin(BUILTIN_NAME)
             .build()
     })?;
-    let output = gpu_helpers::upload_tensor(residency.owner, &tensor).map_err(|error| {
+    let mut output = gpu_helpers::upload_tensor(residency.owner, &tensor).map_err(|error| {
         build_runtime_error(format!(
             "lt: failed to preserve explicit gpuArray residency: {error}"
         ))
@@ -259,7 +259,7 @@ fn restore_explicit_logical_result(
         .build()
     })?;
     runmat_accelerate_api::set_handle_logical(&output, true);
-    runmat_accelerate_api::mark_handle_explicit(&output);
+    runmat_accelerate_api::mark_handle_explicit(&mut output);
     Ok(gpu_helpers::resident_gpu_value(output))
 }
 

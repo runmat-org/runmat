@@ -554,7 +554,7 @@ mod tests {
             buffer_id: 9_300_004,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(Value::GpuTensor(handle))
             .expect_err("MATLAB mode rejects explicit interactive gpuArray input before gather");

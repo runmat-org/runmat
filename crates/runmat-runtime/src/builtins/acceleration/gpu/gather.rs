@@ -310,7 +310,8 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result =
                 block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())])).expect("gather");
             match result {

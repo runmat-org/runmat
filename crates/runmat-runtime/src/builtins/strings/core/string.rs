@@ -1585,7 +1585,7 @@ pub(crate) mod tests {
             buffer_id: u64::MAX - 452,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = futures::executor::block_on(super::string_builtin(
             Value::GpuTensor(handle),

@@ -1379,7 +1379,7 @@ pub(crate) mod tests {
             buffer_id: u64::MAX - 469,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = run_write(Value::Num(0.0), Value::GpuTensor(handle), Vec::new())
             .expect_err("strict mode rejects explicit GPU data before provider access");
         assert_eq!(

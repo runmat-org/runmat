@@ -15,14 +15,13 @@ const PACKET: [(&str, usize); 9] = [
 ];
 
 fn resident_handle(buffer_id: u64, provenance: GpuHandleProvenance) -> GpuTensorHandle {
-    let handle = GpuTensorHandle {
+    GpuTensorHandle {
         shape: vec![1, 1],
         device_id: u32::MAX - 440,
         buffer_id,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_provenance(&handle, provenance);
-    handle
+    }
+    .with_provenance(provenance)
 }
 
 #[test]

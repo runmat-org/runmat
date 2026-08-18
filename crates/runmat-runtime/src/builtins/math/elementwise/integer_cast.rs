@@ -299,7 +299,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
                         .into(),
                 ));
             }
-            let output = match provider
+            let mut output = match provider
                 .cast_to_integer(&handle, target.accelerator_type())
                 .await
             {
@@ -339,7 +339,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
                     "provider returned an invalid integer cast result".into(),
                 ));
             }
-            runmat_accelerate_api::set_handle_provenance(&output, provenance);
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
             Ok(crate::builtins::common::gpu_helpers::resident_gpu_value(
                 output,
             ))

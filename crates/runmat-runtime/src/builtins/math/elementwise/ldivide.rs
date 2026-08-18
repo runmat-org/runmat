@@ -270,7 +270,7 @@ async fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRes
         }
         _ => None,
     };
-    let base = if let Some(handle) = native {
+    let base = if let Some(mut handle) = native {
         let provenance = [&lhs, &rhs]
             .into_iter()
             .filter_map(|value| match value {
@@ -279,7 +279,7 @@ async fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRes
             })
             .find(|provenance| *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-        runmat_accelerate_api::set_handle_provenance(&handle, provenance);
+        runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
         gpu_helpers::resident_gpu_value(handle)
     } else if let Some(source) = source.as_ref() {
         let lhs = gather_ldivide_operand(lhs).await?;
@@ -1813,7 +1813,8 @@ pub(crate) mod tests {
             let divisor =
                 Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).expect("divisor");
             let source = gpu_helpers::upload_tensor(provider, &divisor).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = ldivide_builtin(
                 Value::GpuTensor(source.clone()),
                 Value::Num(10.0),
@@ -1838,11 +1839,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let scalar = Tensor::new(vec![2.0], vec![1, 1]).expect("scalar");
             let automatic = gpu_helpers::upload_tensor(provider, &scalar).expect("automatic");
-            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let integer =
                 Tensor::new_integer(IntegerStorage::I32(vec![6, 10]), vec![2, 1]).expect("integer");
             let explicit = gpu_helpers::upload_tensor(provider, &integer).expect("explicit");
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
 
             let result = ldivide_builtin(
                 Value::GpuTensor(automatic),

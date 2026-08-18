@@ -359,11 +359,9 @@ fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
             if explicit_constructor {
                 handle.descriptor.provenance =
                     Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-                runmat_accelerate_api::clear_handle_provenance(handle);
             } else if runmat_accelerate_api::handle_provenance(handle).is_none() {
                 handle.descriptor.provenance =
                     Some(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-                runmat_accelerate_api::clear_handle_provenance(handle);
             }
         });
         return;
@@ -375,7 +373,6 @@ fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
     };
     visit_gpu_handles_mut(result, &mut |handle| {
         handle.descriptor.provenance = Some(provenance);
-        runmat_accelerate_api::clear_handle_provenance(handle);
     });
 }
 
@@ -892,7 +889,8 @@ mod tests {
             buffer_id: 5,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_automatic(&automatic_gpu);
+        let automatic_gpu =
+            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         let ordinary_gpu_error = crate::build_runtime_error("GPU input requires host fallback")
             .with_identifier("RunMat:example:UnsupportedGpuPath")
             .build();
@@ -900,7 +898,8 @@ mod tests {
             &ordinary_gpu_error,
             &[Value::GpuTensor(automatic_gpu.clone())]
         ));
-        runmat_accelerate_api::mark_handle_explicit(&automatic_gpu);
+        let automatic_gpu =
+            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         assert!(!should_retry_with_gpu_gather(
             &ordinary_gpu_error,
             &[Value::GpuTensor(automatic_gpu.clone())]
@@ -952,7 +951,8 @@ mod tests {
             &wrapped_request,
             &[Value::GpuTensor(requested_handle.clone())]
         ));
-        runmat_accelerate_api::mark_handle_explicit(&requested_handle);
+        let requested_handle =
+            requested_handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         assert!(!should_retry_with_gpu_gather(
             &wrapped_request,
             &[Value::GpuTensor(requested_handle.clone())]
@@ -986,8 +986,10 @@ mod tests {
             buffer_id: 94,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&explicit);
-        runmat_accelerate_api::mark_handle_automatic(&automatic);
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
 
         let mut explicit_value = Value::GpuTensor(explicit_result.clone());
         super::propagate_gpu_provenance(

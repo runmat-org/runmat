@@ -574,11 +574,11 @@ mod native_gather_tests {
             vec![1, 2],
         )
         .unwrap();
-        let handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
+        let mut handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
             provider, &expected,
         )
         .expect("native complex integer upload");
-        runmat_accelerate_api::mark_handle_automatic(&handle);
+        runmat_accelerate_api::mark_handle_automatic(&mut handle);
         let accelerator = Accelerator::new(Planner::new(None));
 
         let gathered = block_on(accelerator.gather_handle(&handle)).expect("native gather");

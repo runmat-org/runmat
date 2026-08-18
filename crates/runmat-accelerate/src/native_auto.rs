@@ -828,10 +828,10 @@ impl NativeAutoOffload {
     }
 
     fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
-        let handle =
+        let mut handle =
             runmat_runtime::builtins::common::gpu_helpers::upload_tensor(self.provider, tensor)
                 .map_err(|error| anyhow!(error))?;
-        runmat_accelerate_api::mark_handle_automatic(&handle);
+        runmat_accelerate_api::mark_handle_automatic(&mut handle);
         Ok(Value::GpuTensor(handle))
     }
 

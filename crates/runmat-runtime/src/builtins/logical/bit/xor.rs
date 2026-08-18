@@ -529,7 +529,8 @@ pub(crate) mod tests {
             )
             .expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = run_xor(Value::GpuTensor(handle), Value::Bool(true)).expect("xor");
             let Value::GpuTensor(output) = &result else {
                 panic!("explicit gpuArray result must remain resident");
@@ -665,7 +666,7 @@ pub(crate) mod tests {
         )
         .expect("integer input");
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let result = run_xor(Value::GpuTensor(handle), Value::Bool(true)).expect("xor");
         let Value::GpuTensor(output) = &result else {
             panic!("explicit gpuArray result must remain resident");

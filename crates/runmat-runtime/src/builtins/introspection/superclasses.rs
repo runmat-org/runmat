@@ -341,7 +341,8 @@ mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             assert!(call(Value::GpuTensor(handle.clone())).is_empty());
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             assert!(call(Value::GpuTensor(handle)).is_empty());
         });
     }

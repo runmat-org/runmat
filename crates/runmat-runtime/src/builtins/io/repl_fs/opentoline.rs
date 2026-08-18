@@ -572,15 +572,15 @@ mod tests {
     #[test]
     fn opentoline_resident_position_is_gated_without_provider_access() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        if let Value::GpuTensor(handle) = &resident {
-            runmat_accelerate_api::mark_handle_explicit(handle);
-        }
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            }
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+        );
         let error = call(vec![Value::String("definitely-missing.m".into()), resident])
             .expect_err("resident line must be gated");
 
@@ -599,7 +599,8 @@ mod tests {
             let line = Tensor::new(vec![1.0], vec![1, 1]).expect("line");
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &line)
                 .expect("resident line");
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let result = {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 call(vec![

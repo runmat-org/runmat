@@ -1618,7 +1618,7 @@ mod tests {
             buffer_id: 9_451_001,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = stackedplot_builtin(vec![Value::GpuTensor(handle)])
             .expect_err("explicit GPU intent must be gated");
         assert_eq!(

@@ -1385,7 +1385,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let parameter = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let output = block_on(gamrnd::gamrnd_builtin(vec![
                 Value::GpuTensor(handle),
@@ -1417,7 +1418,7 @@ mod tests {
         .expect("actual WGPU provider");
         let parameter = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let result = block_on(gamrnd::gamrnd_builtin(vec![
             Value::GpuTensor(handle.clone()),

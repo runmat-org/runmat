@@ -1674,7 +1674,8 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("resident dimension");
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let result = split_builtin(
                 Value::String("Mary Butler".into()),
                 vec![Value::String(" ".into()), Value::GpuTensor(handle.clone())],
@@ -1686,7 +1687,8 @@ pub(crate) mod tests {
             assert_eq!(result.shape, vec![2, 1]);
 
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let error = split_builtin(
                 Value::String("Mary Butler".into()),
                 vec![Value::String(" ".into()), Value::GpuTensor(handle.clone())],

@@ -490,10 +490,12 @@ pub(crate) mod tests {
                 isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("automatic isa"),
                 Value::Bool(false)
             );
-            let Value::GpuTensor(handle) = &gpu_value else {
+            let Value::GpuTensor(handle) = gpu_value else {
                 unreachable!()
             };
-            runmat_accelerate_api::mark_handle_explicit(handle);
+            let gpu_value = Value::GpuTensor(
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+            );
             assert_eq!(
                 isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("explicit isa"),
                 Value::Bool(true)

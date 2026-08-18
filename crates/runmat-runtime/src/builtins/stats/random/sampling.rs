@@ -2839,10 +2839,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("upload integer population");
-            runmat_accelerate_api::set_handle_provenance(
-                &source,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let Value::GpuTensor(output) = block_on(randsample::randsample_builtin(vec![
                 Value::GpuTensor(source),
                 Value::Num(2.0),
@@ -2886,7 +2884,8 @@ mod tests {
             expected.sort_by_key(|value| format!("{value:?}"));
             let population = Tensor::new_integer(storage, vec![1, 2]).expect("population");
             let source = gpu_helpers::upload_tensor(provider, &population).expect("upload");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let output = block_on(randsample::randsample_builtin(vec![
                 Value::GpuTensor(source),
                 Value::Num(2.0),

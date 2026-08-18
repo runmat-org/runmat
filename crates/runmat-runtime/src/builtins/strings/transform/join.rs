@@ -1086,7 +1086,8 @@ pub(crate) mod tests {
             buffer_id: u64::MAX - 1,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_automatic(&automatic);
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         let input = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
         let automatic_error = join_builtin(
             Value::StringArray(input.clone()),
@@ -1104,7 +1105,8 @@ pub(crate) mod tests {
             buffer_id: u64::MAX - 2,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&explicit);
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let explicit_error = join_builtin(
             Value::StringArray(input),
             vec![Value::GpuTensor(explicit.clone())],

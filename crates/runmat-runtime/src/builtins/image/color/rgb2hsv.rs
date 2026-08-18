@@ -454,7 +454,8 @@ mod tests {
             let rgb =
                 Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]).unwrap();
             let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload rgb");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = block_on(rgb2hsv_builtin(
                 Value::GpuTensor(source.clone()),
                 Vec::new(),

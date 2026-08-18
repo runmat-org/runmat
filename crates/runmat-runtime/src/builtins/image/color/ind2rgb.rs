@@ -545,7 +545,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let indexed = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
             let source = gpu_helpers::upload_tensor(provider, &indexed).expect("upload indexed");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
 
             let result = block_on(ind2rgb_builtin(

@@ -4693,10 +4693,10 @@ mod tests {
             buffer_id: u64::MAX,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_automatic(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         ensure_groupcounts_residency_extension(&Value::GpuTensor(handle.clone()), &[])
             .expect("automatic residency must remain transparent");
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let resident = Value::GpuTensor(handle.clone());
         let resident_error = block_on(groupcounts_builtin(resident, Vec::new()))
             .expect_err("resident form must gate before provider access");

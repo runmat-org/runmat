@@ -453,7 +453,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let lab = Tensor::new(vec![70.0, 5.0, 10.0], vec![1, 1, 3]).unwrap();
             let source = gpu_helpers::upload_tensor(provider, &lab).expect("upload LAB");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
             let value = block_on(lab2rgb_builtin(
                 Value::GpuTensor(source.clone()),

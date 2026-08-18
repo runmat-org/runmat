@@ -1576,7 +1576,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0, 1.0, 255.0], vec![2, 2], NumericDType::U8);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = {
                 let _outputs = crate::output_count::push_output_count(Some(2));
                 block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
@@ -1610,7 +1611,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F64);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = {
                 let _requested = crate::output_context::push_output_count(0);
                 block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
@@ -1632,7 +1634,8 @@ mod tests {
             runmat_accelerate::ensure_residency_hooks();
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F32);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let err = block_on(imhist_builtin(Value::GpuTensor(source), vec![]))
                 .expect_err("double output cannot silently become host output");
             assert!(
@@ -1650,7 +1653,8 @@ mod tests {
             runmat_accelerate::ensure_residency_hooks();
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F32);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            runmat_accelerate_api::mark_handle_automatic(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             runmat_accelerate_api::mark_residency(&source);
             let result = {
                 let _outputs = crate::output_count::push_output_count(Some(2));
@@ -1673,7 +1677,8 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let map = tensor(vec![0.0; 6], vec![2, 3], NumericDType::F64);
             let err = block_on(imhist_builtin(
                 Value::GpuTensor(source.clone()),

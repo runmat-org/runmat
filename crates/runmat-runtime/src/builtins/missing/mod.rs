@@ -3216,7 +3216,8 @@ mod tests {
                         if mask.shape == vec![1, 1] && mask.data == vec![0]
                 ));
             }
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             {
                 let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
                 let error = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
@@ -3321,7 +3322,8 @@ mod tests {
             )
             .expect("integer tensor");
             let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let _outputs = crate::output_count::push_output_count(Some(2));
             let result = block_on(rmmissing_builtin(
                 Value::GpuTensor(source.clone()),
@@ -3686,7 +3688,7 @@ mod tests {
             buffer_id: 9_451_002,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::mark_handle_explicit(&handle);
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let error = block_on(standardize_missing_builtin(
             tensor(vec![-99.0, 2.0], vec![1, 2]),
             vec![Value::GpuTensor(handle)],

@@ -40,8 +40,6 @@ static HANDLE_STORAGES: Lazy<RwLock<HashMap<GpuHandleIdentity, GpuTensorStorage>
     Lazy::new(|| RwLock::new(HashMap::new()));
 static HANDLE_INTEGER_TYPES: Lazy<RwLock<HashMap<GpuHandleIdentity, IntegerElementType>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_PROVENANCE: Lazy<RwLock<HashMap<GpuHandleIdentity, GpuHandleProvenance>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
 
 pub const fn handle_identity(handle: &GpuTensorHandle) -> GpuHandleIdentity {
     (handle.device_id, handle.buffer_id)
@@ -415,31 +413,19 @@ pub enum GpuHandleProvenance {
     Explicit,
 }
 
-pub fn set_handle_provenance(handle: &GpuTensorHandle, provenance: GpuHandleProvenance) {
-    if let Ok(mut guard) = HANDLE_PROVENANCE.write() {
-        guard.insert(handle_identity(handle), provenance);
-    }
+pub fn set_handle_provenance(handle: &mut GpuTensorHandle, provenance: GpuHandleProvenance) {
+    handle.descriptor.provenance = Some(provenance);
 }
 
 pub fn handle_provenance(handle: &GpuTensorHandle) -> Option<GpuHandleProvenance> {
-    HANDLE_PROVENANCE
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
-        .or(handle.descriptor.provenance)
+    handle.descriptor.provenance
 }
 
-pub fn clear_handle_provenance(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_PROVENANCE.write() {
-        guard.remove(&handle_identity(handle));
-    }
-}
-
-pub fn mark_handle_explicit(handle: &GpuTensorHandle) {
+pub fn mark_handle_explicit(handle: &mut GpuTensorHandle) {
     set_handle_provenance(handle, GpuHandleProvenance::Explicit);
 }
 
-pub fn mark_handle_automatic(handle: &GpuTensorHandle) {
+pub fn mark_handle_automatic(handle: &mut GpuTensorHandle) {
     set_handle_provenance(handle, GpuHandleProvenance::Automatic);
 }
 
@@ -459,7 +445,6 @@ pub fn clear_handle_metadata(handle: &GpuTensorHandle) {
     clear_handle_transpose(handle);
     clear_handle_storage(handle);
     clear_handle_integer_type(handle);
-    clear_handle_provenance(handle);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -4855,8 +4840,8 @@ mod tests {
 
     #[test]
     fn handle_metadata_is_namespaced_by_device_and_buffer() {
-        let first = test_handle(PROVIDER_A.device_id());
-        let second = test_handle(PROVIDER_B.device_id());
+        let mut first = test_handle(PROVIDER_A.device_id());
+        let mut second = test_handle(PROVIDER_B.device_id());
         clear_handle_metadata(&first);
         clear_handle_metadata(&second);
 
@@ -4868,8 +4853,8 @@ mod tests {
         set_handle_logical(&first, true);
         record_handle_transpose(&first, 2, 3);
         set_handle_storage(&second, GpuTensorStorage::ComplexInterleaved);
-        mark_handle_automatic(&first);
-        mark_handle_explicit(&second);
+        mark_handle_automatic(&mut first);
+        mark_handle_explicit(&mut second);
 
         assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
         assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
@@ -4900,7 +4885,10 @@ mod tests {
         assert_eq!(handle_class_name(&first), None);
         assert!(!handle_is_logical(&first));
         assert_eq!(handle_transpose_info(&first), None);
-        assert_eq!(handle_provenance(&first), None);
+        assert_eq!(
+            handle_provenance(&first),
+            Some(GpuHandleProvenance::Automatic)
+        );
         assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
         assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
         assert!(handle_is_explicit(&second));

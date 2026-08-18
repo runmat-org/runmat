@@ -367,16 +367,16 @@ impl LuEval {
     }
 
     fn from_provider(
-        result: ProviderLuResult,
+        mut result: ProviderLuResult,
         pivot_mode: PivotMode,
         provenance: runmat_accelerate_api::GpuHandleProvenance,
     ) -> Self {
         for handle in [
-            &result.combined,
-            &result.lower,
-            &result.upper,
-            &result.perm_matrix,
-            &result.perm_vector,
+            &mut result.combined,
+            &mut result.lower,
+            &mut result.upper,
+            &mut result.perm_matrix,
+            &mut result.perm_vector,
         ] {
             runmat_accelerate_api::set_handle_provenance(handle, provenance);
             runmat_accelerate_api::mark_residency(handle);
@@ -469,12 +469,18 @@ fn restore_lu_eval_to_provider(
         }
     }
     let mut uploaded = uploaded.into_iter();
-    let combined = uploaded.next().expect("combined upload");
-    let lower = uploaded.next().expect("lower upload");
-    let upper = uploaded.next().expect("upper upload");
-    let perm_matrix = uploaded.next().expect("permutation upload");
-    let perm_vector = uploaded.next().expect("pivot upload");
-    for handle in [&combined, &lower, &upper, &perm_matrix, &perm_vector] {
+    let mut combined = uploaded.next().expect("combined upload");
+    let mut lower = uploaded.next().expect("lower upload");
+    let mut upper = uploaded.next().expect("upper upload");
+    let mut perm_matrix = uploaded.next().expect("permutation upload");
+    let mut perm_vector = uploaded.next().expect("pivot upload");
+    for handle in [
+        &mut combined,
+        &mut lower,
+        &mut upper,
+        &mut perm_matrix,
+        &mut perm_vector,
+    ] {
         runmat_accelerate_api::mark_handle_explicit(handle);
         runmat_accelerate_api::mark_residency(handle);
     }

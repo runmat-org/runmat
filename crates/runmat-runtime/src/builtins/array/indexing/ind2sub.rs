@@ -403,7 +403,7 @@ fn try_gpu_ind2sub(
         let result = provider.ind2sub(dims, strides, handle, total, len, &output_shape);
         gpu_helpers::restore_handle_metadata(handle, &source_metadata);
         match result {
-            Ok(handles) => {
+            Ok(mut handles) => {
                 if handles.len() != dims.len() {
                     for output in &handles {
                         gpu_helpers::free_unprotected_exact_owner(output, &[handle]);
@@ -444,7 +444,7 @@ fn try_gpu_ind2sub(
                 }
                 let provenance = runmat_accelerate_api::handle_provenance(handle)
                     .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-                for output in &handles {
+                for output in &mut handles {
                     runmat_accelerate_api::set_handle_provenance(output, provenance);
                     runmat_accelerate_api::mark_residency(output);
                 }
@@ -970,10 +970,8 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("scalar index");
-            runmat_accelerate_api::set_handle_provenance(
-                &indices,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            let indices =
+                indices.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = ind2sub_builtin(
                 Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
                 Value::GpuTensor(indices.clone()),

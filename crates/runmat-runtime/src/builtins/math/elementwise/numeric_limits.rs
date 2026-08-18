@@ -408,7 +408,8 @@ fn integer_limit_like(
                     "GPU limit creation returned an invalid provider result",
                 ));
             }
-            runmat_accelerate_api::set_handle_provenance(&output, provenance);
+            let mut output = output;
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
             Ok(gpu_helpers::resident_gpu_value(output))
         }
         _ => Err(invalid_integer_prototype(builtin)),

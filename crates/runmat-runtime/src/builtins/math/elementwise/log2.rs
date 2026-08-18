@@ -248,10 +248,10 @@ async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         let provider = owner;
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
-                if let Ok(out) = provider.unary_log2(&handle).await {
+                if let Ok(mut out) = provider.unary_log2(&handle).await {
                     if valid_log2_output(&out, &handle, provider) {
                         runmat_accelerate_api::set_handle_provenance(
-                            &out,
+                            &mut out,
                             runmat_accelerate_api::handle_provenance(&handle)
                                 .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
                         );
@@ -303,14 +303,14 @@ fn restore_explicit_log2_result(
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
     })?;
-    let output = match &result {
+    let mut output = match &result {
         Value::Tensor(tensor) => gpu_helpers::upload_tensor(owner, tensor).map_err(|error| {
             builtin_error(format!("log2: failed to restore GPU result: {error}"))
         })?,
         Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(owner, tensor)?,
         _ => return Ok(result),
     };
-    runmat_accelerate_api::mark_handle_explicit(&output);
+    runmat_accelerate_api::mark_handle_explicit(&mut output);
     Ok(gpu_helpers::resident_gpu_value(output))
 }
 

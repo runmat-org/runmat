@@ -714,8 +714,9 @@ fn validated_sequence_output(
             "{builtin}: provider returned malformed sequence output"
         )));
     }
+    let mut output = output;
     runmat_accelerate_api::set_handle_provenance(
-        &output,
+        &mut output,
         runmat_accelerate_api::handle_provenance(source)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
     );

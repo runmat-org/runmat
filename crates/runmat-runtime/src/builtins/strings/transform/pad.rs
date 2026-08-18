@@ -887,7 +887,8 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("automatic integer length");
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let result = pad_builtin(
                 Value::String("GPU".into()),
                 vec![Value::GpuTensor(handle.clone())],
@@ -895,7 +896,8 @@ pub(crate) mod tests {
             .expect("automatic residency is transparent");
             assert_eq!(result, Value::String("GPU  ".into()));
 
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let error = pad_builtin(
                 Value::String("GPU".into()),
                 vec![Value::GpuTensor(handle.clone())],

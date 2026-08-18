@@ -1287,7 +1287,8 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let zero = Matrix::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &zero).expect("integer upload");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 let err =

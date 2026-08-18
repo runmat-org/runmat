@@ -399,7 +399,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            runmat_accelerate_api::mark_handle_automatic(&automatic);
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
 
             let automatic_result = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
@@ -418,7 +419,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            runmat_accelerate_api::mark_handle_explicit(&explicit);
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
@@ -438,7 +440,8 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("mixed automatic upload");
-            runmat_accelerate_api::mark_handle_automatic(&mixed_automatic);
+            let mixed_automatic = mixed_automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let explicit_result = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
                 Value::GpuTensor(explicit),

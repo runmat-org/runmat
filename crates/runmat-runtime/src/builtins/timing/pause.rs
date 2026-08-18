@@ -652,15 +652,15 @@ pub(crate) mod tests {
     fn pause_resident_argument_is_gated_before_provider_access() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        if let Value::GpuTensor(handle) = &resident {
-            runmat_accelerate_api::mark_handle_explicit(handle);
-        }
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            }
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+        );
         let error = block_on(pause_builtin(vec![resident])).expect_err("resident pause input");
 
         assert_eq!(
@@ -675,8 +675,9 @@ pub(crate) mod tests {
         reset_state(false);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("resident duration");
-            runmat_accelerate_api::mark_handle_automatic(&handle);
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("resident duration")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let result = {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 block_on(pause_builtin(vec![Value::GpuTensor(handle.clone())]))

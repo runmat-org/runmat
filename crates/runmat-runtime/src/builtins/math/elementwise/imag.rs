@@ -200,8 +200,8 @@ async fn imag_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         let result = provider.unary_imag(&handle).await;
         gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         match result {
-            Ok(out) if valid_imag_gpu_output(&out, &handle, provider) => {
-                runmat_accelerate_api::set_handle_provenance(&out, input_provenance);
+            Ok(mut out) if valid_imag_gpu_output(&out, &handle, provider) => {
+                runmat_accelerate_api::set_handle_provenance(&mut out, input_provenance);
                 return Ok(gpu_helpers::resident_gpu_value(out));
             }
             Ok(out) => {

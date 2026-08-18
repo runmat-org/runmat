@@ -84,11 +84,11 @@ pub(crate) fn upload_value_like_protected(
     protected: &[GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let output = upload_value_protected(provider, value, builtin, protected)?;
-    let Value::GpuTensor(handle) = &output else {
+    let Value::GpuTensor(mut handle) = output else {
         unreachable!("upload_value always returns a resident value")
     };
     if handle.device_id != prototype.device_id {
-        free_unless_protected(provider, handle, protected);
+        free_unless_protected(provider, &handle, protected);
         return Err(build_runtime_error(format!(
             "{builtin}: provider restored the result on the wrong device"
         ))
@@ -96,9 +96,9 @@ pub(crate) fn upload_value_like_protected(
         .build());
     }
     if let Some(provenance) = runmat_accelerate_api::handle_provenance(prototype) {
-        runmat_accelerate_api::set_handle_provenance(handle, provenance);
+        runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
     }
-    Ok(output)
+    Ok(Value::GpuTensor(handle))
 }
 
 pub(crate) fn upload_value(

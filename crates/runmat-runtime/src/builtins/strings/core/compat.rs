@@ -3383,7 +3383,8 @@ mod tests {
                     Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
                 );
             }
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 let error = block(isstrprop_builtin(

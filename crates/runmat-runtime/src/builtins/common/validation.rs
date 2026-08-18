@@ -3063,10 +3063,8 @@ mod tests {
                 .expect("integer source");
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload integer source");
-            runmat_accelerate_api::set_handle_provenance(
-                &handle,
-                runmat_accelerate_api::GpuHandleProvenance::Automatic,
-            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             ok(
                 "mustBeA",
                 vec![
@@ -3081,10 +3079,8 @@ mod tests {
                     Value::String("gpuArray".into()),
                 ],
             );
-            runmat_accelerate_api::set_handle_provenance(
-                &handle,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             ok(
                 "mustBeA",
                 vec![
@@ -3674,10 +3670,8 @@ mod tests {
                 .expect("resident integer");
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload resident integer");
-            runmat_accelerate_api::set_handle_provenance(
-                &handle,
-                runmat_accelerate_api::GpuHandleProvenance::Automatic,
-            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let value = Value::GpuTensor(handle.clone());
             assert!(block_on(dispatch_validator_async(
                 "mustBeNonzero",
@@ -3717,10 +3711,7 @@ mod tests {
         .expect("wide integer source");
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
             .expect("upload wide integer source");
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Automatic,
-        );
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         let value = Value::GpuTensor(handle.clone());
 
         for name in [
@@ -3733,10 +3724,8 @@ mod tests {
             block_on(dispatch_validator_async(name, vec![value.clone()]))
                 .unwrap_or_else(|error| panic!("{name} unexpectedly failed: {error}"));
         }
-        runmat_accelerate_api::set_handle_provenance(
-            &handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let value = Value::GpuTensor(handle.clone());
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         for name in ["mustBeReal", "mustBeVector"] {
             block_on(dispatch_validator_async(name, vec![value.clone()]))
@@ -3784,10 +3773,8 @@ mod tests {
                 .expect("resident integer");
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload resident integer");
-            runmat_accelerate_api::set_handle_provenance(
-                &handle,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let value = Value::GpuTensor(handle.clone());
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             for name in [

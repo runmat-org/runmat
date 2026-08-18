@@ -1064,7 +1064,8 @@ pub(crate) mod tests {
             let input = Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![1, 2])
                 .expect("integer tensor");
             let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-            runmat_accelerate_api::mark_handle_explicit(&source);
+            let source =
+                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             let result = repelem_builtin(
                 Value::GpuTensor(source.clone()),
                 vec![Value::Int(IntValue::U8(2))],

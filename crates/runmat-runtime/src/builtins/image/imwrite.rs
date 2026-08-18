@@ -1871,7 +1871,8 @@ mod tests {
             let image = typed_tensor(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]);
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &image)
                 .expect("upload image");
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             runmat_accelerate_api::mark_residency(&handle);
             runmat_accelerate_api::record_handle_transpose(&handle, 1, 3);
             call(vec![

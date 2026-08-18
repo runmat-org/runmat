@@ -238,7 +238,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
         let options = ProviderInvOptions::default();
         match provider.inv(&handle, options).await {
-            Ok(result)
+            Ok(mut result)
                 if valid_inv_gpu_output(
                     &handle,
                     &result,
@@ -248,7 +248,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 ) =>
             {
                 gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-                runmat_accelerate_api::set_handle_provenance(&result, provenance);
+                runmat_accelerate_api::set_handle_provenance(&mut result, provenance);
                 return Ok(gpu_helpers::resident_gpu_value(result));
             }
             Ok(result) => {

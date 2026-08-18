@@ -339,7 +339,8 @@ mod tests {
                 Value::GpuTensor(handle.clone()),
                 Value::from("gather")
             ));
-            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
             for method in [
                 "arrayfun",
                 "existsOnGPU",
@@ -416,7 +417,8 @@ mod tests {
                         .unwrap(),
                     Value::Bool(false)
                 );
-                runmat_accelerate_api::mark_handle_explicit(&handle);
+                let handle =
+                    handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
                 assert_eq!(
                     ismethod_builtin(Value::GpuTensor(handle.clone()), Value::from("gather"))
                         .unwrap(),
