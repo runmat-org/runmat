@@ -1,6 +1,7 @@
 mod adaptive_coarsening;
 mod adaptive_lineage;
 mod adaptive_refinement;
+mod adaptive_transfer;
 mod carving;
 mod constraints;
 mod facet_recovery;
@@ -27,6 +28,11 @@ pub use adaptive_refinement::{
     DelaunayAdaptiveRefinementDecision, DelaunayAdaptiveRefinementError,
     DelaunayAdaptiveRefinementErrorKind, DelaunayAdaptiveRefinementMark,
     DelaunayAdaptiveRefinementOptions, DelaunayAdaptiveRefinementResult,
+};
+pub use adaptive_transfer::{
+    build_coarsening_solver_transfer_map, build_refinement_solver_transfer_map,
+    DelaunayAdaptiveCoarseningTransferInput, DelaunayAdaptiveTransferError,
+    DelaunayAdaptiveTransferErrorKind, DelaunayAdaptiveTransferOptions,
 };
 pub use carving::{
     carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
