@@ -19,16 +19,11 @@ pub fn validate_exact_face_delaunay(
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceDelaunayError> {
-    if options.maximum_triangles == 0
-        || options.maximum_predicate_evaluations == 0
-        || options.maximum_edge_flips == 0
-        || options.maximum_cavity_retriangulations == 0
-        || options.cancellation_check_interval == 0
-    {
+    if let Err(reason) = options.validate() {
         return Err(invalid(
             pslg,
             ExactFaceDelaunayErrorKind::InvalidOptions,
-            "Delaunay limits and cancellation interval must be non-zero",
+            reason,
         ));
     }
     check_cancelled(cancellation, pslg, "surface Delaunay validation cancelled")?;

@@ -54,9 +54,11 @@ pub use recovery::{
 };
 pub use refinement::{
     classify_exact_face_refinement_candidate, insert_exact_face_refinement_candidate,
-    select_exact_face_refinement_candidate, ExactFaceCandidateDisposition,
-    ExactFaceRefinedTopology, ExactFaceRefinementCandidate, ExactFaceRefinementError,
-    ExactFaceRefinementErrorKind, ExactFaceRefinementReason, ExactProtectedSegmentSplit,
+    refine_exact_face_until_blocked, select_exact_face_refinement_candidate,
+    ExactFaceCandidateDisposition, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
+    ExactFaceRefinementCandidate, ExactFaceRefinementContext, ExactFaceRefinementError,
+    ExactFaceRefinementErrorKind, ExactFaceRefinementOptions, ExactFaceRefinementOutcome,
+    ExactFaceRefinementPolicy, ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,

@@ -237,6 +237,11 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         options,
     )
     .unwrap();
+    let initial = ExactFaceRefinedTopology {
+        pslg: pslg.clone(),
+        constrained: constrained.clone(),
+        trimmed: trimmed.clone(),
+    };
     let triangle = trimmed.triangles[0];
     let corners = triangle
         .vertex_indices
@@ -255,9 +260,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
 
     let refined = insert_exact_face_refinement_candidate(
         face_boundary,
-        &pslg,
-        &constrained,
-        &trimmed,
+        &initial,
         &candidate,
         &NeverCancelled,
         options,
@@ -265,9 +268,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     .unwrap();
     let repeated = insert_exact_face_refinement_candidate(
         face_boundary,
-        &pslg,
-        &constrained,
-        &trimmed,
+        &initial,
         &candidate,
         &NeverCancelled,
         options,
@@ -305,9 +306,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     assert_eq!(
         insert_exact_face_refinement_candidate(
             face_boundary,
-            &pslg,
-            &constrained,
-            &trimmed,
+            &initial,
             &duplicate,
             &NeverCancelled,
             options,
@@ -322,9 +321,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     assert_eq!(
         insert_exact_face_refinement_candidate(
             face_boundary,
-            &pslg,
-            &constrained,
-            &trimmed,
+            &initial,
             &candidate,
             &NeverCancelled,
             limited,
@@ -336,9 +333,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     assert_eq!(
         insert_exact_face_refinement_candidate(
             face_boundary,
-            &pslg,
-            &constrained,
-            &trimmed,
+            &initial,
             &candidate,
             &CancelledSignal,
             options,
@@ -346,6 +341,97 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         .unwrap_err()
         .kind,
         ExactFaceRefinementErrorKind::Delaunay(crate::ExactFaceDelaunayErrorKind::Cancelled)
+    );
+
+    let coarse_request = MetricFieldRequest {
+        combination: MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
+        maximum_grading_ratio: 2.0,
+        contributions: Vec::new(),
+    };
+    let permissive_quality = SurfaceQualityTargets {
+        minimum_metric_angle_degrees: 0.01,
+        maximum_physical_aspect_ratio: 1.0e9,
+        maximum_chordal_deviation_m: 1.0e9,
+        maximum_normal_deviation_degrees: 180.0,
+    };
+    let converged = refine_exact_face_until_blocked(
+        face_boundary,
+        &initial,
+        ExactFaceRefinementContext::new(
+            &topology,
+            &coarse_request,
+            &evaluator,
+            &Control,
+            &NeverCancelled,
+        ),
+        ExactFaceRefinementPolicy {
+            quality: permissive_quality,
+            delaunay: options,
+            refinement: ExactFaceRefinementOptions {
+                maximum_interior_insertions: 1,
+            },
+        },
+    )
+    .unwrap();
+    let ExactFaceRefinementOutcome::Converged(converged) = converged else {
+        panic!("permissive exact-circle refinement must converge")
+    };
+    assert_eq!(converged.interior_insertion_count, 0);
+
+    let strict_aspect = SurfaceQualityTargets {
+        maximum_physical_aspect_ratio: 1.0,
+        ..permissive_quality
+    };
+    let strict = refine_exact_face_until_blocked(
+        face_boundary,
+        &initial,
+        ExactFaceRefinementContext::new(
+            &topology,
+            &coarse_request,
+            &evaluator,
+            &Control,
+            &NeverCancelled,
+        ),
+        ExactFaceRefinementPolicy {
+            quality: strict_aspect,
+            delaunay: options,
+            refinement: ExactFaceRefinementOptions {
+                maximum_interior_insertions: 1,
+            },
+        },
+    );
+    let ExactFaceRefinementOutcome::RequiresCurveSplit {
+        completed_interior_insertions,
+        ..
+    } = strict.unwrap()
+    else {
+        panic!("strict boundary-adjacent refinement must request a protected split")
+    };
+    assert_eq!(completed_interior_insertions, 0);
+
+    assert_eq!(
+        refine_exact_face_until_blocked(
+            face_boundary,
+            &initial,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            ExactFaceRefinementPolicy {
+                quality: permissive_quality,
+                delaunay: options,
+                refinement: ExactFaceRefinementOptions {
+                    maximum_interior_insertions: 0,
+                },
+            },
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::InvalidOptions
     );
 }
 

@@ -119,16 +119,11 @@ fn validate_options(
     pslg: &ExactFacePslg,
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceDelaunayError> {
-    if options.maximum_triangles == 0
-        || options.maximum_predicate_evaluations == 0
-        || options.maximum_edge_flips == 0
-        || options.maximum_cavity_retriangulations == 0
-        || options.cancellation_check_interval == 0
-    {
+    if let Err(reason) = options.validate() {
         return Err(ExactFaceDelaunayError::new(
             ExactFaceDelaunayErrorKind::InvalidOptions,
             &pslg.source_face_id,
-            "Delaunay limits and cancellation interval must be non-zero",
+            reason,
         ));
     }
     if pslg.vertices.len() > u32::MAX as usize - 3 {

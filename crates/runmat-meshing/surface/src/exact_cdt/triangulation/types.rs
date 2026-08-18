@@ -33,6 +33,21 @@ impl Default for ExactFaceDelaunayOptions {
     }
 }
 
+impl ExactFaceDelaunayOptions {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.maximum_triangles == 0
+            || self.maximum_predicate_evaluations == 0
+            || self.maximum_edge_flips == 0
+            || self.maximum_cavity_retriangulations == 0
+            || self.cancellation_check_interval == 0
+        {
+            Err("Delaunay limits and cancellation interval must be non-zero")
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExactFaceDelaunayError {
     pub kind: ExactFaceDelaunayErrorKind,

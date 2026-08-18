@@ -4,8 +4,8 @@ use crate::exact_cdt::MAX_FACE_PSLG_ITEMS;
 use crate::{
     carve_exact_face_domain, exact_face_interior_node_id, recover_exact_face_segments,
     triangulate_exact_face_pslg, validate_exact_face_trimmed_delaunay, ExactFaceBoundary,
-    ExactFaceConstrainedDelaunay, ExactFaceDelaunayError, ExactFaceDelaunayErrorKind,
-    ExactFaceDelaunayOptions, ExactFacePslg, ExactFacePslgVertex, ExactFaceTrimmedDelaunay,
+    ExactFaceDelaunayError, ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFacePslg,
+    ExactFacePslgVertex, ExactFaceTrimmedDelaunay,
 };
 
 use super::{
@@ -15,23 +15,22 @@ use super::{
 
 pub fn insert_exact_face_refinement_candidate(
     boundary: &ExactFaceBoundary,
-    pslg: &ExactFacePslg,
-    constrained: &ExactFaceConstrainedDelaunay,
-    trimmed: &ExactFaceTrimmedDelaunay,
+    topology: &ExactFaceRefinedTopology,
     candidate: &ExactFaceRefinementCandidate,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceRefinedTopology, ExactFaceRefinementError> {
+    let pslg = &topology.pslg;
     validate_exact_face_trimmed_delaunay(
-        trimmed,
-        constrained,
+        &topology.trimmed,
+        &topology.constrained,
         pslg,
         boundary,
         cancellation,
         options,
     )
     .map_err(map_delaunay)?;
-    validate_candidate(pslg, trimmed, candidate)?;
+    validate_candidate(pslg, &topology.trimmed, candidate)?;
 
     let refined_pslg = append_interior_vertex(pslg, candidate.uv)?;
     let delaunay = triangulate_exact_face_pslg(&refined_pslg, boundary, cancellation, options)
@@ -49,7 +48,6 @@ pub fn insert_exact_face_refinement_candidate(
     .map_err(map_delaunay)?;
     Ok(ExactFaceRefinedTopology {
         pslg: refined_pslg,
-        delaunay,
         constrained: refined_constrained,
         trimmed: refined_trimmed,
     })

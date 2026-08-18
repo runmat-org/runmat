@@ -186,16 +186,11 @@ fn validate_options(
     pslg: &ExactFacePslg,
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceDelaunayError> {
-    if options.maximum_triangles == 0
-        || options.maximum_predicate_evaluations == 0
-        || options.maximum_edge_flips == 0
-        || options.maximum_cavity_retriangulations == 0
-        || options.cancellation_check_interval == 0
-    {
+    if let Err(reason) = options.validate() {
         Err(invalid(
             pslg,
             ExactFaceDelaunayErrorKind::InvalidOptions,
-            "constrained Delaunay limits must be non-zero",
+            reason,
         ))
     } else {
         Ok(())

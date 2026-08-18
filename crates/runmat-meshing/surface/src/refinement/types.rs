@@ -1,9 +1,13 @@
-use runmat_geometry_core::PersistentEntityId;
+use runmat_geometry_core::{
+    ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, PersistentEntityId,
+};
+use runmat_meshing_core::{MeshingCancellationSignal, MetricFieldRequest, SurfaceQualityTargets};
 use runmat_meshing_curve::SharedCurveSegmentSplit;
 
 use crate::{
-    ExactFaceConstrainedDelaunay, ExactFaceDelaunay, ExactFaceDelaunayErrorKind,
-    ExactFaceDelaunayTriangle, ExactFaceMetricErrorKind, ExactFacePslg, ExactFaceTrimmedDelaunay,
+    ExactFaceConstrainedDelaunay, ExactFaceDelaunayErrorKind, ExactFaceDelaunayTriangle,
+    ExactFaceGeometry, ExactFaceGeometryErrorKind, ExactFaceMetricErrorKind, ExactFacePslg,
+    ExactFaceTrimmedDelaunay,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -41,17 +45,83 @@ pub struct ExactProtectedSegmentSplit {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceRefinedTopology {
     pub pslg: ExactFacePslg,
-    pub delaunay: ExactFaceDelaunay,
     pub constrained: ExactFaceConstrainedDelaunay,
     pub trimmed: ExactFaceTrimmedDelaunay,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExactFaceRefinementOptions {
+    pub maximum_interior_insertions: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExactFaceRefinementPolicy {
+    pub quality: SurfaceQualityTargets,
+    pub delaunay: crate::ExactFaceDelaunayOptions,
+    pub refinement: ExactFaceRefinementOptions,
+}
+
+pub struct ExactFaceRefinementContext<'a> {
+    pub topology: &'a ExactBRepTopology,
+    pub metric_request: &'a MetricFieldRequest,
+    pub evaluator: &'a dyn ExactSurfaceEvaluator,
+    pub geometry_control: &'a dyn GeometryEvaluationControl,
+    pub cancellation: &'a dyn MeshingCancellationSignal,
+}
+
+impl<'a> ExactFaceRefinementContext<'a> {
+    pub fn new(
+        topology: &'a ExactBRepTopology,
+        metric_request: &'a MetricFieldRequest,
+        evaluator: &'a dyn ExactSurfaceEvaluator,
+        geometry_control: &'a dyn GeometryEvaluationControl,
+        cancellation: &'a dyn MeshingCancellationSignal,
+    ) -> Self {
+        Self {
+            topology,
+            metric_request,
+            evaluator,
+            geometry_control,
+            cancellation,
+        }
+    }
+}
+
+impl Default for ExactFaceRefinementOptions {
+    fn default() -> Self {
+        Self {
+            maximum_interior_insertions: 1_000_000,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceRefinedMesh {
+    pub topology: ExactFaceRefinedTopology,
+    pub geometry: ExactFaceGeometry,
+    pub interior_insertion_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExactFaceRefinementOutcome {
+    Converged(Box<ExactFaceRefinedMesh>),
+    /// The global shared curve must be rebuilt before this face is restarted. Any provisional
+    /// face-owned insertions are intentionally not authoritative across that boundary change.
+    RequiresCurveSplit {
+        split: Box<ExactProtectedSegmentSplit>,
+        completed_interior_insertions: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExactFaceRefinementErrorKind {
+    InvalidOptions,
     InvalidQuality,
     InvalidGeometry,
     Metric(ExactFaceMetricErrorKind),
+    Geometry(ExactFaceGeometryErrorKind),
     Delaunay(ExactFaceDelaunayErrorKind),
+    ResourceLimit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
