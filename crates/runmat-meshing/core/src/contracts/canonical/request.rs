@@ -99,7 +99,7 @@ impl CurveQualityTargets {
 }
 
 impl SurfaceQualityTargets {
-    fn validate(&self) -> Result<(), MeshingContractError> {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
         for (field, value) in [
             (
                 "minimum surface metric angle",

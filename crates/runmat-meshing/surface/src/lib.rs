@@ -5,6 +5,7 @@ pub const CRATE_PURPOSE: &str = "face-domain triangulation, loop recovery, and s
 mod exact_metric;
 mod face_geometry;
 mod math;
+mod refinement;
 
 pub mod contract;
 pub mod exact_boundary;
@@ -49,6 +50,11 @@ pub use param_tri::{
 };
 pub use recovery::{
     validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
+};
+pub use refinement::{
+    classify_exact_face_refinement_candidate, select_exact_face_refinement_candidate,
+    ExactFaceCandidateDisposition, ExactFaceRefinementCandidate, ExactFaceRefinementError,
+    ExactFaceRefinementErrorKind, ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,
