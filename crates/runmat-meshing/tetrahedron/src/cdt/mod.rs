@@ -6,6 +6,7 @@ mod insertion;
 mod point_set;
 mod segment_recovery;
 mod topology;
+mod volume_quality;
 
 pub use carving::{
     carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
@@ -42,4 +43,9 @@ pub use segment_recovery::{
 pub use topology::{
     build_delaunay_volume_topology, DelaunayTopologyError, DelaunayTopologyErrorKind,
     DelaunayTopologyOptions, DelaunayVolumeNode, DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
+};
+pub use volume_quality::{
+    evaluate_delaunay_volume_quality, validate_delaunay_volume_quality, DelaunayTetrahedronQuality,
+    DelaunayVolumeMetricContext, DelaunayVolumeQuality, DelaunayVolumeQualityError,
+    DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions,
 };
