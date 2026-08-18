@@ -10,7 +10,7 @@ pub enum PredicateSign {
 }
 
 impl PredicateSign {
-    fn from_value(value: f64) -> Self {
+    pub(super) fn from_value(value: f64) -> Self {
         if value > 0.0 {
             Self::Positive
         } else if value < 0.0 {
@@ -20,7 +20,7 @@ impl PredicateSign {
         }
     }
 
-    fn from_odd_permutation(odd: bool) -> Self {
+    pub(super) fn from_odd_permutation(odd: bool) -> Self {
         if odd {
             Self::Negative
         } else {
@@ -138,7 +138,7 @@ fn validate_points<const N: usize>(
     Ok(())
 }
 
-fn permutation_is_odd<const N: usize>(identities: [StableDigest; N]) -> bool {
+pub(super) fn permutation_is_odd<const N: usize>(identities: [StableDigest; N]) -> bool {
     let inversion_count = (0..N)
         .flat_map(|left| (left + 1..N).map(move |right| (left, right)))
         .filter(|(left, right)| identities[*left] > identities[*right])
