@@ -37,7 +37,10 @@ pub use pass_result::{
 };
 #[cfg(test)]
 pub(crate) use surface_codec::decode_exact_surface_mesh_with_byte_limit;
-pub use surface_codec::{decode_exact_surface_mesh, encode_exact_surface_mesh};
+pub use surface_codec::{
+    decode_exact_surface_mesh, decode_exact_surface_mesh_from_pass, encode_exact_surface_mesh,
+    encode_exact_surface_mesh_from_pass,
+};
 pub use types::{
     ExactFaceMeshBatch, ExactFacePartitionOutcome, ExactFacePartitionResult,
     ExactSurfaceJoinOptions, ExactSurfaceMesh, ExactSurfaceMeshError, ExactSurfaceMeshErrorKind,

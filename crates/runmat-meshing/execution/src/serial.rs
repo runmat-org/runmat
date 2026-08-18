@@ -276,7 +276,10 @@ fn validate_stage_streams(
             MeshingChunkMediaType::CurvePartitions | MeshingChunkMediaType::CurveMesh
         ),
         MeshingStageKind::SurfaceMesh => {
-            matches!(media, MeshingChunkMediaType::SurfacePartitions)
+            matches!(
+                media,
+                MeshingChunkMediaType::SurfacePartitions | MeshingChunkMediaType::SurfaceMesh
+            )
         }
         MeshingStageKind::ProtectedBoundaryComplex => {
             matches!(media, MeshingChunkMediaType::ProtectedBoundaryComplex)

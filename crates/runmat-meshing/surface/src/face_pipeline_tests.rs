@@ -199,6 +199,14 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         panic!("restart pass must retain canonical curve split demands")
     };
     assert_eq!(splits, std::slice::from_ref(&split));
+    assert!(crate::encode_exact_surface_mesh_from_pass(
+        &restart_pass,
+        &sheet_topology,
+        &curves,
+        &restart_results,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .is_err());
     let restart_pass_bytes = encode_exact_surface_pass_result(
         &restart_pass,
         &sheet_topology,

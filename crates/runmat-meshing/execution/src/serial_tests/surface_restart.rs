@@ -141,23 +141,45 @@ fn serial_surface_join_publishes_the_reconstructed_pass_decision() {
         .stage_objects()
         .decoded_streams()
         .unwrap();
+    assert_eq!(streams.len(), 2);
+    assert_eq!(
+        streams[0].media_type,
+        runmat_meshing_core::MeshingChunkMediaType::SurfacePartitions
+    );
+    assert_eq!(
+        streams[1].media_type,
+        runmat_meshing_core::MeshingChunkMediaType::SurfaceMesh
+    );
+    let options = runmat_meshing_surface::ExactSurfaceJoinOptions {
+        coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
+        maximum_nodes: host.resolved_request.resources.maximum_nodes,
+        maximum_triangles: host.resolved_request.resources.maximum_elements,
+        maximum_boundary_segments: host.resolved_request.resources.maximum_elements,
+    };
+    let partition_results = [partition_result];
     let pass = runmat_meshing_surface::decode_exact_surface_pass_result(
         &streams[0].records[0],
         &exact.geometry_objects().topology,
         &curves,
-        &[partition_result],
-        runmat_meshing_surface::ExactSurfaceJoinOptions {
-            coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
-            maximum_nodes: host.resolved_request.resources.maximum_nodes,
-            maximum_triangles: host.resolved_request.resources.maximum_elements,
-            maximum_boundary_segments: host.resolved_request.resources.maximum_elements,
-        },
+        &partition_results,
+        options,
     )
     .unwrap();
-    assert!(matches!(
-        pass.outcome,
-        runmat_meshing_surface::ExactSurfacePassOutcome::Converged { .. }
-    ));
+    let surface = runmat_meshing_surface::decode_exact_surface_mesh_from_pass(
+        &streams[1].records[0],
+        &pass,
+        &exact.geometry_objects().topology,
+        &curves,
+        &partition_results,
+        options,
+    )
+    .unwrap();
+    let runmat_meshing_surface::ExactSurfacePassOutcome::Converged { surface: expected } =
+        pass.outcome
+    else {
+        panic!("surface publication requires a converged pass")
+    };
+    assert_eq!(surface, expected);
 }
 
 #[test]

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{identity::validate_digest_list, MeshingContractError, MeshingStageKind, StableDigest};
 
-pub const MESHING_STAGE_MANIFEST_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_STAGE_MANIFEST_SCHEMA_VERSION: u16 = 3;
 const MAX_CHUNKS_PER_MANIFEST: usize = 65_536;
 const MAX_MANIFEST_PREREQUISITES: usize = 64;
 
@@ -23,6 +23,7 @@ pub enum MeshingChunkMediaType {
     CurvePartitions,
     CurveMesh,
     SurfacePartitions,
+    SurfaceMesh,
     ProtectedBoundaryComplex,
     VolumeTopology,
     MeshNodes,
@@ -44,6 +45,7 @@ impl MeshingChunkMediaType {
             Self::CurvePartitions => "application/vnd.runmat.mesh-curves.v2",
             Self::CurveMesh => "application/vnd.runmat.shared-curve-mesh.v4",
             Self::SurfacePartitions => "application/vnd.runmat.mesh-surfaces.v2",
+            Self::SurfaceMesh => "application/vnd.runmat.exact-surface-mesh.v1",
             Self::ProtectedBoundaryComplex => "application/vnd.runmat.mesh-plc.v2",
             Self::VolumeTopology => "application/vnd.runmat.mesh-volume.v2",
             Self::MeshNodes => "application/vnd.runmat.mesh-nodes.v2",
@@ -65,6 +67,7 @@ impl MeshingChunkMediaType {
             Self::CurvePartitions,
             Self::CurveMesh,
             Self::SurfacePartitions,
+            Self::SurfaceMesh,
             Self::ProtectedBoundaryComplex,
             Self::VolumeTopology,
             Self::MeshNodes,

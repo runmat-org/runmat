@@ -1,9 +1,12 @@
 use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
 use runmat_geometry_core::ExactBRepTopology;
+use runmat_meshing_curve::SharedCurveMesh;
 
 use super::{
-    validate_exact_surface_mesh, ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh,
-    ExactSurfaceMeshError, ExactSurfaceMeshErrorKind,
+    validate_exact_surface_mesh, validate_exact_surface_pass_result, ExactFaceMeshBatch,
+    ExactFacePartitionOutcome, ExactFacePartitionResult, ExactSurfaceJoinOptions, ExactSurfaceMesh,
+    ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfacePassOutcome,
+    ExactSurfacePassResult, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
 };
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-exact-surface-canonical-cbor/v1\0";
@@ -29,6 +32,62 @@ pub fn decode_exact_surface_mesh(
     options: ExactSurfaceJoinOptions,
 ) -> Result<ExactSurfaceMesh, ExactSurfaceMeshError> {
     decode_with_limits(bytes, topology, batches, options, CONTRACT_LIMITS)
+}
+
+pub fn encode_exact_surface_mesh_from_pass(
+    pass: &ExactSurfacePassResult,
+    topology: &ExactBRepTopology,
+    curves: &SharedCurveMesh,
+    partitions: &[ExactFacePartitionResult],
+    options: ExactSurfaceJoinOptions,
+) -> Result<Vec<u8>, ExactSurfaceMeshError> {
+    validate_exact_surface_pass_result(pass, topology, curves, partitions, options)?;
+    let ExactSurfacePassOutcome::Converged { surface } = &pass.outcome else {
+        return Err(ExactSurfaceMeshError::new(
+            ExactSurfaceMeshErrorKind::InvalidInput,
+            "a curve-restart pass cannot publish a final exact surface",
+        ));
+    };
+    encode_exact_surface_mesh(surface, topology, &converged_batches(partitions)?, options)
+}
+
+pub fn decode_exact_surface_mesh_from_pass(
+    bytes: &[u8],
+    pass: &ExactSurfacePassResult,
+    topology: &ExactBRepTopology,
+    curves: &SharedCurveMesh,
+    partitions: &[ExactFacePartitionResult],
+    options: ExactSurfaceJoinOptions,
+) -> Result<ExactSurfaceMesh, ExactSurfaceMeshError> {
+    validate_exact_surface_pass_result(pass, topology, curves, partitions, options)?;
+    if !matches!(pass.outcome, ExactSurfacePassOutcome::Converged { .. }) {
+        return Err(ExactSurfaceMeshError::new(
+            ExactSurfaceMeshErrorKind::InvalidInput,
+            "a curve-restart pass cannot admit a final exact surface",
+        ));
+    }
+    decode_exact_surface_mesh(bytes, topology, &converged_batches(partitions)?, options)
+}
+
+fn converged_batches(
+    partitions: &[ExactFacePartitionResult],
+) -> Result<Vec<ExactFaceMeshBatch>, ExactSurfaceMeshError> {
+    partitions
+        .iter()
+        .map(|partition| {
+            let ExactFacePartitionOutcome::Converged { faces } = &partition.outcome else {
+                return Err(ExactSurfaceMeshError::new(
+                    ExactSurfaceMeshErrorKind::InvalidInput,
+                    "final exact surface prerequisites contain a curve-restart partition",
+                ));
+            };
+            Ok(ExactFaceMeshBatch {
+                schema_version: EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
+                partition: partition.partition.clone(),
+                faces: faces.clone(),
+            })
+        })
+        .collect()
 }
 
 fn decode_with_limits(

@@ -6,8 +6,9 @@ use runmat_meshing_core::{
 use runmat_meshing_curve::decode_shared_curve_mesh;
 use runmat_meshing_surface::{
     decide_exact_surface_pass, decode_exact_face_partition_result,
-    encode_decided_exact_surface_pass_result, ExactSurfacePassOutcome,
-    EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION, EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
+    encode_decided_exact_surface_pass_result, encode_exact_surface_mesh_from_pass,
+    ExactSurfacePassOutcome, EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
+    EXACT_SURFACE_MESH_SCHEMA_VERSION, EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
     MAX_EXACT_FACE_PARTITIONS,
 };
 
@@ -88,6 +89,21 @@ impl MeshingStageKernel for ExactSurfaceJoinKernel {
             .checkpoint(MeshingStageCheckpoint::default())?;
         let encoded = encode_decided_exact_surface_pass_result(&result)
             .map_err(|error| invalid_input(&error.to_string()))?;
+        let encoded_surface =
+            if matches!(&result.outcome, ExactSurfacePassOutcome::Converged { .. }) {
+                Some(
+                    encode_exact_surface_mesh_from_pass(
+                        &result,
+                        &geometry.topology,
+                        &curves,
+                        &partitions,
+                        options,
+                    )
+                    .map_err(|error| invalid_input(&error.to_string()))?,
+                )
+            } else {
+                None
+            };
 
         let face_count = checked_count(
             std::iter::once(geometry.topology.faces.len()),
@@ -124,27 +140,36 @@ impl MeshingStageKernel for ExactSurfaceJoinKernel {
         entity_counts.insert("surface_nodes".into(), node_count);
         entity_counts.insert("surface_triangles".into(), element_count);
         entity_counts.insert("curve_split_demands".into(), split_count);
+        let encoded_output_bytes = checked_count(
+            std::iter::once(encoded.len()).chain(encoded_surface.iter().map(Vec::len)),
+            "surface publication byte count overflowed",
+        )?;
         let checkpoint = MeshingStageCheckpoint {
             completed_work,
             estimated_work: face_count,
             node_count,
             element_count,
-            peak_memory_bytes: encoded_input_bytes.saturating_add(checked_count(
-                std::iter::once(encoded.len()),
-                "surface pass byte count overflowed",
-            )?),
+            peak_memory_bytes: encoded_input_bytes.saturating_add(encoded_output_bytes),
             entity_counts,
             ..MeshingStageCheckpoint::default()
         };
         invocation.control.checkpoint(checkpoint.clone())?;
 
+        let mut streams = vec![MeshingChunkStream {
+            media_type: MeshingChunkMediaType::SurfacePartitions,
+            schema_version: EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
+            records: vec![encoded],
+        }];
+        if let Some(surface) = encoded_surface {
+            streams.push(MeshingChunkStream {
+                media_type: MeshingChunkMediaType::SurfaceMesh,
+                schema_version: EXACT_SURFACE_MESH_SCHEMA_VERSION,
+                records: vec![surface],
+            });
+        }
         Ok(ValidatedMeshingStageOutput {
-            invariant_summary_digest: validation_digest(&encoded),
-            streams: vec![MeshingChunkStream {
-                media_type: MeshingChunkMediaType::SurfacePartitions,
-                schema_version: EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
-                records: vec![encoded],
-            }],
+            invariant_summary_digest: validation_digest(&streams),
+            streams,
             final_checkpoint: checkpoint,
         })
     }
@@ -226,8 +251,15 @@ pub(crate) fn partition_record(
     Ok(stream.records[0].clone())
 }
 
-fn validation_digest(encoded: &[u8]) -> StableDigest {
-    let mut bytes = b"runmat-exact-surface-pass-validation/v1\0".to_vec();
-    bytes.extend_from_slice(encoded);
+fn validation_digest(streams: &[MeshingChunkStream]) -> StableDigest {
+    let mut bytes = b"runmat-exact-surface-publication-validation/v1\0".to_vec();
+    for stream in streams {
+        bytes.extend_from_slice(stream.media_type.media_type().as_bytes());
+        bytes.extend_from_slice(&stream.schema_version.to_be_bytes());
+        for record in &stream.records {
+            bytes.extend_from_slice(&(record.len() as u64).to_be_bytes());
+            bytes.extend_from_slice(record);
+        }
+    }
     StableDigest::from_bytes(*Digest::sha256(&bytes).bytes())
 }

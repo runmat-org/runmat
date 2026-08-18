@@ -35,6 +35,16 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .surface_join(&first_pass, first_partition_roots.clone())
         .unwrap();
     let restart = execute_planned(&mut fixture, &restart_stage, &crate::ExactSurfaceJoinKernel);
+    let restart_streams = restart
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    assert_eq!(restart_streams.len(), 1);
+    assert_eq!(
+        restart_streams[0].media_type,
+        runmat_meshing_core::MeshingChunkMediaType::SurfacePartitions
+    );
     let restart_root = root(restart.publication().root_output());
 
     let refinement_stage = planner
@@ -90,6 +100,16 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .surface_join(&second_pass, vec![second_partition_root])
         .unwrap();
     let final_pass = execute_planned(&mut fixture, &final_stage, &crate::ExactSurfaceJoinKernel);
+    let final_streams = final_pass
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    assert_eq!(final_streams.len(), 2);
+    assert_eq!(
+        final_streams[1].media_type,
+        runmat_meshing_core::MeshingChunkMediaType::SurfaceMesh
+    );
 
     let refined_curve_bytes = refined_curve
         .publication()
