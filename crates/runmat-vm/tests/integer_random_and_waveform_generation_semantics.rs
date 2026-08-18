@@ -3,6 +3,8 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
+use runmat_builtins::{IntegerStorage, Value};
+
 #[test]
 fn compiled_random_size_controls_accept_every_integer_class() {
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
@@ -45,6 +47,21 @@ fn compiled_runmat_extensions_cover_waveforms_distributions_and_exact_sampling()
         "p=rectpuls(uint8([0 1]),uint8(2)); if ~isequal(p,[1 0]); error('rectpuls edge'); end; q=pulstran(uint8([0 1]),uint8(0),'rectpuls',uint8(2)); if ~isequal(q,[1 0]); error('pulstran integer form'); end; r=random('Normal',uint8(0),uint8(1),uint8(2)); if ~isequal(size(r),[2 2]); error('random integer form'); end; base=bitshift(uint64(1),53); s=randsample(uint64([base base+uint64(1)]),uint8(2)); if ~isa(s,'uint64') || numel(s)~=2; error('randsample integer form'); end;",
     )
     .expect("compiled RunMat integer extensions");
+}
+
+#[test]
+fn compiled_randi_samples_full_width_integer_domains_reproducibly() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let values = execute_source(
+        "rng(uint64(123)); sb=[intmin('int64') intmax('int64')]; a=randi(sb,1,64,'int64'); ub=[uint64(0) intmax('uint64')]; b=randi(ub,1,64,'uint64'); rng(uint64(123)); a2=randi(sb,1,64,'int64'); b2=randi(ub,1,64,'uint64'); if ~isequal(a,a2) || ~isequal(b,b2); error('randi reproducibility'); end;",
+    )
+    .expect("compiled full-width integer randi");
+    assert!(values.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if matches!(tensor.integer_storage(), Some(IntegerStorage::I64(data)) if data.iter().any(|item| *item < 0) && data.iter().any(|item| *item > 0)))
+    }));
+    assert!(values.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if matches!(tensor.integer_storage(), Some(IntegerStorage::U64(data)) if data.iter().any(|item| *item > (1_u64 << 53))))
+    }));
 }
 
 #[test]

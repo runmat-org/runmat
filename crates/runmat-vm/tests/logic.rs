@@ -296,6 +296,26 @@ fn every_integer_class_uses_native_arithmetic_and_comparison_dispatch() {
 }
 
 #[test]
+fn unary_integer_operators_preserve_class_and_saturate_every_endpoint() {
+    let vars = execute_source(
+        "a=+intmin('int8'); b=-intmin('int8'); c=+intmin('int16'); d=-intmin('int16'); e=+intmin('int32'); f=-intmin('int32'); g=+intmin('int64'); h=-intmin('int64'); i=-intmax('uint8'); j=-intmax('uint16'); k=-intmax('uint32'); l=-intmax('uint64');",
+    )
+    .expect("compiled unary integer endpoint semantics");
+    assert_eq!(vars[0], Value::Int(IntValue::I8(i8::MIN)));
+    assert_eq!(vars[1], Value::Int(IntValue::I8(i8::MAX)));
+    assert_eq!(vars[2], Value::Int(IntValue::I16(i16::MIN)));
+    assert_eq!(vars[3], Value::Int(IntValue::I16(i16::MAX)));
+    assert_eq!(vars[4], Value::Int(IntValue::I32(i32::MIN)));
+    assert_eq!(vars[5], Value::Int(IntValue::I32(i32::MAX)));
+    assert_eq!(vars[6], Value::Int(IntValue::I64(i64::MIN)));
+    assert_eq!(vars[7], Value::Int(IntValue::I64(i64::MAX)));
+    assert_eq!(vars[8], Value::Int(IntValue::U8(0)));
+    assert_eq!(vars[9], Value::Int(IntValue::U16(0)));
+    assert_eq!(vars[10], Value::Int(IntValue::U32(0)));
+    assert_eq!(vars[11], Value::Int(IntValue::U64(0)));
+}
+
+#[test]
 fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "r = uint64([9223372036854775808 18446744073709551615]); z = complex(r, 1); zr = real(z); zi = imag(z); scalar = complex(int64(-9223372036854775808), int64(7)); sr = real(scalar); si = imag(scalar); tf = isreal(z); high = uint64(9223372036854775808) + 1; highz = complex(high, 1); highr = real(highz); picked = z([2 1]); pickedreal = real(picked); reshaped = reshape(z, 2, 1); reshapedreal = real(reshaped); scalarreshape = reshape(high, 1, 1, 1);",

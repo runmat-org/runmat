@@ -16,7 +16,7 @@ use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, random, tensor};
 use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
@@ -28,17 +28,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("generator"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[
-        ProviderHook::Custom("random_integer_range"),
-        ProviderHook::Custom("random_integer_like"),
-    ],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may offer integer RNG kernels via random_integer_range / random_integer_like; integer gpuArray prototypes stay provider-resident through random generation plus native integer cast when supported, with exact host upload retained for bounds outside the provider contract.",
+    notes: "Host generation uses unbiased full-width integer rejection sampling. gpuArray prototypes stay provider-resident through exact native upload, without a floating provider RNG intermediate.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -557,7 +554,7 @@ fn value_uses_wide_integer_class(value: &Value) -> bool {
 struct Bounds {
     lower: i128,
     upper: i128,
-    span: u64,
+    span: u128,
 }
 
 impl Bounds {
@@ -572,15 +569,15 @@ impl Bounds {
         if span <= 0 {
             return Err(builtin_error("randi: invalid bounds"));
         }
-        if span > (1u64 << 53) as i128 {
+        if span > (1_u128 << 64) as i128 {
             return Err(builtin_error(
-                "randi: range width exceeds RNG precision (2^53)",
+                "randi: range width exceeds the full 64-bit integer domain",
             ));
         }
         Ok(Self {
             lower,
             upper,
-            span: span as u64,
+            span: span as u128,
         })
     }
 }
@@ -755,12 +752,34 @@ impl ParsedRandi {
 }
 
 async fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
+    if output_template_uses_floating_storage(&parsed.template)
+        && parsed.bounds.span > (1_u128 << 53)
+    {
+        return Err(builtin_error(
+            "randi: floating output range width exceeds RNG precision (2^53)",
+        ));
+    }
     match parsed.template {
         OutputTemplate::Double => randi_double(&parsed.bounds, &parsed.shape),
         OutputTemplate::Single => randi_single(&parsed.bounds, &parsed.shape),
         OutputTemplate::Logical => randi_logical(&parsed.bounds, &parsed.shape),
         OutputTemplate::Integer(target) => randi_integer(&parsed.bounds, &parsed.shape, target),
         OutputTemplate::Like(proto) => randi_like(&proto, &parsed.bounds, &parsed.shape).await,
+    }
+}
+
+fn output_template_uses_floating_storage(template: &OutputTemplate) -> bool {
+    match template {
+        OutputTemplate::Double | OutputTemplate::Single => true,
+        OutputTemplate::Logical | OutputTemplate::Integer(_) => false,
+        OutputTemplate::Like(value) => match value {
+            Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => false,
+            Value::Tensor(tensor) => tensor.integer_storage().is_none(),
+            Value::GpuTensor(handle) => {
+                runmat_accelerate_api::handle_integer_type(handle).is_none()
+            }
+            _ => true,
+        },
     }
 }
 
@@ -858,13 +877,6 @@ async fn randi_like_gpu(
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
             let target = integer_target_from_accelerator_type(integer_type);
-            if integer_bounds_are_representable(bounds, target) {
-                if let Some(gpu) =
-                    try_provider_integer_randi(provider, handle, bounds, shape, target).await
-                {
-                    return Ok(Value::GpuTensor(gpu));
-                }
-            }
             let values = generate_integer_values(bounds, tensor::element_count(shape))?;
             let storage = integer_storage_from_values(target, values)?;
             let view = integer_tensor_view(&storage, shape);
@@ -878,25 +890,6 @@ async fn randi_like_gpu(
                 });
         }
 
-        let lower = i64::try_from(bounds.lower).map_err(|_| {
-            builtin_error(
-                "randi: GPU integer generation currently requires int64-representable bounds",
-            )
-        })?;
-        let upper = i64::try_from(bounds.upper).map_err(|_| {
-            builtin_error(
-                "randi: GPU integer generation currently requires int64-representable bounds",
-            )
-        })?;
-        let attempt = if handle.shape == shape {
-            provider.random_integer_like(handle, lower, upper)
-        } else {
-            provider.random_integer_range(lower, upper, shape)
-        };
-        if let Ok(gpu) = attempt {
-            return Ok(Value::GpuTensor(gpu));
-        }
-
         let tensor = integer_tensor(bounds, shape)?;
         if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &tensor) {
             return Ok(Value::GpuTensor(gpu));
@@ -908,36 +901,6 @@ async fn randi_like_gpu(
         .await
         .map_err(|e| builtin_error(format!("randi: {e}")))?;
     randi_like(&gathered, bounds, shape).await
-}
-
-async fn try_provider_integer_randi(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    handle: &GpuTensorHandle,
-    bounds: &Bounds,
-    shape: &[usize],
-    target: IntegerTarget,
-) -> Option<GpuTensorHandle> {
-    let lower = i64::try_from(bounds.lower).ok()?;
-    let upper = i64::try_from(bounds.upper).ok()?;
-    if target.uses_extended_scalar_precision()
-        && (!provider_integer_bound_is_exact(lower) || !provider_integer_bound_is_exact(upper))
-    {
-        return None;
-    }
-    let generated = if handle.shape == shape {
-        provider.random_integer_like(handle, lower, upper).ok()?
-    } else {
-        provider.random_integer_range(lower, upper, shape).ok()?
-    };
-    provider
-        .cast_to_integer(&generated, target.accelerator_type())
-        .await
-        .ok()
-}
-
-fn provider_integer_bound_is_exact(value: i64) -> bool {
-    const MAX_EXACT_INTEGER: i64 = 1_i64 << 53;
-    (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&value)
 }
 
 fn integer_tensor(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Tensor> {
@@ -957,38 +920,17 @@ fn generate_integer_values(bounds: &Bounds, len: usize) -> crate::BuiltinResult<
         return Ok(vec![bounds.lower; len]);
     }
 
-    let uniforms = random::generate_uniform(len, "randi")?;
-    let span = bounds.span as f64;
+    let offsets = random::generate_integer_offsets(bounds.span, len, "randi")?;
     let mut out = Vec::with_capacity(len);
-    for u in uniforms {
-        let mut offset = (u * span).floor() as u64;
-        if offset >= bounds.span {
-            offset = bounds.span - 1;
-        }
-        let mut value = bounds
+    for offset in offsets {
+        let value = bounds
             .lower
             .checked_add(offset as i128)
             .ok_or_else(|| builtin_error("randi: integer overflow while sampling"))?;
-        if value > bounds.upper {
-            value = bounds.upper;
-        }
+        debug_assert!(value <= bounds.upper);
         out.push(value);
     }
     Ok(out)
-}
-
-fn integer_bounds_are_representable(bounds: &Bounds, target: IntegerTarget) -> bool {
-    let (min, max) = match target {
-        IntegerTarget::I8 => (i8::MIN as i128, i8::MAX as i128),
-        IntegerTarget::I16 => (i16::MIN as i128, i16::MAX as i128),
-        IntegerTarget::I32 => (i32::MIN as i128, i32::MAX as i128),
-        IntegerTarget::I64 => (i64::MIN as i128, i64::MAX as i128),
-        IntegerTarget::U8 => (0, u8::MAX as i128),
-        IntegerTarget::U16 => (0, u16::MAX as i128),
-        IntegerTarget::U32 => (0, u32::MAX as i128),
-        IntegerTarget::U64 => (0, u64::MAX as i128),
-    };
-    bounds.lower >= min && bounds.upper <= max
 }
 
 fn integer_storage_from_values(
@@ -1289,17 +1231,9 @@ pub(crate) mod tests {
     }
 
     fn expected_sequence(bounds: &Bounds, count: usize) -> Vec<i128> {
-        let uniforms = random::expected_uniform_sequence(count);
-        let span = bounds.span as f64;
-        uniforms
+        random::expected_integer_offset_sequence(bounds.span, count)
             .into_iter()
-            .map(|u| {
-                let mut offset = (u * span).floor() as u64;
-                if offset >= bounds.span {
-                    offset = bounds.span - 1;
-                }
-                bounds.lower + offset as i128
-            })
+            .map(|offset| bounds.lower + offset as i128)
             .collect()
     }
 
@@ -1480,6 +1414,76 @@ pub(crate) mod tests {
                 Some(&IntegerStorage::U8(vec![expected; 4]))
             );
         }
+    }
+
+    #[test]
+    fn randi_samples_complete_signed_and_unsigned_64_bit_domains_exactly() {
+        let _guard = random::test_lock().lock().unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+
+        reset_rng_clean();
+        let signed_bounds =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+                .expect("int64 full-width bounds");
+        let signed = block_on(randi_builtin(vec![
+            Value::Tensor(signed_bounds),
+            Value::Num(1.0),
+            Value::Num(256.0),
+            Value::from("int64"),
+        ]))
+        .expect("full-width int64 randi");
+        let Value::Tensor(signed) = signed else {
+            panic!("expected int64 tensor");
+        };
+        let IntegerStorage::I64(signed) = signed.integer_storage().expect("int64 storage") else {
+            panic!("expected int64 storage");
+        };
+        assert!(signed.iter().any(|value| *value < 0));
+        assert!(signed.iter().any(|value| *value > 0));
+
+        reset_rng_clean();
+        let unsigned_bounds =
+            Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+                .expect("uint64 full-width bounds");
+        let unsigned = block_on(randi_builtin(vec![
+            Value::Tensor(unsigned_bounds),
+            Value::Num(1.0),
+            Value::Num(256.0),
+            Value::from("uint64"),
+        ]))
+        .expect("full-width uint64 randi");
+        let Value::Tensor(unsigned) = unsigned else {
+            panic!("expected uint64 tensor");
+        };
+        let IntegerStorage::U64(unsigned) = unsigned.integer_storage().expect("uint64 storage")
+        else {
+            panic!("expected uint64 storage");
+        };
+        assert!(unsigned.iter().any(|value| *value > (1_u64 << 53)));
+    }
+
+    #[test]
+    fn randi_full_width_sequence_is_reproducible_and_floating_outputs_remain_bounded() {
+        let _guard = random::test_lock().lock().unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let bounds = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+            .expect("uint64 full-width bounds");
+        let args = vec![
+            Value::Tensor(bounds.clone()),
+            Value::Num(1.0),
+            Value::Num(32.0),
+            Value::from("uint64"),
+        ];
+        reset_rng_clean();
+        let first = block_on(randi_builtin(args.clone())).expect("first sequence");
+        reset_rng_clean();
+        let second = block_on(randi_builtin(args)).expect("second sequence");
+        assert_eq!(first, second);
+
+        reset_rng_clean();
+        let error = block_on(randi_builtin(vec![Value::Tensor(bounds)]))
+            .expect_err("double output cannot represent a full-width range");
+        assert!(error.to_string().contains("floating output range width"));
     }
 
     #[test]
@@ -1897,7 +1901,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn randi_gpu_like_preserves_native_uint64_storage() {
+    fn randi_gpu_like_preserves_full_width_native_uint64_storage() {
         let _guard = random::test_lock().lock().unwrap();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         random::reset_rng();
@@ -1909,13 +1913,13 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload uint64 prototype");
-            let lower = (1_u64 << 53) + 1;
-            let upper = lower + 3;
-            let bounds = Tensor::new_integer(IntegerStorage::U64(vec![lower, upper]), vec![1, 2])
-                .expect("uint64 bounds");
+            let bounds = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+                .expect("full-width uint64 bounds");
 
             let result = block_on(randi_builtin(vec![
                 Value::Tensor(bounds),
+                Value::Num(1.0),
+                Value::Num(32.0),
                 Value::from("like"),
                 Value::GpuTensor(prototype),
             ]))
@@ -1928,15 +1932,15 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&gpu),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert_eq!(gpu.shape, vec![1, 1]);
+            assert_eq!(gpu.shape, vec![1, 32]);
             let downloaded = block_on(provider.download_integer(&gpu))
                 .expect("download uint64 randi")
                 .data;
             let runmat_accelerate_api::HostIntegerDataOwned::U64(values) = downloaded else {
                 panic!("expected uint64 storage");
             };
-            assert_eq!(values.len(), 1);
-            assert!(values.iter().all(|value| (lower..=upper).contains(value)));
+            assert_eq!(values.len(), 32);
+            assert!(values.iter().any(|value| *value > (1_u64 << 53)));
         });
     }
 

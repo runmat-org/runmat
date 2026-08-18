@@ -5326,46 +5326,6 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
-    fn random_integer_range(
-        &self,
-        lower: i64,
-        upper: i64,
-        shape: &[usize],
-    ) -> Result<GpuTensorHandle> {
-        ensure!(lower <= upper, "lower bound must be <= upper bound");
-        let span_i128 = (upper as i128)
-            .checked_sub(lower as i128)
-            .and_then(|delta| delta.checked_add(1))
-            .ok_or_else(|| anyhow!("integer range overflow"))?;
-        ensure!(span_i128 > 0, "integer range must be non-empty");
-        ensure!(
-            span_i128 <= (1i128 << 53),
-            "integer range exceeds 2^53 and cannot be represented exactly"
-        );
-        let span = span_i128 as u64;
-
-        let len: usize = shape.iter().copied().product();
-        let mut data = Vec::with_capacity(len);
-        if span == 1 {
-            data.resize(len, lower as f64);
-        } else if len > 0 {
-            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
-            let span_f64 = span as f64;
-            for _ in 0..len {
-                let mut offset = (next_uniform(&mut guard) * span_f64).floor() as u64;
-                if offset >= span {
-                    offset = span - 1;
-                }
-                let value = (lower as i128 + offset as i128) as f64;
-                data.push(value);
-            }
-        }
-
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, data);
-        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
-    }
-
     fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
         ensure!(k <= n, "randperm: K must satisfy 0 <= K <= N");
         let k = k.min(n);

@@ -989,32 +989,6 @@ pub struct PeaksXYParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub struct RandomIntParamsF64 {
-    pub lower: f64,
-    pub upper: f64,
-    pub span: f64,
-    pub span_minus_one: f64,
-    pub offset: u32,
-    pub chunk: u32,
-    pub seed: u32,
-    pub _pad: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct RandomIntParamsF32 {
-    pub lower: f32,
-    pub upper: f32,
-    pub span: f32,
-    pub span_minus_one: f32,
-    pub offset: u32,
-    pub chunk: u32,
-    pub seed: u32,
-    pub _pad: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct RandomScalarParams {
     pub offset: u32,
     pub chunk: u32,

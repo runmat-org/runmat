@@ -2077,28 +2077,6 @@ pub trait AccelProvider: Send + Sync {
         unsupported_future("imfilter not supported by provider")
     }
 
-    /// Allocate a tensor filled with random integers over an inclusive range.
-    fn random_integer_range(
-        &self,
-        _lower: i64,
-        _upper: i64,
-        _shape: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "random_integer_range not supported by provider"
-        ))
-    }
-
-    /// Allocate a random integer tensor matching the prototype shape.
-    fn random_integer_like(
-        &self,
-        prototype: &GpuTensorHandle,
-        lower: i64,
-        upper: i64,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        self.random_integer_range(lower, upper, &prototype.shape)
-    }
-
     /// Allocate a random permutation of 1..=n, returning the first k elements.
     fn random_permutation(&self, _n: usize, _k: usize) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow!("random_permutation not supported by provider"))

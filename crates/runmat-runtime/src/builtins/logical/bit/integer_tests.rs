@@ -1774,6 +1774,16 @@ fn idivide_rejects_zero_mixed_class_and_invalid_double_inputs() {
 }
 
 #[test]
+fn idivide_rejects_the_unrepresentable_signed_minimum_quotient() {
+    let overflow = block_on(idivide_builtin(vec![
+        Value::Int(IntValue::I64(i64::MIN)),
+        Value::Int(IntValue::I64(-1)),
+    ]))
+    .expect_err("int64 minimum divided by negative one must not wrap");
+    assert_eq!(overflow.identifier(), ERROR_OVERFLOW.identifier);
+}
+
+#[test]
 fn swapbytes_preserves_integer_scalar_classes() {
     assert_eq!(
         block_on(swapbytes_builtin(Value::Int(IntValue::U16(0x1234)))).expect("swapbytes"),

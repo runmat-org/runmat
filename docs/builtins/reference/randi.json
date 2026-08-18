@@ -185,6 +185,6 @@
   },
   "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the examples above, the result of `randi` remains on the GPU whenever the planner determines that downstream work benefits from staying on device.\n\nTo preserve backwards compatibility with MathWorks MATLAB—and when you want to be explicit about residency—you can call `gpuArray` yourself to seed GPU execution.\n\nBecause MathWorks MATLAB lacks a fusion planner and ships GPU support as a separate toolbox, MATLAB users must move data manually. RunMat automates residency to streamline accelerated workflows.",
   "gpu_behavior": [
-    "When the target output or `'like'` prototype resides on the GPU, RunMat first asks the active acceleration provider for device-side generation via `random_integer_like` (shape reuse) or `random_integer_range` (explicit shape). Providers that do not expose these hooks fall back to host-side sampling followed by a single upload, ensuring correctness while still keeping the resulting tensor on the GPU."
+    "When the target output or `'like'` prototype resides on the GPU, RunMat performs the same unbiased full-width integer sampling used for host output and uploads the authoritative typed values once. The result remains provider-resident without routing integer generation through a floating-point provider RNG."
   ]
 }

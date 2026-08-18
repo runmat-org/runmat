@@ -201,15 +201,6 @@ impl AccelProvider for WgpuProvider {
         Box::pin(async move { self.imfilter_exec(image, kernel, options).await })
     }
 
-    fn random_integer_range(
-        &self,
-        lower: i64,
-        upper: i64,
-        shape: &[usize],
-    ) -> Result<GpuTensorHandle> {
-        self.random_integer_range_exec(lower, upper, shape)
-    }
-
     fn set_rng_state(&self, state: u64) -> Result<()> {
         self.set_rng_state_exec(state)
     }
