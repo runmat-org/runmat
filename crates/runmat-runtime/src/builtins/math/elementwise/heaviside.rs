@@ -515,9 +515,14 @@ pub(crate) mod tests {
                 device_id: self.device_id(),
                 buffer_id: 2,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_precision(&handle, self.precision());
-            runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+            }
+            .with_numeric_descriptor(
+                match self.precision() {
+                    ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                    ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+                },
+                GpuTensorStorage::Real,
+            );
             runmat_accelerate_api::set_handle_logical(&handle, false);
             Ok(handle)
         }
@@ -808,7 +813,11 @@ pub(crate) mod tests {
             device_id: provider.device_id(),
             buffer_id: 1,
             descriptor: Default::default(),
-        };
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
         let source_metadata = (
             runmat_accelerate_api::handle_storage(&handle),
             runmat_accelerate_api::handle_precision(&handle),

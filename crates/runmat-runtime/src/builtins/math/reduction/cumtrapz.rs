@@ -1297,12 +1297,14 @@ pub(crate) mod tests {
                 buffer_id,
                 descriptor: Default::default(),
             };
-            if integer {
-                runmat_accelerate_api::set_handle_integer_type(
-                    &handle,
-                    runmat_accelerate_api::IntegerElementType::U64,
-                );
-            }
+            let handle = if integer {
+                handle.with_numeric_descriptor(
+                    runmat_accelerate_api::NumericElementType::U64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+            } else {
+                handle
+            };
             if logical {
                 runmat_accelerate_api::set_handle_logical(&handle, true);
             }

@@ -1466,16 +1466,12 @@ pub(crate) mod tests {
         fn imfilter<'a>(
             &'a self,
             image: &'a GpuTensorHandle,
-            kernel: &'a GpuTensorHandle,
+            _kernel: &'a GpuTensorHandle,
             _options: &'a ImfilterOptions,
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-            runmat_accelerate_api::set_handle_precision(image, ProviderPrecision::F32);
-            runmat_accelerate_api::set_handle_storage(image, GpuTensorStorage::ComplexInterleaved);
-            runmat_accelerate_api::set_handle_integer_type(image, IntegerElementType::U8);
             runmat_accelerate_api::set_handle_logical(image, true);
             runmat_accelerate_api::set_handle_class_name(image, "single");
             runmat_accelerate_api::clear_handle_transpose(image);
-            runmat_accelerate_api::set_handle_precision(kernel, ProviderPrecision::F32);
             Box::pin(async move { Ok(image.clone()) })
         }
     }
@@ -1722,8 +1718,6 @@ pub(crate) mod tests {
                 shape: &[2, 2],
             })
             .expect("image upload");
-        runmat_accelerate_api::set_handle_precision(&image, ProviderPrecision::F64);
-        runmat_accelerate_api::set_handle_storage(&image, GpuTensorStorage::Real);
         runmat_accelerate_api::set_handle_class_name(&image, "double");
         runmat_accelerate_api::record_handle_transpose(&image, 2, 2);
         let image = image.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);

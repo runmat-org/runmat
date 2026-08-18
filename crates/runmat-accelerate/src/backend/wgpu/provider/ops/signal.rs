@@ -2544,10 +2544,11 @@ mod tests {
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use num_complex::Complex;
     use runmat_accelerate_api::{
-        AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
-        ProviderEnvelopeRequest, ProviderHilbertRequest, ProviderIirFilterOptions,
-        ProviderMovingWindowEndpoints, ProviderMovingWindowOp, ProviderMovingWindowRequest,
-        ProviderNanMode, ProviderStdNormalization, ProviderTrapezoidSpacing,
+        AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
+        HostTensorView, ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderHilbertRequest,
+        ProviderIirFilterOptions, ProviderMovingWindowEndpoints, ProviderMovingWindowOp,
+        ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
+        ProviderTrapezoidSpacing,
     };
     use runmat_builtins::{ComplexTensor, Tensor};
     use runmat_runtime::builtins::math::reduction::{
@@ -2740,12 +2741,12 @@ mod tests {
                 interleaved.push(im);
             }
             let input = provider
-                .upload(&HostTensorView {
-                    data: &interleaved,
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F64(&interleaved),
                     shape,
+                    storage: GpuTensorStorage::ComplexInterleaved,
                 })
                 .expect("upload");
-            runmat_accelerate_api::set_handle_storage(&input, GpuTensorStorage::ComplexInterleaved);
             let output = provider
                 .gradient_dim(&input, dim, spacing)
                 .expect("gradient");
@@ -3089,12 +3090,12 @@ mod tests {
                 .expect("upload denominator");
             let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0];
             let x = provider
-                .upload(&HostTensorView {
-                    data: &data,
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F64(&data),
                     shape: &[1, 3],
+                    storage: GpuTensorStorage::ComplexInterleaved,
                 })
                 .expect("upload signal");
-            runmat_accelerate_api::set_handle_storage(&x, GpuTensorStorage::ComplexInterleaved);
 
             let result = pollster::block_on(provider.iir_filter(
                 &b,
@@ -3240,12 +3241,12 @@ mod tests {
         with_wgpu_provider(|provider| {
             let data = [1.0, 1.0, 2.0, 2.0, 3.0, 3.0];
             let input = provider
-                .upload(&HostTensorView {
-                    data: &data,
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F64(&data),
                     shape: &[1, 3],
+                    storage: GpuTensorStorage::ComplexInterleaved,
                 })
                 .expect("upload input");
-            runmat_accelerate_api::set_handle_storage(&input, GpuTensorStorage::ComplexInterleaved);
 
             let trapz = provider
                 .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)

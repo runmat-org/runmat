@@ -350,10 +350,6 @@ mod constructor_dimension_tests {
                     shape: &[1, 2],
                 })
                 .expect("integer upload");
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F64,
-            );
             let output = validate_constructor_gpu_output(
                 "constructor",
                 provider,

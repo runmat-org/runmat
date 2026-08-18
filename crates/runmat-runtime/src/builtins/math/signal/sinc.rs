@@ -721,10 +721,10 @@ mod tests {
             device_id: 0,
             buffer_id: 9_300_005,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::I16,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -787,7 +787,11 @@ mod tests {
             device_id: provider.device_id(),
             buffer_id: 2,
             descriptor: Default::default(),
-        };
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
         let result = call(Value::GpuTensor(handle)).expect("sinc gpu fallback");
         match result {
             Value::Tensor(out) => {
@@ -831,8 +835,11 @@ mod tests {
             device_id: provider.device_id(),
             buffer_id: 3,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::ComplexInterleaved,
+        );
 
         let result = call(Value::GpuTensor(handle)).expect("complex sinc gpu fallback");
         match result {
@@ -855,13 +862,14 @@ mod tests {
             device_id: provider.device_id(),
             buffer_id: 4,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::ComplexInterleaved,
+        );
 
         let err = call(Value::GpuTensor(handle)).expect_err("odd complex buffer should error");
-        assert!(err
-            .message()
-            .contains("sinc: malformed complex buffer, odd length"));
+        assert_eq!(err.identifier(), Some("RunMat:gather:DownloadFailed"));
     }
 
     #[test]

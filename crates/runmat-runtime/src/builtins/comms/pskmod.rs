@@ -1327,7 +1327,6 @@ mod tests {
             let single = Tensor::from_f32(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
             let single_handle =
                 gpu_helpers::upload_tensor(provider, &single).expect("single upload");
-            runmat_accelerate_api::set_handle_precision(&single_handle, ProviderPrecision::F32);
             let result = block_on(super::pskmod_builtin(
                 Value::GpuTensor(single_handle),
                 Value::Num(4.0),

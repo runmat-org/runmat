@@ -710,10 +710,10 @@ mod tests {
             device_id: u32::MAX - 13,
             buffer_id: 1,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            runmat_accelerate_api::ProviderPrecision::F64,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);

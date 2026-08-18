@@ -1539,7 +1539,6 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("integer upload");
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
             validate_prepared_handle(
                 &handle,
                 provider,

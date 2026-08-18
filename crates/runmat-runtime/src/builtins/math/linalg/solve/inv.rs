@@ -720,7 +720,7 @@ pub(crate) mod tests {
     #[test]
     fn inv_gpu_output_validation_uses_immutable_expected_metadata() {
         test_support::with_test_provider(|provider| {
-            let input = provider
+            let mut input = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &[2.0],
                     shape: &[1, 1],
@@ -734,10 +734,7 @@ pub(crate) mod tests {
                 .expect("upload output");
             let expected_storage = runmat_accelerate_api::handle_storage(&input);
             let expected_precision = runmat_accelerate_api::handle_precision(&input);
-            runmat_accelerate_api::set_handle_precision(
-                &input,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
+            input.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::F32);
             assert!(valid_inv_gpu_output(
                 &input,
                 &output,

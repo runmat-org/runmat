@@ -605,10 +605,12 @@ mod tests {
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 510 - offset,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+            }
+            .with_numeric_descriptor(
+                element_type.into(),
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
             let result = copyobj_builtin(vec![Value::GpuTensor(handle.clone()), Value::Num(1.0)]);
-            runmat_accelerate_api::clear_handle_integer_type(&handle);
             let error = result.expect_err("resident numeric handles must reject");
             assert_eq!(
                 error.identifier(),
@@ -637,11 +639,13 @@ mod tests {
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 610 - offset,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+            }
+            .with_numeric_descriptor(
+                element_type.into(),
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
             let result =
                 copyobj_builtin(vec![Value::Num(source), Value::GpuTensor(handle.clone())]);
-            runmat_accelerate_api::clear_handle_integer_type(&handle);
             let error = result.expect_err("resident integer parent must reject");
             assert_eq!(
                 error.identifier(),

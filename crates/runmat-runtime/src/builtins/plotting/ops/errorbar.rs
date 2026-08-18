@@ -1615,17 +1615,13 @@ mod tests {
             })
         };
         let x = make(9_401_001);
-        let y = make(9_401_002);
+        let mut y = make(9_401_002);
         let yn = make(9_401_003);
         let yp = make(9_401_004);
-        let NumericInput::Gpu(handle) = &y else {
+        let NumericInput::Gpu(handle) = &mut y else {
             unreachable!()
         };
-        runmat_accelerate_api::set_handle_integer_type(
-            handle,
-            runmat_accelerate_api::IntegerElementType::U64,
-        );
+        handle.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U64);
         assert!(!errorbar_gpu_inputs_eligible(&x, &y, None, None, &yn, &yp));
-        runmat_accelerate_api::clear_handle_integer_type(handle);
     }
 }

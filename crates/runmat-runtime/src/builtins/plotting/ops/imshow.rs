@@ -1004,17 +1004,15 @@ mod tests {
             device_id: 0,
             buffer_id: u64::MAX - 155,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::I32,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::I32,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         assert_eq!(
             gpu_default_limits(&handle),
             (i32::MIN as f64, i32::MAX as f64)
         );
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
-        assert_eq!(gpu_default_limits(&handle), (0.0, 1.0));
     }
 
     #[test]

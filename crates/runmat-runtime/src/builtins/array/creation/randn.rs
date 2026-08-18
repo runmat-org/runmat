@@ -660,10 +660,10 @@ pub(crate) mod tests {
             device_id: u32::MAX - 18,
             buffer_id: 1,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U8,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U8,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let error = block_on(randn_builtin(vec![Value::GpuTensor(handle.clone())]))
             .expect_err("strict resident size");

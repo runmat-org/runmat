@@ -625,11 +625,20 @@ mod tests {
                 device_id: provider.device_id().wrapping_add(1000),
                 buffer_id: u64::MAX - 21,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
+            }
+            .with_numeric_descriptor(
+                match provider.precision() {
+                    runmat_accelerate_api::ProviderPrecision::F32 => {
+                        runmat_accelerate_api::NumericElementType::F32
+                    }
+                    runmat_accelerate_api::ProviderPrecision::F64 => {
+                        runmat_accelerate_api::NumericElementType::F64
+                    }
+                },
+                GpuTensorStorage::Real,
+            );
             let error = resident_numeric_dtype(&handle, "color-test")
                 .expect_err("global fallback is not exact ownership");
-            runmat_accelerate_api::clear_handle_metadata(&handle);
             assert!(error.message().contains("not owned"));
         });
     }

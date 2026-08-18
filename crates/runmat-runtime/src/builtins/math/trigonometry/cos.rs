@@ -815,8 +815,6 @@ pub(crate) mod tests {
                     storage,
                 ),
             };
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
-            runmat_accelerate_api::set_handle_storage(&handle, storage);
             handle
         }
     }

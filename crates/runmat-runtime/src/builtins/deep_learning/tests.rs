@@ -816,13 +816,13 @@ fn forward_rejects_complex_gpu_dlarray_before_dense_dispatch() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
         let shape = [1usize, 2usize];
-        let handle = provider
+        let mut handle = provider
             .upload(&HostTensorView {
                 data: &[1.0, 2.0],
                 shape: &shape,
             })
             .expect("upload");
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+        handle.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
         provider.reset_telemetry();
         let dl = block_on(dlarray_builtin(
             Value::GpuTensor(handle),

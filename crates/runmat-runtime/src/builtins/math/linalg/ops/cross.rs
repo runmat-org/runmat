@@ -1260,22 +1260,17 @@ pub(crate) mod tests {
     #[test]
     fn cross_rejects_native_output_with_wrong_single_precision() {
         test_support::with_test_provider(|provider| {
-            let lhs = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 0.0, 0.0],
-                    shape: &[1, 3],
-                })
-                .unwrap();
+            let lhs = gpu_helpers::upload_tensor(
+                provider,
+                &runmat_builtins::Tensor::from_f32(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap(),
+            )
+            .unwrap();
             let rhs = provider
                 .upload(&HostTensorView {
                     data: &[0.0, 1.0, 0.0],
                     shape: &[1, 3],
                 })
                 .unwrap();
-            runmat_accelerate_api::set_handle_precision(
-                &lhs,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
             let Value::Tensor(output) =
                 cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new()).unwrap()
             else {

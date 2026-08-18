@@ -4192,7 +4192,6 @@ mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single input");
             let handle = gpu_helpers::upload_tensor(provider, &single).expect("single upload");
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
             let result = block_on(binocdf::binocdf_builtin(
                 Value::GpuTensor(handle),
                 vec![Value::Num(2.0), Value::Num(0.5)],

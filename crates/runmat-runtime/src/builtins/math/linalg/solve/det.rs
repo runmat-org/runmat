@@ -904,7 +904,7 @@ pub(crate) mod tests {
 
     #[test]
     fn det_rejects_aliased_or_mistyped_provider_lu_results_and_frees_safely() {
-        use runmat_accelerate_api::{ProviderLuResult, ProviderPrecision};
+        use runmat_accelerate_api::ProviderLuResult;
 
         test_support::with_test_provider(|provider| {
             let upload = |data: &[f64], shape: &[usize]| {
@@ -918,16 +918,6 @@ pub(crate) mod tests {
             let upper = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
             let perm_matrix = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
             let perm_vector = upload(&[1.0, 2.0], &[2, 1]);
-            for handle in [
-                &input,
-                &combined,
-                &lower,
-                &upper,
-                &perm_matrix,
-                &perm_vector,
-            ] {
-                runmat_accelerate_api::set_handle_precision(handle, ProviderPrecision::F64);
-            }
             let valid = ProviderLuResult {
                 combined: combined.clone(),
                 lower: lower.clone(),

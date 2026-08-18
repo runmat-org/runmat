@@ -490,10 +490,10 @@ mod tests {
                 device_id: 0,
                 buffer_id: 9_305_001,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_integer_type(
-                &resident_nu,
-                runmat_accelerate_api::IntegerElementType::U16,
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
             );
             let error = block_on(trnd_builtin(vec![Value::GpuTensor(resident_nu.clone())]))
                 .expect_err("MATLAB mode rejects resident integer nu before gather");
@@ -501,17 +501,16 @@ mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension")
             );
-            runmat_accelerate_api::clear_handle_integer_type(&resident_nu);
 
             let resident_size = GpuTensorHandle {
                 shape: vec![1, 2],
                 device_id: 0,
                 buffer_id: 9_305_002,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_integer_type(
-                &resident_size,
-                runmat_accelerate_api::IntegerElementType::U16,
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
             );
             let error = block_on(trnd_builtin(vec![
                 Value::Num(5.0),
@@ -522,7 +521,6 @@ mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:TrndIntegerSizeExtension")
             );
-            runmat_accelerate_api::clear_handle_integer_type(&resident_size);
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -563,7 +561,6 @@ mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let nu = Tensor::from_f32(vec![5.0, 6.0], vec![2, 1]).unwrap();
             let input = gpu_helpers::upload_tensor(provider, &nu).expect("upload single parameter");
-            runmat_accelerate_api::set_handle_precision(&input, ProviderPrecision::F32);
             let out = block_on(trnd_builtin(vec![Value::GpuTensor(input)]))
                 .expect("resident single trnd");
             let Value::GpuTensor(handle) = out else {

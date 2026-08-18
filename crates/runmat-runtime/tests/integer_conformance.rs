@@ -393,14 +393,17 @@ fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
         device_id: u32::MAX,
         buffer_id: u64::MAX - 1,
         descriptor: Default::default(),
-    };
+    }
+    .with_numeric_descriptor(
+        IntegerElementType::I64.into(),
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
     let logical_handle = GpuTensorHandle {
         shape: vec![1, 1],
         device_id: u32::MAX,
         buffer_id: u64::MAX,
         descriptor: Default::default(),
     };
-    runmat_accelerate_api::set_handle_integer_type(&integer_handle, IntegerElementType::I64);
     runmat_accelerate_api::set_handle_logical(&logical_handle, true);
 
     let resident_integer = Value::GpuTensor(integer_handle.clone());
@@ -1198,8 +1201,11 @@ fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dis
             device_id: u32::MAX,
             buffer_id: u64::MAX - 100 - offset as u64,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
+        }
+        .with_numeric_descriptor(
+            integer_type.into(),
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
         let resident = Value::GpuTensor(handle.clone());
         let host = integer_tensor(IntegerStorage::I32(vec![1, 2]), vec![2, 1]);
         for builtin in ["ismember", "intersect", "union", "setdiff", "setxor"] {

@@ -958,15 +958,15 @@ mod tests {
             GAUSPULS_SINGLE_CONTROL_EXTENSION.error_identifier
         );
 
-        let resident = GpuTensorHandle {
+        let mut resident = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: u32::MAX - 8,
             buffer_id: u64::MAX - 8,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_precision(
-            &resident,
-            runmat_accelerate_api::ProviderPrecision::F64,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let resident_error = call(Value::GpuTensor(resident.clone()), Vec::new())
             .expect_err("resident extension before provider access");
@@ -982,10 +982,7 @@ mod tests {
             GAUSPULS_RESIDENT_INPUT_EXTENSION.error_identifier
         );
 
-        runmat_accelerate_api::set_handle_integer_type(
-            &resident,
-            runmat_accelerate_api::IntegerElementType::U64,
-        );
+        resident.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U64);
         let typed_resident_error = call(Value::GpuTensor(resident.clone()), Vec::new())
             .expect_err("integer role precedes residency");
         assert_eq!(

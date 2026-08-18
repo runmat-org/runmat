@@ -1575,10 +1575,10 @@ mod tests {
             device_id: 0,
             buffer_id: 9_306_001,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &resident,
-            runmat_accelerate_api::IntegerElementType::I16,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let error = block_on(binornd::binornd_builtin(vec![
             Value::GpuTensor(resident.clone()),
@@ -1668,7 +1668,6 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let parameter = Tensor::from_f32(vec![1.0, 1.0], vec![1, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &parameter).expect("upload");
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
             let output = block_on(binornd::binornd_builtin(vec![
                 Value::GpuTensor(handle),
                 Value::Num(1.0),

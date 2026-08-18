@@ -62,10 +62,10 @@ fn bitand_rejects_unsupported_resident_forms_before_provider_access() {
         device_id: u32::MAX,
         buffer_id: u64::MAX - 70,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &signed,
-        runmat_accelerate_api::IntegerElementType::I32,
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::I32,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(bitand_builtin(vec![
@@ -83,10 +83,10 @@ fn bitand_rejects_unsupported_resident_forms_before_provider_access() {
         device_id: u32::MAX,
         buffer_id: u64::MAX - 71,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &unsigned,
-        runmat_accelerate_api::IntegerElementType::U8,
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::U8,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitand_builtin(vec![
         Value::GpuTensor(unsigned),
@@ -254,10 +254,10 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         device_id: u32::MAX,
         buffer_id: u64::MAX - 72,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &signed,
-        runmat_accelerate_api::IntegerElementType::I32,
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::I32,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(bitor_builtin(vec![
@@ -275,10 +275,10 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         device_id: u32::MAX,
         buffer_id: u64::MAX - 73,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &unsigned,
-        runmat_accelerate_api::IntegerElementType::U8,
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::U8,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitor_builtin(vec![
         Value::GpuTensor(unsigned),
@@ -430,10 +430,10 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         device_id: u32::MAX,
         buffer_id: u64::MAX - 74,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &signed_value,
-        runmat_accelerate_api::IntegerElementType::I32,
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::I32,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(signed_value),
@@ -450,10 +450,10 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         device_id: u32::MAX,
         buffer_id: u64::MAX - 75,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_integer_type(
-        &unsigned_value,
-        runmat_accelerate_api::IntegerElementType::U8,
+    }
+    .with_numeric_descriptor(
+        runmat_accelerate_api::NumericElementType::U8,
+        runmat_accelerate_api::GpuTensorStorage::Real,
     );
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(unsigned_value.clone()),

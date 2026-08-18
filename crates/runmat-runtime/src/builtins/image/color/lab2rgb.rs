@@ -550,10 +550,10 @@ mod tests {
             device_id: u32::MAX - 21,
             buffer_id: u64::MAX - 21,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U8,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U8,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let error = block_on(lab2rgb_builtin(Value::GpuTensor(handle), Vec::new()))
             .expect_err("integer resident LAB must reject");
@@ -562,30 +562,30 @@ mod tests {
     }
 
     #[test]
-    fn resident_floating_metadata_must_match_exact_owner_before_download() {
+    fn resident_floating_descriptor_must_match_exact_owner_before_download() {
         test_support::with_test_provider(|provider| {
             let lab =
                 Tensor::new_with_dtype(vec![70.0, 5.0, 10.0], vec![1, 1, 3], NumericDType::F32)
                     .expect("LAB");
-            let source = gpu_helpers::upload_tensor(provider, &lab).expect("upload LAB");
-            let wrong_precision = match provider.precision() {
-                runmat_accelerate_api::ProviderPrecision::F32 => {
-                    runmat_accelerate_api::ProviderPrecision::F64
+            let mut source = gpu_helpers::upload_tensor(provider, &lab).expect("upload LAB");
+            let original_element_type = source.descriptor.element_type;
+            source.descriptor.element_type = Some(match original_element_type {
+                Some(runmat_accelerate_api::NumericElementType::F32) => {
+                    runmat_accelerate_api::NumericElementType::F64
                 }
-                runmat_accelerate_api::ProviderPrecision::F64 => {
-                    runmat_accelerate_api::ProviderPrecision::F32
-                }
-            };
-            runmat_accelerate_api::set_handle_precision(&source, wrong_precision);
+                _ => runmat_accelerate_api::NumericElementType::F32,
+            });
             let error = block_on(lab2rgb_builtin(
                 Value::GpuTensor(source.clone()),
                 Vec::new(),
             ))
-            .expect_err("stale floating precision must reject before download");
-            assert_eq!(error.identifier(), LAB2RGB_ERROR_INVALID_INPUT.identifier);
-            runmat_accelerate_api::set_handle_precision(&source, provider.precision());
+            .expect_err("contradictory floating descriptor must reject before download");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:gpu:ProviderPayloadMismatch")
+            );
+            source.descriptor.element_type = original_element_type;
             provider.free(&source).expect("free source");
-            runmat_accelerate_api::clear_handle_metadata(&source);
         });
     }
 }

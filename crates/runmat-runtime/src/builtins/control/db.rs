@@ -900,10 +900,10 @@ pub(crate) mod tests {
                 device_id: 0,
                 buffer_id: 9_306_001,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_integer_type(
-                &resident,
-                runmat_accelerate_api::IntegerElementType::I16,
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::I16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
             );
             let error = db_builtin(Value::GpuTensor(resident.clone()), vec![])
                 .expect_err("MATLAB mode rejects resident integer before gather");

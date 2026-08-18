@@ -1203,7 +1203,10 @@ mod tests {
     use super::*;
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
-    use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
+    use runmat_accelerate_api::{
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostNumericDataView,
+        HostNumericTensorView,
+    };
 
     #[test]
     fn linear_scatter_length_uses_logical_counts_for_all_integer_types() {
@@ -1242,12 +1245,12 @@ mod tests {
         };
         let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
         let source = provider
-            .upload_exec(&HostTensorView {
-                data: &data,
+            .upload_numeric_exec(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&data),
                 shape: &[1, 4],
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload");
-        runmat_accelerate_api::set_handle_storage(&source, GpuTensorStorage::ComplexInterleaved);
 
         let gathered = provider
             .gather_linear_exec(&source, &[1, 3], &[1, 2])

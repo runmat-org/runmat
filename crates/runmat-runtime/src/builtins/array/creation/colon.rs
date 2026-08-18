@@ -1518,16 +1518,14 @@ pub(crate) mod tests {
                 COLON_LOGICAL_INPUT_EXTENSION.error_identifier
             );
             drop(_compat);
-            let complex = provider
+            let mut complex = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 0.0],
                     shape: &[1, 1],
                 })
                 .expect("complex upload");
-            runmat_accelerate_api::set_handle_storage(
-                &complex,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
+            complex.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = colon_builtin(
                 Value::GpuTensor(complex.clone()),

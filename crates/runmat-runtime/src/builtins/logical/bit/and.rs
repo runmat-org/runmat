@@ -622,9 +622,9 @@ pub(crate) mod tests {
             device_id: 0,
             buffer_id: 9_347_001,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_storage(
-            &complex_handle,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
         );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);

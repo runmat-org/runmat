@@ -521,15 +521,8 @@ pub(crate) mod tests {
         test_support::with_f32_test_provider(|provider| {
             let tensor =
                 Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::F32).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload");
             runmat_accelerate_api::set_handle_class_name(&handle, "single");
 
             assert_eq!(

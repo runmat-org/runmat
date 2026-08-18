@@ -36,8 +36,11 @@ fn resident_integer(buffer_id: u64, shape: Vec<usize>) -> Value {
         device_id: u32::MAX - 442,
         buffer_id,
         descriptor: Default::default(),
-    };
-    runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U64);
+    }
+    .with_numeric_descriptor(
+        IntegerElementType::U64.into(),
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
     Value::GpuTensor(handle.with_provenance(GpuHandleProvenance::Explicit))
 }
 

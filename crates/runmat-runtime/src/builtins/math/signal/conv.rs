@@ -1032,22 +1032,17 @@ pub(crate) mod tests {
     #[test]
     fn conv_rejects_native_output_with_wrong_single_precision() {
         test_support::with_test_provider(|provider| {
-            let a = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 2.0],
-                    shape: &[1, 2],
-                })
-                .unwrap();
+            let a = gpu_helpers::upload_tensor(
+                provider,
+                &runmat_builtins::Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+            )
+            .unwrap();
             let b = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 1.0],
                     shape: &[1, 2],
                 })
                 .unwrap();
-            runmat_accelerate_api::set_handle_precision(
-                &a,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
             let Value::Tensor(output) =
                 conv_builtin(Value::GpuTensor(a), Value::GpuTensor(b), Vec::new()).unwrap()
             else {

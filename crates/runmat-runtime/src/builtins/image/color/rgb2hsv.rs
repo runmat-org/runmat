@@ -491,10 +491,10 @@ mod tests {
             device_id: u32::MAX - 12,
             buffer_id: 1,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U32,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U32,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let err = block_on(rgb2hsv_builtin(
             Value::GpuTensor(handle.clone()),

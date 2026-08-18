@@ -2523,13 +2523,15 @@ mod tests {
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 350 - offset,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+            }
+            .with_numeric_descriptor(
+                element_type.into(),
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
             let result = block(append_builtin(vec![
                 Value::GpuTensor(handle.clone()),
                 Value::String("suffix".into()),
             ]));
-            runmat_accelerate_api::clear_handle_integer_type(&handle);
             let error = result.expect_err("resident numeric append input must reject");
             assert!(error.message().contains("expected string"), "{error}");
         }

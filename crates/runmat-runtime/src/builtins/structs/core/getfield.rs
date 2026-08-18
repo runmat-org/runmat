@@ -2034,10 +2034,10 @@ pub(crate) mod tests {
             device_id: u32::MAX - 1,
             buffer_id: u64::MAX - 1,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U64,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let mut st = StructValue::new();
         st.fields

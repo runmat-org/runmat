@@ -424,8 +424,9 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
                 .expect("integer tensor");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
-            runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
+            let mut handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+            handle.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             let error = run_isnan(Value::GpuTensor(handle.clone()))
                 .expect_err("integer/float metadata contradiction must reject");
             assert!(error.message().contains("metadata is contradictory"));

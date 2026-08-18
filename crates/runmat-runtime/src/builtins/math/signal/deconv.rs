@@ -1115,8 +1115,6 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload integer denominator");
-            runmat_accelerate_api::set_handle_precision(&numerator, ProviderPrecision::F32);
-            runmat_accelerate_api::set_handle_precision(&denominator, ProviderPrecision::F32);
 
             let eval = evaluate(Value::GpuTensor(numerator), Value::GpuTensor(denominator))
                 .expect("evaluate");
@@ -1194,7 +1192,6 @@ pub(crate) mod tests {
                 })
                 .expect("upload logical numerator");
             runmat_accelerate_api::set_handle_logical(&numerator, true);
-            runmat_accelerate_api::set_handle_precision(&numerator, ProviderPrecision::F32);
             let denominator = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 1.0],

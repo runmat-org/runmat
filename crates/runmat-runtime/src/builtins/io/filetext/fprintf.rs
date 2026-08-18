@@ -1090,10 +1090,10 @@ pub(crate) mod tests {
             device_id: 904,
             buffer_id: 904,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U16,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let args = [Value::Num(1.0), Value::GpuTensor(handle.clone())];
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);

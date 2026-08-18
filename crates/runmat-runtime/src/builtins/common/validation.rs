@@ -2544,21 +2544,28 @@ mod tests {
     fn resident_integer_exactness_is_class_conservative() {
         use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 
-        let handle = GpuTensorHandle {
+        let narrow = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: u32::MAX,
             buffer_id: u64::MAX - 1,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U32);
-        assert!(native_integer_value_is_exact_f64(&Value::GpuTensor(
-            handle.clone()
-        )));
-        runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I64);
-        assert!(!native_integer_value_is_exact_f64(&Value::GpuTensor(
-            handle.clone()
-        )));
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        }
+        .with_numeric_descriptor(
+            IntegerElementType::U32.into(),
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+        assert!(native_integer_value_is_exact_f64(&Value::GpuTensor(narrow)));
+        let wide = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 2,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            IntegerElementType::I64.into(),
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+        assert!(!native_integer_value_is_exact_f64(&Value::GpuTensor(wide)));
     }
 
     #[test]
@@ -2588,33 +2595,6 @@ mod tests {
                 provider.free(&handle).expect("free resident uint64");
                 runmat_accelerate_api::clear_handle_metadata(&handle);
             }
-        });
-    }
-
-    #[test]
-    fn resident_wide_integer_exactness_rejects_contradictory_source_metadata() {
-        use crate::builtins::common::test_support;
-        use futures::executor::block_on;
-        use runmat_accelerate_api::{
-            HostIntegerDataView, HostIntegerTensorView, ProviderPrecision,
-        };
-
-        test_support::with_test_provider(|provider| {
-            let value = 9_007_199_254_740_992_u64;
-            let handle = provider
-                .upload_integer(&HostIntegerTensorView {
-                    data: HostIntegerDataView::U64(std::slice::from_ref(&value)),
-                    shape: &[1, 1],
-                })
-                .expect("upload resident uint64");
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
-            let error = block_on(native_integer_value_is_exact_f64_async(&Value::GpuTensor(
-                handle.clone(),
-            )))
-            .expect_err("contradictory integer metadata must reject");
-            assert!(error.message().contains("contradictory integer metadata"));
-            provider.free(&handle).ok();
-            runmat_accelerate_api::clear_handle_metadata(&handle);
         });
     }
 
@@ -2701,8 +2681,11 @@ mod tests {
             device_id: u32::MAX - 1,
             buffer_id: u64::MAX - 2,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I32);
+        }
+        .with_numeric_descriptor(
+            IntegerElementType::I32.into(),
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
         for builtin in ["mustBeText", "mustBeTextScalar", "mustBeValidVariableName"] {
             let error = dispatch_validator(builtin, vec![Value::GpuTensor(handle.clone())])
                 .expect_err("resident integer must fail text validation");
@@ -2723,17 +2706,8 @@ mod tests {
             provider
                 .free(&handle)
                 .expect("free payload before predicates");
-            runmat_accelerate_api::set_handle_integer_type(
-                &handle,
-                runmat_accelerate_api::IntegerElementType::U64,
-            );
             runmat_accelerate_api::clear_handle_precision(&handle);
             runmat_accelerate_api::set_handle_logical(&handle, false);
-            runmat_accelerate_api::set_handle_storage(
-                &handle,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-            runmat_accelerate_api::set_handle_class_name(&handle, "uint64");
             let value = Value::GpuTensor(handle.clone());
 
             ok("mustBeReal", vec![value.clone()]);
@@ -2916,8 +2890,6 @@ mod tests {
 
     #[test]
     fn resident_secondary_validator_operands_require_coherent_metadata() {
-        use runmat_accelerate_api::ProviderPrecision;
-
         test_support::with_test_provider(|provider| {
             let value =
                 Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).expect("value");
@@ -2926,10 +2898,11 @@ mod tests {
             let value_handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &value)
                     .expect("upload value");
-            let lower_handle =
+            let mut lower_handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &lower)
                     .expect("upload lower");
-            runmat_accelerate_api::set_handle_precision(&lower_handle, ProviderPrecision::F64);
+            lower_handle.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             let error = dispatch_validator(
                 "mustBeGreaterThan",
                 vec![

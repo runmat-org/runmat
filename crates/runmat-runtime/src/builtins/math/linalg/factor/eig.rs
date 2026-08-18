@@ -1539,15 +1539,13 @@ pub(crate) mod tests {
 
     #[test]
     fn eig_provider_results_require_owner_shape_precision_storage_and_unique_handles() {
-        use runmat_accelerate_api::{HostTensorView, ProviderEigResult, ProviderPrecision};
+        use runmat_accelerate_api::{HostTensorView, ProviderEigResult};
 
         test_support::with_test_provider(|provider| {
             let upload = |data: &[f64], shape: &[usize]| {
-                let handle = provider
+                provider
                     .upload(&HostTensorView { data, shape })
-                    .expect("upload");
-                runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
-                handle
+                    .expect("upload")
             };
             let input = upload(&[1.0, 0.0, 0.0, 2.0], &[2, 2]);
             let eigenvalues = upload(&[1.0, 2.0], &[2, 1]);
@@ -1686,15 +1684,14 @@ pub(crate) mod tests {
             device_id: 0,
             buffer_id: 9_300_042,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::U16,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = evaluate(Value::GpuTensor(handle.clone()), &[], false)
             .expect_err("resident integer A must gate before provider access");
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
         assert_eq!(
             error.identifier(),
             EIG_NONFLOATING_COEFFICIENT_EXTENSION.error_identifier

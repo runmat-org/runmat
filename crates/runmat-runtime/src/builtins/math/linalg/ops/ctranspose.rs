@@ -1139,7 +1139,7 @@ pub(crate) mod tests {
                     shape: &input_tensor.shape,
                 })
                 .unwrap();
-            let output = provider.transpose(&input).unwrap();
+            let mut output = provider.transpose(&input).unwrap();
             assert!(native_ctranspose_output_matches(
                 &input,
                 &output,
@@ -1164,36 +1164,34 @@ pub(crate) mod tests {
                 &[3, 2]
             ));
 
-            let original_storage = runmat_accelerate_api::handle_storage(&output);
-            runmat_accelerate_api::set_handle_storage(
-                &output,
-                GpuTensorStorage::ComplexInterleaved,
-            );
+            let original_storage = output.descriptor.storage;
+            output.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
             assert!(!native_ctranspose_output_matches(
                 &input,
                 &output,
                 provider,
                 &[3, 2]
             ));
-            runmat_accelerate_api::set_handle_storage(&output, original_storage);
+            output.descriptor.storage = original_storage;
 
             let original_precision = runmat_accelerate_api::handle_precision(&output).unwrap();
             let wrong_precision = match original_precision {
                 runmat_accelerate_api::ProviderPrecision::F32 => {
-                    runmat_accelerate_api::ProviderPrecision::F64
+                    runmat_accelerate_api::NumericElementType::F64
                 }
                 runmat_accelerate_api::ProviderPrecision::F64 => {
-                    runmat_accelerate_api::ProviderPrecision::F32
+                    runmat_accelerate_api::NumericElementType::F32
                 }
             };
-            runmat_accelerate_api::set_handle_precision(&output, wrong_precision);
+            let original_element_type = output.descriptor.element_type;
+            output.descriptor.element_type = Some(wrong_precision);
             assert!(!native_ctranspose_output_matches(
                 &input,
                 &output,
                 provider,
                 &[3, 2]
             ));
-            runmat_accelerate_api::set_handle_precision(&output, original_precision);
+            output.descriptor.element_type = original_element_type;
 
             provider.free(&output).unwrap();
             provider.free(&input).unwrap();
@@ -1289,12 +1287,10 @@ pub(crate) mod tests {
                 ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2])
                     .expect("complex vector"),
             ] {
-                let handle =
+                let mut handle =
                     gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-                runmat_accelerate_api::set_handle_integer_type(
-                    &handle,
-                    runmat_accelerate_api::IntegerElementType::I8,
-                );
+                handle.descriptor.element_type =
+                    Some(runmat_accelerate_api::NumericElementType::I8);
                 let err = call_ctranspose(Value::GpuTensor(handle.clone()))
                     .expect_err("complex integer GPU ctranspose must fail");
                 assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));

@@ -538,10 +538,6 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
             let output = call(Value::GpuTensor(handle), Vec::new()).unwrap();
             assert!(matches!(output, Value::GpuTensor(_)));
             let gathered = test_support::gather(output).unwrap();

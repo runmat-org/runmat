@@ -1768,10 +1768,10 @@ mod tests {
             device_id: 0,
             buffer_id: 9_300_002,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_integer_type(
-            &handle,
-            runmat_accelerate_api::IntegerElementType::I16,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
         );
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);

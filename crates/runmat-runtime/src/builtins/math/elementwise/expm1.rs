@@ -943,7 +943,7 @@ pub(crate) mod tests {
                 &Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap(),
             )
             .unwrap();
-            let output = gpu_helpers::upload_tensor(
+            let mut output = gpu_helpers::upload_tensor(
                 provider,
                 &Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap(),
             )
@@ -953,10 +953,8 @@ pub(crate) mod tests {
             let mut wrong_shape = output.clone();
             wrong_shape.shape = vec![1, 2];
             assert!(!valid_real_gpu_output(&wrong_shape, &input, provider));
-            runmat_accelerate_api::set_handle_storage(
-                &output,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
+            output.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
             assert!(!valid_real_gpu_output(&output, &input, provider));
         });
     }

@@ -1200,11 +1200,10 @@ mod tests {
             device_id: FALLBACK_PROVIDER.device_id(),
             buffer_id: 1,
             descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            runmat_accelerate_api::ProviderPrecision::F64,
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
         );
         let handle = Value::GpuTensor(handle);
         assert!(!expect_bool(call_isdiag(handle.clone()).unwrap()));

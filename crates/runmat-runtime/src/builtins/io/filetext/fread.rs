@@ -2160,9 +2160,7 @@ pub(crate) mod tests {
             &self,
             host: &runmat_accelerate_api::HostTensorView,
         ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-            let handle = self.inner.upload(host)?;
-            runmat_accelerate_api::set_handle_precision(&handle, self.precision);
-            Ok(handle)
+            self.inner.upload(host)
         }
 
         fn download<'a>(
@@ -2170,6 +2168,20 @@ pub(crate) mod tests {
             handle: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
             self.inner.download(handle)
+        }
+
+        fn upload_numeric(
+            &self,
+            host: &runmat_accelerate_api::HostNumericTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload_numeric(host)
+        }
+
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+            self.inner.download_numeric(handle)
         }
 
         fn upload_integer(
@@ -2323,10 +2335,12 @@ pub(crate) mod tests {
             runmat_accelerate_api::register_provider(ambient);
         }
         let _ambient = runmat_accelerate_api::ThreadProviderGuard::set(Some(ambient));
+        let prototype_data = [0.0_f32];
         let prototype = owner
-            .upload(&HostTensorView {
-                data: &[0.0],
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&prototype_data),
                 shape: &[1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
             })
             .expect("prototype upload");
         let output = tensor_to_gpu_value(
@@ -2360,16 +2374,14 @@ pub(crate) mod tests {
                 shape: &[1, 1],
             })
             .expect("prototype upload");
-        let malformed = owner
+        let mut malformed = owner
             .upload(&HostTensorView {
                 data: &[1.0],
                 shape: &[1, 1],
             })
             .expect("malformed upload");
-        runmat_accelerate_api::set_handle_storage(
-            &malformed,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
+        malformed.descriptor.storage =
+            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
         let error = validate_resident_like_output(
             &prototype,
             &malformed,

@@ -1574,8 +1574,11 @@ pub(crate) mod tests {
                 device_id: u32::MAX,
                 buffer_id: u64::MAX - 10 - offset,
                 descriptor: Default::default(),
-            };
-            runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+            }
+            .with_numeric_descriptor(
+                element_type.into(),
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
             let error = block_on(randi_builtin(vec![
                 Value::Num(5.0),
                 Value::from("like"),
@@ -1583,7 +1586,6 @@ pub(crate) mod tests {
             ]))
             .expect_err("wide resident prototype must be gated before provider dispatch");
             assert!(error.to_string().contains("RunMat extensions"), "{error}");
-            runmat_accelerate_api::clear_handle_integer_type(&handle);
         }
     }
 
