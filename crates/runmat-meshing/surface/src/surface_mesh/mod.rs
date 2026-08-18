@@ -17,5 +17,5 @@ pub use surface_codec::{decode_exact_surface_mesh, encode_exact_surface_mesh};
 pub use types::{
     ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh, ExactSurfaceMeshError,
     ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
-    EXACT_SURFACE_MESH_SCHEMA_VERSION,
+    EXACT_SURFACE_MESH_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
 };

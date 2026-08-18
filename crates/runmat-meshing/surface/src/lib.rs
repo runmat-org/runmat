@@ -7,9 +7,13 @@ mod chart;
 mod exact_metric;
 mod face_geometry;
 mod face_mesh;
+mod face_pipeline;
 mod math;
 mod refinement;
 mod surface_mesh;
+
+#[cfg(test)]
+mod face_pipeline_tests;
 
 pub mod contract;
 pub mod exact_boundary;
@@ -64,6 +68,10 @@ pub use face_mesh::{
     ExactFaceMeshEdgeParameter, ExactFaceMeshJoinedCut, ExactFaceMeshNode, ExactFaceMeshNodeUse,
     ExactFaceMeshTriangle, EXACT_FACE_MESH_SCHEMA_VERSION,
 };
+pub use face_pipeline::{
+    mesh_exact_face_partition, ExactFacePartitionContext, ExactFacePartitionError,
+    ExactFacePartitionErrorKind, ExactFacePartitionOptions, ExactFacePartitionOutcome,
+};
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
     discretize_cad_topology_surfaces_with_cad_curves,
@@ -95,7 +103,7 @@ pub use surface_mesh::{
     join_exact_face_mesh_batches, validate_exact_face_mesh_batch, validate_exact_surface_mesh,
     ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh, ExactSurfaceMeshError,
     ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
-    EXACT_SURFACE_MESH_SCHEMA_VERSION,
+    EXACT_SURFACE_MESH_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,

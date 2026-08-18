@@ -6,11 +6,9 @@ use runmat_meshing_core::StableDigest;
 use super::{
     validate_exact_face_mesh_batch, ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh,
     ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence,
-    EXACT_SURFACE_MESH_SCHEMA_VERSION,
+    EXACT_SURFACE_MESH_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
 };
 use crate::{ExactFaceMeshBoundarySegment, ExactFaceMeshNode};
-
-const MAX_FACE_PARTITIONS: usize = 63;
 
 pub fn join_exact_face_mesh_batches(
     topology: &ExactBRepTopology,
@@ -18,7 +16,7 @@ pub fn join_exact_face_mesh_batches(
     options: ExactSurfaceJoinOptions,
 ) -> Result<ExactSurfaceMesh, ExactSurfaceMeshError> {
     validate_options(options)?;
-    if batches.is_empty() || batches.len() > MAX_FACE_PARTITIONS {
+    if batches.is_empty() || batches.len() > MAX_EXACT_FACE_PARTITIONS {
         return Err(invalid(
             "surface join requires a bounded nonempty partition set",
         ));

@@ -8,6 +8,7 @@ use crate::{
 
 pub const EXACT_FACE_MESH_BATCH_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_SURFACE_MESH_SCHEMA_VERSION: u16 = 1;
+pub const MAX_EXACT_FACE_PARTITIONS: usize = 63;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactSurfaceJoinOptions {

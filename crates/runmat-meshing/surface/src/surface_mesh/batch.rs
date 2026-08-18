@@ -5,12 +5,10 @@ use crate::{face_mesh::validate_exact_face_mesh_contract, ExactFaceMesh};
 
 use super::{
     ExactFaceMeshBatch, ExactSurfaceMeshError, ExactSurfaceMeshErrorKind,
-    EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
+    EXACT_FACE_MESH_BATCH_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
 };
 
 // One exact-geometry prerequisite plus this many partition roots fits the shared 64-input join.
-const MAX_FACE_PARTITIONS: usize = 63;
-
 pub fn face_partition_descriptors(
     topology: &ExactBRepTopology,
     preferred_faces_per_partition: u32,
@@ -20,7 +18,7 @@ pub fn face_partition_descriptors(
             "maximum faces and exact face inventory must be nonzero",
         ));
     }
-    let minimum_batch_size = topology.faces.len().div_ceil(MAX_FACE_PARTITIONS);
+    let minimum_batch_size = topology.faces.len().div_ceil(MAX_EXACT_FACE_PARTITIONS);
     let batch_size = (preferred_faces_per_partition as usize).max(minimum_batch_size);
     let partition_count = topology.faces.len().div_ceil(batch_size);
     Ok(topology
@@ -73,6 +71,8 @@ pub fn validate_exact_face_mesh_batch(
         .filter(|face| face.id >= range.first && face.id <= range.last)
         .collect::<Vec<_>>();
     if expected.len() as u64 != range.entity_count
+        || expected.first().is_none_or(|face| face.id != range.first)
+        || expected.last().is_none_or(|face| face.id != range.last)
         || batch.faces.len() != expected.len()
         || batch
             .faces
@@ -98,7 +98,7 @@ fn validate_partition(partition: &MeshingPartitionDescriptor) -> Result<(), Exac
         .validate()
         .map_err(|error| invalid_input(error.to_string()))?;
     if partition.kind != MeshingPartitionKind::CanonicalEntityBatch
-        || partition.partition_count as usize > MAX_FACE_PARTITIONS
+        || partition.partition_count as usize > MAX_EXACT_FACE_PARTITIONS
     {
         return Err(invalid_input(
             "face work requires a bounded canonical entity batch",
