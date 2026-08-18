@@ -1,5 +1,5 @@
 use runmat_geometry_core::PersistentEntityId;
-use runmat_meshing_core::StableDigest;
+use runmat_meshing_curve::SharedCurveSegmentSplit;
 
 use crate::{ExactFaceDelaunayTriangle, ExactFaceMetricErrorKind};
 
@@ -32,12 +32,7 @@ pub struct ExactProtectedSegmentSplit {
     pub source_face_id: PersistentEntityId,
     pub pslg_segment_index: u32,
     pub source_coedge_id: PersistentEntityId,
-    pub source_edge_id: PersistentEntityId,
-    /// Ordered by increasing exact source-edge parameter, independent of coedge orientation.
-    pub endpoint_node_ids: [StableDigest; 2],
-    /// Strictly increasing exact source-edge parameter interval.
-    pub edge_parameters: [f64; 2],
-    pub split_parameter: f64,
+    pub curve_split: SharedCurveSegmentSplit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

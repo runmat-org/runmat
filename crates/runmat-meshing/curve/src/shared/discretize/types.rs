@@ -41,16 +41,16 @@ pub trait CurveMetricField: Send + Sync {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct SharedCurveEvaluationContext<'a> {
-    pub(crate) topology: &'a ExactBRepTopology,
-    pub(crate) curves: &'a dyn ExactCurveEvaluator,
-    pub(crate) pcurves: &'a dyn ExactPcurveEvaluator,
-    pub(crate) metric_field: &'a dyn CurveMetricField,
-    pub(crate) control: &'a dyn GeometryEvaluationControl,
+pub struct SharedCurveEvaluationContext<'a> {
+    pub topology: &'a ExactBRepTopology,
+    pub curves: &'a dyn ExactCurveEvaluator,
+    pub pcurves: &'a dyn ExactPcurveEvaluator,
+    pub metric_field: &'a dyn CurveMetricField,
+    pub control: &'a dyn GeometryEvaluationControl,
 }
 
 impl<'a> SharedCurveEvaluationContext<'a> {
-    pub(crate) fn new(
+    pub fn new(
         topology: &'a ExactBRepTopology,
         curves: &'a dyn ExactCurveEvaluator,
         pcurves: &'a dyn ExactPcurveEvaluator,

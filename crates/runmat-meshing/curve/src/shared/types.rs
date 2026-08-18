@@ -53,6 +53,16 @@ pub struct SharedCurveNode {
     pub coordinates_m: [f64; 3],
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SharedCurveSegmentSplit {
+    pub source_edge_id: PersistentEntityId,
+    /// Ordered by increasing exact source-edge parameter.
+    pub endpoint_node_ids: [StableDigest; 2],
+    /// Strictly increasing parameter interval owned by the current shared curve mesh.
+    pub edge_parameters: [f64; 2],
+    pub split_parameter: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SharedCurveFaceUse {

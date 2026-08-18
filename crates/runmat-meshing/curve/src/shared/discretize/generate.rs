@@ -57,7 +57,24 @@ pub(crate) fn discretize_edge(
     edge: &ExactEdge,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurve, SharedCurveError> {
+    discretize_edge_with_parameters(context, edge, &[], options)
+}
+
+pub(crate) fn discretize_edge_with_parameters(
+    context: SharedCurveEvaluationContext<'_>,
+    edge: &ExactEdge,
+    required_parameters: &[f64],
+    options: SharedCurveDiscretizationOptions,
+) -> Result<SharedCurve, SharedCurveError> {
     if edge.is_degenerate {
+        if !required_parameters.is_empty() {
+            return Err(edge_error(
+                edge,
+                SharedCurveErrorKind::UnsatisfiedConstraint,
+                "protected curve split",
+                "a degenerate exact edge cannot accept an interior mesh split",
+            ));
+        }
         return discretize_degenerate_edge(
             context.topology,
             edge,
@@ -72,6 +89,7 @@ pub(crate) fn discretize_edge(
         .parameter_range(&edge.curve_evaluator_id)
         .map_err(|error| geometry_error(edge, error))?;
     require_parameter_range(edge, parameter_range)?;
+    validate_required_parameters(edge, parameter_range, required_parameters, options)?;
     let transform = context
         .topology
         .world_transform_for(&edge.id)
@@ -90,10 +108,17 @@ pub(crate) fn discretize_edge(
         context.control,
         transform,
     );
-    let left = cache.sample(parameter_range.start)?;
-    let right = cache.sample(parameter_range.end)?;
+    let mut left = cache.sample(parameter_range.start)?;
     let mut samples = vec![left];
-    subdivide(&mut cache, left, right, 0, &mut samples, options)?;
+    for parameter in required_parameters
+        .iter()
+        .copied()
+        .chain(std::iter::once(parameter_range.end))
+    {
+        let right = cache.sample(parameter)?;
+        subdivide(&mut cache, left, right, 0, &mut samples, options)?;
+        left = right;
+    }
     let achieved = resolution_evidence(&mut cache, &samples)?;
     if achieved.minimum_metric_edge_length + 1.0e-12 < options.resolution.minimum_metric_edge_length
     {
@@ -175,6 +200,34 @@ pub(crate) fn discretize_edge(
     })
 }
 
+fn validate_required_parameters(
+    edge: &ExactEdge,
+    range: ParameterRange,
+    required: &[f64],
+    options: SharedCurveDiscretizationOptions,
+) -> Result<(), SharedCurveError> {
+    if required.len().saturating_add(2) > options.maximum_nodes_per_edge as usize {
+        return Err(edge_error(
+            edge,
+            SharedCurveErrorKind::ResourceLimit,
+            "required curve parameters",
+            "required parameters exceed the per-edge node limit",
+        ));
+    }
+    if required.iter().any(|parameter| {
+        !parameter.is_finite() || *parameter <= range.start || *parameter >= range.end
+    }) || required.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(edge_error(
+            edge,
+            SharedCurveErrorKind::InvalidRequest,
+            "required curve parameters",
+            "required parameters must be finite, strictly ordered interior samples within the node bound",
+        ));
+    }
+    Ok(())
+}
+
 fn subdivide(
     cache: &mut EvaluationCache<'_>,
     left: EvaluatedPoint,
@@ -201,6 +254,14 @@ fn subdivide(
         subdivide(cache, left, evidence.midpoint, depth + 1, output, options)?;
         subdivide(cache, evidence.midpoint, right, depth + 1, output, options)?;
     } else {
+        if output.len() >= options.maximum_nodes_per_edge as usize {
+            return Err(edge_error(
+                cache.edge,
+                SharedCurveErrorKind::ResourceLimit,
+                "curve subdivision",
+                "required refinement exceeds the per-edge node limit",
+            ));
+        }
         output.push(right);
     }
     Ok(())

@@ -6,6 +6,11 @@ use runmat_meshing_core::{
     MetricCombinationRule, MetricFieldRequest, MetricSourceKind, MetricTensor3, StableDigest,
     SurfaceQualityTargets,
 };
+use runmat_meshing_curve::{
+    apply_shared_curve_splits, discretize_shared_curves, shared_curve_interior_node_id,
+    CurveResolutionPolicy, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
+    UniformCurveMetric,
+};
 
 use crate::{
     ExactFaceDelaunayTriangle, ExactFaceGeometry, ExactFaceGeometryVertex,
@@ -78,9 +83,27 @@ fn encroaching_candidate_requests_one_exact_parameter_split_before_insertion() {
     };
     assert_eq!(split.source_face_id, face_id);
     assert_eq!(split.pslg_segment_index, 0);
-    assert_eq!(split.endpoint_node_ids, [node(2), node(1)]);
-    assert_eq!(split.edge_parameters, [2.0, 6.0]);
-    assert_eq!(split.split_parameter, 4.0);
+    assert_eq!(split.curve_split.endpoint_node_ids, [node(2), node(1)]);
+    assert_eq!(split.curve_split.edge_parameters, [2.0, 6.0]);
+    assert_eq!(split.curve_split.split_parameter, 4.0);
+
+    let mut forward = pslg.clone();
+    forward.segments[0].vertex_indices = [1, 0];
+    forward.segments[0].edge_parameters = [2.0, 6.0];
+    let ExactFaceCandidateDisposition::SplitProtectedSegment(forward_split) =
+        classify_exact_face_refinement_candidate(
+            &encroaching,
+            &forward,
+            &topology,
+            &metric_request(),
+            &evaluator,
+            &Control,
+        )
+        .unwrap()
+    else {
+        panic!("opposite coedge use must request the same protected split")
+    };
+    assert_eq!(forward_split.curve_split, split.curve_split);
 
     let outside = candidate(topology.faces[0].id.clone(), [0.0, 2.0]);
     assert_eq!(
@@ -94,6 +117,84 @@ fn encroaching_candidate_requests_one_exact_parameter_split_before_insertion() {
         )
         .unwrap(),
         ExactFaceCandidateDisposition::Insert
+    );
+}
+
+#[test]
+fn protected_split_rebuilds_the_global_curve_and_face_pslg() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let metric = UniformCurveMetric::from_target_size_m(1.0).unwrap();
+    let options = curve_options();
+    let curves = discretize_shared_curves(
+        &topology, &evaluator, &evaluator, &metric, &Control, options,
+    )
+    .unwrap();
+    let boundary = crate::build_exact_surface_boundary(&topology, &curves).unwrap();
+    let pslg = crate::build_exact_face_pslg(&boundary.faces[0]).unwrap();
+    let segment = &pslg.segments[0];
+    let endpoints = segment
+        .vertex_indices
+        .map(|index| pslg.vertices[index as usize].uv);
+    let encroaching = candidate(
+        pslg.source_face_id.clone(),
+        [
+            (endpoints[0][0] + endpoints[1][0]) * 0.5,
+            (endpoints[0][1] + endpoints[1][1]) * 0.5,
+        ],
+    );
+    let disposition = classify_exact_face_refinement_candidate(
+        &encroaching,
+        &pslg,
+        &topology,
+        &metric_request(),
+        &evaluator,
+        &Control,
+    )
+    .unwrap();
+    let ExactFaceCandidateDisposition::SplitProtectedSegment(split) = disposition else {
+        panic!("segment midpoint must be classified as encroaching")
+    };
+    let inserted_id = shared_curve_interior_node_id(
+        &split.curve_split.source_edge_id,
+        split.curve_split.split_parameter,
+    );
+    let context =
+        SharedCurveEvaluationContext::new(&topology, &evaluator, &evaluator, &metric, &Control);
+    let refined = apply_shared_curve_splits(
+        &curves,
+        context,
+        options,
+        std::slice::from_ref(&split.curve_split),
+    )
+    .unwrap();
+    let rebuilt_boundary = crate::build_exact_surface_boundary(&topology, &refined).unwrap();
+    let rebuilt = crate::build_exact_face_pslg(&rebuilt_boundary.faces[0]).unwrap();
+
+    assert_eq!(
+        refined.edges[0].nodes.len(),
+        curves.edges[0].nodes.len() + 1
+    );
+    assert_eq!(rebuilt.segments.len(), pslg.segments.len() + 1);
+    assert!(refined.edges[0]
+        .nodes
+        .iter()
+        .any(|node| node.node_id == inserted_id));
+    assert_eq!(
+        rebuilt
+            .segments
+            .iter()
+            .filter(|segment| {
+                segment
+                    .vertex_indices
+                    .into_iter()
+                    .any(|index| rebuilt.vertices[index as usize].node_id == inserted_id)
+            })
+            .count(),
+        2
     );
 }
 
@@ -208,6 +309,22 @@ fn metric_request() -> MetricFieldRequest {
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+    }
+}
+
+fn curve_options() -> SharedCurveDiscretizationOptions {
+    SharedCurveDiscretizationOptions {
+        resolution: CurveResolutionPolicy {
+            maximum_chordal_deviation_m: 0.01,
+            maximum_tangent_change_rad: 0.2,
+            minimum_metric_edge_length: 0.01,
+            maximum_metric_edge_length: 1.0,
+        },
+        maximum_nodes_per_edge: 1_024,
+        maximum_subdivision_depth: 20,
+        geometry_absolute_error_m: 1.0e-10,
+        pcurve_absolute_error: 1.0e-10,
+        arc_length_absolute_error_m: 1.0e-10,
     }
 }
 

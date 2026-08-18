@@ -1,5 +1,6 @@
 use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl};
 use runmat_meshing_core::MetricFieldRequest;
+use runmat_meshing_curve::SharedCurveSegmentSplit;
 
 use crate::{ExactFaceMetricError, ExactFacePslg, ResolvedFaceMetricField};
 
@@ -96,10 +97,12 @@ pub fn classify_exact_face_refinement_candidate(
                     source_face_id: pslg.source_face_id.clone(),
                     pslg_segment_index: segment_index as u32,
                     source_coedge_id: segment.source_coedge_id.clone(),
-                    source_edge_id: segment.source_edge_id.clone(),
-                    endpoint_node_ids,
-                    edge_parameters,
-                    split_parameter,
+                    curve_split: SharedCurveSegmentSplit {
+                        source_edge_id: segment.source_edge_id.clone(),
+                        endpoint_node_ids,
+                        edge_parameters,
+                        split_parameter,
+                    },
                 }),
             ));
         }
