@@ -1,3 +1,4 @@
+mod carving;
 mod constraints;
 mod facet_recovery;
 mod incidence;
@@ -6,6 +7,11 @@ mod point_set;
 mod segment_recovery;
 mod topology;
 
+pub use carving::{
+    carve_delaunay_volume, validate_delaunay_carving, DelaunayCarving, DelaunayCarvingError,
+    DelaunayCarvingErrorKind, DelaunayCarvingOptions, DelaunayCarvingSeeds, DelaunayRegionSeed,
+    DelaunayVoidSeed,
+};
 pub use constraints::{
     build_delaunay_constraints, validate_delaunay_constraints, DelaunayConstraintError,
     DelaunayConstraintErrorKind, DelaunayConstraintFacet, DelaunayConstraintNode,

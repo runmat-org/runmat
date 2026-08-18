@@ -89,6 +89,13 @@ pub fn recover_delaunay_facets(
 ) -> Result<DelaunayFacetRecovery, DelaunayFacetRecoveryError> {
     validate_options(options)?;
     validate_inputs(&segment_recovery, constraints, options, cancellation)?;
+    if !segment_recovery.topology.incidence.regions.is_empty() {
+        return Err(error(
+            DelaunayFacetRecoveryErrorKind::InvalidTopology,
+            None,
+            "facet recovery must precede region assignment",
+        ));
+    }
     let mut work = FacetRecoveryWork::new(options, cancellation);
     let mut facets = Vec::with_capacity(constraints.facets.len());
     let mut protected_triangles = Vec::new();

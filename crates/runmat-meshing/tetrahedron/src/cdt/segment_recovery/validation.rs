@@ -17,7 +17,13 @@ pub fn validate_delaunay_segment_recovery(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunaySegmentRecoveryError> {
     validate_options(options)?;
-    validate_inputs(&recovery.topology, constraints, options, cancellation)?;
+    validate_inputs(
+        &recovery.topology,
+        constraints,
+        options,
+        cancellation,
+        false,
+    )?;
     if recovery.recovery_passes == 0
         || recovery.recovery_passes > options.maximum_recovery_passes
         || recovery.segments.len() != constraints.segments.len()
@@ -100,12 +106,13 @@ pub(super) fn validate_inputs(
     constraints: &DelaunayConstraints,
     options: DelaunaySegmentRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
+    require_unassigned: bool,
 ) -> Result<(), DelaunaySegmentRecoveryError> {
     validate_delaunay_constraints(constraints, options.constraints, cancellation)
         .map_err(super::constraint_error)?;
     validate_delaunay_volume_topology(topology, options.insertion, cancellation)
         .map_err(|validation| super::insertion_error(validation, 0))?;
-    if !topology.incidence.regions.is_empty() {
+    if require_unassigned && !topology.incidence.regions.is_empty() {
         return Err(error(
             DelaunaySegmentRecoveryErrorKind::InvalidTopology,
             None,

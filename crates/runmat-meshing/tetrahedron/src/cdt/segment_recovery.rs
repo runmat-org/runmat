@@ -105,7 +105,7 @@ pub fn recover_delaunay_segments(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunaySegmentRecovery, DelaunaySegmentRecoveryError> {
     validate_options(options)?;
-    validate_inputs(&topology, constraints, options, cancellation)?;
+    validate_inputs(&topology, constraints, options, cancellation, true)?;
     let constraint_identities = constraints
         .nodes
         .iter()
