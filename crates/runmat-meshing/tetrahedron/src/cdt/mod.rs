@@ -9,6 +9,7 @@ mod topology;
 mod volume_provenance;
 mod volume_quality;
 mod volume_refinement;
+mod volume_sliver;
 
 pub use carving::{
     carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
@@ -66,4 +67,9 @@ pub use volume_refinement::{
     DelaunayVolumeRefinementOptions, DelaunayVolumeRefinementStep,
     DelaunayVolumeRefinementStepError, DelaunayVolumeRefinementStepErrorKind,
     DelaunayVolumeRefinementStepOptions,
+};
+pub use volume_sliver::{
+    treat_delaunay_volume_slivers, validate_delaunay_volume_sliver_treatment,
+    DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind, DelaunayVolumeSliverOptions,
+    DelaunayVolumeSliverRelocation, DelaunayVolumeSliverTreatment,
 };
