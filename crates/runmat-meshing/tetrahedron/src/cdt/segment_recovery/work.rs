@@ -10,6 +10,7 @@ pub(super) struct RecoveryWork<'a> {
     pub(super) cancellation: &'a dyn MeshingCancellationSignal,
     recovery_steps: u64,
     search_steps: u64,
+    flip_attempts: u64,
     inserted_nodes: u64,
 }
 
@@ -23,6 +24,7 @@ impl<'a> RecoveryWork<'a> {
             cancellation,
             recovery_steps: 0,
             search_steps: 0,
+            flip_attempts: 0,
             inserted_nodes: 0,
         }
     }
@@ -86,6 +88,31 @@ impl<'a> RecoveryWork<'a> {
             return Err(resource(
                 Some(constraint_index),
                 "segment Steiner-node limit exceeded",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn flip_attempt(
+        &mut self,
+        constraint_index: u32,
+    ) -> Result<(), DelaunaySegmentRecoveryError> {
+        self.flip_attempts += 1;
+        if self.flip_attempts > self.options.maximum_flip_attempts {
+            return Err(resource(
+                Some(constraint_index),
+                "segment face-flip attempt limit exceeded",
+            ));
+        }
+        if self
+            .flip_attempts
+            .is_multiple_of(self.options.constraints.cancellation_check_interval)
+            && self.cancellation.is_cancelled()
+        {
+            return Err(error(
+                DelaunaySegmentRecoveryErrorKind::Cancelled,
+                Some(constraint_index),
+                "cancelled",
             ));
         }
         Ok(())

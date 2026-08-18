@@ -9,10 +9,12 @@ use super::{
     DelaunayInsertionOptions, DelaunayVolumeNode, DelaunayVolumeTopology,
 };
 
+mod flip;
 mod parameter;
 mod validation;
 mod work;
 
+use flip::try_recover_edge_with_face_flip;
 use parameter::{interpolate, steiner_identity, DyadicNode, SegmentContext};
 pub use validation::validate_delaunay_segment_recovery;
 use validation::validate_inputs;
@@ -25,6 +27,7 @@ pub struct DelaunaySegmentRecoveryOptions {
     pub maximum_steiner_nodes: u64,
     pub maximum_recovery_steps: u64,
     pub maximum_search_steps: u64,
+    pub maximum_flip_attempts: u64,
     pub maximum_split_depth: u8,
     pub maximum_recovery_passes: u32,
 }
@@ -37,6 +40,7 @@ impl Default for DelaunaySegmentRecoveryOptions {
             maximum_steiner_nodes: 10_000_000,
             maximum_recovery_steps: 100_000_000,
             maximum_search_steps: 1_000_000_000,
+            maximum_flip_attempts: 100_000_000,
             maximum_split_depth: 48,
             maximum_recovery_passes: 8,
         }
@@ -205,6 +209,18 @@ fn recover_interval(
         push_chain_node(output, right);
         return Ok(());
     }
+    if let Some(updated) = try_recover_edge_with_face_flip(
+        topology_ref(topology)?,
+        left.identity,
+        right.identity,
+        context.constraint_index,
+        work,
+    )? {
+        *topology = Some(updated);
+        push_chain_node(output, left);
+        push_chain_node(output, right);
+        return Ok(());
+    }
     if depth >= work.options.maximum_split_depth {
         return Err(error(
             DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
@@ -320,6 +336,7 @@ fn validate_options(
     if options.maximum_steiner_nodes == 0
         || options.maximum_recovery_steps == 0
         || options.maximum_search_steps == 0
+        || options.maximum_flip_attempts == 0
         || options.maximum_split_depth == 0
         || options.maximum_split_depth > 60
         || options.maximum_recovery_passes == 0

@@ -4,8 +4,9 @@ use runmat_meshing_core::NeverCancelled;
 
 use super::*;
 use crate::cdt::{
-    assign_delaunay_volume_regions, build_delaunay_volume_point_set, DelaunayConstraintNode,
-    DelaunayConstraintSegment, DelaunayPointSetOptions, DelaunayTopologyOptions,
+    assign_delaunay_volume_regions, build_delaunay_volume_point_set,
+    build_delaunay_volume_topology, DelaunayConstraintNode, DelaunayConstraintSegment,
+    DelaunayPointSetOptions, DelaunayTopologyOptions,
 };
 
 fn octahedron_constraints() -> DelaunayConstraints {
@@ -46,6 +47,57 @@ fn octahedron_topology(constraints: &DelaunayConstraints) -> DelaunayVolumeTopol
         &NeverCancelled,
     )
     .unwrap()
+}
+
+fn cospherical_bipyramid() -> (DelaunayConstraints, DelaunayVolumeTopology) {
+    let coordinates = [
+        [5.0, 0.0, 0.0],
+        [0.0, 5.0, 0.0],
+        [-3.0, -4.0, 0.0],
+        [0.0, 0.0, 5.0],
+        [0.0, 0.0, -5.0],
+    ];
+    let constraints = DelaunayConstraints {
+        nodes: coordinates
+            .into_iter()
+            .enumerate()
+            .map(|(index, coordinates_m)| DelaunayConstraintNode {
+                identity: StableDigest::from_bytes([(index + 30) as u8; 32]),
+                source_node_id: TopologyEntityId {
+                    stage: MeshingStage::ProtectedBoundaryComplex,
+                    id: format!("bipyramid:{index}"),
+                },
+                coordinates_m,
+            })
+            .collect(),
+        segments: vec![
+            DelaunayConstraintSegment {
+                vertex_indices: [0, 1],
+                protected_edge_id: Some(TopologyEntityId {
+                    stage: MeshingStage::ProtectedBoundaryComplex,
+                    id: "protected:base".to_owned(),
+                }),
+                source_edge_id: Some(TopologyEntityId {
+                    stage: MeshingStage::CurveMesh,
+                    id: "curve:base".to_owned(),
+                }),
+            },
+            DelaunayConstraintSegment {
+                vertex_indices: [3, 4],
+                protected_edge_id: None,
+                source_edge_id: None,
+            },
+        ],
+        facets: Vec::new(),
+    };
+    let topology = build_delaunay_volume_topology(
+        constraints.volume_nodes(),
+        vec![[0, 1, 2, 3], [0, 2, 1, 4]],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    (constraints, topology)
 }
 
 #[test]
@@ -148,6 +200,47 @@ fn recovery_preserves_existing_edges_without_steiner_nodes() {
     assert_eq!(recovered.topology, topology);
     assert!(recovered.steiner_node_identities.is_empty());
     assert_eq!(recovered.segments[0].nodes.len(), 2);
+}
+
+#[test]
+fn recovery_uses_a_checked_face_flip_before_steiner_splitting() {
+    let (constraints, topology) = cospherical_bipyramid();
+
+    let recovered = recover_delaunay_segments(
+        topology,
+        &constraints,
+        DelaunaySegmentRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    assert!(recovered.steiner_node_identities.is_empty());
+    assert_eq!(recovered.segments[0].nodes.len(), 2);
+    assert_eq!(recovered.segments[1].nodes.len(), 2);
+    assert_eq!(recovered.topology.tetrahedra.len(), 3);
+    validate_delaunay_segment_recovery(
+        &recovered,
+        &constraints,
+        DelaunaySegmentRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    let search_limited = DelaunaySegmentRecoveryOptions {
+        maximum_search_steps: 1,
+        ..DelaunaySegmentRecoveryOptions::default()
+    };
+    assert_eq!(
+        recover_delaunay_segments(
+            cospherical_bipyramid().1,
+            &constraints,
+            search_limited,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunaySegmentRecoveryErrorKind::ResourceLimit
+    );
 }
 
 #[test]
