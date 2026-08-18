@@ -55,13 +55,16 @@ pub use exact_cdt::{
     ExactFaceTrimmedDelaunay,
 };
 pub use exact_metric::{
-    validate_exact_face_metric_evaluation, ExactFaceMetricError, ExactFaceMetricErrorKind,
-    ExactFaceMetricEvaluation, ParametricMetricTensor, ResolvedFaceMetricField,
+    validate_exact_face_metric_evaluation,
+    validate_exact_face_metric_evaluation_in_parameterization, ExactFaceMetricError,
+    ExactFaceMetricErrorKind, ExactFaceMetricEvaluation, ParametricMetricTensor,
+    ResolvedFaceMetricField,
 };
 pub use face_geometry::{
-    evaluate_exact_face_geometry, validate_exact_face_geometry, ExactFaceGeometry,
-    ExactFaceGeometryError, ExactFaceGeometryErrorKind, ExactFaceGeometryVertex,
-    ExactFaceTriangleGeometry,
+    evaluate_exact_face_geometry, evaluate_exact_face_geometry_in_parameterization,
+    validate_exact_face_geometry, validate_exact_face_geometry_in_parameterization,
+    ExactFaceGeometry, ExactFaceGeometryContext, ExactFaceGeometryError,
+    ExactFaceGeometryErrorKind, ExactFaceGeometryVertex, ExactFaceTriangleGeometry,
 };
 pub use face_mesh::{
     join_exact_face_charts, validate_exact_face_mesh, ExactFaceJoinContext, ExactFaceJoinError,

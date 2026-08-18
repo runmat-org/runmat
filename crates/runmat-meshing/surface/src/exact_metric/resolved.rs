@@ -15,6 +15,7 @@ use super::{
     ExactFaceMetricError, ExactFaceMetricErrorKind, ExactFaceMetricEvaluation,
     ParametricMetricTensor,
 };
+use crate::ExactFaceChartParameterization;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedFaceMetricField {
@@ -106,6 +107,23 @@ impl ResolvedFaceMetricField {
         evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
         control: &dyn GeometryEvaluationControl,
     ) -> Result<ExactFaceMetricEvaluation, ExactFaceMetricError> {
+        self.evaluate_parameterized(
+            source_face_id,
+            uv,
+            &ExactFaceChartParameterization::EvaluatorParameters,
+            evaluator,
+            control,
+        )
+    }
+
+    pub fn evaluate_parameterized(
+        &self,
+        source_face_id: &PersistentEntityId,
+        uv: [f64; 2],
+        parameterization: &ExactFaceChartParameterization,
+        evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+        control: &dyn GeometryEvaluationControl,
+    ) -> Result<ExactFaceMetricEvaluation, ExactFaceMetricError> {
         if uv.iter().any(|value| !value.is_finite()) {
             return Err(ExactFaceMetricError::new(
                 ExactFaceMetricErrorKind::InvalidEvaluation,
@@ -120,24 +138,29 @@ impl ResolvedFaceMetricField {
                 "face is absent from the resolved exact metric field",
             )
         })?;
-        let evaluator_uv =
-            evaluator_parameters(evaluator, &record.surface_evaluator_id, source_face_id, uv)?;
-        let derivatives = ExactSurfaceEvaluator::derivatives(
-            evaluator,
-            &record.surface_evaluator_id,
-            evaluator_uv,
-            control,
-        )
-        .map_err(|error| {
+        parameterization.validate().map_err(|reason| {
             ExactFaceMetricError::new(
-                ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
+                ExactFaceMetricErrorKind::InvalidEvaluation,
                 Some(source_face_id),
-                error.reason,
+                reason,
             )
         })?;
-        let point_m = record.world_transform.transform_point(derivatives.point_m);
-        let derivative_u_m = record.world_transform.transform_vector(derivatives.du_m);
-        let derivative_v_m = record.world_transform.transform_vector(derivatives.dv_m);
+        let sample = parameterized_sample(
+            parameterization,
+            evaluator,
+            &record.surface_evaluator_id,
+            source_face_id,
+            uv,
+            control,
+        )?;
+        let evaluator_uv = sample.evaluator_uv;
+        let point_m = record.world_transform.transform_point(sample.point_m);
+        let derivative_u_m = record
+            .world_transform
+            .transform_vector(sample.derivatives[0]);
+        let derivative_v_m = record
+            .world_transform
+            .transform_vector(sample.derivatives[1]);
         if point_m
             .iter()
             .chain(&derivative_u_m)
@@ -181,6 +204,85 @@ impl ResolvedFaceMetricField {
             clipped_contribution_count: record.resolved.clipped_contribution_count,
             rejected_contribution_count: record.resolved.rejected_contribution_count,
         })
+    }
+}
+
+struct ParameterizedSample {
+    evaluator_uv: [f64; 2],
+    point_m: [f64; 3],
+    derivatives: [[f64; 3]; 2],
+}
+
+fn parameterized_sample(
+    parameterization: &ExactFaceChartParameterization,
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator_id: &SurfaceEvaluatorId,
+    source_face_id: &PersistentEntityId,
+    coordinates: [f64; 2],
+    control: &dyn GeometryEvaluationControl,
+) -> Result<ParameterizedSample, ExactFaceMetricError> {
+    match parameterization {
+        ExactFaceChartParameterization::EvaluatorParameters => {
+            let evaluator_uv =
+                evaluator_parameters(evaluator, evaluator_id, source_face_id, coordinates)?;
+            let derivatives = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry_error(source_face_id, error))?;
+            Ok(ParameterizedSample {
+                evaluator_uv,
+                point_m: derivatives.point_m,
+                derivatives: [derivatives.du_m, derivatives.dv_m],
+            })
+        }
+        ExactFaceChartParameterization::ClosestPointProjection {
+            differential_step_m,
+            projection_tolerance_m,
+            ..
+        } => {
+            let project = |coordinates| {
+                let query = parameterization
+                    .chart_plane_point(coordinates)
+                    .ok_or_else(|| {
+                        invalid_evaluation(source_face_id, "projected chart has no plane point")
+                    })?;
+                evaluator
+                    .closest_point(evaluator_id, query, *projection_tolerance_m, control)
+                    .map_err(|error| geometry_error(source_face_id, error))
+            };
+            let center = project(coordinates)?;
+            let samples = [0, 1]
+                .map(|axis| {
+                    let mut before = coordinates;
+                    let mut after = coordinates;
+                    before[axis] -= differential_step_m;
+                    after[axis] += differential_step_m;
+                    let before = project(before)?;
+                    let after = project(after)?;
+                    Ok(std::array::from_fn(|component| {
+                        (after.point_m[component] - before.point_m[component])
+                            / (2.0 * differential_step_m)
+                    }))
+                })
+                .into_iter()
+                .collect::<Result<Vec<[f64; 3]>, ExactFaceMetricError>>()?;
+            if center
+                .uv
+                .iter()
+                .chain(&center.point_m)
+                .chain(samples.iter().flatten())
+                .any(|value| !value.is_finite())
+            {
+                return Err(invalid_evaluation(
+                    source_face_id,
+                    "projected chart evaluation is not finite",
+                ));
+            }
+            Ok(ParameterizedSample {
+                evaluator_uv: center.uv,
+                point_m: center.point_m,
+                derivatives: [samples[0], samples[1]],
+            })
+        }
     }
 }
 

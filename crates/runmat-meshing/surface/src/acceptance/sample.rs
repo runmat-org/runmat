@@ -1,7 +1,8 @@
 use runmat_meshing_core::SurfaceQualityTargets;
 
 use crate::{
-    validate_exact_face_geometry, ExactFaceMetricError, ExactFaceRefinedMesh,
+    validate_exact_face_geometry_in_parameterization, ExactFaceChartParameterization,
+    ExactFaceGeometryContext, ExactFaceMetricError, ExactFaceRefinedMesh,
     ExactFaceRefinementContext, ResolvedFaceMetricField,
 };
 
@@ -16,8 +17,16 @@ pub fn accept_exact_face_mesh(
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
-    let report = sample(mesh, context, quality, options)?;
-    validate_exact_face_acceptance(&report, mesh, context, quality, options)?;
+    let parameterization = ExactFaceChartParameterization::EvaluatorParameters;
+    let report = sample(mesh, context, quality, options, &parameterization)?;
+    validate_exact_face_acceptance_in_parameterization(
+        &report,
+        mesh,
+        context,
+        quality,
+        options,
+        &parameterization,
+    )?;
     Ok(report)
 }
 
@@ -28,7 +37,44 @@ pub fn validate_exact_face_acceptance(
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
 ) -> Result<(), ExactFaceAcceptanceError> {
-    let expected = sample(mesh, context, quality, options)?;
+    validate_exact_face_acceptance_in_parameterization(
+        report,
+        mesh,
+        context,
+        quality,
+        options,
+        &ExactFaceChartParameterization::EvaluatorParameters,
+    )
+}
+
+pub(crate) fn accept_exact_face_mesh_in_parameterization(
+    mesh: &ExactFaceRefinedMesh,
+    context: ExactFaceRefinementContext<'_>,
+    quality: SurfaceQualityTargets,
+    options: ExactFaceAcceptanceOptions,
+    parameterization: &ExactFaceChartParameterization,
+) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
+    let report = sample(mesh, context, quality, options, parameterization)?;
+    validate_exact_face_acceptance_in_parameterization(
+        &report,
+        mesh,
+        context,
+        quality,
+        options,
+        parameterization,
+    )?;
+    Ok(report)
+}
+
+pub(crate) fn validate_exact_face_acceptance_in_parameterization(
+    report: &ExactFaceAcceptanceReport,
+    mesh: &ExactFaceRefinedMesh,
+    context: ExactFaceRefinementContext<'_>,
+    quality: SurfaceQualityTargets,
+    options: ExactFaceAcceptanceOptions,
+    parameterization: &ExactFaceChartParameterization,
+) -> Result<(), ExactFaceAcceptanceError> {
+    let expected = sample(mesh, context, quality, options, parameterization)?;
     if report != &expected {
         return Err(error(
             mesh,
@@ -44,8 +90,9 @@ fn sample(
     context: ExactFaceRefinementContext<'_>,
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
+    parameterization: &ExactFaceChartParameterization,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
-    validate_inputs(mesh, context, quality, options)?;
+    validate_inputs(mesh, context, quality, options, parameterization)?;
     let field = ResolvedFaceMetricField::new(context.topology, context.metric_request)
         .map_err(|failure| map_metric(mesh, failure))?;
     let mut budget = SampleBudget::new(mesh, options.maximum_samples);
@@ -78,9 +125,10 @@ fn sample(
                     )
                 })?;
                 let evaluation = field
-                    .evaluate(
+                    .evaluate_parameterized(
                         &mesh.geometry.source_face_id,
                         uv,
+                        parameterization,
                         context.evaluator,
                         context.geometry_control,
                     )
@@ -162,6 +210,7 @@ fn validate_inputs(
     context: ExactFaceRefinementContext<'_>,
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
+    parameterization: &ExactFaceChartParameterization,
 ) -> Result<(), ExactFaceAcceptanceError> {
     quality.validate().map_err(|failure| {
         error(
@@ -182,14 +231,17 @@ fn validate_inputs(
             "acceptance depths, refinement margin, or sample bound are invalid",
         ));
     }
-    validate_exact_face_geometry(
+    validate_exact_face_geometry_in_parameterization(
         &mesh.geometry,
         &mesh.topology.trimmed,
         &mesh.topology.pslg,
-        context.topology,
-        context.metric_request,
-        context.evaluator,
-        context.geometry_control,
+        parameterization,
+        ExactFaceGeometryContext::new(
+            context.topology,
+            context.metric_request,
+            context.evaluator,
+            context.geometry_control,
+        ),
     )
     .map_err(|failure| {
         error(

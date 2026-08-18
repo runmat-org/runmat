@@ -1,6 +1,33 @@
-use runmat_geometry_core::PersistentEntityId;
+use runmat_geometry_core::{
+    ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, PersistentEntityId,
+};
+use runmat_meshing_core::MetricFieldRequest;
 
 use crate::{ExactFaceDelaunayTriangle, ExactFaceMetricErrorKind, ExactFaceMetricEvaluation};
+
+#[derive(Clone, Copy)]
+pub struct ExactFaceGeometryContext<'a> {
+    pub topology: &'a ExactBRepTopology,
+    pub metric_request: &'a MetricFieldRequest,
+    pub evaluator: &'a dyn ExactSurfaceEvaluator,
+    pub control: &'a dyn GeometryEvaluationControl,
+}
+
+impl<'a> ExactFaceGeometryContext<'a> {
+    pub fn new(
+        topology: &'a ExactBRepTopology,
+        metric_request: &'a MetricFieldRequest,
+        evaluator: &'a dyn ExactSurfaceEvaluator,
+        control: &'a dyn GeometryEvaluationControl,
+    ) -> Self {
+        Self {
+            topology,
+            metric_request,
+            evaluator,
+            control,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceGeometry {

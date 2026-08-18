@@ -544,6 +544,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     assert!(acceptance.maximum_chordal_deviation_m < 1.0e-12);
     assert!(acceptance.maximum_normal_deviation_rad < 1.0e-7);
     let chart_acceptance = crate::accept_exact_face_chart_mesh(
+        &chart,
         &chart_converged,
         ExactFaceRefinementContext::new(
             &topology,
@@ -563,6 +564,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     assert_eq!(
         crate::validate_exact_face_chart_acceptance(
             &mismatched_chart_acceptance,
+            &chart,
             &chart_converged,
             ExactFaceRefinementContext::new(
                 &topology,

@@ -14,11 +14,30 @@ use super::{
     resolved::evaluator_parameters, ExactFaceMetricError, ExactFaceMetricErrorKind,
     ExactFaceMetricEvaluation, ParametricMetricTensor,
 };
+use crate::ExactFaceChartParameterization;
 
 pub fn validate_exact_face_metric_evaluation(
     evaluation: &ExactFaceMetricEvaluation,
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    control: &dyn GeometryEvaluationControl,
+) -> Result<(), ExactFaceMetricError> {
+    validate_exact_face_metric_evaluation_in_parameterization(
+        evaluation,
+        topology,
+        request,
+        &ExactFaceChartParameterization::EvaluatorParameters,
+        evaluator,
+        control,
+    )
+}
+
+pub fn validate_exact_face_metric_evaluation_in_parameterization(
+    evaluation: &ExactFaceMetricEvaluation,
+    topology: &ExactBRepTopology,
+    request: &MetricFieldRequest,
+    parameterization: &ExactFaceChartParameterization,
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
 ) -> Result<(), ExactFaceMetricError> {
@@ -44,31 +63,23 @@ pub fn validate_exact_face_metric_evaluation(
                 "metric evaluation face is absent from exact topology",
             )
         })?;
-    let expected_evaluator_uv = evaluator_parameters(
+    parameterization
+        .validate()
+        .map_err(|reason| invalid(&evaluation.source_face_id, reason))?;
+    let expected = independent_sample(
+        parameterization,
         evaluator,
         &face.surface_evaluator_id,
         &evaluation.source_face_id,
         evaluation.uv,
+        control,
     )?;
-    if evaluation.evaluator_uv != expected_evaluator_uv {
+    if evaluation.evaluator_uv != expected.evaluator_uv {
         return Err(invalid(
             &face.id,
-            "metric evaluation uses a noncanonical periodic evaluator image",
+            "metric evaluation uses a noncanonical evaluator image",
         ));
     }
-    let derivatives = ExactSurfaceEvaluator::derivatives(
-        evaluator,
-        &face.surface_evaluator_id,
-        evaluation.evaluator_uv,
-        control,
-    )
-    .map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
-            Some(&evaluation.source_face_id),
-            error.reason,
-        )
-    })?;
     let transform = topology.world_transform_for(&face.id).map_err(|error| {
         ExactFaceMetricError::new(
             ExactFaceMetricErrorKind::InvalidRequest,
@@ -76,9 +87,9 @@ pub fn validate_exact_face_metric_evaluation(
             error.to_string(),
         )
     })?;
-    let expected_point = transform.transform_point(derivatives.point_m);
-    let expected_u = transform.transform_vector(derivatives.du_m);
-    let expected_v = transform.transform_vector(derivatives.dv_m);
+    let expected_point = transform.transform_point(expected.point_m);
+    let expected_u = transform.transform_vector(expected.derivatives[0]);
+    let expected_v = transform.transform_vector(expected.derivatives[1]);
     if evaluation.point_m != expected_point
         || evaluation.derivative_u_m != expected_u
         || evaluation.derivative_v_m != expected_v
@@ -126,6 +137,93 @@ pub fn validate_exact_face_metric_evaluation(
         ));
     }
     Ok(())
+}
+
+struct IndependentSample {
+    evaluator_uv: [f64; 2],
+    point_m: [f64; 3],
+    derivatives: [[f64; 3]; 2],
+}
+
+fn independent_sample(
+    parameterization: &ExactFaceChartParameterization,
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator_id: &runmat_geometry_core::SurfaceEvaluatorId,
+    source_face_id: &PersistentEntityId,
+    coordinates: [f64; 2],
+    control: &dyn GeometryEvaluationControl,
+) -> Result<IndependentSample, ExactFaceMetricError> {
+    match parameterization {
+        ExactFaceChartParameterization::EvaluatorParameters => {
+            let evaluator_uv =
+                evaluator_parameters(evaluator, evaluator_id, source_face_id, coordinates)?;
+            let derivatives = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry(source_face_id, error))?;
+            Ok(IndependentSample {
+                evaluator_uv,
+                point_m: derivatives.point_m,
+                derivatives: [derivatives.du_m, derivatives.dv_m],
+            })
+        }
+        ExactFaceChartParameterization::ClosestPointProjection {
+            origin_m,
+            axes,
+            differential_step_m,
+            projection_tolerance_m,
+        } => {
+            let project = |coordinates: [f64; 2]| {
+                let query = std::array::from_fn(|axis| {
+                    origin_m[axis] + coordinates[0] * axes[0][axis] + coordinates[1] * axes[1][axis]
+                });
+                evaluator
+                    .closest_point(evaluator_id, query, *projection_tolerance_m, control)
+                    .map_err(|error| geometry(source_face_id, error))
+            };
+            let center = project(coordinates)?;
+            let mut derivatives = [[0.0; 3]; 2];
+            for axis in 0..2 {
+                let mut before = coordinates;
+                let mut after = coordinates;
+                before[axis] -= differential_step_m;
+                after[axis] += differential_step_m;
+                let before = project(before)?;
+                let after = project(after)?;
+                derivatives[axis] = std::array::from_fn(|component| {
+                    (after.point_m[component] - before.point_m[component])
+                        / (2.0 * differential_step_m)
+                });
+            }
+            if center
+                .uv
+                .iter()
+                .chain(&center.point_m)
+                .chain(derivatives.iter().flatten())
+                .any(|value| !value.is_finite())
+            {
+                return Err(invalid(
+                    source_face_id,
+                    "projected chart evaluation is not finite",
+                ));
+            }
+            Ok(IndependentSample {
+                evaluator_uv: center.uv,
+                point_m: center.point_m,
+                derivatives,
+            })
+        }
+    }
+}
+
+fn geometry(
+    face_id: &PersistentEntityId,
+    error: runmat_geometry_core::GeometryEvaluationError,
+) -> ExactFaceMetricError {
+    ExactFaceMetricError::new(
+        ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
+        Some(face_id),
+        error.reason,
+    )
 }
 
 fn resolve_face_metrics(

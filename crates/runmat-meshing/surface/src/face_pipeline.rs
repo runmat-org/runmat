@@ -165,10 +165,13 @@ pub fn mesh_exact_face_partition(
         if refined.len() != charts.charts.len() {
             continue;
         }
-        let acceptance = refined
+        let acceptance = charts
+            .charts
             .iter()
-            .map(|mesh| {
+            .zip(&refined)
+            .map(|(chart, mesh)| {
                 accept_exact_face_chart_mesh(
+                    chart,
                     mesh,
                     refinement_context,
                     context.quality,

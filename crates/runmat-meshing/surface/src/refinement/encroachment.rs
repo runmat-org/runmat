@@ -3,8 +3,8 @@ use runmat_meshing_core::MetricFieldRequest;
 use runmat_meshing_curve::SharedCurveSegmentSplit;
 
 use crate::{
-    exact_face_chart_cut_node_id, ExactFaceMetricError, ExactFacePslg, ExactFacePslgSegmentSource,
-    ResolvedFaceMetricField,
+    exact_face_chart_cut_node_id, ExactFaceChartParameterization, ExactFaceMetricError,
+    ExactFacePslg, ExactFacePslgSegmentSource, ResolvedFaceMetricField,
 };
 
 use super::{
@@ -18,6 +18,26 @@ pub fn classify_exact_face_refinement_candidate(
     pslg: &ExactFacePslg,
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    control: &dyn GeometryEvaluationControl,
+) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
+    classify_exact_face_refinement_candidate_in_parameterization(
+        candidate,
+        pslg,
+        topology,
+        request,
+        &ExactFaceChartParameterization::EvaluatorParameters,
+        evaluator,
+        control,
+    )
+}
+
+pub(crate) fn classify_exact_face_refinement_candidate_in_parameterization(
+    candidate: &ExactFaceRefinementCandidate,
+    pslg: &ExactFacePslg,
+    topology: &ExactBRepTopology,
+    request: &MetricFieldRequest,
+    parameterization: &ExactFaceChartParameterization,
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
 ) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
@@ -55,7 +75,13 @@ pub fn classify_exact_face_refinement_candidate(
             (first.uv[1] + second.uv[1]) * 0.5,
         ];
         let metric = field
-            .evaluate(&pslg.source_face_id, midpoint, evaluator, control)
+            .evaluate_parameterized(
+                &pslg.source_face_id,
+                midpoint,
+                parameterization,
+                evaluator,
+                control,
+            )
             .map_err(|error| metric(&pslg.source_face_id, error))?
             .sizing_metric;
         let left = [candidate.uv[0] - first.uv[0], candidate.uv[1] - first.uv[1]];

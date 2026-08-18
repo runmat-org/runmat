@@ -2,11 +2,13 @@ use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEva
 use runmat_meshing_core::MetricFieldRequest;
 
 use crate::{
-    validate_exact_face_metric_evaluation, ExactFaceMetricEvaluation, ExactFacePslg,
-    ExactFaceTrimmedDelaunay, ParametricMetricTensor,
+    validate_exact_face_metric_evaluation_in_parameterization, ExactFaceChartParameterization,
+    ExactFaceMetricEvaluation, ExactFacePslg, ExactFaceTrimmedDelaunay, ParametricMetricTensor,
 };
 
-use super::{ExactFaceGeometry, ExactFaceGeometryError, ExactFaceGeometryErrorKind};
+use super::{
+    ExactFaceGeometry, ExactFaceGeometryContext, ExactFaceGeometryError, ExactFaceGeometryErrorKind,
+};
 
 pub fn validate_exact_face_geometry(
     geometry: &ExactFaceGeometry,
@@ -14,8 +16,24 @@ pub fn validate_exact_face_geometry(
     pslg: &ExactFacePslg,
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
-    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
+) -> Result<(), ExactFaceGeometryError> {
+    validate_exact_face_geometry_in_parameterization(
+        geometry,
+        trimmed,
+        pslg,
+        &ExactFaceChartParameterization::EvaluatorParameters,
+        ExactFaceGeometryContext::new(topology, request, evaluator, control),
+    )
+}
+
+pub fn validate_exact_face_geometry_in_parameterization(
+    geometry: &ExactFaceGeometry,
+    trimmed: &ExactFaceTrimmedDelaunay,
+    pslg: &ExactFacePslg,
+    parameterization: &ExactFaceChartParameterization,
+    context: ExactFaceGeometryContext<'_>,
 ) -> Result<(), ExactFaceGeometryError> {
     if geometry.source_face_id != pslg.source_face_id
         || trimmed.source_face_id != pslg.source_face_id
@@ -28,7 +46,7 @@ pub fn validate_exact_face_geometry(
         ));
     }
     for (index, (actual, source)) in geometry.vertices.iter().zip(&pslg.vertices).enumerate() {
-        checkpoint(control, &geometry.source_face_id)?;
+        checkpoint(context.control, &geometry.source_face_id)?;
         if actual.pslg_vertex_index != index as u32
             || actual.evaluation.source_face_id != geometry.source_face_id
             || actual.evaluation.uv != source.uv
@@ -38,12 +56,13 @@ pub fn validate_exact_face_geometry(
                 "face geometry vertex identity or UV is inconsistent",
             ));
         }
-        validate_exact_face_metric_evaluation(
+        validate_exact_face_metric_evaluation_in_parameterization(
             &actual.evaluation,
-            topology,
-            request,
-            evaluator,
-            control,
+            context.topology,
+            context.metric_request,
+            parameterization,
+            context.evaluator,
+            context.control,
         )
         .map_err(|error| metric(&geometry.source_face_id, error))?;
         let expected_normal = independent_surface_normal(&actual.evaluation)?;
@@ -61,7 +80,7 @@ pub fn validate_exact_face_geometry(
     let mut maximum_chordal_deviation_m: f64 = 0.0;
     let mut maximum_normal_deviation_rad: f64 = 0.0;
     for (actual, triangle) in geometry.triangles.iter().zip(&trimmed.triangles) {
-        checkpoint(control, &geometry.source_face_id)?;
+        checkpoint(context.control, &geometry.source_face_id)?;
         if actual.triangle != *triangle {
             return Err(invalid(
                 &geometry.source_face_id,
@@ -95,12 +114,13 @@ pub fn validate_exact_face_geometry(
                 "face triangle centroid query is inconsistent",
             ));
         }
-        validate_exact_face_metric_evaluation(
+        validate_exact_face_metric_evaluation_in_parameterization(
             &actual.centroid,
-            topology,
-            request,
-            evaluator,
-            control,
+            context.topology,
+            context.metric_request,
+            parameterization,
+            context.evaluator,
+            context.control,
         )
         .map_err(|error| metric(&geometry.source_face_id, error))?;
         let points = [

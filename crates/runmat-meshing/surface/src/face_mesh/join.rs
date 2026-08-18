@@ -308,7 +308,7 @@ fn validate_chart_inputs(
         )
         .with_chart(chart.chart_id));
     }
-    validate_exact_face_chart_acceptance(report, mesh, context, quality, acceptance_options)
+    validate_exact_face_chart_acceptance(report, chart, mesh, context, quality, acceptance_options)
         .map_err(|error| {
             ExactFaceJoinError::new(
                 ExactFaceJoinErrorKind::Acceptance(error.kind),

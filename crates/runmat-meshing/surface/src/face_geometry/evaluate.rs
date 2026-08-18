@@ -2,13 +2,13 @@ use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEva
 use runmat_meshing_core::MetricFieldRequest;
 
 use crate::{
-    ExactFaceMetricError, ExactFaceMetricEvaluation, ExactFacePslg, ExactFaceTrimmedDelaunay,
-    ParametricMetricTensor, ResolvedFaceMetricField,
+    ExactFaceChartParameterization, ExactFaceMetricError, ExactFaceMetricEvaluation, ExactFacePslg,
+    ExactFaceTrimmedDelaunay, ParametricMetricTensor, ResolvedFaceMetricField,
 };
 
 use super::{
-    ExactFaceGeometry, ExactFaceGeometryError, ExactFaceGeometryErrorKind, ExactFaceGeometryVertex,
-    ExactFaceTriangleGeometry,
+    ExactFaceGeometry, ExactFaceGeometryContext, ExactFaceGeometryError,
+    ExactFaceGeometryErrorKind, ExactFaceGeometryVertex, ExactFaceTriangleGeometry,
 };
 
 pub fn evaluate_exact_face_geometry(
@@ -16,15 +16,29 @@ pub fn evaluate_exact_face_geometry(
     pslg: &ExactFacePslg,
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
-    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<ExactFaceGeometry, ExactFaceGeometryError> {
+    evaluate_exact_face_geometry_in_parameterization(
+        trimmed,
+        pslg,
+        &ExactFaceChartParameterization::EvaluatorParameters,
+        ExactFaceGeometryContext::new(topology, request, evaluator, control),
+    )
+}
+
+pub fn evaluate_exact_face_geometry_in_parameterization(
+    trimmed: &ExactFaceTrimmedDelaunay,
+    pslg: &ExactFacePslg,
+    parameterization: &ExactFaceChartParameterization,
+    context: ExactFaceGeometryContext<'_>,
+) -> Result<ExactFaceGeometry, ExactFaceGeometryError> {
     validate_inventory(trimmed, pslg)?;
-    let field = ResolvedFaceMetricField::new(topology, request)
+    let field = ResolvedFaceMetricField::new(context.topology, context.metric_request)
         .map_err(|error| map_metric(&pslg.source_face_id, error))?;
     let mut vertices = Vec::with_capacity(pslg.vertices.len());
     for (index, vertex) in pslg.vertices.iter().enumerate() {
-        control.checkpoint().map_err(|error| {
+        context.control.checkpoint().map_err(|error| {
             ExactFaceGeometryError::new(
                 ExactFaceGeometryErrorKind::Metric(
                     crate::ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
@@ -34,7 +48,13 @@ pub fn evaluate_exact_face_geometry(
             )
         })?;
         let evaluation = field
-            .evaluate(&pslg.source_face_id, vertex.uv, evaluator, control)
+            .evaluate_parameterized(
+                &pslg.source_face_id,
+                vertex.uv,
+                parameterization,
+                context.evaluator,
+                context.control,
+            )
             .map_err(|error| map_metric(&pslg.source_face_id, error))?;
         let unit_normal = surface_normal(&evaluation)?;
         vertices.push(ExactFaceGeometryVertex {
@@ -46,7 +66,7 @@ pub fn evaluate_exact_face_geometry(
 
     let mut triangles = Vec::with_capacity(trimmed.triangles.len());
     for triangle in &trimmed.triangles {
-        control.checkpoint().map_err(|error| {
+        context.control.checkpoint().map_err(|error| {
             ExactFaceGeometryError::new(
                 ExactFaceGeometryErrorKind::Metric(
                     crate::ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
@@ -71,7 +91,13 @@ pub fn evaluate_exact_face_geometry(
                 / 3.0,
         ];
         let centroid = field
-            .evaluate(&pslg.source_face_id, centroid_uv, evaluator, control)
+            .evaluate_parameterized(
+                &pslg.source_face_id,
+                centroid_uv,
+                parameterization,
+                context.evaluator,
+                context.control,
+            )
             .map_err(|error| map_metric(&pslg.source_face_id, error))?;
         triangles.push(evaluate_triangle(*triangle, corners, centroid)?);
     }

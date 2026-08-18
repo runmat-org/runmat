@@ -236,6 +236,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         maximum_samples: 100_000,
     };
     let acceptance = crate::accept_exact_face_chart_mesh(
+        &annulus_charts.charts[0],
         &refined,
         refinement_context,
         quality,
@@ -862,6 +863,133 @@ fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
     assert_ne!(twice_area, 0.0);
     assert_ne!(chart.boundary, source);
     validate_exact_face_charts(&charts, &source, &topology, &evaluator, &Control, options).unwrap();
+
+    let delaunay_context = ExactFaceChartDelaunayContext {
+        topology: &topology,
+        evaluator: &evaluator,
+        geometry_control: &Control,
+        cancellation: &NeverCancelled,
+    };
+    let triangulations = triangulate_exact_face_charts(
+        &charts,
+        &source,
+        delaunay_context,
+        options,
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    let domains = recover_exact_face_chart_domains(
+        &triangulations,
+        &charts,
+        &source,
+        delaunay_context,
+        options,
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    let metric_request = MetricFieldRequest {
+        combination: MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
+        maximum_grading_ratio: 1.3,
+        contributions: Vec::new(),
+    };
+    let geometry = crate::evaluate_exact_face_geometry_in_parameterization(
+        &domains[0].trimmed,
+        &chart.pslg,
+        &chart.parameterization,
+        crate::ExactFaceGeometryContext::new(&topology, &metric_request, &evaluator, &Control),
+    )
+    .unwrap();
+    crate::validate_exact_face_geometry_in_parameterization(
+        &geometry,
+        &domains[0].trimmed,
+        &chart.pslg,
+        &chart.parameterization,
+        crate::ExactFaceGeometryContext::new(&topology, &metric_request, &evaluator, &Control),
+    )
+    .unwrap();
+    let mut tampered_geometry = geometry.clone();
+    tampered_geometry.vertices[0].evaluation.evaluator_uv[0] += 0.25;
+    assert_eq!(
+        crate::validate_exact_face_geometry_in_parameterization(
+            &tampered_geometry,
+            &domains[0].trimmed,
+            &chart.pslg,
+            &chart.parameterization,
+            crate::ExactFaceGeometryContext::new(&topology, &metric_request, &evaluator, &Control),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceGeometryErrorKind::Metric(
+            crate::ExactFaceMetricErrorKind::InvalidEvaluation,
+        )
+    );
+    let pole = geometry
+        .vertices
+        .iter()
+        .find(|vertex| chart.pslg.vertices[vertex.pslg_vertex_index as usize].node_id == node(2))
+        .unwrap();
+    assert!((pole.evaluation.point_m[2] - 1.0).abs() < 1.0e-10);
+    assert!(pole.evaluation.physical_metric.validate().is_ok());
+    let quality = SurfaceQualityTargets {
+        minimum_metric_angle_degrees: 0.001,
+        maximum_physical_aspect_ratio: 1.0e9,
+        maximum_chordal_deviation_m: 1.0e9,
+        maximum_normal_deviation_degrees: 180.0,
+    };
+    let refinement_context = crate::ExactFaceRefinementContext::new(
+        &topology,
+        &metric_request,
+        &evaluator,
+        &Control,
+        &NeverCancelled,
+    );
+    let refined = crate::refine_exact_face_chart_until_blocked(
+        chart,
+        &domains[0],
+        refinement_context,
+        crate::ExactFaceRefinementPolicy {
+            quality,
+            delaunay: crate::ExactFaceDelaunayOptions::default(),
+            refinement: crate::ExactFaceRefinementOptions {
+                maximum_interior_insertions: 1,
+            },
+        },
+        crate::ExactFaceChartRefinementOptions {
+            maximum_chart_cut_splits: 1,
+        },
+    )
+    .unwrap();
+    let crate::ExactFaceChartRefinementOutcome::Converged(refined) = refined else {
+        panic!("permissive projected singular chart must converge: {refined:?}")
+    };
+    let acceptance_options = crate::ExactFaceAcceptanceOptions {
+        minimum_subdivision_depth: 1,
+        maximum_subdivision_depth: 2,
+        refinement_margin_ratio: 0.5,
+        maximum_samples: 10_000,
+    };
+    let acceptance = crate::accept_exact_face_chart_mesh(
+        chart,
+        &refined,
+        refinement_context,
+        quality,
+        acceptance_options,
+    )
+    .unwrap();
+    let joined = crate::join_exact_face_charts(
+        &charts,
+        std::slice::from_ref(refined.as_ref()),
+        std::slice::from_ref(&acceptance),
+        crate::ExactFaceJoinContext::new(refinement_context, quality, acceptance_options),
+        crate::ExactFaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(joined.triangles.len(), 1);
+    assert!(joined
+        .nodes
+        .iter()
+        .any(|vertex| vertex.node_id == node(2) && (vertex.point_m[2] - 1.0).abs() < 1.0e-10));
 
     let mut tampered = charts;
     let ExactFaceChartParameterization::ClosestPointProjection { axes, .. } =

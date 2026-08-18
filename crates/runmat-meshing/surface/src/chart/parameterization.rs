@@ -1,4 +1,6 @@
-use runmat_geometry_core::{ExactSurfaceEvaluator, GeometryEvaluationControl, SurfaceEvaluatorId};
+use runmat_geometry_core::{
+    ExactSurfaceEvaluator, GeometryEvaluationControl, SurfaceDerivatives, SurfaceEvaluatorId,
+};
 
 use crate::ExactFaceBoundary;
 
@@ -61,6 +63,17 @@ impl ExactFaceChartParameterization {
             }
         }
     }
+
+    pub(crate) fn chart_plane_point(&self, coordinates: [f64; 2]) -> Option<[f64; 3]> {
+        match self {
+            Self::EvaluatorParameters => None,
+            Self::ClosestPointProjection { origin_m, axes, .. } => {
+                Some(std::array::from_fn(|axis| {
+                    origin_m[axis] + coordinates[0] * axes[0][axis] + coordinates[1] * axes[1][axis]
+                }))
+            }
+        }
+    }
 }
 
 pub(super) fn build_projected_parameterization(
@@ -71,14 +84,16 @@ pub(super) fn build_projected_parameterization(
     options: ExactFaceChartOptions,
 ) -> Result<ExactFaceChartParameterization, ExactFaceChartError> {
     let mut points = Vec::new();
+    let mut singular = None::<SurfaceDerivatives>;
     for segment in boundary_segments(boundary) {
         for uv in segment.node_uv {
             control
                 .checkpoint()
                 .map_err(|error| geometry_error(boundary, error))?;
-            let point = evaluator
-                .point(evaluator_id, uv, control)
+            let derivatives = evaluator
+                .derivatives(evaluator_id, uv, control)
                 .map_err(|error| geometry_error(boundary, error))?;
+            let point = derivatives.point_m;
             if point.iter().any(|value| !value.is_finite()) {
                 return Err(invalid(
                     boundary,
@@ -91,9 +106,22 @@ pub(super) fn build_projected_parameterization(
             }) {
                 points.push(point);
             }
+            if is_singular(&derivatives) {
+                if singular.as_ref().is_some_and(|existing| {
+                    squared_norm(subtract(existing.point_m, point))
+                        > options.projection_tolerance_m * options.projection_tolerance_m
+                }) {
+                    return Err(ExactFaceChartError::new(
+                        ExactFaceChartErrorKind::RequiresMultipleCharts,
+                        &boundary.source_face_id,
+                        "one projected chart cannot contain multiple surface singularities",
+                    ));
+                }
+                singular.get_or_insert(derivatives);
+            }
         }
     }
-    let parameterization = frame(boundary, &points, options)?;
+    let parameterization = frame(boundary, &points, singular.as_ref(), options)?;
     let source_face_id = boundary.source_face_id.clone();
     for segment in boundary_segments_mut(boundary) {
         for endpoint in 0..2 {
@@ -122,8 +150,12 @@ pub(super) fn build_projected_parameterization(
 fn frame(
     boundary: &ExactFaceBoundary,
     points: &[[f64; 3]],
+    singular: Option<&SurfaceDerivatives>,
     options: ExactFaceChartOptions,
 ) -> Result<ExactFaceChartParameterization, ExactFaceChartError> {
+    if let Some(singular) = singular {
+        return differential_frame(boundary, points, singular, options);
+    }
     let Some(origin) = points.first().copied() else {
         return Err(invalid(boundary, "singular chart has no boundary points"));
     };
@@ -181,12 +213,111 @@ fn frame(
         )
     })?;
     let extent_m = first_distance.sqrt().max(area.sqrt());
+    projected_parameterization(
+        boundary,
+        origin,
+        [first_axis, second_axis],
+        extent_m,
+        options,
+    )
+}
+
+fn differential_frame(
+    boundary: &ExactFaceBoundary,
+    points: &[[f64; 3]],
+    singular: &SurfaceDerivatives,
+    options: ExactFaceChartOptions,
+) -> Result<ExactFaceChartParameterization, ExactFaceChartError> {
+    let candidates = [
+        singular.du_m,
+        singular.dv_m,
+        singular.duu_m,
+        singular.duv_m,
+        singular.dvv_m,
+    ];
+    let (first_index, first) = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, vector)| vector.iter().all(|value| value.is_finite()))
+        .max_by(|left, right| {
+            squared_norm(*left.1)
+                .total_cmp(&squared_norm(*right.1))
+                .then_with(|| right.0.cmp(&left.0))
+        })
+        .ok_or_else(|| {
+            invalid(
+                boundary,
+                "singular chart has no finite differential direction",
+            )
+        })?;
+    let first_axis = normalize(*first).ok_or_else(|| {
+        invalid(
+            boundary,
+            "singular chart has no nonzero differential direction",
+        )
+    })?;
+    let second = candidates
+        .iter()
+        .enumerate()
+        .filter(|(index, vector)| {
+            *index != first_index && vector.iter().all(|value| value.is_finite())
+        })
+        .map(|(index, vector)| {
+            let orthogonal = subtract(*vector, scale(first_axis, dot(*vector, first_axis)));
+            (index, orthogonal, squared_norm(orthogonal))
+        })
+        .max_by(|left, right| {
+            left.2
+                .total_cmp(&right.2)
+                .then_with(|| right.0.cmp(&left.0))
+        })
+        .map(|(_, vector, _)| vector)
+        .ok_or_else(|| {
+            invalid(
+                boundary,
+                "singular chart has no second differential direction",
+            )
+        })?;
+    let second_axis = normalize(second).ok_or_else(|| {
+        ExactFaceChartError::new(
+            ExactFaceChartErrorKind::RequiresMultipleCharts,
+            &boundary.source_face_id,
+            "surface differential cannot define one regular singular chart",
+        )
+    })?;
+    let extent_m = points
+        .iter()
+        .map(|point| norm(subtract(*point, singular.point_m)))
+        .fold(0.0, f64::max);
+    if !extent_m.is_finite() || extent_m <= options.projection_tolerance_m {
+        return Err(ExactFaceChartError::new(
+            ExactFaceChartErrorKind::RequiresMultipleCharts,
+            &boundary.source_face_id,
+            "singular chart has no finite physical extent",
+        ));
+    }
+    projected_parameterization(
+        boundary,
+        singular.point_m,
+        [first_axis, second_axis],
+        extent_m,
+        options,
+    )
+}
+
+fn projected_parameterization(
+    boundary: &ExactFaceBoundary,
+    origin_m: [f64; 3],
+    axes: [[f64; 3]; 2],
+    extent_m: f64,
+    options: ExactFaceChartOptions,
+) -> Result<ExactFaceChartParameterization, ExactFaceChartError> {
     let differential_step_m = (extent_m * f64::EPSILON.cbrt())
         .max(options.projection_tolerance_m * 8.0)
         .min(extent_m * 0.125);
     let result = ExactFaceChartParameterization::ClosestPointProjection {
-        origin_m: origin,
-        axes: [first_axis, second_axis],
+        origin_m,
+        axes,
         differential_step_m,
         projection_tolerance_m: options.projection_tolerance_m,
     };
@@ -194,6 +325,12 @@ fn frame(
         .validate()
         .map_err(|reason| invalid(boundary, reason))?;
     Ok(result)
+}
+
+fn is_singular(derivatives: &SurfaceDerivatives) -> bool {
+    let area = norm(cross(derivatives.du_m, derivatives.dv_m));
+    let scale = norm(derivatives.du_m) * norm(derivatives.dv_m);
+    area.is_finite() && area <= f64::EPSILON.sqrt() * scale.max(1.0)
 }
 
 fn boundary_segments(
@@ -263,4 +400,8 @@ fn norm(vector: [f64; 3]) -> f64 {
 fn normalize(vector: [f64; 3]) -> Option<[f64; 3]> {
     let length = norm(vector);
     (length.is_finite() && length > 0.0).then(|| vector.map(|value| value / length))
+}
+
+fn scale(vector: [f64; 3], factor: f64) -> [f64; 3] {
+    vector.map(|value| value * factor)
 }

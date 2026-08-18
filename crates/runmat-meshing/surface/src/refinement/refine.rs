@@ -1,21 +1,31 @@
 use crate::{
-    evaluate_exact_face_geometry, validate_exact_face_geometry, ExactFaceBoundary,
-    ExactFaceGeometryError,
+    evaluate_exact_face_geometry_in_parameterization,
+    validate_exact_face_geometry_in_parameterization, ExactFaceBoundary, ExactFaceChart,
+    ExactFaceChartParameterization, ExactFaceGeometryContext, ExactFaceGeometryError,
 };
 
 use super::{
-    classify_exact_face_refinement_candidate, derive_exact_face_feature_collars,
-    insert_exact_face_refinement_candidate, insert_validated_face_refinement_candidate,
-    select_exact_face_refinement_candidate, split_exact_face_chart_cut,
-    ExactFaceCandidateDisposition, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
-    ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
-    ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
+    classify_exact_face_refinement_candidate_in_parameterization,
+    derive_exact_face_feature_collars, insert_exact_face_refinement_candidate,
+    insert_validated_face_refinement_candidate, select_exact_face_refinement_candidate,
+    split_exact_face_chart_cut, ExactFaceCandidateDisposition, ExactFaceRefinedMesh,
+    ExactFaceRefinedTopology, ExactFaceRefinementContext, ExactFaceRefinementError,
+    ExactFaceRefinementErrorKind, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
 };
 
 #[derive(Clone, Copy)]
 pub(crate) enum ExactFaceRefinementDomain<'a> {
     ExactBoundary(&'a ExactFaceBoundary),
-    Chart,
+    Chart(&'a ExactFaceChart),
+}
+
+impl ExactFaceRefinementDomain<'_> {
+    fn parameterization(&self) -> &ExactFaceChartParameterization {
+        match self {
+            Self::ExactBoundary(_) => &ExactFaceChartParameterization::EvaluatorParameters,
+            Self::Chart(chart) => &chart.parameterization,
+        }
+    }
 }
 
 pub fn refine_exact_face_until_blocked(
@@ -55,7 +65,7 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
             "refinement and Delaunay operational limits must be nonzero",
         ));
     }
-    if matches!(domain, ExactFaceRefinementDomain::Chart) && maximum_chart_cut_splits == 0 {
+    if matches!(domain, ExactFaceRefinementDomain::Chart(_)) && maximum_chart_cut_splits == 0 {
         return Err(ExactFaceRefinementError::new(
             ExactFaceRefinementErrorKind::InvalidOptions,
             &initial.pslg.source_face_id,
@@ -66,23 +76,29 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
     let mut insertion_count = 0u32;
     let mut chart_cut_split_count = 0u32;
     loop {
-        let geometry = evaluate_exact_face_geometry(
+        let geometry = evaluate_exact_face_geometry_in_parameterization(
             &current.trimmed,
             &current.pslg,
-            context.topology,
-            context.metric_request,
-            context.evaluator,
-            context.geometry_control,
+            domain.parameterization(),
+            ExactFaceGeometryContext::new(
+                context.topology,
+                context.metric_request,
+                context.evaluator,
+                context.geometry_control,
+            ),
         )
         .map_err(map_geometry)?;
-        validate_exact_face_geometry(
+        validate_exact_face_geometry_in_parameterization(
             &geometry,
             &current.trimmed,
             &current.pslg,
-            context.topology,
-            context.metric_request,
-            context.evaluator,
-            context.geometry_control,
+            domain.parameterization(),
+            ExactFaceGeometryContext::new(
+                context.topology,
+                context.metric_request,
+                context.evaluator,
+                context.geometry_control,
+            ),
         )
         .map_err(map_geometry)?;
         let collars = derive_exact_face_feature_collars(&current.pslg, &geometry, policy.quality)?;
@@ -103,11 +119,12 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                 chart_cut_split_count,
             ));
         };
-        match classify_exact_face_refinement_candidate(
+        match classify_exact_face_refinement_candidate_in_parameterization(
             &candidate,
             &current.pslg,
             context.topology,
             context.metric_request,
+            domain.parameterization(),
             context.evaluator,
             context.geometry_control,
         )? {
@@ -130,7 +147,7 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                         chart_cut_split_count,
                     ));
                 }
-                ExactFaceRefinementDomain::Chart => {
+                ExactFaceRefinementDomain::Chart(_) => {
                     if chart_cut_split_count >= maximum_chart_cut_splits {
                         return Err(ExactFaceRefinementError::new(
                             ExactFaceRefinementErrorKind::ResourceLimit,
@@ -165,12 +182,14 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                             policy.delaunay,
                         )?
                     }
-                    ExactFaceRefinementDomain::Chart => insert_validated_face_refinement_candidate(
-                        &current,
-                        &candidate,
-                        context.cancellation,
-                        policy.delaunay,
-                    )?,
+                    ExactFaceRefinementDomain::Chart(_) => {
+                        insert_validated_face_refinement_candidate(
+                            &current,
+                            &candidate,
+                            context.cancellation,
+                            policy.delaunay,
+                        )?
+                    }
                 };
                 insertion_count += 1;
             }

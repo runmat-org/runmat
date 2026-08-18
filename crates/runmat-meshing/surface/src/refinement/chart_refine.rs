@@ -49,7 +49,7 @@ pub fn refine_exact_face_chart_until_blocked(
         trimmed: initial.trimmed.clone(),
     };
     let (outcome, chart_cut_split_count) = refine_exact_face_domain_until_blocked(
-        ExactFaceRefinementDomain::Chart,
+        ExactFaceRefinementDomain::Chart(chart),
         &topology,
         context,
         policy,
