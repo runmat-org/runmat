@@ -28,6 +28,7 @@ pub struct DelaunayVolumeQualityOptions {
     pub maximum_tetrahedra: u64,
     pub maximum_metric_edge_length: f64,
     pub maximum_radius_edge_ratio: f64,
+    pub minimum_metric_scaled_jacobian: f64,
     pub cancellation_check_interval: u64,
     pub provenance: DelaunayVolumeProvenanceOptions,
 }
@@ -39,6 +40,7 @@ impl Default for DelaunayVolumeQualityOptions {
             maximum_tetrahedra: 2_000_000_000,
             maximum_metric_edge_length: 1.0,
             maximum_radius_edge_ratio: 2.0,
+            minimum_metric_scaled_jacobian: 0.1,
             cancellation_check_interval: 1_024,
             provenance: DelaunayVolumeProvenanceOptions::default(),
         }
@@ -59,6 +61,7 @@ pub struct DelaunayTetrahedronQuality {
     pub maximum_metric_edge_length: f64,
     pub metric_circumradius: f64,
     pub metric_radius_edge_ratio: f64,
+    pub metric_scaled_jacobian: f64,
     pub refinement_violation_ratio: f64,
 }
 
@@ -74,6 +77,7 @@ pub struct DelaunayVolumeQuality {
     pub worst_refinement_tetrahedron: Option<[StableDigest; 4]>,
     pub maximum_metric_edge_length: f64,
     pub maximum_radius_edge_ratio: f64,
+    pub minimum_metric_scaled_jacobian: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,6 +159,7 @@ pub fn evaluate_delaunay_volume_quality(
     let mut worst = None::<(f64, [StableDigest; 4])>;
     let mut maximum_metric_edge_length = 0.0_f64;
     let mut maximum_radius_edge_ratio = 0.0_f64;
+    let mut minimum_metric_scaled_jacobian = f64::INFINITY;
 
     for (index, (tetrahedron, context)) in
         topology.tetrahedra.iter().zip(&metric_contexts).enumerate()
@@ -187,6 +192,8 @@ pub fn evaluate_delaunay_volume_quality(
         maximum_metric_edge_length =
             maximum_metric_edge_length.max(quality.maximum_metric_edge_length);
         maximum_radius_edge_ratio = maximum_radius_edge_ratio.max(quality.metric_radius_edge_ratio);
+        minimum_metric_scaled_jacobian =
+            minimum_metric_scaled_jacobian.min(quality.metric_scaled_jacobian);
         if quality.requires_refinement() {
             let candidate = (quality.refinement_violation_ratio, quality.node_identities);
             if worst.as_ref().is_none_or(|current| {
@@ -204,6 +211,7 @@ pub fn evaluate_delaunay_volume_quality(
         worst_refinement_tetrahedron: worst.map(|(_, identity)| identity),
         maximum_metric_edge_length,
         maximum_radius_edge_ratio,
+        minimum_metric_scaled_jacobian,
     };
     validate_delaunay_volume_quality(
         topology,
@@ -318,11 +326,14 @@ fn validate_options(
         || options.maximum_metric_edge_length <= 0.0
         || !options.maximum_radius_edge_ratio.is_finite()
         || options.maximum_radius_edge_ratio <= 0.0
+        || !options.minimum_metric_scaled_jacobian.is_finite()
+        || options.minimum_metric_scaled_jacobian <= 0.0
+        || options.minimum_metric_scaled_jacobian > 1.0
     {
         return Err(error(
             DelaunayVolumeQualityErrorKind::InvalidOptions,
             None,
-            "inventory limits and cancellation interval must be nonzero and quality bounds must be finite and positive",
+            "inventory limits and cancellation interval must be nonzero; upper quality bounds must be finite and positive; minimum scaled Jacobian must be finite and in (0, 1]",
         ));
     }
     Ok(())

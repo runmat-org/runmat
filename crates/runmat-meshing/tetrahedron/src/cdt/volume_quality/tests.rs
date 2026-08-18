@@ -70,6 +70,36 @@ fn topology() -> DelaunayVolumeTopology {
     .unwrap()
 }
 
+fn sliver_topology() -> DelaunayVolumeTopology {
+    let nodes = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.5, 0.5, 1.0e-6],
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, coordinates_m)| DelaunayVolumeNode {
+        identity: StableDigest::from_bytes([(index + 11) as u8; 32]),
+        coordinates_m,
+    })
+    .collect();
+    let topology = build_delaunay_volume_topology(
+        nodes,
+        vec![[0, 1, 2, 3]],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assign_delaunay_volume_regions(
+        topology,
+        vec![region("sliver-region")],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap()
+}
+
 fn metric_request() -> MetricFieldRequest {
     MetricFieldRequest {
         combination: MetricCombinationRule::MostRestrictiveIntersection,
@@ -194,6 +224,72 @@ fn quality_is_deterministic_and_independently_rejects_tampering() {
     );
 }
 
+#[test]
+fn anisotropic_metric_scaled_jacobian_detects_and_selects_a_sliver() {
+    let topology = sliver_topology();
+    let provenance = DelaunayVolumeProvenance {
+        nodes: Vec::new(),
+        segments: Vec::new(),
+        facets: Vec::new(),
+    };
+    let request = MetricFieldRequest {
+        combination: MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: MetricTensor3 {
+            xx: 2.0,
+            yy: 1.5,
+            zz: 0.75,
+            xy: 0.25,
+            xz: 0.1,
+            yz: 0.05,
+        },
+        maximum_grading_ratio: 1.5,
+        contributions: Vec::new(),
+    };
+    let options = DelaunayVolumeQualityOptions {
+        maximum_metric_edge_length: 1.0e12,
+        maximum_radius_edge_ratio: 1.0e12,
+        minimum_metric_scaled_jacobian: 0.1,
+        ..DelaunayVolumeQualityOptions::default()
+    };
+    let quality = evaluate_delaunay_volume_quality(
+        &topology,
+        &request,
+        &provenance,
+        options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    let tetrahedron = &quality.tetrahedra[0];
+
+    assert!(tetrahedron.maximum_metric_edge_length / options.maximum_metric_edge_length < 1.0);
+    assert!(tetrahedron.metric_radius_edge_ratio / options.maximum_radius_edge_ratio < 1.0);
+    assert!(tetrahedron.metric_scaled_jacobian < options.minimum_metric_scaled_jacobian);
+    assert_eq!(
+        quality.worst_refinement_tetrahedron,
+        Some(tetrahedron.node_identities)
+    );
+    assert_eq!(
+        quality.minimum_metric_scaled_jacobian,
+        tetrahedron.metric_scaled_jacobian
+    );
+
+    let mut tampered = quality;
+    tampered.tetrahedra[0].metric_scaled_jacobian *= 2.0;
+    assert_eq!(
+        validate_delaunay_volume_quality(
+            &topology,
+            &request,
+            &provenance,
+            &tampered,
+            options,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeQualityErrorKind::InvalidQuality
+    );
+}
+
 struct Cancelled;
 
 impl MeshingCancellationSignal for Cancelled {
@@ -242,6 +338,21 @@ fn quality_rejects_unassigned_topology_limits_bad_policy_and_cancellation() {
             &contexts,
             DelaunayVolumeQualityOptions {
                 maximum_metric_edge_length: 0.0,
+                ..DelaunayVolumeQualityOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeQualityErrorKind::InvalidOptions
+    );
+    assert_eq!(
+        evaluate_delaunay_volume_quality(
+            &assigned,
+            &metric_request(),
+            &contexts,
+            DelaunayVolumeQualityOptions {
+                minimum_metric_scaled_jacobian: 1.1,
                 ..DelaunayVolumeQualityOptions::default()
             },
             &NeverCancelled,

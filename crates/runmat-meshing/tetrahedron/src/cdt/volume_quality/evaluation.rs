@@ -1,4 +1,5 @@
 use runmat_geometry_core::PersistentEntityId;
+use runmat_meshing_core::predicate::tetrahedron_scaled_jacobian;
 use runmat_meshing_size::metric::ResolvedMetricEvaluation;
 
 use super::{
@@ -43,8 +44,22 @@ pub(super) fn evaluate_tetrahedron(
         )
     })?;
     let radius_edge_ratio = radius / minimum_edge;
+    let scaled_jacobian = tetrahedron_scaled_jacobian(transformed);
+    if !scaled_jacobian.is_finite() || scaled_jacobian < 0.0 {
+        return Err(error(
+            DelaunayVolumeQualityErrorKind::NumericalFailure,
+            Some(tetrahedron_index),
+            "metric scaled Jacobian must be finite and nonnegative",
+        ));
+    }
+    let sliver_violation_ratio = if scaled_jacobian > 0.0 {
+        options.minimum_metric_scaled_jacobian / scaled_jacobian
+    } else {
+        f64::MAX
+    };
     let violation_ratio = (maximum_edge / options.maximum_metric_edge_length)
-        .max(radius_edge_ratio / options.maximum_radius_edge_ratio);
+        .max(radius_edge_ratio / options.maximum_radius_edge_ratio)
+        .max(sliver_violation_ratio);
     if !radius_edge_ratio.is_finite() || !violation_ratio.is_finite() {
         return Err(error(
             DelaunayVolumeQualityErrorKind::NumericalFailure,
@@ -66,6 +81,7 @@ pub(super) fn evaluate_tetrahedron(
         maximum_metric_edge_length: maximum_edge,
         metric_circumradius: radius,
         metric_radius_edge_ratio: radius_edge_ratio,
+        metric_scaled_jacobian: scaled_jacobian,
         refinement_violation_ratio: violation_ratio,
     })
 }

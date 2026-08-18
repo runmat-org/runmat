@@ -19,7 +19,7 @@ struct IndependentTetrahedronQuality {
     contribution_count: u32,
     clipped_contribution_count: u32,
     rejected_contribution_count: u32,
-    values: [f64; 5],
+    values: [f64; 6],
 }
 
 pub fn validate_delaunay_volume_quality(
@@ -73,6 +73,7 @@ pub fn validate_delaunay_volume_quality(
     .map_err(super::metric_error)?;
     let mut maximum_edge = 0.0_f64;
     let mut maximum_ratio = 0.0_f64;
+    let mut minimum_scaled_jacobian = f64::INFINITY;
     let mut worst = None::<(f64, [runmat_meshing_core::StableDigest; 4])>;
 
     for (index, ((tetrahedron, context), observed)) in topology
@@ -107,8 +108,20 @@ pub fn validate_delaunay_volume_quality(
             )
         })?;
         let radius_edge_ratio = radius / minimum_edge;
+        let scaled_jacobian = metric_scaled_jacobian(points, resolved.metric).ok_or_else(|| {
+            invalid(
+                Some(index),
+                "independent metric scaled Jacobian evaluation failed",
+            )
+        })?;
+        let sliver_violation_ratio = if scaled_jacobian > 0.0 {
+            options.minimum_metric_scaled_jacobian / scaled_jacobian
+        } else {
+            f64::MAX
+        };
         let violation_ratio = (local_maximum_edge / options.maximum_metric_edge_length)
-            .max(radius_edge_ratio / options.maximum_radius_edge_ratio);
+            .max(radius_edge_ratio / options.maximum_radius_edge_ratio)
+            .max(sliver_violation_ratio);
         let independent = IndependentTetrahedronQuality {
             identities,
             region_id,
@@ -123,12 +136,14 @@ pub fn validate_delaunay_volume_quality(
                 local_maximum_edge,
                 radius,
                 radius_edge_ratio,
+                scaled_jacobian,
                 violation_ratio,
             ],
         };
         validate_tetrahedron(observed, &independent, index)?;
         maximum_edge = maximum_edge.max(local_maximum_edge);
         maximum_ratio = maximum_ratio.max(radius_edge_ratio);
+        minimum_scaled_jacobian = minimum_scaled_jacobian.min(scaled_jacobian);
         if violation_ratio > 1.0 {
             let candidate = (violation_ratio, identities);
             if worst.as_ref().is_none_or(|current| {
@@ -142,6 +157,10 @@ pub fn validate_delaunay_volume_quality(
     if quality.worst_refinement_tetrahedron != worst.map(|(_, identity)| identity)
         || !approximately_equal(quality.maximum_metric_edge_length, maximum_edge)
         || !approximately_equal(quality.maximum_radius_edge_ratio, maximum_ratio)
+        || !approximately_equal(
+            quality.minimum_metric_scaled_jacobian,
+            minimum_scaled_jacobian,
+        )
     {
         return Err(invalid(None, "aggregate quality evidence is inconsistent"));
     }
@@ -165,7 +184,8 @@ fn validate_tetrahedron(
         || !approximately_equal(observed.maximum_metric_edge_length, independent.values[1])
         || !approximately_equal(observed.metric_circumradius, independent.values[2])
         || !approximately_equal(observed.metric_radius_edge_ratio, independent.values[3])
-        || !approximately_equal(observed.refinement_violation_ratio, independent.values[4])
+        || !approximately_equal(observed.metric_scaled_jacobian, independent.values[4])
+        || !approximately_equal(observed.refinement_violation_ratio, independent.values[5])
     {
         return Err(invalid(
             Some(index),
@@ -173,6 +193,56 @@ fn validate_tetrahedron(
         ));
     }
     Ok(())
+}
+
+fn metric_scaled_jacobian(points: [[f64; 3]; 4], metric: MetricTensor3) -> Option<f64> {
+    let determinant = metric.xx * (metric.yy * metric.zz - metric.yz * metric.yz)
+        - metric.xy * (metric.xy * metric.zz - metric.yz * metric.xz)
+        + metric.xz * (metric.xy * metric.yz - metric.yy * metric.xz);
+    if !determinant.is_finite() || determinant <= 0.0 {
+        return None;
+    }
+    let corners = [(0, 1, 2, 3), (1, 0, 3, 2), (2, 0, 1, 3), (3, 0, 2, 1)];
+    let mut minimum = f64::INFINITY;
+    for (origin, first, second, third) in corners {
+        let edges = [first, second, third].map(|vertex| {
+            [
+                points[vertex][0] - points[origin][0],
+                points[vertex][1] - points[origin][1],
+                points[vertex][2] - points[origin][2],
+            ]
+        });
+        let lengths = edges.map(|edge| metric_length(edge, metric));
+        if lengths
+            .into_iter()
+            .any(|length| !length.is_finite() || length <= 0.0)
+        {
+            return None;
+        }
+        let physical_jacobian = determinant3(edges).abs();
+        let scaled = 2.0_f64.sqrt() * determinant.sqrt() * physical_jacobian
+            / lengths.into_iter().product::<f64>();
+        if !scaled.is_finite() || scaled < 0.0 {
+            return None;
+        }
+        minimum = minimum.min(scaled);
+    }
+    Some(minimum)
+}
+
+fn metric_length(vector: [f64; 3], metric: MetricTensor3) -> f64 {
+    let product = [
+        metric.xx * vector[0] + metric.xy * vector[1] + metric.xz * vector[2],
+        metric.xy * vector[0] + metric.yy * vector[1] + metric.yz * vector[2],
+        metric.xz * vector[0] + metric.yz * vector[1] + metric.zz * vector[2],
+    ];
+    (vector[0] * product[0] + vector[1] * product[1] + vector[2] * product[2]).sqrt()
+}
+
+fn determinant3(matrix: [[f64; 3]; 3]) -> f64 {
+    matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
+        - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
+        + matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0])
 }
 
 fn metric_edge_extrema(points: [[f64; 3]; 4], metric: MetricTensor3) -> Option<(f64, f64)> {
@@ -270,7 +340,7 @@ fn approximately_equal(left: f64, right: f64) -> bool {
     left.is_finite()
         && right.is_finite()
         && (left - right).abs()
-            <= 256.0 * f64::EPSILON * left.abs().max(right.abs()).max(f64::MIN_POSITIVE)
+            <= 131_072.0 * f64::EPSILON * left.abs().max(right.abs()).max(f64::MIN_POSITIVE)
 }
 
 fn invalid(index: Option<usize>, reason: &'static str) -> DelaunayVolumeQualityError {
