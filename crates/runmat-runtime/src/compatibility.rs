@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 /// Runtime release identity for RunMat's compatibility version pin. Keep this
 /// paired with `MATLAB_COMPATIBILITY_VERSION`; the reader-facing source of
-/// truth is `docs/development/backwards-compat.md`.
+/// truth is `docs/getting-started/compatability.md`.
 pub const MATLAB_COMPATIBILITY_RELEASE: &str = "R2026a";
 
 /// Numeric product version corresponding to `MATLAB_COMPATIBILITY_RELEASE`.
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn documented_compatibility_version_pin_matches_runtime_queries() {
-        let policy = include_str!("../../../docs/development/backwards-compat.md");
+        let policy = include_str!("../../../docs/getting-started/compatability.md");
         assert!(policy.contains(&format!("**MATLAB {MATLAB_COMPATIBILITY_RELEASE}**")));
         assert!(policy.contains(&format!(
             "product version, `{MATLAB_COMPATIBILITY_VERSION}`"
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn compatibility_version_pin_is_centralized_in_the_repository() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let canonical_policy = workspace_root.join("docs/development/backwards-compat.md");
+        let canonical_policy = workspace_root.join("docs/getting-started/compatability.md");
         let runtime_policy = workspace_root.join("crates/runmat-runtime/src/compatibility.rs");
         let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
         let bare_release_label = release_label.strip_prefix('r').unwrap_or(&release_label);

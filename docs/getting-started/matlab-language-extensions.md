@@ -52,4 +52,4 @@ Each builtin reference separates ordinary behavior from RunMat-only forms. When 
 
 When `matlab` mode rejects an extension, RunMat reports a compatibility error before performing provider access, file I/O, graphics mutation, or another avoidable side effect. Stable extension identifiers in builtin metadata allow editors and other tooling to explain the rejected form.
 
-For the broader language and builtin coverage model, see [MATLAB Language Compatibility](/docs/runtime/getting-started/compatability). For configuration details, see the [Configuration Reference](/docs/runtime/getting-started/config). Contributors should use the [Semantic Compatibility Engineering Policy](/docs/runtime/development/backwards-compat) when classifying a new behavior.
+For the broader language and builtin coverage model, including the current compatibility target, see [MATLAB Language Compatibility](/docs/runtime/getting-started/compatability). For configuration details, see the [Configuration Reference](/docs/runtime/getting-started/config).
