@@ -50,14 +50,3 @@ pub(crate) struct MissingFaceLocalCapStitchDiagnostic {
     pub reason: &'static str,
     pub max_min_scaled_jacobian: f64,
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BoundaryMissingFaceClusterDiagnostic {
-    pub missing_face_count: usize,
-    pub edge_component_count: usize,
-    pub edge_component_size_histogram: BTreeMap<usize, usize>,
-    pub node_component_count: usize,
-    pub node_component_size_histogram: BTreeMap<usize, usize>,
-    pub node_component_common_node_count_histogram: BTreeMap<usize, usize>,
-    pub node_component_common_node_ids: BTreeMap<u32, usize>,
-}

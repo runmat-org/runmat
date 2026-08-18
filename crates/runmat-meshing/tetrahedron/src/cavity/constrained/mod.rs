@@ -1,5 +1,3 @@
-#![cfg_attr(test, allow(dead_code))]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{

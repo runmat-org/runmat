@@ -20,26 +20,6 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         (result, trace)
     }
 
-    #[cfg(test)]
-    pub(in super::super::super::super) fn search_without_forced_with_trace(
-        &mut self,
-    ) -> (Option<Vec<usize>>, BoundaryExactCoverTrace) {
-        let mut trace = BoundaryExactCoverTrace {
-            dead_end: None,
-            dead_ends: Vec::new(),
-            dead_end_reason_counts: BTreeMap::new(),
-            dead_end_faces_by_reason: BTreeMap::new(),
-        };
-        let result = self.search_from_without_forced_traced(
-            0.0,
-            &mut BTreeMap::new(),
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut trace,
-        );
-        (result, trace)
-    }
-
     pub(in super::super::super::super) fn record_dead_end(
         &self,
         trace: &mut BoundaryExactCoverTrace,
