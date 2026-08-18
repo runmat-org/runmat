@@ -360,14 +360,23 @@ pub fn gpu_metadata_snapshot(handle: &GpuTensorHandle) -> GpuMetadataSnapshot {
 }
 
 pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnapshot) {
-    runmat_accelerate_api::set_handle_storage(handle, snapshot.0);
-    match snapshot.1 {
-        Some(precision) => runmat_accelerate_api::set_handle_precision(handle, precision),
-        None => runmat_accelerate_api::clear_handle_precision(handle),
+    if handle.descriptor.storage.is_none() {
+        runmat_accelerate_api::set_handle_storage(handle, snapshot.0);
+    } else {
+        runmat_accelerate_api::clear_handle_storage(handle);
     }
-    match snapshot.2 {
-        Some(integer) => runmat_accelerate_api::set_handle_integer_type(handle, integer),
-        None => runmat_accelerate_api::clear_handle_integer_type(handle),
+    if handle.descriptor.element_type.is_none() {
+        match snapshot.1 {
+            Some(precision) => runmat_accelerate_api::set_handle_precision(handle, precision),
+            None => runmat_accelerate_api::clear_handle_precision(handle),
+        }
+        match snapshot.2 {
+            Some(integer) => runmat_accelerate_api::set_handle_integer_type(handle, integer),
+            None => runmat_accelerate_api::clear_handle_integer_type(handle),
+        }
+    } else {
+        runmat_accelerate_api::clear_handle_precision(handle);
+        runmat_accelerate_api::clear_handle_integer_type(handle);
     }
     runmat_accelerate_api::set_handle_logical(handle, snapshot.3);
 }
@@ -1428,7 +1437,6 @@ mod tests {
             let tensor =
                 Tensor::new_integer(IntegerStorage::I32(vec![1, -2, 3]), vec![1, 3]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
-            runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I32);
             let gathered = block_on(gather_gpu_complex_tensor(&handle, "ifft"))
                 .expect("exact integer download");
             assert_eq!(
@@ -1452,7 +1460,6 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                     .unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
-            runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U64);
             let error = block_on(gather_gpu_complex_tensor(&handle, "ifft"))
                 .expect_err("wide resident integer must not materialize through f64");
             assert!(error.message().contains("exact provider transform"));

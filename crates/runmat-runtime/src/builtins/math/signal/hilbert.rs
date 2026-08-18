@@ -640,15 +640,24 @@ fn hilbert_input_metadata(handle: &GpuTensorHandle) -> HilbertGpuMetadata {
 }
 
 fn restore_hilbert_input_metadata(handle: &GpuTensorHandle, metadata: HilbertGpuMetadata) {
-    runmat_accelerate_api::set_handle_storage(handle, metadata.0);
-    if let Some(precision) = metadata.1 {
-        runmat_accelerate_api::set_handle_precision(handle, precision);
+    if handle.descriptor.storage.is_none() {
+        runmat_accelerate_api::set_handle_storage(handle, metadata.0);
+    } else {
+        runmat_accelerate_api::clear_handle_storage(handle);
+    }
+    if handle.descriptor.element_type.is_none() {
+        if let Some(precision) = metadata.1 {
+            runmat_accelerate_api::set_handle_precision(handle, precision);
+        } else {
+            runmat_accelerate_api::clear_handle_precision(handle);
+        }
+        if let Some(integer) = metadata.2 {
+            runmat_accelerate_api::set_handle_integer_type(handle, integer);
+        } else {
+            runmat_accelerate_api::clear_handle_integer_type(handle);
+        }
     } else {
         runmat_accelerate_api::clear_handle_precision(handle);
-    }
-    if let Some(integer) = metadata.2 {
-        runmat_accelerate_api::set_handle_integer_type(handle, integer);
-    } else {
         runmat_accelerate_api::clear_handle_integer_type(handle);
     }
     runmat_accelerate_api::set_handle_logical(handle, metadata.3);

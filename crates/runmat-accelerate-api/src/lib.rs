@@ -124,8 +124,10 @@ pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
     provider().and_then(|p| p.export_wgpu_buffer(handle))
 }
 
-/// Record the precision associated with a GPU tensor handle so host operations can
-/// reconstruct the original dtype when gathering back to the CPU.
+/// Record fallback precision for a legacy handle without durable element metadata.
+///
+/// Provider-created handles must populate `descriptor.element_type`; when present,
+/// that durable physical type is authoritative over this compatibility annotation.
 pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecision) {
     if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
         guard.insert(handle_identity(handle), precision);
@@ -134,16 +136,13 @@ pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecisi
 
 /// Look up the recorded precision for a GPU tensor handle, if any.
 pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
-    HANDLE_PRECISIONS
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
-        .or_else(|| {
-            handle
-                .descriptor
-                .element_type
-                .and_then(NumericElementType::precision)
-        })
+    match handle.descriptor.element_type {
+        Some(element_type) => element_type.precision(),
+        None => HANDLE_PRECISIONS
+            .read()
+            .ok()
+            .and_then(|guard| guard.get(&handle_identity(handle)).copied()),
+    }
 }
 
 /// Clear any recorded precision metadata for a GPU tensor handle.
@@ -309,7 +308,10 @@ impl IntegerElementType {
     }
 }
 
-/// Record the exact native integer class stored by a GPU tensor handle.
+/// Record fallback integer class metadata for a legacy handle.
+///
+/// Provider-created handles must populate `descriptor.element_type`; when present,
+/// that durable physical type is authoritative over this compatibility annotation.
 pub fn set_handle_integer_type(handle: &GpuTensorHandle, element_type: IntegerElementType) {
     if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
         guard.insert(handle_identity(handle), element_type);
@@ -318,16 +320,13 @@ pub fn set_handle_integer_type(handle: &GpuTensorHandle, element_type: IntegerEl
 
 /// Look up the exact native integer class stored by a GPU tensor handle.
 pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementType> {
-    HANDLE_INTEGER_TYPES
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
-        .or_else(|| {
-            handle
-                .descriptor
-                .element_type
-                .and_then(NumericElementType::integer_type)
-        })
+    match handle.descriptor.element_type {
+        Some(element_type) => element_type.integer_type(),
+        None => HANDLE_INTEGER_TYPES
+            .read()
+            .ok()
+            .and_then(|guard| guard.get(&handle_identity(handle)).copied()),
+    }
 }
 
 /// Clear the native integer class annotation for a released handle.
@@ -778,6 +777,10 @@ pub struct WgpuBufferRef {
     pub precision: ProviderPrecision,
 }
 
+/// Record fallback layout metadata for a legacy handle.
+///
+/// Provider-created handles must populate `descriptor.storage`; when present,
+/// that durable physical layout is authoritative over this compatibility annotation.
 pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
     if let Ok(mut guard) = HANDLE_STORAGES.write() {
         guard.insert(handle_identity(handle), storage);
@@ -785,11 +788,15 @@ pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
 }
 
 pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
-    HANDLE_STORAGES
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
-        .or(handle.descriptor.storage)
+    handle
+        .descriptor
+        .storage
+        .or_else(|| {
+            HANDLE_STORAGES
+                .read()
+                .ok()
+                .and_then(|guard| guard.get(&handle_identity(handle)).copied())
+        })
         .unwrap_or(GpuTensorStorage::Real)
 }
 
@@ -4733,6 +4740,36 @@ mod tests {
                 .expect("deserialize legacy handle");
         assert_eq!(legacy.descriptor, GpuTensorDescriptor::default());
         assert_eq!(handle_storage(&legacy), GpuTensorStorage::Real);
+    }
+
+    #[test]
+    fn durable_physical_descriptor_wins_over_conflicting_legacy_annotations() {
+        let floating = GpuTensorHandle::new(vec![1, 2], 23, 31).with_numeric_descriptor(
+            NumericElementType::F32,
+            GpuTensorStorage::ComplexInterleaved,
+        );
+        set_handle_precision(&floating, ProviderPrecision::F64);
+        set_handle_integer_type(&floating, IntegerElementType::U64);
+        set_handle_storage(&floating, GpuTensorStorage::Real);
+
+        assert_eq!(handle_precision(&floating), Some(ProviderPrecision::F32));
+        assert_eq!(handle_integer_type(&floating), None);
+        assert_eq!(
+            handle_storage(&floating),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(handle_class_name(&floating).as_deref(), Some("single"));
+        clear_handle_metadata(&floating);
+
+        let integer = GpuTensorHandle::new(vec![1, 2], 37, 41)
+            .with_numeric_descriptor(NumericElementType::U64, GpuTensorStorage::Real);
+        set_handle_precision(&integer, ProviderPrecision::F32);
+        set_handle_integer_type(&integer, IntegerElementType::I8);
+
+        assert_eq!(handle_precision(&integer), None);
+        assert_eq!(handle_integer_type(&integer), Some(IntegerElementType::U64));
+        assert_eq!(handle_class_name(&integer).as_deref(), Some("uint64"));
+        clear_handle_metadata(&integer);
     }
 
     #[test]

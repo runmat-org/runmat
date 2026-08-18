@@ -193,16 +193,14 @@ impl RejectingNativeResultProvider {
     }
 
     fn rejected_handle(&self) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-        let handle = self
+        let mut handle = self
             .rejected_owner
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &[0.0],
                 shape: &[1, 1],
             })?;
-        runmat_accelerate_api::set_handle_storage(
-            &handle,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
+        handle.descriptor.storage =
+            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
         Ok(handle)
     }
 }

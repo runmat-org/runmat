@@ -119,6 +119,134 @@ impl InProcessNumericData {
             Self::Integer(values) => integer_data_bytes(values),
         }
     }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::Integer(values) => match values {
+                HostIntegerDataOwned::I8(values) => values.len(),
+                HostIntegerDataOwned::I16(values) => values.len(),
+                HostIntegerDataOwned::I32(values) => values.len(),
+                HostIntegerDataOwned::I64(values) => values.len(),
+                HostIntegerDataOwned::U8(values) => values.len(),
+                HostIntegerDataOwned::U16(values) => values.len(),
+                HostIntegerDataOwned::U32(values) => values.len(),
+                HostIntegerDataOwned::U64(values) => values.len(),
+            },
+        }
+    }
+}
+
+fn diagonalize_vector_values<T: Copy + Default>(
+    values: &[T],
+    offset: isize,
+    out_rows: usize,
+    out_cols: usize,
+) -> Result<Vec<T>> {
+    let total = out_rows
+        .checked_mul(out_cols)
+        .ok_or_else(|| anyhow!("diag: result size exceeds limits"))?;
+    let mut output = vec![T::default(); total];
+    for (index, value) in values.iter().copied().enumerate() {
+        let (row, column) = diagonal_target_index(index, offset);
+        if row < out_rows && column < out_cols {
+            output[row + column * out_rows] = value;
+        }
+    }
+    Ok(output)
+}
+
+fn extract_diagonal_values<T: Copy>(
+    values: &[T],
+    rows: usize,
+    offset: isize,
+    diagonal_len: usize,
+) -> Result<Vec<T>> {
+    let mut output = Vec::with_capacity(diagonal_len);
+    for index in 0..diagonal_len {
+        let (row, column) = diagonal_source_index(index, offset);
+        let linear = column
+            .checked_mul(rows)
+            .and_then(|base| row.checked_add(base))
+            .ok_or_else(|| anyhow!("diag: source index exceeds provider limits"))?;
+        output.push(
+            values
+                .get(linear)
+                .copied()
+                .ok_or_else(|| anyhow!("diag: source shape exceeds physical buffer length"))?,
+        );
+    }
+    Ok(output)
+}
+
+fn diagonalize_numeric_data(
+    data: &InProcessNumericData,
+    offset: isize,
+    out_rows: usize,
+    out_cols: usize,
+) -> Result<InProcessNumericData> {
+    macro_rules! diagonalize_integer {
+        ($variant:ident, $values:expr) => {
+            InProcessNumericData::Integer(HostIntegerDataOwned::$variant(
+                diagonalize_vector_values($values, offset, out_rows, out_cols)?,
+            ))
+        };
+    }
+    Ok(match data {
+        InProcessNumericData::F64(values) => InProcessNumericData::F64(diagonalize_vector_values(
+            values, offset, out_rows, out_cols,
+        )?),
+        InProcessNumericData::F32(values) => InProcessNumericData::F32(diagonalize_vector_values(
+            values, offset, out_rows, out_cols,
+        )?),
+        InProcessNumericData::Integer(values) => match values {
+            HostIntegerDataOwned::I8(values) => diagonalize_integer!(I8, values),
+            HostIntegerDataOwned::I16(values) => diagonalize_integer!(I16, values),
+            HostIntegerDataOwned::I32(values) => diagonalize_integer!(I32, values),
+            HostIntegerDataOwned::I64(values) => diagonalize_integer!(I64, values),
+            HostIntegerDataOwned::U8(values) => diagonalize_integer!(U8, values),
+            HostIntegerDataOwned::U16(values) => diagonalize_integer!(U16, values),
+            HostIntegerDataOwned::U32(values) => diagonalize_integer!(U32, values),
+            HostIntegerDataOwned::U64(values) => diagonalize_integer!(U64, values),
+        },
+    })
+}
+
+fn extract_numeric_diagonal(
+    data: &InProcessNumericData,
+    rows: usize,
+    offset: isize,
+    diagonal_len: usize,
+) -> Result<InProcessNumericData> {
+    macro_rules! extract_integer {
+        ($variant:ident, $values:expr) => {
+            InProcessNumericData::Integer(HostIntegerDataOwned::$variant(extract_diagonal_values(
+                $values,
+                rows,
+                offset,
+                diagonal_len,
+            )?))
+        };
+    }
+    Ok(match data {
+        InProcessNumericData::F64(values) => {
+            InProcessNumericData::F64(extract_diagonal_values(values, rows, offset, diagonal_len)?)
+        }
+        InProcessNumericData::F32(values) => {
+            InProcessNumericData::F32(extract_diagonal_values(values, rows, offset, diagonal_len)?)
+        }
+        InProcessNumericData::Integer(values) => match values {
+            HostIntegerDataOwned::I8(values) => extract_integer!(I8, values),
+            HostIntegerDataOwned::I16(values) => extract_integer!(I16, values),
+            HostIntegerDataOwned::I32(values) => extract_integer!(I32, values),
+            HostIntegerDataOwned::I64(values) => extract_integer!(I64, values),
+            HostIntegerDataOwned::U8(values) => extract_integer!(U8, values),
+            HostIntegerDataOwned::U16(values) => extract_integer!(U16, values),
+            HostIntegerDataOwned::U32(values) => extract_integer!(U32, values),
+            HostIntegerDataOwned::U64(values) => extract_integer!(U64, values),
+        },
+    })
 }
 
 static NUMERIC_REGISTRY: OnceCell<Mutex<HashMap<u64, InProcessNumericData>>> = OnceCell::new();
@@ -1856,6 +1984,26 @@ impl InProcessProvider {
             .unwrap_or_else(|error| error.into_inner())
             .insert(id, InProcessNumericData::F32(data));
         self.f32_handle_for_existing_buffer(id, shape, storage)
+    }
+
+    fn allocate_numeric_data(
+        &self,
+        data: InProcessNumericData,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
+        match data {
+            InProcessNumericData::F64(values) => {
+                self.allocate_tensor_with_storage(values, shape, storage)
+            }
+            InProcessNumericData::F32(values) => {
+                self.allocate_f32_tensor_with_storage(values, shape, storage)
+            }
+            InProcessNumericData::Integer(values) => {
+                debug_assert_eq!(storage, GpuTensorStorage::Real);
+                self.allocate_integer_tensor(values, shape)
+            }
+        }
     }
 
     fn f64_handle_for_existing_buffer(
@@ -4737,6 +4885,10 @@ impl AccelProvider for InProcessProvider {
 
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &vector.shape)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(vector) == GpuTensorStorage::Real,
+            "diag: complex input is not supported by this provider hook"
+        );
         let (rows, cols) = rows_cols(&vector.shape);
         ensure!(
             is_vector_like(rows, cols, vector.shape.len()),
@@ -4744,10 +4896,12 @@ impl AccelProvider for InProcessProvider {
         );
 
         let len = {
-            let guard = registry().lock().unwrap();
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             guard
                 .get(&vector.buffer_id)
-                .map(|data| data.len())
+                .map(InProcessNumericData::len)
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id))?
         };
         let (size, _) = diag_matrix_size(len, offset)?;
@@ -4762,6 +4916,10 @@ impl AccelProvider for InProcessProvider {
         out_cols: usize,
     ) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &vector.shape)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(vector) == GpuTensorStorage::Real,
+            "diag: complex input is not supported by this provider hook"
+        );
         let (rows, cols) = rows_cols(&vector.shape);
         ensure!(
             is_vector_like(rows, cols, vector.shape.len()),
@@ -4769,58 +4927,41 @@ impl AccelProvider for InProcessProvider {
         );
 
         let data = {
-            let guard = registry().lock().unwrap();
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             guard
                 .get(&vector.buffer_id)
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id))?
         };
-        let total = out_rows
-            .checked_mul(out_cols)
-            .ok_or_else(|| anyhow!("diag: result size exceeds limits"))?;
-        let mut out = vec![0.0; total];
-        for (idx, &value) in data.iter().enumerate() {
-            let (row, col) = diagonal_target_index(idx, offset);
-            if row < out_rows && col < out_cols {
-                out[row + col * out_rows] = value;
-            }
-        }
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, out);
-        Ok(self.f64_handle_for_existing_buffer(
-            id,
-            vec![out_rows, out_cols],
-            GpuTensorStorage::Real,
-        ))
+        let output = diagonalize_numeric_data(&data, offset, out_rows, out_cols)?;
+        Ok(self.allocate_numeric_data(output, vec![out_rows, out_cols], GpuTensorStorage::Real))
     }
 
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &matrix.shape)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(matrix) == GpuTensorStorage::Real,
+            "diag: complex input is not supported by this provider hook"
+        );
         let (rows, cols) = rows_cols(&matrix.shape);
         ensure!(
             !is_vector_like(rows, cols, matrix.shape.len()),
             "diag: matrix input required"
         );
         let diag_len = diagonal_length(rows, cols, offset);
-        if diag_len == 0 {
-            return self.zeros(&[0, 1]);
-        }
         let data = {
-            let guard = registry().lock().unwrap();
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             guard
                 .get(&matrix.buffer_id)
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", matrix.buffer_id))?
         };
-        let mut out = Vec::with_capacity(diag_len);
-        for idx in 0..diag_len {
-            let (row, col) = diagonal_source_index(idx, offset);
-            let linear = row + col * rows;
-            out.push(*data.get(linear).unwrap_or(&0.0));
-        }
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, out);
-        Ok(self.f64_handle_for_existing_buffer(id, vec![diag_len, 1], GpuTensorStorage::Real))
+        let output = extract_numeric_diagonal(&data, rows, offset, diag_len)?;
+        Ok(self.allocate_numeric_data(output, vec![diag_len, 1], GpuTensorStorage::Real))
     }
 
     fn tril<'a>(
@@ -10359,6 +10500,77 @@ mod tests {
     }
 
     #[test]
+    fn diag_hooks_preserve_native_single_and_wide_integer_storage() {
+        let provider = InProcessProvider::new();
+
+        let single = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.25, -2.5]),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single upload");
+        let single_matrix = provider
+            .diag_from_vector(&single, 0)
+            .expect("single diagonal construction");
+        assert_eq!(
+            single_matrix.descriptor.element_type,
+            Some(NumericElementType::F32)
+        );
+        let single_download =
+            block_on(provider.download_numeric(&single_matrix)).expect("single diagonal download");
+        assert_eq!(
+            single_download.data,
+            HostNumericDataOwned::F32(vec![1.25, 0.0, 0.0, -2.5])
+        );
+
+        let wide_values = [9_007_199_254_740_993, u64::MAX];
+        let wide = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::U64(&wide_values),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("wide integer upload");
+        let wide_matrix = provider
+            .diag_from_vector(&wide, 0)
+            .expect("wide integer diagonal construction");
+        assert_eq!(
+            wide_matrix.descriptor.element_type,
+            Some(NumericElementType::U64)
+        );
+        let wide_download =
+            block_on(provider.download_numeric(&wide_matrix)).expect("wide diagonal download");
+        assert_eq!(
+            wide_download.data,
+            HostNumericDataOwned::U64(vec![wide_values[0], 0, 0, wide_values[1]])
+        );
+
+        let extracted = provider
+            .diag_extract(&wide_matrix, 0)
+            .expect("wide integer diagonal extraction");
+        let extracted_download =
+            block_on(provider.download_numeric(&extracted)).expect("wide extraction download");
+        assert_eq!(
+            extracted_download.data,
+            HostNumericDataOwned::U64(wide_values.to_vec())
+        );
+
+        let mut forged_shape = wide_matrix.clone();
+        forged_shape.shape = vec![3, 3];
+        let error = provider
+            .diag_extract(&forged_shape, 0)
+            .expect_err("forged shape must not index beyond physical storage");
+        assert!(error
+            .to_string()
+            .contains("source shape exceeds physical buffer length"));
+
+        for handle in [single, single_matrix, wide, wide_matrix, extracted] {
+            provider.free(&handle).expect("free diagonal buffer");
+        }
+    }
+
+    #[test]
     fn old_download_projects_native_single_without_storing_an_f64_mirror() {
         let provider = InProcessProvider::new();
         let values = [1.25_f32, -2.5, f32::MAX];
@@ -10502,12 +10714,12 @@ mod tests {
             interleaved.push(im);
         }
         let handle = provider
-            .upload(&HostTensorView {
-                data: &interleaved,
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&interleaved),
                 shape,
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload complex");
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
         handle
     }
 

@@ -827,12 +827,11 @@ mod tests {
             shape: frequency.shape.clone(),
             device_id: raw.device_id,
             buffer_id: raw.buffer_id,
-            descriptor: Default::default(),
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                ..raw.descriptor
+            },
         };
-        runmat_accelerate_api::set_handle_storage(
-            &source,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
         let gpu = block_on(ifftn_builtin(Value::GpuTensor(source.clone()), Vec::new()))
             .expect("resident ifftn");
         let cpu = block_on(ifftn_builtin(Value::ComplexTensor(frequency), Vec::new()))

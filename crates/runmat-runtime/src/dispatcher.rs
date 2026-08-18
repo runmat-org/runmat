@@ -359,11 +359,11 @@ fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
             if explicit_constructor {
                 handle.descriptor.provenance =
                     Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-                runmat_accelerate_api::mark_handle_explicit(handle);
+                runmat_accelerate_api::clear_handle_provenance(handle);
             } else if runmat_accelerate_api::handle_provenance(handle).is_none() {
                 handle.descriptor.provenance =
                     Some(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-                runmat_accelerate_api::mark_handle_automatic(handle);
+                runmat_accelerate_api::clear_handle_provenance(handle);
             }
         });
         return;
@@ -375,7 +375,7 @@ fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
     };
     visit_gpu_handles_mut(result, &mut |handle| {
         handle.descriptor.provenance = Some(provenance);
-        runmat_accelerate_api::set_handle_provenance(handle, provenance);
+        runmat_accelerate_api::clear_handle_provenance(handle);
     });
 }
 
@@ -1002,7 +1002,10 @@ mod tests {
             &mut automatic_value,
         );
 
-        assert!(runmat_accelerate_api::handle_is_explicit(&explicit_result));
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&explicit_result),
+            None
+        );
         let Value::GpuTensor(explicit_value) = explicit_value else {
             unreachable!()
         };
@@ -1012,7 +1015,7 @@ mod tests {
         );
         assert_eq!(
             runmat_accelerate_api::handle_provenance(&automatic_result),
-            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            None
         );
         let Value::GpuTensor(automatic_value) = automatic_value else {
             unreachable!()

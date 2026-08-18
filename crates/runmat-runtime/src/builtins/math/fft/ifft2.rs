@@ -1196,12 +1196,11 @@ pub(crate) mod tests {
                 shape: spectrum.shape.clone(),
                 device_id: raw.device_id,
                 buffer_id: raw.buffer_id,
-                descriptor: Default::default(),
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..raw.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &second,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
 
             let gpu =
                 ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
@@ -1301,12 +1300,11 @@ pub(crate) mod tests {
             shape: spectrum.shape.clone(),
             device_id: raw.device_id,
             buffer_id: raw.buffer_id,
-            descriptor: Default::default(),
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                ..raw.descriptor
+            },
         };
-        runmat_accelerate_api::set_handle_storage(
-            &second,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
 
         let gpu_val =
             ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
