@@ -20,7 +20,7 @@ pub use shared::{
     curve_partition_descriptors, decode_shared_curve_batch, decode_shared_curve_mesh,
     derive_curve_geometry_metric, discretize_shared_curve_partition, discretize_shared_curves,
     encode_shared_curve_batch, encode_shared_curve_mesh, join_shared_curve_batches,
-    shared_curve_node_id, shared_degenerate_curve_node_id, validate_shared_curve_geometry,
+    shared_curve_interior_node_id, shared_curve_vertex_node_id, validate_shared_curve_geometry,
     CurveMetricEvaluation, CurveMetricField, CurveMetricQuery, CurveMetricResolutionEvidence,
     CurveResolutionEvidence, CurveResolutionPolicy, ResolvedCurveMetricField, SharedCurve,
     SharedCurveBatch, SharedCurveDiscretizationOptions, SharedCurveError, SharedCurveErrorKind,

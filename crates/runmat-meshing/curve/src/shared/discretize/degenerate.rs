@@ -4,11 +4,12 @@ use runmat_geometry_core::{
 };
 
 use crate::shared::{
-    shared_degenerate_curve_node_id, CurveMetricResolutionEvidence, CurveResolutionEvidence,
+    shared_curve_vertex_node_id, CurveMetricResolutionEvidence, CurveResolutionEvidence,
     SharedCurve, SharedCurveError, SharedCurveErrorKind, SharedCurveNode,
 };
 
 use super::{
+    endpoints::canonical_vertex_point,
     error::{edge_error, geometry_error, require_parameter_range},
     math::{norm, sub},
     pcurves::face_uses_for_parameters,
@@ -37,10 +38,15 @@ pub(super) fn discretize_degenerate_edge(
         )
     })?;
     let witness_parameters = interval_parameters(parameter_range.start, parameter_range.end);
-    let anchor = curves
-        .point(&edge.curve_evaluator_id, parameter_range.start, control)
-        .map(|point| transform.transform_point(point))
-        .map_err(|error| geometry_error(edge, error))?;
+    let vertex_id = edge.start_vertex_id.as_ref().ok_or_else(|| {
+        edge_error(
+            edge,
+            SharedCurveErrorKind::GeometricMismatch,
+            "degenerate curve vertex",
+            "admitted degenerate edge has no canonical vertex",
+        )
+    })?;
+    let anchor = canonical_vertex_point(topology, edge, vertex_id, transform)?;
     for parameter in witness_parameters {
         control
             .checkpoint()
@@ -59,7 +65,7 @@ pub(super) fn discretize_degenerate_edge(
         }
     }
     let parameters = [parameter_range.start, parameter_range.end];
-    let node_id = shared_degenerate_curve_node_id(&edge.id);
+    let node_id = shared_curve_vertex_node_id(vertex_id);
     let nodes = parameters
         .into_iter()
         .map(|parameter| SharedCurveNode {

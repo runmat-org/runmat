@@ -4,13 +4,15 @@ use runmat_geometry_core::{
 };
 
 use crate::shared::{
-    shared_curve_node_id, CurveResolutionEvidence, SharedCurve, SharedCurveError,
-    SharedCurveErrorKind, SharedCurveMesh, SharedCurveNode, SHARED_CURVE_MESH_SCHEMA_VERSION,
+    shared_curve_interior_node_id, shared_curve_vertex_node_id, CurveResolutionEvidence,
+    SharedCurve, SharedCurveError, SharedCurveErrorKind, SharedCurveMesh, SharedCurveNode,
+    SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
 use super::{
     arc_length::world_arc_length,
     degenerate::discretize_degenerate_edge,
+    endpoints::canonical_vertex_point,
     error::{edge_error, geometry_error, require_parameter_range, validate_options},
     pcurves::face_uses_for_parameters,
     sampling::{interval_evidence, EvaluatedPoint, EvaluationCache},
@@ -114,18 +116,30 @@ pub(crate) fn discretize_edge(
                 options.maximum_subdivision_depth,
             )?;
         }
+        let source_vertex_id = if index == 0 {
+            edge.start_vertex_id.clone()
+        } else if index + 1 == samples.len() {
+            edge.end_vertex_id.clone()
+        } else {
+            None
+        };
+        let (node_id, coordinates_m) = if let Some(vertex_id) = &source_vertex_id {
+            (
+                shared_curve_vertex_node_id(vertex_id),
+                canonical_vertex_point(topology, edge, vertex_id, transform)?,
+            )
+        } else {
+            (
+                shared_curve_interior_node_id(&edge.id, sample.parameter),
+                sample.point_m,
+            )
+        };
         nodes.push(SharedCurveNode {
-            node_id: shared_curve_node_id(&edge.id, sample.parameter),
-            source_vertex_id: if index == 0 {
-                edge.start_vertex_id.clone()
-            } else if index + 1 == samples.len() {
-                edge.end_vertex_id.clone()
-            } else {
-                None
-            },
+            node_id,
+            source_vertex_id,
             parameter: sample.parameter,
             arc_length_m,
-            coordinates_m: sample.point_m,
+            coordinates_m,
         });
     }
 

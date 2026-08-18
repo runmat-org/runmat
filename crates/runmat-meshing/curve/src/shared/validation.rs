@@ -6,7 +6,7 @@ use runmat_geometry_core::{
 use runmat_meshing_core::MetricSourceKind;
 
 use super::{
-    shared_curve_node_id, shared_degenerate_curve_node_id, CurveMetricResolutionEvidence,
+    shared_curve_interior_node_id, shared_curve_vertex_node_id, CurveMetricResolutionEvidence,
     CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve, SharedCurveError, SharedCurveMesh,
     SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
@@ -38,6 +38,7 @@ pub(super) fn validate_shared_curve_mesh(
     let mut node_count = 0usize;
     let mut face_use_count = 0usize;
     let mut uv_sample_count = 0usize;
+    let mut coordinates_by_node = BTreeMap::new();
     for curve in &mesh.edges {
         if previous_edge.is_some_and(|previous| previous >= &curve.source_edge_id) {
             return Err(invalid(
@@ -52,7 +53,23 @@ pub(super) fn validate_shared_curve_mesh(
                 "source edge does not exist in exact topology",
             )
         })?;
-        validate_curve(curve, edge, coedges_by_edge.get(&curve.source_edge_id))?;
+        validate_curve(
+            curve,
+            edge,
+            coedges_by_edge.get(&curve.source_edge_id),
+            topology,
+        )?;
+        for node in &curve.nodes {
+            if coordinates_by_node
+                .insert(node.node_id, node.coordinates_m.map(f64::to_bits))
+                .is_some_and(|previous| previous != node.coordinates_m.map(f64::to_bits))
+            {
+                return Err(invalid(
+                    "shared curve node coordinates",
+                    "one canonical node identity must have one exact coordinate",
+                ));
+            }
+        }
         node_count = node_count.saturating_add(curve.nodes.len());
         face_use_count = face_use_count.saturating_add(curve.face_uses.len());
         uv_sample_count = curve
@@ -79,6 +96,7 @@ fn validate_curve(
     curve: &SharedCurve,
     edge: &ExactEdge,
     expected_coedges: Option<&Vec<&ExactCoedge>>,
+    topology: &ExactBRepTopology,
 ) -> Result<(), SharedCurveError> {
     if curve.source_edge_id.kind != PersistentEntityKind::Edge
         || !finite_range(curve.parameter_range.start, curve.parameter_range.end)
@@ -93,12 +111,17 @@ fn validate_curve(
     validate_metric_resolution(curve, edge.is_degenerate)?;
     let mut node_ids = BTreeSet::new();
     for (index, node) in curve.nodes.iter().enumerate() {
-        let expected_node_id = if edge.is_degenerate {
-            shared_degenerate_curve_node_id(&curve.source_edge_id)
+        let expected_node_id = if let Some(vertex_id) = &node.source_vertex_id {
+            shared_curve_vertex_node_id(vertex_id)
         } else {
-            shared_curve_node_id(&curve.source_edge_id, node.parameter)
+            shared_curve_interior_node_id(&curve.source_edge_id, node.parameter)
         };
-        if (!edge.is_degenerate && !node_ids.insert(node.node_id))
+        let duplicate = !node_ids.insert(node.node_id);
+        let closes_at_source_vertex = index + 1 == curve.nodes.len()
+            && node.source_vertex_id.is_some()
+            && node.source_vertex_id == curve.nodes[0].source_vertex_id
+            && node.node_id == curve.nodes[0].node_id;
+        if (duplicate && !closes_at_source_vertex)
             || node.node_id != expected_node_id
             || !node.parameter.is_finite()
             || !node.arc_length_m.is_finite()
@@ -109,6 +132,24 @@ fn validate_curve(
                 "shared curve node",
                 "node identity and finite geometry must be canonical",
             ));
+        }
+        if let Some(vertex_id) = &node.source_vertex_id {
+            let vertex = topology
+                .vertices
+                .binary_search_by(|vertex| vertex.id.cmp(vertex_id))
+                .ok()
+                .map(|index| &topology.vertices[index])
+                .ok_or_else(|| invalid("shared curve vertex", "source vertex is absent"))?;
+            let canonical = topology
+                .world_transform_for(vertex_id)
+                .map_err(|error| invalid("shared curve vertex transform", error.to_string()))?
+                .transform_point(vertex.point_m);
+            if canonical.map(f64::to_bits) != node.coordinates_m.map(f64::to_bits) {
+                return Err(invalid(
+                    "shared curve vertex coordinate",
+                    "endpoint coordinates must equal the authoritative world-space vertex",
+                ));
+            }
         }
         if index > 0
             && (curve.nodes[index - 1].parameter >= node.parameter
@@ -202,7 +243,7 @@ pub(super) fn validate_curve_against_topology(
         .iter()
         .filter(|coedge| coedge.edge_id == curve.source_edge_id)
         .collect::<Vec<_>>();
-    validate_curve(curve, edge, Some(&coedges))
+    validate_curve(curve, edge, Some(&coedges), topology)
 }
 
 fn validate_metric_resolution(

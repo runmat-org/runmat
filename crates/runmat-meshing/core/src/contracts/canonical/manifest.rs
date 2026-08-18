@@ -42,7 +42,7 @@ impl MeshingChunkMediaType {
             Self::FacetedGeometry => "application/vnd.runmat.faceted-solid.v2",
             Self::MetricField => "application/vnd.runmat.metric-field.v2",
             Self::CurvePartitions => "application/vnd.runmat.mesh-curves.v2",
-            Self::CurveMesh => "application/vnd.runmat.shared-curve-mesh.v3",
+            Self::CurveMesh => "application/vnd.runmat.shared-curve-mesh.v4",
             Self::SurfacePartitions => "application/vnd.runmat.mesh-surfaces.v2",
             Self::ProtectedBoundaryComplex => "application/vnd.runmat.mesh-plc.v2",
             Self::VolumeTopology => "application/vnd.runmat.mesh-volume.v2",

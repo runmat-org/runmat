@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SharedCurveError;
 
-pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 3;
+pub const SHARED_CURVE_MESH_SCHEMA_VERSION: u16 = 4;
 pub const SHARED_CURVE_BATCH_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

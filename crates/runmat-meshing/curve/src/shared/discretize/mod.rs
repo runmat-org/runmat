@@ -1,5 +1,6 @@
 mod arc_length;
 mod degenerate;
+mod endpoints;
 mod error;
 mod generate;
 mod math;

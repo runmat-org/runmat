@@ -51,6 +51,10 @@ fn shared_curve_codec_is_canonical_bounded_and_topology_admitted() {
     let encoded = encode_shared_curve_mesh(&mesh, &topology).unwrap();
     assert!(super::codec::decode_with_byte_limit(&encoded, &topology, encoded.len() - 1).is_err());
 
+    let mut displaced_vertex = mesh.clone();
+    displaced_vertex.edges[0].nodes[0].coordinates_m[0] += 1.0e-12;
+    assert!(encode_shared_curve_mesh(&displaced_vertex, &topology).is_err());
+
     let mut different_topology = topology.clone();
     different_topology.edges.clear();
     different_topology.coedges.clear();
@@ -303,6 +307,15 @@ fn constructive_curves_apply_occurrence_scale_to_coordinates_and_arc_length() {
     .unwrap();
     let curve = &mesh.edges[0];
     assert_eq!(curve.nodes[0].coordinates_m, [5.0, 4.0, 5.0]);
+    assert_eq!(curve.nodes[0].node_id, curve.nodes.last().unwrap().node_id);
+    assert_eq!(
+        curve.nodes[0].node_id,
+        shared_curve_vertex_node_id(curve.nodes[0].source_vertex_id.as_ref().unwrap())
+    );
+    assert_eq!(
+        curve.nodes[0].coordinates_m,
+        curve.nodes.last().unwrap().coordinates_m
+    );
     assert!((curve.nodes.last().unwrap().arc_length_m - 2.0 * TAU).abs() < 1.0e-10);
 }
 
@@ -948,7 +961,10 @@ fn circle_mesh(topology: &runmat_geometry_core::ExactBRepTopology) -> SharedCurv
     .into_iter()
     .map(
         |(parameter, arc_length_m, coordinates_m, source_vertex_id)| SharedCurveNode {
-            node_id: shared_curve_node_id(&edge.id, parameter),
+            node_id: source_vertex_id.as_ref().map_or_else(
+                || shared_curve_interior_node_id(&edge.id, parameter),
+                shared_curve_vertex_node_id,
+            ),
             source_vertex_id,
             parameter,
             arc_length_m,
