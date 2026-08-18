@@ -14,3 +14,6 @@ runmat-geometry-core = { workspace = true }
 runmat-meshing-cad = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-curve = { workspace = true }
+
+[dev-dependencies]
+runmat-geometry-fixtures = { workspace = true }

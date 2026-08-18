@@ -6869,6 +6869,7 @@ name = "runmat-meshing-surface"
 version = "0.6.1"
 dependencies = [
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-meshing-cad",
  "runmat-meshing-core",
  "runmat-meshing-curve",
