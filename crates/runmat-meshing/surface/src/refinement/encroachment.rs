@@ -2,7 +2,9 @@ use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEva
 use runmat_meshing_core::MetricFieldRequest;
 use runmat_meshing_curve::SharedCurveSegmentSplit;
 
-use crate::{ExactFaceMetricError, ExactFacePslg, ResolvedFaceMetricField};
+use crate::{
+    ExactFaceMetricError, ExactFacePslg, ExactFacePslgSegmentSource, ResolvedFaceMetricField,
+};
 
 use super::{
     ExactFaceCandidateDisposition, ExactFaceRefinementCandidate, ExactFaceRefinementError,
@@ -68,13 +70,29 @@ pub fn classify_exact_face_refinement_candidate(
             ));
         }
         if diametral_product <= 0.0 {
+            let ExactFacePslgSegmentSource::ExactTrim {
+                source_coedge_id,
+                source_edge_id,
+            } = &segment.source
+            else {
+                return Err(invalid(
+                    &pslg.source_face_id,
+                    "chart-cut refinement requires a face-owned protected split",
+                ));
+            };
+            let Some(segment_parameters) = segment.edge_parameters else {
+                return Err(invalid(
+                    &pslg.source_face_id,
+                    "exact trim segment is missing curve parameters",
+                ));
+            };
             let (endpoint_node_ids, edge_parameters) =
-                if segment.edge_parameters[0] < segment.edge_parameters[1] {
-                    ([first.node_id, second.node_id], segment.edge_parameters)
-                } else if segment.edge_parameters[1] < segment.edge_parameters[0] {
+                if segment_parameters[0] < segment_parameters[1] {
+                    ([first.node_id, second.node_id], segment_parameters)
+                } else if segment_parameters[1] < segment_parameters[0] {
                     (
                         [second.node_id, first.node_id],
-                        [segment.edge_parameters[1], segment.edge_parameters[0]],
+                        [segment_parameters[1], segment_parameters[0]],
                     )
                 } else {
                     return Err(invalid(
@@ -96,9 +114,9 @@ pub fn classify_exact_face_refinement_candidate(
                 Box::new(ExactProtectedSegmentSplit {
                     source_face_id: pslg.source_face_id.clone(),
                     pslg_segment_index: segment_index as u32,
-                    source_coedge_id: segment.source_coedge_id.clone(),
+                    source_coedge_id: source_coedge_id.clone(),
                     curve_split: SharedCurveSegmentSplit {
-                        source_edge_id: segment.source_edge_id.clone(),
+                        source_edge_id: source_edge_id.clone(),
                         endpoint_node_ids,
                         edge_parameters,
                         split_parameter,

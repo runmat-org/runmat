@@ -14,8 +14,9 @@ use runmat_meshing_curve::{
 
 use crate::{
     ExactFaceDelaunayTriangle, ExactFaceGeometry, ExactFaceGeometryVertex,
-    ExactFaceMetricEvaluation, ExactFacePslg, ExactFacePslgLoop, ExactFacePslgSegment,
-    ExactFacePslgVertex, ExactFaceTriangleGeometry, ParametricMetricTensor,
+    ExactFaceMetricEvaluation, ExactFacePslg, ExactFacePslgLoop, ExactFacePslgLoopSource,
+    ExactFacePslgSegment, ExactFacePslgSegmentSource, ExactFacePslgVertex,
+    ExactFaceTriangleGeometry, ParametricMetricTensor,
 };
 
 use super::*;
@@ -136,7 +137,7 @@ fn encroaching_candidate_requests_one_exact_parameter_split_before_insertion() {
 
     let mut forward = pslg.clone();
     forward.segments[0].vertex_indices = [1, 0];
-    forward.segments[0].edge_parameters = [2.0, 6.0];
+    forward.segments[0].edge_parameters = Some([2.0, 6.0]);
     let ExactFaceCandidateDisposition::SplitProtectedSegment(forward_split) =
         classify_exact_face_refinement_candidate(
             &encroaching,
@@ -623,10 +624,12 @@ fn one_segment_pslg(source_face_id: PersistentEntityId) -> ExactFacePslg {
             },
         ],
         segments: vec![ExactFacePslgSegment {
-            source_coedge_id: id(PersistentEntityKind::Coedge, "coedge"),
-            source_edge_id: id(PersistentEntityKind::Edge, "edge"),
+            source: ExactFacePslgSegmentSource::ExactTrim {
+                source_coedge_id: id(PersistentEntityKind::Coedge, "coedge"),
+                source_edge_id: id(PersistentEntityKind::Edge, "edge"),
+            },
             vertex_indices: [0, 1],
-            edge_parameters: [6.0, 2.0],
+            edge_parameters: Some([6.0, 2.0]),
         }],
         loops: Vec::new(),
     }
@@ -649,17 +652,21 @@ fn acute_corner_geometry() -> (ExactFacePslg, ExactFaceGeometry) {
             .collect(),
         segments: (0..3)
             .map(|index| ExactFacePslgSegment {
-                source_coedge_id: id(
-                    PersistentEntityKind::Coedge,
-                    &format!("acute-coedge-{index}"),
-                ),
-                source_edge_id: id(PersistentEntityKind::Edge, &format!("acute-edge-{index}")),
+                source: ExactFacePslgSegmentSource::ExactTrim {
+                    source_coedge_id: id(
+                        PersistentEntityKind::Coedge,
+                        &format!("acute-coedge-{index}"),
+                    ),
+                    source_edge_id: id(PersistentEntityKind::Edge, &format!("acute-edge-{index}")),
+                },
                 vertex_indices: [index, (index + 1) % 3],
-                edge_parameters: [0.0, 1.0],
+                edge_parameters: Some([0.0, 1.0]),
             })
             .collect(),
         loops: vec![ExactFacePslgLoop {
-            source_wire_id: id(PersistentEntityKind::Wire, "acute-wire"),
+            source: ExactFacePslgLoopSource::ExactWire {
+                source_wire_id: id(PersistentEntityKind::Wire, "acute-wire"),
+            },
             orientation: TopologicalOrientation::Forward,
             first_segment: 0,
             segment_count: 3,

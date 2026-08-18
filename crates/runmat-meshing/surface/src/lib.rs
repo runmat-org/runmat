@@ -39,8 +39,9 @@ pub use exact_cdt::{
     validate_exact_face_pslg, validate_exact_face_trimmed_delaunay, ExactFaceConstrainedDelaunay,
     ExactFaceDelaunay, ExactFaceDelaunayError, ExactFaceDelaunayErrorKind,
     ExactFaceDelaunayOptions, ExactFaceDelaunayTriangle, ExactFacePslg, ExactFacePslgError,
-    ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex,
-    ExactFaceRecoveredSegment, ExactFaceTrimmedDelaunay,
+    ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgLoopSource, ExactFacePslgSegment,
+    ExactFacePslgSegmentSource, ExactFacePslgVertex, ExactFaceRecoveredSegment,
+    ExactFaceTrimmedDelaunay,
 };
 pub use exact_metric::{
     validate_exact_face_metric_evaluation, ExactFaceMetricError, ExactFaceMetricErrorKind,

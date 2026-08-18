@@ -4,7 +4,7 @@ use crate::ExactFaceBoundary;
 
 use super::{
     exact_face_interior_node_id, ExactFacePslg, ExactFacePslgError, ExactFacePslgErrorKind,
-    MAX_FACE_PSLG_ITEMS,
+    ExactFacePslgLoopSource, ExactFacePslgSegmentSource, MAX_FACE_PSLG_ITEMS,
 };
 
 pub fn validate_exact_face_pslg(
@@ -64,7 +64,10 @@ pub fn validate_exact_face_pslg(
     let mut expected_offset = 0usize;
     let mut referenced_vertices = BTreeSet::new();
     for (actual_loop, boundary_loop) in pslg.loops.iter().zip(boundary_loops) {
-        if actual_loop.source_wire_id != boundary_loop.source_wire_id
+        let expected_loop_source = ExactFacePslgLoopSource::ExactWire {
+            source_wire_id: boundary_loop.source_wire_id.clone(),
+        };
+        if actual_loop.source != expected_loop_source
             || actual_loop.orientation != boundary_loop.orientation
             || actual_loop.first_segment as usize != expected_offset
             || actual_loop.segment_count as usize != boundary_loop.segments.len()
@@ -87,11 +90,14 @@ pub fn validate_exact_face_pslg(
             let Some(finish) = pslg.vertices.get(actual.vertex_indices[1] as usize) else {
                 return Err(invalid(boundary, "face PSLG segment end is absent"));
             };
-            if actual.source_coedge_id != expected.source_coedge_id
-                || actual.source_edge_id != expected.source_edge_id
+            let expected_source = ExactFacePslgSegmentSource::ExactTrim {
+                source_coedge_id: expected.source_coedge_id.clone(),
+                source_edge_id: expected.source_edge_id.clone(),
+            };
+            if actual.source != expected_source
                 || start.node_id != expected.node_ids[0]
                 || finish.node_id != expected.node_ids[1]
-                || actual.edge_parameters != expected.edge_parameters
+                || actual.edge_parameters != Some(expected.edge_parameters)
                 || start.seam_image != expected.seam_image
                 || finish.seam_image != expected.seam_image
                 || start.uv != expected.node_uv[0]
@@ -99,8 +105,7 @@ pub fn validate_exact_face_pslg(
                 || actual.vertex_indices[0] == actual.vertex_indices[1]
                 || actual
                     .edge_parameters
-                    .iter()
-                    .any(|value| !value.is_finite())
+                    .is_none_or(|parameters| parameters.iter().any(|value| !value.is_finite()))
             {
                 return Err(invalid(boundary, "face PSLG segment differs from boundary"));
             }

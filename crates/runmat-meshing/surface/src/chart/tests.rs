@@ -1,11 +1,13 @@
 use runmat_geometry_core::{
     ExactSurfaceDefinition, ExactSurfaceImplementation, GeometryEvaluationControl,
-    GeometryEvaluationError, GeometryModel, ParameterRange, PortableExactEvaluator,
-    TopologicalOrientation,
+    GeometryEvaluationError, GeometryModel, ParameterRange, PersistentEntityId,
+    PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
 };
 use runmat_meshing_core::StableDigest;
 
-use crate::{ExactFaceBoundary, ExactFaceBoundaryLoop, ExactFaceBoundarySegment};
+use crate::{
+    ExactFaceBoundary, ExactFaceBoundaryLoop, ExactFaceBoundarySegment, ExactFacePslgSegmentSource,
+};
 
 use super::*;
 
@@ -89,6 +91,77 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         .kind,
         ExactFaceChartErrorKind::RequiresMultipleCharts
     );
+
+    let mut annulus = winding;
+    let mut inner = boundary(
+        &topology,
+        [
+            [0.0, 1.0],
+            [-std::f64::consts::FRAC_PI_2, 1.0],
+            [-std::f64::consts::PI, 1.0],
+            [std::f64::consts::FRAC_PI_2, 1.0],
+        ],
+    )
+    .outer_loop;
+    inner.source_wire_id = entity(PersistentEntityKind::Wire, "inner-wire");
+    inner.orientation = TopologicalOrientation::Reversed;
+    for (index, segment) in inner.segments.iter_mut().enumerate() {
+        segment.source_coedge_id = entity(
+            PersistentEntityKind::Coedge,
+            &format!("inner-coedge-{index}"),
+        );
+        segment.source_edge_id = entity(PersistentEntityKind::Edge, &format!("inner-edge-{index}"));
+        segment.node_ids = [node(index as u8 + 5), node((index as u8 + 1) % 4 + 5)];
+    }
+    annulus.inner_loops.push(inner);
+    let annulus_charts = build_exact_face_charts(
+        &annulus,
+        &topology,
+        &evaluator,
+        &Control,
+        ExactFaceChartOptions::default(),
+    )
+    .unwrap();
+    let annulus_pslg = &annulus_charts.charts[0].pslg;
+    assert_eq!(annulus_pslg.loops.len(), 1);
+    assert_eq!(annulus_pslg.segments.len(), 10);
+    let cuts = annulus_pslg
+        .segments
+        .iter()
+        .filter_map(|segment| match &segment.source {
+            ExactFacePslgSegmentSource::ChartCut { cut_id } => Some(*cut_id),
+            ExactFacePslgSegmentSource::ExactTrim { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cuts.len(), 2);
+    assert_eq!(cuts[0], cuts[1]);
+    assert!(annulus_pslg
+        .segments
+        .iter()
+        .zip(annulus_pslg.segments.iter().cycle().skip(1))
+        .all(|(left, right)| left.vertex_indices[1] == right.vertex_indices[0]));
+
+    let mut tampered_annulus = annulus_charts;
+    let cut = tampered_annulus.charts[0]
+        .pslg
+        .segments
+        .iter_mut()
+        .find(|segment| matches!(&segment.source, ExactFacePslgSegmentSource::ChartCut { .. }))
+        .unwrap();
+    cut.source = ExactFacePslgSegmentSource::ChartCut { cut_id: node(99) };
+    assert_eq!(
+        validate_exact_face_charts(
+            &tampered_annulus,
+            &annulus,
+            &topology,
+            &evaluator,
+            &Control,
+            ExactFaceChartOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceChartErrorKind::InvalidInput
+    );
 }
 
 #[test]
@@ -158,6 +231,14 @@ fn range(start: f64, end: f64) -> ParameterRange {
 
 fn node(value: u8) -> StableDigest {
     StableDigest::from_bytes([value; 32])
+}
+
+fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
+    PersistentEntityId {
+        kind,
+        source_topology_id: source_topology_id.to_owned(),
+        assembly_path: Vec::new(),
+    }
 }
 
 struct Control;

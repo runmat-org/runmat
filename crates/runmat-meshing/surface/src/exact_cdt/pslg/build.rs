@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 
+use runmat_geometry_core::{PersistentEntityId, TopologicalOrientation};
 use runmat_meshing_core::StableDigest;
 
-use crate::{ExactFaceBoundary, ExactFaceBoundaryLoop};
+use crate::ExactFaceBoundary;
 
 use super::{
     validate_exact_face_pslg, ExactFacePslg, ExactFacePslgError, ExactFacePslgErrorKind,
-    ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex, MAX_FACE_PSLG_ITEMS,
+    ExactFacePslgLoop, ExactFacePslgLoopSource, ExactFacePslgSegment, ExactFacePslgSegmentSource,
+    ExactFacePslgVertex, MAX_FACE_PSLG_ITEMS,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -16,47 +18,77 @@ struct VertexKey {
     uv_bits: [u64; 2],
 }
 
+pub(crate) struct PslgSegmentInput {
+    pub source: ExactFacePslgSegmentSource,
+    pub endpoints: [ExactFacePslgVertex; 2],
+    pub edge_parameters: Option<[f64; 2]>,
+}
+
+pub(crate) struct PslgLoopInput {
+    pub source: ExactFacePslgLoopSource,
+    pub orientation: TopologicalOrientation,
+    pub segments: Vec<PslgSegmentInput>,
+}
+
 pub fn build_exact_face_pslg(
     boundary: &ExactFaceBoundary,
 ) -> Result<ExactFacePslg, ExactFacePslgError> {
-    let segment_count = std::iter::once(&boundary.outer_loop)
+    let loops = std::iter::once(&boundary.outer_loop)
         .chain(&boundary.inner_loops)
-        .map(|loop_boundary| loop_boundary.segments.len())
+        .map(|loop_boundary| PslgLoopInput {
+            source: ExactFacePslgLoopSource::ExactWire {
+                source_wire_id: loop_boundary.source_wire_id.clone(),
+            },
+            orientation: loop_boundary.orientation,
+            segments: loop_boundary
+                .segments
+                .iter()
+                .map(|segment| PslgSegmentInput {
+                    source: ExactFacePslgSegmentSource::ExactTrim {
+                        source_coedge_id: segment.source_coedge_id.clone(),
+                        source_edge_id: segment.source_edge_id.clone(),
+                    },
+                    endpoints: [0, 1].map(|endpoint| ExactFacePslgVertex {
+                        node_id: segment.node_ids[endpoint],
+                        seam_image: segment.seam_image,
+                        uv: segment.node_uv[endpoint],
+                    }),
+                    edge_parameters: Some(segment.edge_parameters),
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let pslg = build_canonical_pslg(&boundary.source_face_id, loops)?;
+    validate_exact_face_pslg(&pslg, boundary)?;
+    Ok(pslg)
+}
+
+pub(crate) fn build_canonical_pslg(
+    source_face_id: &PersistentEntityId,
+    loops: Vec<PslgLoopInput>,
+) -> Result<ExactFacePslg, ExactFacePslgError> {
+    let segment_count = loops
+        .iter()
+        .map(|loop_input| loop_input.segments.len())
         .try_fold(0usize, usize::checked_add)
-        .ok_or_else(|| resource_error(boundary, "face PSLG segment count overflow"))?;
-    if segment_count == 0 || segment_count > MAX_FACE_PSLG_ITEMS {
+        .ok_or_else(|| resource_error(source_face_id, "face PSLG segment count overflow"))?;
+    if loops.is_empty() || segment_count == 0 || segment_count > MAX_FACE_PSLG_ITEMS {
         return Err(resource_error(
-            boundary,
-            "face PSLG segment count is empty or exceeds its hard bound",
+            source_face_id,
+            "face PSLG loop or segment inventory is empty or exceeds its hard bound",
         ));
     }
 
-    let mut keys = std::iter::once(&boundary.outer_loop)
-        .chain(&boundary.inner_loops)
-        .flat_map(|loop_boundary| &loop_boundary.segments)
-        .flat_map(|segment| {
-            (0..2).map(|endpoint| VertexKey {
-                node_id: segment.node_ids[endpoint],
-                seam_image: segment.seam_image,
-                uv_bits: segment.node_uv[endpoint].map(f64::to_bits),
-            })
-        })
+    let mut keys = loops
+        .iter()
+        .flat_map(|loop_input| &loop_input.segments)
+        .flat_map(|segment| segment.endpoints.map(vertex_key))
         .collect::<Vec<_>>();
-    keys.sort_by(|left, right| {
-        left.node_id
-            .cmp(&right.node_id)
-            .then_with(|| left.seam_image.cmp(&right.seam_image))
-            .then_with(|| {
-                f64::from_bits(left.uv_bits[0]).total_cmp(&f64::from_bits(right.uv_bits[0]))
-            })
-            .then_with(|| {
-                f64::from_bits(left.uv_bits[1]).total_cmp(&f64::from_bits(right.uv_bits[1]))
-            })
-    });
+    keys.sort_by(compare_keys);
     keys.dedup();
     if keys.len() > MAX_FACE_PSLG_ITEMS || keys.len() > u32::MAX as usize {
         return Err(resource_error(
-            boundary,
+            source_face_id,
             "face PSLG vertex count exceeds its hard bound",
         ));
     }
@@ -75,66 +107,56 @@ pub fn build_exact_face_pslg(
         .collect();
 
     let mut segments = Vec::with_capacity(segment_count);
-    let mut loops = Vec::with_capacity(1 + boundary.inner_loops.len());
-    for loop_boundary in std::iter::once(&boundary.outer_loop).chain(&boundary.inner_loops) {
-        push_loop(
-            &boundary.source_face_id,
-            loop_boundary,
-            &vertex_index,
-            &mut segments,
-            &mut loops,
-        )?;
-    }
-    let pslg = ExactFacePslg {
-        source_face_id: boundary.source_face_id.clone(),
-        vertices,
-        segments,
-        loops,
-    };
-    validate_exact_face_pslg(&pslg, boundary)?;
-    Ok(pslg)
-}
-
-fn push_loop(
-    source_face_id: &runmat_geometry_core::PersistentEntityId,
-    boundary: &ExactFaceBoundaryLoop,
-    vertex_index: &BTreeMap<VertexKey, u32>,
-    segments: &mut Vec<ExactFacePslgSegment>,
-    loops: &mut Vec<ExactFacePslgLoop>,
-) -> Result<(), ExactFacePslgError> {
-    let first_segment = u32::try_from(segments.len()).map_err(|_| {
-        ExactFacePslgError::new(
-            ExactFacePslgErrorKind::ResourceLimit,
-            source_face_id,
-            "face PSLG segment offset exceeds u32",
-        )
-    })?;
-    for segment in &boundary.segments {
-        let key = |endpoint: usize| VertexKey {
-            node_id: segment.node_ids[endpoint],
-            seam_image: segment.seam_image,
-            uv_bits: segment.node_uv[endpoint].map(f64::to_bits),
-        };
-        segments.push(ExactFacePslgSegment {
-            source_coedge_id: segment.source_coedge_id.clone(),
-            source_edge_id: segment.source_edge_id.clone(),
-            vertex_indices: [vertex_index[&key(0)], vertex_index[&key(1)]],
-            edge_parameters: segment.edge_parameters,
+    let mut pslg_loops = Vec::with_capacity(loops.len());
+    for loop_input in loops {
+        let first_segment = u32::try_from(segments.len())
+            .map_err(|_| resource_error(source_face_id, "face PSLG segment offset exceeds u32"))?;
+        let loop_segment_count = u32::try_from(loop_input.segments.len())
+            .map_err(|_| resource_error(source_face_id, "face PSLG loop length exceeds u32"))?;
+        for segment in loop_input.segments {
+            segments.push(ExactFacePslgSegment {
+                source: segment.source,
+                vertex_indices: segment
+                    .endpoints
+                    .map(|endpoint| vertex_index[&vertex_key(endpoint)]),
+                edge_parameters: segment.edge_parameters,
+            });
+        }
+        pslg_loops.push(ExactFacePslgLoop {
+            source: loop_input.source,
+            orientation: loop_input.orientation,
+            first_segment,
+            segment_count: loop_segment_count,
         });
     }
-    loops.push(ExactFacePslgLoop {
-        source_wire_id: boundary.source_wire_id.clone(),
-        orientation: boundary.orientation,
-        first_segment,
-        segment_count: boundary.segments.len() as u32,
-    });
-    Ok(())
+    Ok(ExactFacePslg {
+        source_face_id: source_face_id.clone(),
+        vertices,
+        segments,
+        loops: pslg_loops,
+    })
 }
 
-fn resource_error(boundary: &ExactFaceBoundary, reason: &str) -> ExactFacePslgError {
+fn vertex_key(vertex: ExactFacePslgVertex) -> VertexKey {
+    VertexKey {
+        node_id: vertex.node_id,
+        seam_image: vertex.seam_image,
+        uv_bits: vertex.uv.map(f64::to_bits),
+    }
+}
+
+fn compare_keys(left: &VertexKey, right: &VertexKey) -> std::cmp::Ordering {
+    left.node_id
+        .cmp(&right.node_id)
+        .then_with(|| left.seam_image.cmp(&right.seam_image))
+        .then_with(|| f64::from_bits(left.uv_bits[0]).total_cmp(&f64::from_bits(right.uv_bits[0])))
+        .then_with(|| f64::from_bits(left.uv_bits[1]).total_cmp(&f64::from_bits(right.uv_bits[1])))
+}
+
+fn resource_error(source_face_id: &PersistentEntityId, reason: &str) -> ExactFacePslgError {
     ExactFacePslgError::new(
         ExactFacePslgErrorKind::ResourceLimit,
-        &boundary.source_face_id,
+        source_face_id,
         reason,
     )
 }

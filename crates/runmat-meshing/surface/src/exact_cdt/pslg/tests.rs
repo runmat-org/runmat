@@ -24,7 +24,7 @@ fn planar_exact_face_builds_a_canonical_closed_pslg() {
     );
     assert_eq!(
         pslg.segments[0].edge_parameters,
-        boundary.faces[0].outer_loop.segments[0].edge_parameters
+        Some(boundary.faces[0].outer_loop.segments[0].edge_parameters)
     );
 }
 
@@ -33,7 +33,7 @@ fn independent_pslg_admission_rejects_edge_parameter_substitution() {
     let (topology, curves) = fixture();
     let boundary = crate::build_exact_surface_boundary(&topology, &curves).unwrap();
     let mut pslg = build_exact_face_pslg(&boundary.faces[0]).unwrap();
-    pslg.segments[0].edge_parameters[1] += 1.0e-6;
+    pslg.segments[0].edge_parameters.as_mut().unwrap()[1] += 1.0e-6;
 
     let error = validate_exact_face_pslg(&pslg, &boundary.faces[0]).unwrap_err();
     assert_eq!(error.kind, ExactFacePslgErrorKind::InvalidBoundary);

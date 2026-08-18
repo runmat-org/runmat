@@ -5,8 +5,8 @@ use sha2::{Digest, Sha256};
 use crate::{build_exact_face_pslg, ExactFaceBoundary, ExactFaceBoundaryLoop};
 
 use super::{
-    ExactFaceChart, ExactFaceChartError, ExactFaceChartErrorKind, ExactFaceChartOptions,
-    ExactFaceCharts,
+    annulus::build_periodic_annulus_pslg, ExactFaceChart, ExactFaceChartError,
+    ExactFaceChartErrorKind, ExactFaceChartOptions, ExactFaceCharts,
 };
 
 pub fn build_exact_face_charts(
@@ -80,19 +80,29 @@ fn build_without_validation(
         ));
     }
     let mut boundary = source.clone();
-    lift_loop(&mut boundary.outer_loop, periodicity, options, source)?;
+    let mut windings = vec![lift_loop(
+        &mut boundary.outer_loop,
+        periodicity,
+        options,
+        source,
+    )?];
     for loop_boundary in &mut boundary.inner_loops {
-        lift_loop(loop_boundary, periodicity, options, source)?;
+        windings.push(lift_loop(loop_boundary, periodicity, options, source)?);
     }
-    let pslg = build_exact_face_pslg(&boundary).map_err(|failure| {
-        ExactFaceChartError::new(
-            ExactFaceChartErrorKind::InvalidInput,
-            &source.source_face_id,
-            failure.to_string(),
-        )
-    })?;
+    let chart_id = chart_id(&source.source_face_id, 0);
+    let pslg = if windings.iter().all(|winding| *winding == [0, 0]) {
+        build_exact_face_pslg(&boundary).map_err(|failure| {
+            ExactFaceChartError::new(
+                ExactFaceChartErrorKind::InvalidInput,
+                &source.source_face_id,
+                failure.to_string(),
+            )
+        })?
+    } else {
+        build_periodic_annulus_pslg(&mut boundary, &windings, periodicity, chart_id, options)?
+    };
     let chart = ExactFaceChart {
-        chart_id: chart_id(&source.source_face_id, 0),
+        chart_id,
         source_face_id: source.source_face_id.clone(),
         periodicity,
         boundary,
@@ -110,7 +120,7 @@ fn lift_loop(
     periodicity: [Option<f64>; 2],
     options: ExactFaceChartOptions,
     source: &ExactFaceBoundary,
-) -> Result<(), ExactFaceChartError> {
+) -> Result<[i32; 2], ExactFaceChartError> {
     if loop_boundary.segments.is_empty() {
         return Err(invalid(source, "face chart loop is empty"));
     }
@@ -143,18 +153,34 @@ fn lift_loop(
     if previous_id != loop_boundary.segments[0].node_ids[0] {
         return Err(invalid(source, "face chart loop is not identity-closed"));
     }
+    let mut winding = [0i32; 2];
     for axis in 0..2 {
         let residual = previous_uv[axis] - first_uv[axis];
-        if residual.abs() > scaled_tolerance(previous_uv[axis], first_uv[axis], options) {
+        let tolerance = scaled_tolerance(previous_uv[axis], first_uv[axis], options);
+        if residual.abs() <= tolerance {
+            continue;
+        }
+        let Some(period) = periodicity[axis] else {
+            return Err(invalid(
+                source,
+                "nonperiodic face chart loop does not close",
+            ));
+        };
+        let periods = (residual / period).round();
+        if !periods.is_finite()
+            || periods.abs() > options.maximum_period_shifts as f64
+            || (residual - periods * period).abs() > tolerance
+        {
             return Err(ExactFaceChartError::new(
-                ExactFaceChartErrorKind::RequiresMultipleCharts,
+                ExactFaceChartErrorKind::InvalidInput,
                 &source.source_face_id,
-                "periodic loop has nonzero chart winding and requires a deterministic cut",
+                "periodic loop residual is not an integral bounded winding",
             )
             .with_witness(&loop_boundary.source_wire_id, axis, residual));
         }
+        winding[axis] = periods as i32;
     }
-    Ok(())
+    Ok(winding)
 }
 
 struct CoordinateLift<'a> {

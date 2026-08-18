@@ -9,10 +9,11 @@ pub use domain::{
 };
 
 pub(crate) use pslg::MAX_FACE_PSLG_ITEMS;
+pub(crate) use pslg::{build_canonical_pslg, PslgLoopInput, PslgSegmentInput};
 pub use pslg::{
     build_exact_face_pslg, exact_face_interior_node_id, validate_exact_face_pslg, ExactFacePslg,
-    ExactFacePslgError, ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment,
-    ExactFacePslgVertex,
+    ExactFacePslgError, ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgLoopSource,
+    ExactFacePslgSegment, ExactFacePslgSegmentSource, ExactFacePslgVertex,
 };
 pub use recovery::{
     recover_exact_face_segments, validate_exact_face_constrained_delaunay,

@@ -1,6 +1,6 @@
 use runmat_geometry_core::PersistentEntityId;
 
-use crate::ExactFaceDelaunayTriangle;
+use crate::{ExactFaceDelaunayTriangle, ExactFacePslgSegmentSource};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExactFaceConstrainedDelaunay {
@@ -15,8 +15,7 @@ pub struct ExactFaceConstrainedDelaunay {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExactFaceRecoveredSegment {
     pub pslg_segment_index: u32,
-    pub source_coedge_id: PersistentEntityId,
-    pub source_edge_id: PersistentEntityId,
+    pub source: ExactFacePslgSegmentSource,
     /// Oriented exactly as the source PSLG segment.
     pub vertex_indices: [u32; 2],
 }

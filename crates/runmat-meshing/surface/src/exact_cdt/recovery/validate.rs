@@ -133,8 +133,7 @@ pub fn validate_exact_face_constrained_delaunay(
         .enumerate()
     {
         if actual.pslg_segment_index != index as u32
-            || actual.source_coedge_id != expected.source_coedge_id
-            || actual.source_edge_id != expected.source_edge_id
+            || actual.source != expected.source
             || actual.vertex_indices != expected.vertex_indices
         {
             return Err(invalid(

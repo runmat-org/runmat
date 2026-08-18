@@ -76,8 +76,7 @@ pub fn recover_exact_face_segments(
         protected.insert(target);
         protected_segments.push(ExactFaceRecoveredSegment {
             pslg_segment_index: pslg_segment_index as u32,
-            source_coedge_id: segment.source_coedge_id.clone(),
-            source_edge_id: segment.source_edge_id.clone(),
+            source: segment.source.clone(),
             vertex_indices: segment.vertex_indices,
         });
     }

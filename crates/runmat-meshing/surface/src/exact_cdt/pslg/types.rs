@@ -21,19 +21,35 @@ pub struct ExactFacePslgVertex {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFacePslgSegment {
-    pub source_coedge_id: PersistentEntityId,
-    pub source_edge_id: PersistentEntityId,
+    pub source: ExactFacePslgSegmentSource,
     pub vertex_indices: [u32; 2],
-    /// Exact curve parameters oriented with this face-local coedge segment.
-    pub edge_parameters: [f64; 2],
+    /// Present only for an exact trim segment and oriented with its face-local coedge.
+    pub edge_parameters: Option<[f64; 2]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExactFacePslgSegmentSource {
+    ExactTrim {
+        source_coedge_id: PersistentEntityId,
+        source_edge_id: PersistentEntityId,
+    },
+    ChartCut {
+        cut_id: StableDigest,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExactFacePslgLoop {
-    pub source_wire_id: PersistentEntityId,
+    pub source: ExactFacePslgLoopSource,
     pub orientation: TopologicalOrientation,
     pub first_segment: u32,
     pub segment_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExactFacePslgLoopSource {
+    ExactWire { source_wire_id: PersistentEntityId },
+    ChartBoundary { boundary_id: StableDigest },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

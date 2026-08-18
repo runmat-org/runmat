@@ -1,3 +1,4 @@
+mod annulus;
 mod periodic;
 mod types;
 
