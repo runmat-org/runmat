@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::poly::type_resolvers::polyval_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
@@ -534,7 +534,8 @@ async fn try_gpu_polyval(
         return Ok(Some(Value::GpuTensor(result_handle)));
     }
 
-    let host = match download_handle_async(provider, &result_handle).await {
+    let host = match gpu_helpers::download_floating_projection_async(provider, &result_handle).await
+    {
         Ok(host) => host,
         Err(err) => {
             debug!("polyval: GPU download failed, falling back: {err}");

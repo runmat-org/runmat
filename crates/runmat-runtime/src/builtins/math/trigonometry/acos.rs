@@ -23,9 +23,9 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "acos";
 const ZERO_EPS: f64 = 1e-12;
@@ -273,7 +273,7 @@ async fn detect_gpu_requires_complex(
             ));
         }
     };
-    let min_host = match download_handle_async(provider, &min_handle).await {
+    let min_host = match gpu_helpers::download_native_values_async(provider, &min_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);
@@ -284,7 +284,7 @@ async fn detect_gpu_requires_complex(
             ));
         }
     };
-    let max_host = match download_handle_async(provider, &max_handle).await {
+    let max_host = match gpu_helpers::download_native_values_async(provider, &max_handle).await {
         Ok(host) => host,
         Err(err) => {
             let _ = provider.free(&min_handle);
@@ -297,19 +297,19 @@ async fn detect_gpu_requires_complex(
     };
     let _ = provider.free(&min_handle);
     let _ = provider.free(&max_handle);
-    if min_host.data.iter().any(|&v| v.is_nan()) || max_host.data.iter().any(|&v| v.is_nan()) {
+    if min_host.data.iter().any(|value| value.is_nan())
+        || max_host.data.iter().any(|value| value.is_nan())
+    {
         return Err(acos_error_with_detail(
             &ACOS_ERROR_INTERNAL,
             "reduction results contained NaN",
         ));
     }
-    let min_val = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
-    let max_val = max_host
+    Ok(min_host
         .data
         .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
-    Ok(min_val < -1.0 - DOMAIN_TOL || max_val > 1.0 + DOMAIN_TOL)
+        .chain(&max_host.data)
+        .any(|value| value.is_outside_closed_unit_interval(DOMAIN_TOL)))
 }
 
 fn acos_real(value: Value) -> BuiltinResult<Value> {

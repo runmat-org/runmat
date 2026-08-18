@@ -26,7 +26,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::SymbolicFunction;
 
@@ -239,15 +238,15 @@ async fn detect_gpu_requires_complex(
         .reduce_min(handle)
         .await
         .map_err(|e| builtin_error(format!("sqrt: reduce_min failed: {e}")))?;
-    let download = download_handle_async(provider, &min_handle)
+    let download = gpu_helpers::download_native_values_async(provider, &min_handle)
         .await
         .map_err(|e| builtin_error(format!("sqrt: reduce_min download failed: {e}")));
     let _ = provider.free(&min_handle);
     let host = download?;
-    if host.data.iter().any(|&v| v.is_nan()) {
+    if host.data.iter().any(|value| value.is_nan()) {
         return Err(builtin_error("sqrt: reduce_min result contained NaN"));
     }
-    Ok(host.data.iter().any(|&v| v < 0.0))
+    Ok(host.data.iter().any(|value| value.is_negative()))
 }
 
 fn sqrt_real(value: Value) -> BuiltinResult<Value> {

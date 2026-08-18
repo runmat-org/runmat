@@ -20,7 +20,7 @@ use crate::builtins::common::{gpu_helpers, linalg, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::matmul_type;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mtimes";
 
@@ -308,7 +308,7 @@ async fn real_scalar_value(
             Ok(Some(if logical.data[0] != 0 { 1.0 } else { 0.0 }))
         }
         Value::GpuTensor(handle) if is_scalar_handle(handle) => {
-            let host = download_handle_async(provider, handle)
+            let host = gpu_helpers::download_floating_projection_async(provider, handle)
                 .await
                 .map_err(|e| mtimes_internal_error(format!("{NAME}: {e}")))?;
             Ok(host.data.first().copied())

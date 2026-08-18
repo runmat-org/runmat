@@ -601,7 +601,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     #[cfg(feature = "wgpu")]
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntegerStorage;
@@ -922,11 +921,11 @@ pub(crate) mod tests {
         };
 
         let host =
-            block_on(download_handle_async(provider, &gpu_handle)).expect("download permutation");
+            test_support::gather(Value::GpuTensor(gpu_handle.clone())).expect("gather permutation");
         assert_eq!(host.shape, vec![1, 7]);
-        assert_eq!(host.data.len(), 7);
+        assert_eq!(host.len(), 7);
 
-        let mut sorted = host.data.clone();
+        let mut sorted = host.materialize_f64();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         for window in sorted.windows(2) {
             assert_ne!(
@@ -934,11 +933,12 @@ pub(crate) mod tests {
                 "duplicate value detected in permutation"
             );
         }
-        for value in host.data {
+        for value in host.materialize_f64() {
             assert!(
                 (1.0..=12.0).contains(&value),
                 "value {value} outside expected range 1..12"
             );
         }
+        provider.free(&gpu_handle).expect("free permutation");
     }
 }

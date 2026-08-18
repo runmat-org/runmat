@@ -291,7 +291,7 @@ async fn sinc_gpu_host_fallback(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    let host = crate::dispatcher::download_handle_async(provider, handle)
+    let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
         .map_err(|err| sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, err.to_string()))?;
 

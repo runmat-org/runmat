@@ -1,11 +1,11 @@
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorOwned, HostNumericTensorView, IntegerElementType, NumericElementType,
-    ProviderPrecision,
+    HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned, IntegerElementType,
+    NumericElementType, ProviderPrecision,
 };
 use runmat_builtins::{
     ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    NumericDType, NumericStorage, Tensor, Value,
+    NumericDType, NumericScalar, NumericStorage, Tensor, Value,
 };
 
 use crate::build_runtime_error;
@@ -404,6 +404,166 @@ pub async fn download_value_preserving_residency_async(
             .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
+    })
+}
+
+/// Exact native scalar values decoded from a provider-owned real numeric payload.
+pub struct HostNativeTensorOwned {
+    pub data: Vec<NumericScalar>,
+    pub shape: Vec<usize>,
+}
+
+/// Download a real numeric handle without changing its native class or source residency.
+pub async fn download_native_values_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+) -> crate::BuiltinResult<HostNativeTensorOwned> {
+    let value = download_value_preserving_residency_async(provider, handle).await?;
+    match value {
+        Value::Tensor(tensor) => {
+            let data = (0..tensor.len())
+                .map(|index| {
+                    tensor.numeric_value_at(index).ok_or_else(|| {
+                        build_runtime_error(
+                            "native download: numeric payload storage is inconsistent",
+                        )
+                        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build()
+                    })
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?;
+            Ok(HostNativeTensorOwned {
+                data,
+                shape: tensor.shape,
+            })
+        }
+        Value::LogicalArray(logical) => Ok(HostNativeTensorOwned {
+            data: logical.data.into_iter().map(NumericScalar::U8).collect(),
+            shape: logical.shape,
+        }),
+        Value::Num(value) => Ok(HostNativeTensorOwned {
+            data: vec![NumericScalar::F64(value)],
+            shape: vec![1, 1],
+        }),
+        Value::Bool(value) => Ok(HostNativeTensorOwned {
+            data: vec![NumericScalar::U8(u8::from(value))],
+            shape: vec![1, 1],
+        }),
+        Value::ComplexTensor(_) | Value::Complex(_, _) => Err(build_runtime_error(
+            "native download: provider output must use real storage",
+        )
+        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()),
+        other => Err(build_runtime_error(format!(
+            "native download: unexpected provider value {other:?}"
+        ))
+        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()),
+    }
+}
+
+/// Exact host truth values decoded from a provider-owned real numeric payload.
+pub struct HostTruthTensorOwned {
+    pub data: Vec<u8>,
+    pub shape: Vec<usize>,
+}
+
+/// Download a real numeric handle and classify each native value as zero or
+/// nonzero without entering a floating representation.
+pub async fn download_truth_values_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+) -> crate::BuiltinResult<HostTruthTensorOwned> {
+    let native = download_native_values_async(provider, handle).await?;
+    Ok(HostTruthTensorOwned {
+        data: native
+            .data
+            .into_iter()
+            .map(|value| u8::from(!value.is_zero()))
+            .collect(),
+        shape: native.shape,
+    })
+}
+
+/// Project a provider-owned floating payload into binary64 host lanes for an
+/// operation whose declared computation boundary is floating point.
+///
+/// This is intentionally not a generic gather API. It accepts physical `f64`
+/// or `f32` storage, validates the complete handle/payload contract, preserves
+/// source metadata and residency, and rejects every native integer class.
+pub async fn download_floating_projection_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+) -> crate::BuiltinResult<HostTensorOwned> {
+    let source_guard = HandleMetadataRestoreGuard::new(handle);
+    if provider.device_id() != handle.device_id {
+        return Err(build_runtime_error(format!(
+            "floating projection: provider does not own the input handle"
+        ))
+        .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    let expected_element = expected_handle_numeric_element_type(handle).map_err(|error| {
+        build_runtime_error(format!("floating projection: {error}"))
+            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    let host = provider.download_numeric(handle).await.map_err(|error| {
+        build_runtime_error(format!("floating projection: {error}"))
+            .with_identifier("RunMat:gpu:DownloadFailed")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    host.validate().map_err(|error| {
+        build_runtime_error(format!("floating projection: {error}"))
+            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    if host.shape != handle.shape
+        || host.storage != source_guard.snapshot.storage
+        || host.data.element_type() != expected_element
+    {
+        return Err(provider_payload_mismatch(
+            handle,
+            &host.shape,
+            format!(
+                "{:?} {:?}, expected {:?} {:?}",
+                host.data.element_type(),
+                host.storage,
+                expected_element,
+                source_guard.snapshot.storage
+            ),
+        ));
+    }
+    let data = match host.data {
+        HostNumericDataOwned::F64(values) => values,
+        HostNumericDataOwned::F32(values) => values.into_iter().map(f64::from).collect(),
+        HostNumericDataOwned::I8(_)
+        | HostNumericDataOwned::I16(_)
+        | HostNumericDataOwned::I32(_)
+        | HostNumericDataOwned::I64(_)
+        | HostNumericDataOwned::U8(_)
+        | HostNumericDataOwned::U16(_)
+        | HostNumericDataOwned::U32(_)
+        | HostNumericDataOwned::U64(_) => {
+            return Err(build_runtime_error(format!(
+                "floating projection cannot consume native integer storage"
+            ))
+            .with_identifier("RunMat:gpu:IntegerFloatingProjection")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build())
+        }
+    };
+    Ok(HostTensorOwned {
+        data,
+        shape: host.shape,
+        storage: host.storage,
     })
 }
 
@@ -1113,6 +1273,43 @@ mod preserving_download_tests {
                 runmat_accelerate_api::handle_is_logical(&handle),
                 metadata.3
             );
+        });
+    }
+
+    #[test]
+    fn native_truth_download_keeps_wide_unsigned_values_exact_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let source = Tensor::new_integer(
+                IntegerStorage::U64(vec![0, 1, 1_u64 << 63, u64::MAX]),
+                vec![1, 4],
+            )
+            .expect("wide integer source");
+            let handle = upload_tensor(provider, &source).expect("wide integer upload");
+            runmat_accelerate_api::mark_handle_automatic(&handle);
+
+            let native = block_on(download_native_values_async(provider, &handle))
+                .expect("native-value download");
+            assert_eq!(
+                native.data,
+                vec![
+                    NumericScalar::U64(0),
+                    NumericScalar::U64(1),
+                    NumericScalar::U64(1_u64 << 63),
+                    NumericScalar::U64(u64::MAX),
+                ]
+            );
+            let truth = block_on(download_truth_values_async(provider, &handle))
+                .expect("truth-value download");
+            assert_eq!(truth.data, vec![0, 1, 1, 1]);
+            assert_eq!(truth.shape, vec![1, 4]);
+            assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+            assert_eq!(
+                runmat_accelerate_api::handle_provenance(&handle),
+                Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            );
+
+            provider.free(&handle).unwrap();
+            runmat_accelerate_api::clear_handle_metadata(&handle);
         });
     }
 

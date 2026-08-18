@@ -846,7 +846,6 @@ fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
@@ -979,8 +978,9 @@ pub(crate) mod tests {
             let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
             let host_after_gpu =
                 random::generate_uniform(4, "rand provider sync").expect("uniform");
-            let gpu = block_on(download_handle_async(provider, &handle)).expect("download");
-            assert_eq!(gpu.data, host_after_gpu);
+            let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
+            assert_eq!(gpu.materialize_f64(), host_after_gpu);
+            provider.free(&handle).expect("free uniform handle");
         });
     }
 

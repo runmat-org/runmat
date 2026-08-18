@@ -1,6 +1,5 @@
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
 use runmat_accelerate_api::{
@@ -568,7 +567,7 @@ pub async fn gather_gpu_complex_tensor(
         )
         .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")));
     }
-    let host = download_handle_async(provider, handle)
+    let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
         .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")))?;
     let precision = if runmat_accelerate_api::handle_is_logical(handle) {
@@ -627,7 +626,7 @@ pub async fn download_provider_complex_tensor(
     builtin: &str,
     free_after_download: bool,
 ) -> BuiltinResult<ComplexTensor> {
-    let decoded = download_handle_async(provider, handle)
+    let decoded = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
         .and_then(|host| {

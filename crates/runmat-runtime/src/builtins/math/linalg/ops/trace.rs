@@ -439,7 +439,6 @@ fn matrix_extents_from_shape(shape: &[usize]) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Type};
@@ -566,10 +565,10 @@ pub(crate) mod tests {
             let result = trace_builtin(Value::GpuTensor(handle)).expect("trace");
             match result {
                 Value::GpuTensor(out) => {
-                    let host = block_on(download_handle_async(provider, &out)).expect("download");
+                    let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
                     assert_eq!(host.shape, vec![1, 1]);
-                    assert_eq!(host.data.len(), 1);
-                    assert!((host.data[0] - 6.0).abs() < 1e-12);
+                    assert_eq!(host.len(), 1);
+                    assert!((host.materialize_f64()[0] - 6.0).abs() < 1e-12);
                     let _ = provider.free(&out);
                 }
                 other => panic!("expected gpu result, got {other:?}"),
@@ -591,8 +590,8 @@ pub(crate) mod tests {
             let result = trace_builtin(Value::GpuTensor(handle)).expect("trace");
             match result {
                 Value::GpuTensor(out) => {
-                    let host = block_on(download_handle_async(provider, &out)).expect("download");
-                    assert_eq!(host.data, vec![0.0]);
+                    let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
+                    assert_eq!(host.materialize_f64(), vec![0.0]);
                     let _ = provider.free(&out);
                 }
                 other => panic!("expected gpu result, got {other:?}"),
@@ -615,9 +614,9 @@ pub(crate) mod tests {
                 panic!("expected resident double result");
             };
             assert_eq!(runmat_accelerate_api::handle_integer_type(&out), None);
-            let host = block_on(download_handle_async(provider, &out)).expect("download");
+            let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
             assert_eq!(host.shape, vec![1, 1]);
-            assert_eq!(host.data, vec![10.0]);
+            assert_eq!(host.materialize_f64(), vec![10.0]);
             let _ = provider.free(&out);
         });
     }

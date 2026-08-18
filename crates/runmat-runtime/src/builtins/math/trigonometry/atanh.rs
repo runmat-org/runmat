@@ -23,7 +23,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atanh";
 const ZERO_EPS: f64 = 1.0e-12;
@@ -269,7 +269,7 @@ async fn gpu_domain_is_real(
         atanh_error_with_detail(&ATANH_ERROR_INTERNAL, format!("reduce_max failed: {e}"))
     })?;
 
-    let min_host = match download_handle_async(provider, &min_handle).await {
+    let min_host = match gpu_helpers::download_native_values_async(provider, &min_handle).await {
         Ok(values) => values,
         Err(err) => {
             let _ = provider.free(&min_handle);
@@ -280,7 +280,7 @@ async fn gpu_domain_is_real(
             ));
         }
     };
-    let max_host = match download_handle_async(provider, &max_handle).await {
+    let max_host = match gpu_helpers::download_native_values_async(provider, &max_handle).await {
         Ok(values) => values,
         Err(err) => {
             let _ = provider.free(&min_handle);
@@ -302,22 +302,19 @@ async fn gpu_domain_is_real(
         ));
     }
 
-    let min_value = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
-    let max_value = max_host
+    if min_host
         .data
         .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
-
-    if !min_value.is_finite() || !max_value.is_finite() {
+        .chain(&max_host.data)
+        .any(|value| !value.is_finite())
+    {
         return Ok(false);
     }
-
-    if min_value < -1.0 - DOMAIN_EPS || max_value > 1.0 + DOMAIN_EPS {
-        return Ok(false);
-    }
-
-    Ok(true)
+    Ok(!min_host
+        .data
+        .iter()
+        .chain(&max_host.data)
+        .any(|value| value.is_outside_closed_unit_interval(DOMAIN_EPS)))
 }
 
 fn atanh_real(value: Value) -> BuiltinResult<Value> {

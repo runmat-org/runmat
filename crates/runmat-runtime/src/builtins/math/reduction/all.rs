@@ -6,13 +6,13 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::{
-    gpu_helpers,
+    gpu_helpers::{self, HostTruthTensorOwned},
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_logical_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -380,12 +380,12 @@ async fn try_all_gpu(
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     nan_mode: ReductionNaN,
-) -> BuiltinResult<Option<HostTensorOwned>> {
+) -> BuiltinResult<Option<HostTruthTensorOwned>> {
     let omit_nan = matches!(nan_mode, ReductionNaN::Omit);
 
     if let ReductionSpec::All = spec {
         if let Ok(tmp) = provider.reduce_all(handle, omit_nan).await {
-            let host = download_handle_async(provider, &tmp)
+            let host = gpu_helpers::download_truth_values_async(provider, &tmp)
                 .await
                 .map_err(|e| all_error(format!("all: {e}")))?;
             let _ = provider.free(&tmp);
@@ -401,7 +401,7 @@ async fn reduce_dims_gpu(
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     omit_nan: bool,
-) -> BuiltinResult<Option<HostTensorOwned>> {
+) -> BuiltinResult<Option<HostTruthTensorOwned>> {
     let mut dims = dims_from_spec(spec, &handle.shape);
     if dims.is_empty() {
         return Ok(None);
@@ -458,7 +458,7 @@ async fn reduce_dims_gpu(
         return Ok(None);
     }
 
-    let host = download_handle_async(provider, &current)
+    let host = gpu_helpers::download_truth_values_async(provider, &current)
         .await
         .map_err(|e| all_error(format!("all: {e}")))?;
     let _ = provider.free(&current);
@@ -468,9 +468,9 @@ async fn reduce_dims_gpu(
     Ok(Some(host))
 }
 
-fn logical_from_host(host: HostTensorOwned) -> BuiltinResult<Value> {
+fn logical_from_host(host: HostTruthTensorOwned) -> BuiltinResult<Value> {
     if host.data.len() == 1 {
-        return Ok(Value::Bool(host.data[0] != 0.0));
+        return Ok(Value::Bool(host.data[0] != 0));
     }
     let shape = if tensor::element_count(&host.shape) == host.data.len() {
         normalize_scalar_shape(&host.shape)
@@ -486,7 +486,7 @@ fn logical_from_host(host: HostTensorOwned) -> BuiltinResult<Value> {
     let logical_data: Vec<u8> = host
         .data
         .into_iter()
-        .map(|v| if v != 0.0 { 1 } else { 0 })
+        .map(|v| if v != 0 { 1 } else { 0 })
         .collect();
     LogicalArray::new(logical_data, shape)
         .map(Value::LogicalArray)

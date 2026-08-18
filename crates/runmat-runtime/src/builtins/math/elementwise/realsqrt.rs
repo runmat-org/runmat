@@ -22,7 +22,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "realsqrt";
@@ -219,7 +218,7 @@ async fn gpu_has_negative_input(
         .reduce_min(handle)
         .await
         .map_err(|e| internal_error(format!("realsqrt: reduce_min failed: {e}")))?;
-    let download = download_handle_async(provider, &min_handle)
+    let download = gpu_helpers::download_native_values_async(provider, &min_handle)
         .await
         .map_err(|e| internal_error(format!("realsqrt: reduce_min download failed: {e}")));
     let _ = provider.free(&min_handle);
@@ -229,7 +228,7 @@ async fn gpu_has_negative_input(
             "realsqrt: reduce_min result contained NaN; host validation required",
         ));
     }
-    Ok(host.data.iter().any(|&value| value < 0.0))
+    Ok(host.data.iter().any(|value| value.is_negative()))
 }
 
 fn realsqrt_real(value: Value) -> BuiltinResult<Value> {

@@ -745,7 +745,6 @@ fn sync_provider_state(state: u64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
@@ -1028,8 +1027,9 @@ pub(crate) mod tests {
             block_on(rng_builtin(vec![Value::Int(IntValue::U32(9))])).expect("rng");
             let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
             let host_after_gpu = random::generate_uniform(4, "rng provider sync").expect("uniform");
-            let gpu = block_on(download_handle_async(provider, &handle)).expect("download");
-            assert_eq!(gpu.data, host_after_gpu);
+            let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
+            assert_eq!(gpu.materialize_f64(), host_after_gpu);
+            provider.free(&handle).expect("free uniform handle");
         });
     }
 
@@ -1049,10 +1049,10 @@ pub(crate) mod tests {
         let handle = provider
             .random_uniform(&[1, 6])
             .expect("wgpu random uniform");
-        let gpu = block_on(download_handle_async(provider, &handle)).expect("wgpu download");
+        let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("wgpu gather");
         let host = random::generate_uniform(6, "rng wgpu parity").expect("host uniform sequence");
-        assert_eq!(gpu.data.len(), host.len());
-        for (idx, value) in gpu.data.iter().enumerate() {
+        assert_eq!(gpu.len(), host.len());
+        for (idx, value) in gpu.materialize_f64().iter().enumerate() {
             assert!(value.is_finite(), "gpu value at {idx} not finite: {value}");
             assert!(
                 *value >= 0.0 && *value < 1.0,

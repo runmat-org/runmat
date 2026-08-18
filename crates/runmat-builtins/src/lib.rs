@@ -1225,6 +1225,68 @@ impl NumericScalar {
         }
     }
 
+    pub fn is_nan(self) -> bool {
+        match self {
+            Self::F64(value) => value.is_nan(),
+            Self::F32(value) => value.is_nan(),
+            Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => false,
+        }
+    }
+
+    pub fn is_negative(self) -> bool {
+        match self {
+            Self::F64(value) => value < 0.0,
+            Self::F32(value) => value < 0.0,
+            Self::I8(value) => value < 0,
+            Self::I16(value) => value < 0,
+            Self::I32(value) => value < 0,
+            Self::I64(value) => value < 0,
+            Self::U8(_) | Self::U16(_) | Self::U32(_) | Self::U64(_) => false,
+        }
+    }
+
+    pub fn is_less_than_one(self) -> bool {
+        match self {
+            Self::F64(value) => value < 1.0,
+            Self::F32(value) => value < 1.0,
+            Self::I8(value) => value < 1,
+            Self::I16(value) => value < 1,
+            Self::I32(value) => value < 1,
+            Self::I64(value) => value < 1,
+            Self::U8(value) => value < 1,
+            Self::U16(value) => value < 1,
+            Self::U32(value) => value < 1,
+            Self::U64(value) => value < 1,
+        }
+    }
+
+    pub fn is_outside_closed_unit_interval(self, floating_tolerance: f64) -> bool {
+        match self {
+            Self::F64(value) => {
+                value < -1.0 - floating_tolerance || value > 1.0 + floating_tolerance
+            }
+            Self::F32(value) => {
+                f64::from(value) < -1.0 - floating_tolerance
+                    || f64::from(value) > 1.0 + floating_tolerance
+            }
+            Self::I8(value) => !(-1..=1).contains(&value),
+            Self::I16(value) => !(-1..=1).contains(&value),
+            Self::I32(value) => !(-1..=1).contains(&value),
+            Self::I64(value) => !(-1..=1).contains(&value),
+            Self::U8(value) => value > 1,
+            Self::U16(value) => value > 1,
+            Self::U32(value) => value > 1,
+            Self::U64(value) => value > 1,
+        }
+    }
+
     pub fn is_finite(self) -> bool {
         match self {
             Self::F64(value) => value.is_finite(),
@@ -1644,7 +1706,7 @@ mod integer_storage_tests {
     }
 
     #[test]
-    fn numeric_scalar_zero_and_finite_predicates_cover_every_native_class() {
+    fn numeric_scalar_domain_predicates_cover_every_native_class() {
         let zeros = [
             NumericScalar::F64(-0.0),
             NumericScalar::F32(-0.0),
@@ -1664,6 +1726,16 @@ mod integer_storage_tests {
         assert!(!NumericScalar::F32(f32::INFINITY).is_zero());
         assert!(!NumericScalar::F64(f64::NAN).is_finite());
         assert!(!NumericScalar::F32(f32::INFINITY).is_finite());
+        assert!(NumericScalar::F64(f64::NAN).is_nan());
+        assert!(!NumericScalar::U64(u64::MAX).is_nan());
+        assert!(NumericScalar::I64(i64::MIN).is_negative());
+        assert!(!NumericScalar::U64(u64::MAX).is_negative());
+        assert!(NumericScalar::I8(0).is_less_than_one());
+        assert!(!NumericScalar::U8(1).is_less_than_one());
+        assert!(NumericScalar::I64(i64::MIN).is_outside_closed_unit_interval(1.0e-12));
+        assert!(NumericScalar::U64(u64::MAX).is_outside_closed_unit_interval(1.0e-12));
+        assert!(!NumericScalar::I8(-1).is_outside_closed_unit_interval(1.0e-12));
+        assert!(!NumericScalar::F64(1.0 + 5.0e-13).is_outside_closed_unit_interval(1.0e-12));
         assert!(NumericScalar::I64(i64::MIN).is_finite());
         assert!(NumericScalar::U64(u64::MAX).is_finite());
     }

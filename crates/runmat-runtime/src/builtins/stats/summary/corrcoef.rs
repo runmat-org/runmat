@@ -1333,7 +1333,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
@@ -2049,10 +2048,9 @@ pub(crate) mod tests {
             rows: CorrcoefRows::All,
         };
         let gpu = block_on(provider.corrcoef(&handle, &options)).expect("corrcoef");
-        let host = block_on(download_handle_async(provider, &gpu)).expect("download");
-        let gathered =
-            Tensor::new(host.data.clone(), host.shape.clone()).expect("tensor reconstruction");
+        let gathered = test_support::gather(Value::GpuTensor(gpu.clone())).expect("gather");
         assert_tensor_close(&gathered, &cpu.materialize_f64(), 1.0e-6);
+        provider.free(&gpu).expect("free corrcoef output");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2110,10 +2108,10 @@ pub(crate) mod tests {
         .expect("paired corrcoef");
         let paired_gathered = test_support::gather(paired).expect("paired gather");
         assert_tensor_close(&paired_gathered, &expected.materialize_f64(), 1.0e-6);
-        let left_after =
-            block_on(download_handle_async(provider, &left_handle)).expect("left after corrcoef");
-        let right_after =
-            block_on(download_handle_async(provider, &right_handle)).expect("right after corrcoef");
+        let left_after = test_support::gather(Value::GpuTensor(left_handle.clone()))
+            .expect("left after corrcoef");
+        let right_after = test_support::gather(Value::GpuTensor(right_handle.clone()))
+            .expect("right after corrcoef");
         assert_eq!(left_after.shape, vec![2, 2]);
         assert_eq!(right_after.shape, vec![2, 2]);
         let _ = provider.free(&left_handle);

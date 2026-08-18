@@ -313,7 +313,6 @@ fn squeeze_shape(shape: &[usize]) -> Vec<usize> {
 pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
 
     fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -501,12 +500,13 @@ pub(crate) mod tests {
         };
         assert_eq!(gpu_handle.shape, vec![3, 4]);
 
-        let downloaded = block_on(download_handle_async(provider, &gpu_handle))
-            .expect("download squeezed tensor");
+        let downloaded = test_support::gather(Value::GpuTensor(gpu_handle.clone()))
+            .expect("gather squeezed tensor");
         assert_eq!(downloaded.shape.as_slice(), &[3, 4]);
         assert_eq!(
-            downloaded.data.as_slice(),
+            downloaded.materialize_f64().as_slice(),
             tensor.materialize_f64().as_slice()
         );
+        provider.free(&gpu_handle).expect("free squeezed tensor");
     }
 }
