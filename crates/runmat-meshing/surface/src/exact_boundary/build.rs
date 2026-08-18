@@ -106,6 +106,7 @@ fn push_segments(
         output.push(ExactFaceBoundarySegment {
             source_coedge_id: coedge.id.clone(),
             source_edge_id: curve.source_edge_id.clone(),
+            seam_image: face_use.seam_image,
             node_ids: pair.map(|index| curve.nodes[index].node_id),
             node_uv: pair.map(|index| face_use.node_uv[index]),
         });

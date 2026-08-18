@@ -86,6 +86,11 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
     assert!(curve.nodes.len() > 8);
     assert_eq!(curve.face_uses.len(), 1);
     assert_eq!(curve.face_uses[0].node_uv.len(), curve.nodes.len());
+    assert_eq!(
+        curve.face_uses[0].node_uv.first(),
+        curve.face_uses[0].node_uv.last(),
+        "a closed edge on a non-periodic face has one canonical endpoint UV"
+    );
     assert!((curve.nodes.last().unwrap().arc_length_m - TAU).abs() < 1.0e-10);
     assert!(
         curve.achieved.maximum_chordal_deviation_m
@@ -128,6 +133,39 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
         panic!("ordinary edge must retain evaluated metric evidence")
     };
     assert_eq!(report.metric_evaluation_count, evaluation_count);
+}
+
+#[test]
+fn nonperiodic_closed_face_rejects_distinct_pcurve_endpoints() {
+    let (document, topology, mut registry) = runmat_geometry_fixtures::exact_circle();
+    registry.pcurves[0].implementation =
+        runmat_geometry_core::ExactPcurveImplementation::Portable {
+            definition: runmat_geometry_core::ExactPcurveDefinition::Line {
+                origin_uv: [0.0, 0.0],
+                direction_uv_per_parameter: [1.0, 0.0],
+                domain: ParameterRange {
+                    start: 0.0,
+                    end: TAU,
+                },
+            },
+        };
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact");
+    };
+    let evaluator =
+        runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let error = discretize_shared_curves(
+        &topology,
+        &evaluator,
+        &evaluator,
+        &UniformCurveMetric::from_target_size_m(0.25).unwrap(),
+        &UnlimitedControl,
+        shared_options(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.kind, SharedCurveErrorKind::GeometricMismatch);
+    assert_eq!(error.field, "closed pcurve endpoint");
 }
 
 #[test]

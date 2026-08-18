@@ -58,6 +58,16 @@ fn independent_admission_rejects_segment_substitution() {
     assert_eq!(error.kind, ExactSurfaceBoundaryErrorKind::InvalidContract);
 }
 
+#[test]
+fn independent_admission_rejects_seam_image_substitution() {
+    let (topology, curves) = fixture();
+    let mut boundary = build_exact_surface_boundary(&topology, &curves).unwrap();
+    boundary.faces[0].outer_loop.segments[0].seam_image = Some(7);
+
+    let error = validate_exact_surface_boundary(&boundary, &topology, &curves).unwrap_err();
+    assert_eq!(error.kind, ExactSurfaceBoundaryErrorKind::InvalidContract);
+}
+
 fn fixture() -> (
     runmat_geometry_core::ExactBRepTopology,
     runmat_meshing_curve::SharedCurveMesh,

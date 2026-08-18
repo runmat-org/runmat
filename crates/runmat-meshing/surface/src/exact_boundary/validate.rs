@@ -126,6 +126,7 @@ fn validate_loop(
             };
             if segment.source_coedge_id != coedge.id
                 || segment.source_edge_id != coedge.edge_id
+                || segment.seam_image != face_use.seam_image
                 || segment.node_ids != pair.map(|index| curve.nodes[index].node_id)
                 || segment.node_uv != pair.map(|index| face_use.node_uv[index])
                 || segment

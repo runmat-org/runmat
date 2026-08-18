@@ -201,6 +201,7 @@ mod tests {
         ExactFaceBoundarySegment {
             source_coedge_id: id(PersistentEntityKind::Coedge, edge),
             source_edge_id: id(PersistentEntityKind::Edge, edge),
+            seam_image: None,
             node_ids: [
                 StableDigest::from_bytes([start; 32]),
                 StableDigest::from_bytes([end; 32]),

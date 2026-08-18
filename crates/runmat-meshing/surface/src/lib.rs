@@ -6,6 +6,7 @@ mod math;
 
 pub mod contract;
 pub mod exact_boundary;
+pub mod exact_cdt;
 pub mod param_tri;
 pub mod recovery;
 pub mod validate;
@@ -16,6 +17,10 @@ pub use exact_boundary::{
     ExactFaceBoundaryLoop, ExactFaceBoundarySegment, ExactSurfaceBoundary,
     ExactSurfaceBoundaryConflict, ExactSurfaceBoundaryError, ExactSurfaceBoundaryErrorKind,
     EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
+};
+pub use exact_cdt::{
+    build_exact_face_pslg, validate_exact_face_pslg, ExactFacePslg, ExactFacePslgError,
+    ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex,
 };
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,

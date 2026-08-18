@@ -83,6 +83,7 @@ pub(super) fn discretize_degenerate_edge(
         control,
         parameter_range,
         &parameters,
+        options.pcurve_absolute_error,
     )?;
     Ok(SharedCurve {
         source_edge_id: edge.id.clone(),

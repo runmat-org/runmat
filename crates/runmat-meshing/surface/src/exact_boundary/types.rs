@@ -2,7 +2,7 @@ use runmat_geometry_core::{PersistentEntityId, TopologicalOrientation};
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
 
-pub const EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION: u16 = 1;
+pub const EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,6 +33,7 @@ pub struct ExactFaceBoundaryLoop {
 pub struct ExactFaceBoundarySegment {
     pub source_coedge_id: PersistentEntityId,
     pub source_edge_id: PersistentEntityId,
+    pub seam_image: Option<u8>,
     pub node_ids: [StableDigest; 2],
     pub node_uv: [[f64; 2]; 2],
 }

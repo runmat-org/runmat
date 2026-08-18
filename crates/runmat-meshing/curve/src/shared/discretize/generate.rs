@@ -154,6 +154,7 @@ pub(crate) fn discretize_edge(
         control,
         parameter_range,
         &parameters,
+        options.pcurve_absolute_error,
     )?;
 
     Ok(SharedCurve {
