@@ -12,6 +12,12 @@ use super::{
     DelaunayVolumeNode, DelaunayVolumeTopology,
 };
 
+mod validation;
+mod work;
+
+pub use validation::validate_delaunay_volume_topology;
+use work::InsertionWork;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DelaunayInsertionOptions {
     pub topology: DelaunayTopologyOptions,
@@ -69,9 +75,21 @@ pub fn insert_delaunay_volume_node(
 ) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
     validate_options(options)?;
     validate_delaunay_volume_topology(&topology, options, cancellation)?;
+    let rebuilt = insert_delaunay_volume_node_mutation(topology, node, options, cancellation)?;
+    validate_delaunay_volume_topology(&rebuilt, options, cancellation)?;
+    Ok(rebuilt)
+}
+
+pub(super) fn insert_delaunay_volume_node_mutation(
+    topology: DelaunayVolumeTopology,
+    node: DelaunayVolumeNode,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
+    validate_options(options)?;
     validate_new_node(&topology, node)?;
 
-    let mut work = Work::new(options, cancellation);
+    let mut work = InsertionWork::new(options, cancellation);
     let mut seed = None;
     for (index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
         work.checkpoint()?;
@@ -109,78 +127,15 @@ pub fn insert_delaunay_volume_node(
             inserted_index,
         ]);
     }
-    let rebuilt = build_delaunay_volume_topology(nodes, tetrahedra, options.topology, cancellation)
-        .map_err(topology_error)?;
-    validate_delaunay_volume_topology(&rebuilt, options, cancellation)?;
-    Ok(rebuilt)
-}
-
-pub fn validate_delaunay_volume_topology(
-    topology: &DelaunayVolumeTopology,
-    options: DelaunayInsertionOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<(), DelaunayInsertionError> {
-    validate_options(options)?;
-    let rebuilt = build_delaunay_volume_topology(
-        topology.nodes.clone(),
-        topology
-            .tetrahedra
-            .iter()
-            .map(|tetrahedron| tetrahedron.vertex_indices)
-            .collect(),
-        options.topology,
-        cancellation,
-    )
-    .map_err(topology_error)?;
-    if rebuilt != *topology {
-        return Err(error(
-            DelaunayInsertionErrorKind::InvalidTopology,
-            "tetrahedra or neighbor links are not in canonical checked form",
-        ));
-    }
-
-    let mut work = Work::new(options, cancellation);
-    for (tetrahedron_index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
-        for neighbor_index in tetrahedron.neighbors.iter().flatten().copied() {
-            if neighbor_index as usize <= tetrahedron_index {
-                continue;
-            }
-            work.checkpoint()?;
-            let neighbor = &topology.tetrahedra[neighbor_index as usize];
-            let opposite = neighbor
-                .vertex_indices
-                .iter()
-                .copied()
-                .find(|vertex| !tetrahedron.vertex_indices.contains(vertex))
-                .ok_or_else(|| {
-                    error(
-                        DelaunayInsertionErrorKind::InvalidTopology,
-                        "neighbors do not share exactly one triangular face",
-                    )
-                })?;
-            if in_circumsphere(
-                topology,
-                tetrahedron.vertex_indices,
-                topology.nodes[opposite as usize],
-                &mut work,
-            )? {
-                return Err(error(
-                    DelaunayInsertionErrorKind::InvalidTopology,
-                    format!(
-                        "tetrahedron {tetrahedron_index} has neighbor {neighbor_index} inside its symbolic circumsphere"
-                    ),
-                ));
-            }
-        }
-    }
-    Ok(())
+    build_delaunay_volume_topology(nodes, tetrahedra, options.topology, cancellation)
+        .map_err(topology_error)
 }
 
 fn connected_cavity(
     topology: &DelaunayVolumeTopology,
     node: DelaunayVolumeNode,
     seed: usize,
-    work: &mut Work<'_>,
+    work: &mut InsertionWork<'_>,
 ) -> Result<BTreeSet<usize>, DelaunayInsertionError> {
     let mut cavity = BTreeSet::new();
     let mut examined = BTreeSet::new();
@@ -227,7 +182,7 @@ fn node_coplanar_with_face(
     vertices: [u32; 4],
     opposite: usize,
     node: DelaunayVolumeNode,
-    work: &mut Work<'_>,
+    work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
     work.predicate()?;
     let mut points = [[0.0; 3]; 4];
@@ -280,7 +235,7 @@ fn point_in_tetrahedron(
     topology: &DelaunayVolumeTopology,
     vertices: [u32; 4],
     node: DelaunayVolumeNode,
-    work: &mut Work<'_>,
+    work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
     for replace in 0..4 {
         work.predicate()?;
@@ -298,7 +253,7 @@ fn in_circumsphere(
     topology: &DelaunayVolumeTopology,
     vertices: [u32; 4],
     node: DelaunayVolumeNode,
-    work: &mut Work<'_>,
+    work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
     work.predicate()?;
     let points = vertices.map(|vertex| predicate_point(topology.nodes[vertex as usize]));
@@ -354,7 +309,9 @@ fn validate_new_node(
     Ok(())
 }
 
-fn validate_options(options: DelaunayInsertionOptions) -> Result<(), DelaunayInsertionError> {
+pub(super) fn validate_options(
+    options: DelaunayInsertionOptions,
+) -> Result<(), DelaunayInsertionError> {
     if options.maximum_cavity_tetrahedra == 0
         || options.maximum_cavity_boundary_faces == 0
         || options.maximum_predicate_evaluations == 0
@@ -367,55 +324,14 @@ fn validate_options(options: DelaunayInsertionOptions) -> Result<(), DelaunayIns
     Ok(())
 }
 
-struct Work<'a> {
-    options: DelaunayInsertionOptions,
-    cancellation: &'a dyn MeshingCancellationSignal,
-    predicate_evaluations: u64,
-    checkpoints: u64,
-}
-
-impl<'a> Work<'a> {
-    fn new(
-        options: DelaunayInsertionOptions,
-        cancellation: &'a dyn MeshingCancellationSignal,
-    ) -> Self {
-        Self {
-            options,
-            cancellation,
-            predicate_evaluations: 0,
-            checkpoints: 0,
-        }
-    }
-
-    fn checkpoint(&mut self) -> Result<(), DelaunayInsertionError> {
-        self.checkpoints += 1;
-        if self
-            .checkpoints
-            .is_multiple_of(self.options.topology.cancellation_check_interval)
-            && self.cancellation.is_cancelled()
-        {
-            return Err(error(DelaunayInsertionErrorKind::Cancelled, "cancelled"));
-        }
-        Ok(())
-    }
-
-    fn predicate(&mut self) -> Result<(), DelaunayInsertionError> {
-        self.predicate_evaluations += 1;
-        if self.predicate_evaluations > self.options.maximum_predicate_evaluations {
-            return Err(resource("predicate-evaluation limit exceeded"));
-        }
-        Ok(())
-    }
-}
-
-fn predicate_error(error_value: SpatialPredicateError) -> DelaunayInsertionError {
+pub(super) fn predicate_error(error_value: SpatialPredicateError) -> DelaunayInsertionError {
     error(
         DelaunayInsertionErrorKind::InvalidNode,
         format!("spatial predicate rejected coordinates or identity: {error_value:?}"),
     )
 }
 
-fn topology_error(error_value: DelaunayTopologyError) -> DelaunayInsertionError {
+pub(super) fn topology_error(error_value: DelaunayTopologyError) -> DelaunayInsertionError {
     let kind = match error_value.kind {
         super::DelaunayTopologyErrorKind::Cancelled => DelaunayInsertionErrorKind::Cancelled,
         super::DelaunayTopologyErrorKind::ResourceLimit => {
@@ -426,11 +342,14 @@ fn topology_error(error_value: DelaunayTopologyError) -> DelaunayInsertionError 
     error(kind, error_value.to_string())
 }
 
-fn resource(reason: impl Into<String>) -> DelaunayInsertionError {
+pub(super) fn resource(reason: impl Into<String>) -> DelaunayInsertionError {
     error(DelaunayInsertionErrorKind::ResourceLimit, reason)
 }
 
-fn error(kind: DelaunayInsertionErrorKind, reason: impl Into<String>) -> DelaunayInsertionError {
+pub(super) fn error(
+    kind: DelaunayInsertionErrorKind,
+    reason: impl Into<String>,
+) -> DelaunayInsertionError {
     DelaunayInsertionError {
         kind,
         reason: reason.into(),
