@@ -201,8 +201,10 @@ pub(crate) fn curve_record(
     };
     let geometry_digest = StableDigest::from_bytes(*geometry.root.digest.bytes());
     if publication.stage_objects().result_identity.stage != MeshingStageKind::CurveMesh
-        || publication.stage_objects().result_identity.result_kind
-            != MeshingStageResultKind::DeterministicJoin
+        || !matches!(
+            publication.stage_objects().result_identity.result_kind,
+            MeshingStageResultKind::DeterministicJoin | MeshingStageResultKind::WholeStage
+        )
         || publication
             .stage_objects()
             .manifest
@@ -280,21 +282,16 @@ pub(crate) fn exact_surface_join_options(
 }
 
 pub(crate) fn checked_count(
-    mut lengths: impl Iterator<Item = usize>,
+    lengths: impl Iterator<Item = usize>,
     detail: &str,
 ) -> Result<u64, Box<MeshingFailure>> {
-    lengths.try_fold(0_u64, |total, length| {
-        u64::try_from(length)
-            .ok()
-            .and_then(|length| total.checked_add(length))
-            .ok_or_else(|| {
-                surface_failure(
-                    MeshingFailureCategory::InternalInvariantViolation,
-                    None,
-                    "reduce the admitted surface partition size",
-                    detail,
-                )
-            })
+    crate::accounting::checked_sum_lengths(lengths).ok_or_else(|| {
+        surface_failure(
+            MeshingFailureCategory::InternalInvariantViolation,
+            None,
+            "reduce the admitted surface partition size",
+            detail,
+        )
     })
 }
 

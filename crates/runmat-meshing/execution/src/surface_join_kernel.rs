@@ -192,7 +192,7 @@ fn inputs(
     ))
 }
 
-fn partition_record(
+pub(crate) fn partition_record(
     publication: &PreparedMeshingResultPublication,
     geometry_digest: StableDigest,
     curve_digest: StableDigest,

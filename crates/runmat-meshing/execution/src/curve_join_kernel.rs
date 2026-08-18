@@ -4,12 +4,12 @@ use runmat_meshing_core::{
     MeshingStageKind, MeshingStageResultKind, StableDigest,
 };
 use runmat_meshing_curve::{
-    decode_shared_curve_batch, derive_curve_geometry_metric, encode_shared_curve_mesh,
-    join_shared_curve_batches, validate_shared_curve_geometry, ResolvedCurveMetricField,
-    SharedCurveBatch, SHARED_CURVE_BATCH_SCHEMA_VERSION, SHARED_CURVE_MESH_SCHEMA_VERSION,
+    decode_shared_curve_batch, encode_shared_curve_mesh, join_shared_curve_batches,
+    validate_shared_curve_geometry, SharedCurveBatch, SHARED_CURVE_BATCH_SCHEMA_VERSION,
+    SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
-use crate::curve_kernel::{curve_failure, curve_options, map_curve_error};
+use crate::curve_kernel::{curve_failure, curve_options, map_curve_error, resolved_curve_metric};
 use crate::{
     ExactCurveEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
     MeshingStageKernel, PortableCurveEvaluatorProvider, PreparedExactGeometryObjects,
@@ -97,17 +97,12 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel
             .evaluator(geometry)
             .map_err(|error| invalid_partition(&error.to_string()))?;
         let control = invocation.control.geometry_evaluation_control();
-        let metric_request = derive_curve_geometry_metric(
-            &geometry.topology,
+        let metric = resolved_curve_metric(
+            geometry,
             evaluator.as_ref(),
             &control,
-            &invocation.host.resolved_request.metric,
-            invocation.host.resolved_request.quality.curve,
-            invocation.host.resolved_request.quality.surface,
-        )
-        .map_err(map_curve_error)?;
-        let metric = ResolvedCurveMetricField::new(&geometry.topology, &metric_request)
-            .map_err(map_curve_error)?;
+            &invocation.host.resolved_request,
+        )?;
         let options = curve_options(invocation.host);
         let report = validate_shared_curve_geometry(
             &mesh,

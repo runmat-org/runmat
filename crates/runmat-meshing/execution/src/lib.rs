@@ -3,9 +3,11 @@
 //! Meshing owns logical records, stage identity, and manifest closure. This crate only maps that
 //! immutable closure onto execution artifact objects and, in later modules, execution workloads.
 
+mod accounting;
 mod budget;
 mod curve_join_kernel;
 mod curve_kernel;
+mod curve_refinement_kernel;
 mod diagnostic;
 mod dispatcher;
 mod error;
@@ -45,6 +47,7 @@ pub use curve_kernel::{
     ExactCurveEvaluatorProvider, ExactCurveGeometryEvaluation, ExactCurveStageKernel,
     PortableCurveEvaluatorProvider,
 };
+pub use curve_refinement_kernel::ExactCurveRefinementKernel;
 pub use dispatcher::MeshingKernelDispatcher;
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
 pub use faceted_geometry_objects::{

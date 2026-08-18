@@ -7,8 +7,8 @@ use runmat_geometry_core::{
 };
 use runmat_meshing_core::{
     MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry, MeshingDiagnosticValue,
-    MeshingFailure, MeshingFailureCategory, MeshingOperation, MeshingStageKind, StableDigest,
-    MESHING_FAILURE_SCHEMA_VERSION,
+    MeshingFailure, MeshingFailureCategory, MeshingOperation, MeshingRequest, MeshingStageKind,
+    StableDigest, MESHING_FAILURE_SCHEMA_VERSION,
 };
 use runmat_meshing_curve::{
     derive_curve_geometry_metric, discretize_shared_curve_partition, encode_shared_curve_batch,
@@ -105,17 +105,12 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
                 )
             })?;
         let control = invocation.control.geometry_evaluation_control();
-        let metric_request = derive_curve_geometry_metric(
-            &geometry.topology,
+        let metric = resolved_curve_metric(
+            geometry,
             evaluator.as_ref(),
             &control,
-            &invocation.host.resolved_request.metric,
-            invocation.host.resolved_request.quality.curve,
-            invocation.host.resolved_request.quality.surface,
-        )
-        .map_err(map_curve_error)?;
-        let metric = ResolvedCurveMetricField::new(&geometry.topology, &metric_request)
-            .map_err(map_curve_error)?;
+            &invocation.host.resolved_request,
+        )?;
         if invocation.host.resolved_request.resources.maximum_nodes < 2 {
             return Err(curve_failure(
                 MeshingFailureCategory::NodeBudgetExceeded,
@@ -266,6 +261,24 @@ pub(crate) fn shared_curve_failure_category(kind: SharedCurveErrorKind) -> Meshi
         | SharedCurveErrorKind::GeometricMismatch => MeshingFailureCategory::InvalidGeometry,
         SharedCurveErrorKind::GeometryEvaluation(_) => MeshingFailureCategory::NumericalFailure,
     }
+}
+
+pub(crate) fn resolved_curve_metric(
+    geometry: &PreparedExactGeometryObjects,
+    evaluator: &dyn ExactCurveGeometryEvaluation,
+    control: &crate::MeshingGeometryEvaluationControl<'_>,
+    request: &MeshingRequest,
+) -> Result<ResolvedCurveMetricField, Box<MeshingFailure>> {
+    let metric_request = derive_curve_geometry_metric(
+        &geometry.topology,
+        evaluator,
+        control,
+        &request.metric,
+        request.quality.curve,
+        request.quality.surface,
+    )
+    .map_err(map_curve_error)?;
+    ResolvedCurveMetricField::new(&geometry.topology, &metric_request).map_err(map_curve_error)
 }
 
 pub(super) fn curve_failure(
