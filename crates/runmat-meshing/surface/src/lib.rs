@@ -69,15 +69,16 @@ pub use recovery::{
 };
 pub use refinement::{
     classify_exact_face_refinement_candidate, derive_exact_face_feature_collars,
-    insert_exact_face_refinement_candidate, refine_exact_face_until_blocked,
-    select_exact_face_refinement_candidate, split_exact_face_chart_cut,
-    validate_exact_face_chart_cut_split_result, validate_exact_face_feature_collars,
-    ExactChartCutSplit, ExactChartCutSplitImage, ExactFaceCandidateDisposition,
-    ExactFaceFeatureCollar, ExactFaceFeatureCollars, ExactFaceRefinedMesh,
-    ExactFaceRefinedTopology, ExactFaceRefinementCandidate, ExactFaceRefinementContext,
-    ExactFaceRefinementError, ExactFaceRefinementErrorKind, ExactFaceRefinementOptions,
-    ExactFaceRefinementOutcome, ExactFaceRefinementPolicy, ExactFaceRefinementReason,
-    ExactProtectedSegmentSplit,
+    insert_exact_face_refinement_candidate, refine_exact_face_chart_until_blocked,
+    refine_exact_face_until_blocked, select_exact_face_refinement_candidate,
+    split_exact_face_chart_cut, validate_exact_face_chart_cut_split_result,
+    validate_exact_face_feature_collars, ExactChartCutSplit, ExactChartCutSplitImage,
+    ExactFaceCandidateDisposition, ExactFaceChartRefinedMesh, ExactFaceChartRefinementOptions,
+    ExactFaceChartRefinementOutcome, ExactFaceFeatureCollar, ExactFaceFeatureCollars,
+    ExactFaceRefinedMesh, ExactFaceRefinedTopology, ExactFaceRefinementCandidate,
+    ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
+    ExactFaceRefinementOptions, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
+    ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,

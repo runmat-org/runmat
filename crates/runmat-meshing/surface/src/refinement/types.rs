@@ -83,6 +83,11 @@ pub struct ExactFaceRefinementOptions {
     pub maximum_interior_insertions: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExactFaceChartRefinementOptions {
+    pub maximum_chart_cut_splits: u32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactFaceRefinementPolicy {
     pub quality: SurfaceQualityTargets,
@@ -125,12 +130,38 @@ impl Default for ExactFaceRefinementOptions {
     }
 }
 
+impl Default for ExactFaceChartRefinementOptions {
+    fn default() -> Self {
+        Self {
+            maximum_chart_cut_splits: 1_000_000,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceRefinedMesh {
     pub topology: ExactFaceRefinedTopology,
     pub geometry: ExactFaceGeometry,
     pub feature_collars: ExactFaceFeatureCollars,
     pub interior_insertion_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceChartRefinedMesh {
+    pub chart_id: runmat_meshing_core::StableDigest,
+    pub mesh: ExactFaceRefinedMesh,
+    pub chart_cut_split_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExactFaceChartRefinementOutcome {
+    Converged(Box<ExactFaceChartRefinedMesh>),
+    RequiresCurveSplit {
+        chart_id: runmat_meshing_core::StableDigest,
+        split: Box<ExactProtectedSegmentSplit>,
+        completed_interior_insertions: u32,
+        completed_chart_cut_splits: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

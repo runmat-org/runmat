@@ -1,8 +1,7 @@
 use runmat_meshing_core::{predicate::orient2d, MeshingCancellationSignal, PredicateSign};
 
 use crate::{
-    carve_exact_face_domain, exact_face_interior_node_id, recover_exact_face_segments,
-    triangulate_exact_face_pslg, validate_exact_face_trimmed_delaunay, ExactFaceBoundary,
+    exact_face_interior_node_id, validate_exact_face_trimmed_delaunay, ExactFaceBoundary,
     ExactFaceDelaunayError, ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFacePslg,
     ExactFacePslgVertex, ExactFaceTrimmedDelaunay,
 };
@@ -29,18 +28,40 @@ pub fn insert_exact_face_refinement_candidate(
         options,
     )
     .map_err(map_delaunay)?;
+    insert_validated_face_refinement_candidate(topology, candidate, cancellation, options)
+}
+
+pub(crate) fn insert_validated_face_refinement_candidate(
+    topology: &ExactFaceRefinedTopology,
+    candidate: &ExactFaceRefinementCandidate,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<ExactFaceRefinedTopology, ExactFaceRefinementError> {
+    let pslg = &topology.pslg;
+    crate::exact_cdt::validate_face_trimmed_topology(
+        &topology.trimmed,
+        &topology.constrained,
+        pslg,
+        cancellation,
+        options,
+    )
+    .map_err(map_delaunay)?;
     validate_candidate(pslg, &topology.trimmed, candidate)?;
 
     let refined_pslg = append_interior_vertex(pslg, candidate.uv)?;
-    let delaunay = triangulate_exact_face_pslg(&refined_pslg, boundary, cancellation, options)
-        .map_err(map_delaunay)?;
-    let refined_constrained =
-        recover_exact_face_segments(&delaunay, &refined_pslg, boundary, cancellation, options)
+    let delaunay =
+        crate::exact_cdt::triangulate_validated_face_pslg(&refined_pslg, cancellation, options)
             .map_err(map_delaunay)?;
-    let refined_trimmed = carve_exact_face_domain(
+    let refined_constrained = crate::exact_cdt::recover_validated_face_segments(
+        &delaunay,
+        &refined_pslg,
+        cancellation,
+        options,
+    )
+    .map_err(map_delaunay)?;
+    let refined_trimmed = crate::exact_cdt::carve_validated_face_domain(
         &refined_constrained,
         &refined_pslg,
-        boundary,
         cancellation,
         options,
     )

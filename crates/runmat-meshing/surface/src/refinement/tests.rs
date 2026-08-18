@@ -474,6 +474,48 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         panic!("permissive exact-circle refinement must converge")
     };
     assert_eq!(converged.interior_insertion_count, 0);
+    let chart_id = node(77);
+    let chart = crate::ExactFaceChart {
+        chart_id,
+        source_face_id: pslg.source_face_id.clone(),
+        periodicity: [None, None],
+        boundary: face_boundary.clone(),
+        pslg: pslg.clone(),
+    };
+    let chart_domain = crate::ExactFaceChartConstrainedDomain {
+        chart_id,
+        delaunay: delaunay.clone(),
+        constrained: constrained.clone(),
+        trimmed: trimmed.clone(),
+    };
+    let chart_converged = refine_exact_face_chart_until_blocked(
+        &chart,
+        &chart_domain,
+        ExactFaceRefinementContext::new(
+            &topology,
+            &coarse_request,
+            &evaluator,
+            &Control,
+            &NeverCancelled,
+        ),
+        ExactFaceRefinementPolicy {
+            quality: permissive_quality,
+            delaunay: options,
+            refinement: ExactFaceRefinementOptions {
+                maximum_interior_insertions: 1,
+            },
+        },
+        ExactFaceChartRefinementOptions {
+            maximum_chart_cut_splits: 1,
+        },
+    )
+    .unwrap();
+    let ExactFaceChartRefinementOutcome::Converged(chart_converged) = chart_converged else {
+        panic!("permissive admitted chart refinement must converge")
+    };
+    assert_eq!(chart_converged.chart_id, chart_id);
+    assert_eq!(chart_converged.mesh.interior_insertion_count, 0);
+    assert_eq!(chart_converged.chart_cut_split_count, 0);
     let acceptance_options = crate::ExactFaceAcceptanceOptions {
         minimum_subdivision_depth: 1,
         maximum_subdivision_depth: 2,
@@ -572,6 +614,41 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     };
     assert_eq!(completed_interior_insertions, 0);
 
+    let chart_blocked = refine_exact_face_chart_until_blocked(
+        &chart,
+        &chart_domain,
+        ExactFaceRefinementContext::new(
+            &topology,
+            &coarse_request,
+            &evaluator,
+            &Control,
+            &NeverCancelled,
+        ),
+        ExactFaceRefinementPolicy {
+            quality: strict_aspect,
+            delaunay: options,
+            refinement: ExactFaceRefinementOptions {
+                maximum_interior_insertions: 1,
+            },
+        },
+        ExactFaceChartRefinementOptions {
+            maximum_chart_cut_splits: 1,
+        },
+    )
+    .unwrap();
+    let ExactFaceChartRefinementOutcome::RequiresCurveSplit {
+        chart_id: blocked_chart_id,
+        completed_interior_insertions,
+        completed_chart_cut_splits,
+        ..
+    } = chart_blocked
+    else {
+        panic!("boundary-adjacent chart refinement must request a shared-curve split")
+    };
+    assert_eq!(blocked_chart_id, chart_id);
+    assert_eq!(completed_interior_insertions, 0);
+    assert_eq!(completed_chart_cut_splits, 0);
+
     assert_eq!(
         refine_exact_face_until_blocked(
             face_boundary,
@@ -594,6 +671,60 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         .unwrap_err()
         .kind,
         ExactFaceRefinementErrorKind::InvalidOptions
+    );
+    assert_eq!(
+        refine_exact_face_chart_until_blocked(
+            &chart,
+            &chart_domain,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            ExactFaceRefinementPolicy {
+                quality: permissive_quality,
+                delaunay: options,
+                refinement: ExactFaceRefinementOptions {
+                    maximum_interior_insertions: 1,
+                },
+            },
+            ExactFaceChartRefinementOptions {
+                maximum_chart_cut_splits: 0,
+            },
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::InvalidOptions
+    );
+    let mut mismatched_chart_domain = chart_domain;
+    mismatched_chart_domain.chart_id = node(78);
+    assert_eq!(
+        refine_exact_face_chart_until_blocked(
+            &chart,
+            &mismatched_chart_domain,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            ExactFaceRefinementPolicy {
+                quality: permissive_quality,
+                delaunay: options,
+                refinement: ExactFaceRefinementOptions {
+                    maximum_interior_insertions: 1,
+                },
+            },
+            ExactFaceChartRefinementOptions {
+                maximum_chart_cut_splits: 1,
+            },
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::InvalidGeometry
     );
 }
 

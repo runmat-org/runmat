@@ -5,11 +5,18 @@ use crate::{
 
 use super::{
     classify_exact_face_refinement_candidate, derive_exact_face_feature_collars,
-    insert_exact_face_refinement_candidate, select_exact_face_refinement_candidate,
+    insert_exact_face_refinement_candidate, insert_validated_face_refinement_candidate,
+    select_exact_face_refinement_candidate, split_exact_face_chart_cut,
     ExactFaceCandidateDisposition, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
     ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
     ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
 };
+
+#[derive(Clone, Copy)]
+pub(crate) enum ExactFaceRefinementDomain<'a> {
+    ExactBoundary(&'a ExactFaceBoundary),
+    Chart,
+}
 
 pub fn refine_exact_face_until_blocked(
     boundary: &ExactFaceBoundary,
@@ -17,6 +24,23 @@ pub fn refine_exact_face_until_blocked(
     context: ExactFaceRefinementContext<'_>,
     policy: ExactFaceRefinementPolicy,
 ) -> Result<ExactFaceRefinementOutcome, ExactFaceRefinementError> {
+    refine_exact_face_domain_until_blocked(
+        ExactFaceRefinementDomain::ExactBoundary(boundary),
+        initial,
+        context,
+        policy,
+        0,
+    )
+    .map(|(outcome, _)| outcome)
+}
+
+pub(crate) fn refine_exact_face_domain_until_blocked(
+    domain: ExactFaceRefinementDomain<'_>,
+    initial: &ExactFaceRefinedTopology,
+    context: ExactFaceRefinementContext<'_>,
+    policy: ExactFaceRefinementPolicy,
+    maximum_chart_cut_splits: u32,
+) -> Result<(ExactFaceRefinementOutcome, u32), ExactFaceRefinementError> {
     policy.quality.validate().map_err(|error| {
         ExactFaceRefinementError::new(
             ExactFaceRefinementErrorKind::InvalidQuality,
@@ -31,8 +55,16 @@ pub fn refine_exact_face_until_blocked(
             "refinement and Delaunay operational limits must be nonzero",
         ));
     }
+    if matches!(domain, ExactFaceRefinementDomain::Chart) && maximum_chart_cut_splits == 0 {
+        return Err(ExactFaceRefinementError::new(
+            ExactFaceRefinementErrorKind::InvalidOptions,
+            &initial.pslg.source_face_id,
+            "chart-cut split hard limit must be nonzero",
+        ));
+    }
     let mut current = initial.clone();
     let mut insertion_count = 0u32;
+    let mut chart_cut_split_count = 0u32;
     loop {
         let geometry = evaluate_exact_face_geometry(
             &current.trimmed,
@@ -61,14 +93,15 @@ pub fn refine_exact_face_until_blocked(
             policy.quality,
         )?
         else {
-            return Ok(ExactFaceRefinementOutcome::Converged(Box::new(
-                ExactFaceRefinedMesh {
+            return Ok((
+                ExactFaceRefinementOutcome::Converged(Box::new(ExactFaceRefinedMesh {
                     topology: current,
                     geometry,
                     feature_collars: collars,
                     interior_insertion_count: insertion_count,
-                },
-            )));
+                })),
+                chart_cut_split_count,
+            ));
         };
         match classify_exact_face_refinement_candidate(
             &candidate,
@@ -79,17 +112,41 @@ pub fn refine_exact_face_until_blocked(
             context.geometry_control,
         )? {
             ExactFaceCandidateDisposition::SplitProtectedSegment(split) => {
-                return Ok(ExactFaceRefinementOutcome::RequiresCurveSplit {
-                    split,
-                    completed_interior_insertions: insertion_count,
-                });
+                return Ok((
+                    ExactFaceRefinementOutcome::RequiresCurveSplit {
+                        split,
+                        completed_interior_insertions: insertion_count,
+                    },
+                    chart_cut_split_count,
+                ));
             }
-            ExactFaceCandidateDisposition::SplitChartCut(split) => {
-                return Ok(ExactFaceRefinementOutcome::RequiresChartCutSplit {
-                    split,
-                    completed_interior_insertions: insertion_count,
-                });
-            }
+            ExactFaceCandidateDisposition::SplitChartCut(split) => match domain {
+                ExactFaceRefinementDomain::ExactBoundary(_) => {
+                    return Ok((
+                        ExactFaceRefinementOutcome::RequiresChartCutSplit {
+                            split,
+                            completed_interior_insertions: insertion_count,
+                        },
+                        chart_cut_split_count,
+                    ));
+                }
+                ExactFaceRefinementDomain::Chart => {
+                    if chart_cut_split_count >= maximum_chart_cut_splits {
+                        return Err(ExactFaceRefinementError::new(
+                            ExactFaceRefinementErrorKind::ResourceLimit,
+                            &current.pslg.source_face_id,
+                            "exact face refinement exceeded its chart-cut split hard limit",
+                        ));
+                    }
+                    current = split_exact_face_chart_cut(
+                        &current,
+                        &split,
+                        context.cancellation,
+                        policy.delaunay,
+                    )?;
+                    chart_cut_split_count += 1;
+                }
+            },
             ExactFaceCandidateDisposition::Insert => {
                 if insertion_count >= policy.refinement.maximum_interior_insertions {
                     return Err(ExactFaceRefinementError::new(
@@ -98,13 +155,23 @@ pub fn refine_exact_face_until_blocked(
                         "exact face refinement exceeded its interior insertion hard limit",
                     ));
                 }
-                current = insert_exact_face_refinement_candidate(
-                    boundary,
-                    &current,
-                    &candidate,
-                    context.cancellation,
-                    policy.delaunay,
-                )?;
+                current = match domain {
+                    ExactFaceRefinementDomain::ExactBoundary(boundary) => {
+                        insert_exact_face_refinement_candidate(
+                            boundary,
+                            &current,
+                            &candidate,
+                            context.cancellation,
+                            policy.delaunay,
+                        )?
+                    }
+                    ExactFaceRefinementDomain::Chart => insert_validated_face_refinement_candidate(
+                        &current,
+                        &candidate,
+                        context.cancellation,
+                        policy.delaunay,
+                    )?,
+                };
                 insertion_count += 1;
             }
         }
