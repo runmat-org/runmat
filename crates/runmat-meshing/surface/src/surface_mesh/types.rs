@@ -1,0 +1,87 @@
+use runmat_geometry_core::PersistentEntityId;
+use runmat_meshing_core::MeshingPartitionDescriptor;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    ExactFaceMesh, ExactFaceMeshBoundarySegment, ExactFaceMeshNode, ExactFaceMeshTriangle,
+};
+
+pub const EXACT_FACE_MESH_BATCH_SCHEMA_VERSION: u16 = 1;
+pub const EXACT_SURFACE_MESH_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactFaceMeshBatch {
+    pub schema_version: u16,
+    pub partition: MeshingPartitionDescriptor,
+    pub faces: Vec<ExactFaceMesh>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactSurfaceMesh {
+    pub schema_version: u16,
+    pub face_ids: Vec<PersistentEntityId>,
+    pub nodes: Vec<ExactFaceMeshNode>,
+    pub triangles: Vec<ExactFaceMeshTriangle>,
+    pub boundary_segments: Vec<ExactFaceMeshBoundarySegment>,
+    pub shells: Vec<ExactSurfaceShellEvidence>,
+    pub maximum_chordal_deviation_m: f64,
+    pub maximum_normal_deviation_rad: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactSurfaceShellEvidence {
+    pub source_shell_id: PersistentEntityId,
+    pub face_count: u64,
+    pub shared_edge_count: u64,
+    pub open_edge_count: u64,
+    pub nonmanifold_edge_count: u64,
+    pub is_sheet_shell: bool,
+    pub is_watertight: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExactSurfaceMeshErrorKind {
+    InvalidOptions,
+    InvalidInput,
+    InvalidEncoding,
+    ResourceLimit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExactSurfaceMeshError {
+    pub kind: ExactSurfaceMeshErrorKind,
+    pub source_face_id: Option<Box<PersistentEntityId>>,
+    pub source_shell_id: Option<Box<PersistentEntityId>>,
+    pub reason: String,
+}
+
+impl ExactSurfaceMeshError {
+    pub(super) fn new(kind: ExactSurfaceMeshErrorKind, reason: impl Into<String>) -> Self {
+        Self {
+            kind,
+            source_face_id: None,
+            source_shell_id: None,
+            reason: reason.into(),
+        }
+    }
+
+    pub(super) fn with_face(mut self, face_id: &PersistentEntityId) -> Self {
+        self.source_face_id = Some(Box::new(face_id.clone()));
+        self
+    }
+}
+
+impl std::fmt::Display for ExactSurfaceMeshError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "exact surface mesh {:?} for face {:?} shell {:?}: {}",
+            self.kind, self.source_face_id, self.source_shell_id, self.reason
+        )
+    }
+}
+
+impl std::error::Error for ExactSurfaceMeshError {}

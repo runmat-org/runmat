@@ -1,5 +1,6 @@
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{StableDigest, SurfaceQualityTargets};
+use serde::{Deserialize, Serialize};
 
 use crate::{ExactFaceAcceptanceErrorKind, ExactFaceAcceptanceOptions, ExactFaceRefinementContext};
 
@@ -43,41 +44,56 @@ impl Default for ExactFaceJoinOptions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+pub const EXACT_FACE_MESH_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactFaceMesh {
+    pub schema_version: u16,
     pub source_face_id: PersistentEntityId,
     pub nodes: Vec<ExactFaceMeshNode>,
     pub triangles: Vec<ExactFaceMeshTriangle>,
     pub boundary_segments: Vec<ExactFaceMeshBoundarySegment>,
-    pub joined_chart_cut_count: u32,
-    pub joined_chart_cut_piece_count: u32,
+    pub joined_chart_cuts: Vec<ExactFaceMeshJoinedCut>,
     pub maximum_chordal_deviation_m: f64,
     pub maximum_normal_deviation_rad: f64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactFaceMeshJoinedCut {
+    pub cut_id: StableDigest,
+    pub piece_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactFaceMeshNode {
     pub node_id: StableDigest,
     pub point_m: [f64; 3],
     pub uses: Vec<ExactFaceMeshNodeUse>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactFaceMeshNodeUse {
+    pub source_face_id: PersistentEntityId,
     pub chart_id: StableDigest,
     pub uv: [f64; 2],
     pub evaluator_uv: [f64; 2],
     pub exact_edge_parameters: Vec<ExactFaceMeshEdgeParameter>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactFaceMeshEdgeParameter {
     pub source_coedge_id: PersistentEntityId,
     pub source_edge_id: PersistentEntityId,
     pub parameter: f64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactFaceMeshTriangle {
     pub triangle_id: StableDigest,
     pub chart_id: StableDigest,
@@ -95,7 +111,8 @@ pub struct ExactFaceMeshTriangle {
     pub accepted_normal_deviation_rad: f64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactFaceMeshBoundarySegment {
     pub source_coedge_id: PersistentEntityId,
     pub source_edge_id: PersistentEntityId,

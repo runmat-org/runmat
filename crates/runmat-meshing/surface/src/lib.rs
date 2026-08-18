@@ -9,6 +9,7 @@ mod face_geometry;
 mod face_mesh;
 mod math;
 mod refinement;
+mod surface_mesh;
 
 pub mod contract;
 pub mod exact_boundary;
@@ -60,7 +61,8 @@ pub use face_geometry::{
 pub use face_mesh::{
     join_exact_face_charts, validate_exact_face_mesh, ExactFaceJoinContext, ExactFaceJoinError,
     ExactFaceJoinErrorKind, ExactFaceJoinOptions, ExactFaceMesh, ExactFaceMeshBoundarySegment,
-    ExactFaceMeshEdgeParameter, ExactFaceMeshNode, ExactFaceMeshNodeUse, ExactFaceMeshTriangle,
+    ExactFaceMeshEdgeParameter, ExactFaceMeshJoinedCut, ExactFaceMeshNode, ExactFaceMeshNodeUse,
+    ExactFaceMeshTriangle, EXACT_FACE_MESH_SCHEMA_VERSION,
 };
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
@@ -86,6 +88,12 @@ pub use refinement::{
     ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
     ExactFaceRefinementOptions, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
     ExactFaceRefinementReason, ExactProtectedSegmentSplit,
+};
+pub use surface_mesh::{
+    build_exact_face_mesh_batch, decode_exact_face_mesh_batch, encode_exact_face_mesh_batch,
+    face_partition_descriptors, validate_exact_face_mesh_batch, ExactFaceMeshBatch,
+    ExactSurfaceMesh, ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence,
+    EXACT_FACE_MESH_BATCH_SCHEMA_VERSION, EXACT_SURFACE_MESH_SCHEMA_VERSION,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,

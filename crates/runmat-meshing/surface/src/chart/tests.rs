@@ -109,11 +109,6 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     inner.source_wire_id = entity(PersistentEntityKind::Wire, "inner-wire");
     inner.orientation = TopologicalOrientation::Reversed;
     for (index, segment) in inner.segments.iter_mut().enumerate() {
-        segment.source_coedge_id = entity(
-            PersistentEntityKind::Coedge,
-            &format!("inner-coedge-{index}"),
-        );
-        segment.source_edge_id = entity(PersistentEntityKind::Edge, &format!("inner-edge-{index}"));
         segment.node_ids = [node(index as u8 + 5), node((index as u8 + 1) % 4 + 5)];
     }
     annulus.inner_loops.push(inner);
@@ -261,8 +256,8 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     .unwrap();
     assert_eq!(joined.source_face_id, annulus.source_face_id);
     assert_eq!(joined.boundary_segments.len(), 8);
-    assert_eq!(joined.joined_chart_cut_count, 1);
-    assert_eq!(joined.joined_chart_cut_piece_count, 1);
+    assert_eq!(joined.joined_chart_cuts.len(), 1);
+    assert_eq!(joined.joined_chart_cuts[0].piece_count, 1);
     assert!(joined
         .nodes
         .iter()
@@ -307,6 +302,52 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
                     .sum::<f64>()
                     < -0.999_999
         }));
+    let face_partitions = crate::face_partition_descriptors(&topology, 1).unwrap();
+    assert_eq!(face_partitions.len(), 1);
+    let face_batch = crate::build_exact_face_mesh_batch(
+        &topology,
+        face_partitions[0].clone(),
+        vec![joined.clone()],
+    )
+    .unwrap();
+    crate::validate_exact_face_mesh_batch(&face_batch, &topology).unwrap();
+    let encoded_batch = crate::encode_exact_face_mesh_batch(&face_batch, &topology).unwrap();
+    assert_eq!(
+        crate::decode_exact_face_mesh_batch(&encoded_batch, &topology).unwrap(),
+        face_batch
+    );
+    assert_eq!(
+        crate::surface_mesh::decode_with_byte_limit(
+            &encoded_batch,
+            &topology,
+            encoded_batch.len() - 1,
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
+    let mut corrupt_batch = encoded_batch;
+    corrupt_batch.push(0);
+    assert_eq!(
+        crate::decode_exact_face_mesh_batch(&corrupt_batch, &topology)
+            .unwrap_err()
+            .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
+    let mut tampered_batch = face_batch;
+    tampered_batch.schema_version += 1;
+    assert_eq!(
+        crate::validate_exact_face_mesh_batch(&tampered_batch, &topology)
+            .unwrap_err()
+            .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidInput
+    );
+    assert_eq!(
+        crate::face_partition_descriptors(&topology, 0)
+            .unwrap_err()
+            .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidOptions
+    );
     assert_eq!(
         crate::join_exact_face_charts(
             &annulus_charts,

@@ -11,11 +11,12 @@ use crate::{
 };
 
 use super::{
+    admission::validate_exact_face_mesh_contract,
     identity::{canonical_triangle, exact_face_triangle_id, rotate},
     lineage::{node_edge_parameters, validate_trim_lineage},
     ExactFaceJoinContext, ExactFaceJoinError, ExactFaceJoinErrorKind, ExactFaceJoinOptions,
-    ExactFaceMesh, ExactFaceMeshBoundarySegment, ExactFaceMeshNode, ExactFaceMeshNodeUse,
-    ExactFaceMeshTriangle,
+    ExactFaceMesh, ExactFaceMeshBoundarySegment, ExactFaceMeshJoinedCut, ExactFaceMeshNode,
+    ExactFaceMeshNodeUse, ExactFaceMeshTriangle, EXACT_FACE_MESH_SCHEMA_VERSION,
 };
 
 pub fn join_exact_face_charts(
@@ -88,6 +89,7 @@ pub fn join_exact_face_charts(
                 ));
             }
             let use_record = ExactFaceMeshNodeUse {
+                source_face_id: charts.source_face_id.clone(),
                 chart_id: chart.chart_id,
                 uv: vertex.evaluation.uv,
                 evaluator_uv: vertex.evaluation.evaluator_uv,
@@ -204,6 +206,7 @@ pub fn join_exact_face_charts(
     }
     validate_cut_pieces(&charts.source_face_id, &cut_pieces)?;
     let result = ExactFaceMesh {
+        schema_version: EXACT_FACE_MESH_SCHEMA_VERSION,
         source_face_id: charts.source_face_id.clone(),
         nodes: nodes
             .into_iter()
@@ -215,21 +218,30 @@ pub fn join_exact_face_charts(
             .collect(),
         triangles,
         boundary_segments,
-        joined_chart_cut_count: cut_ids.len().try_into().map_err(|_| {
-            limit(
-                &charts.source_face_id,
-                "exact face join cut count exceeds its representation",
-            )
-        })?,
-        joined_chart_cut_piece_count: cut_pieces.len().try_into().map_err(|_| {
-            limit(
-                &charts.source_face_id,
-                "exact face join cut-piece count exceeds its representation",
-            )
-        })?,
+        joined_chart_cuts: cut_ids
+            .into_iter()
+            .map(|cut_id| {
+                let piece_count = cut_pieces
+                    .keys()
+                    .filter(|(candidate, _)| *candidate == cut_id)
+                    .count()
+                    .try_into()
+                    .map_err(|_| {
+                        limit(
+                            &charts.source_face_id,
+                            "exact face join cut-piece count exceeds its representation",
+                        )
+                    })?;
+                Ok(ExactFaceMeshJoinedCut {
+                    cut_id,
+                    piece_count,
+                })
+            })
+            .collect::<Result<Vec<_>, ExactFaceJoinError>>()?,
         maximum_chordal_deviation_m,
         maximum_normal_deviation_rad,
     };
+    validate_exact_face_mesh_contract(&result, context.refinement.topology)?;
     Ok(result)
 }
 
