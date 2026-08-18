@@ -1,4 +1,7 @@
-use runmat_geometry_core::{ExactBRepTopology, PersistentEntityId};
+use runmat_geometry_core::{
+    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator,
+    ExactTrimClassifier, GeometryEvaluationControl, PersistentEntityId,
+};
 use runmat_meshing_core::{
     validate_solver_mesh_topology, MeshingCancellationSignal, MeshingRequest, SolverMeshTopology,
 };
@@ -14,6 +17,7 @@ mod classification;
 mod construction;
 mod error;
 mod inventories;
+mod order_elevation;
 mod parameters;
 
 pub use error::{DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind};
@@ -31,12 +35,30 @@ pub struct DelaunaySolverTopologyInput<'a> {
     pub volume_options: DelaunayVolumeMeshOptions,
     pub request: &'a MeshingRequest,
     pub region_materials: &'a [DelaunayRegionMaterial],
+    pub exact_evaluation: Option<DelaunayExactEvaluation<'a>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub trait DelaunayExactEvaluator:
+    ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ExactTrimClassifier
+{
+}
+
+impl<T> DelaunayExactEvaluator for T where
+    T: ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ExactTrimClassifier
+{
+}
+
+#[derive(Clone, Copy)]
+pub struct DelaunayExactEvaluation<'a> {
+    pub evaluator: &'a dyn DelaunayExactEvaluator,
+    pub control: &'a dyn GeometryEvaluationControl,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DelaunaySolverTopologyOptions {
     pub maximum_boundary_faces: u64,
     pub maximum_boundary_edges: u64,
+    pub trim_boundary_tolerance_uv: f64,
     pub cancellation_check_interval: u64,
 }
 
@@ -45,24 +67,19 @@ impl Default for DelaunaySolverTopologyOptions {
         Self {
             maximum_boundary_faces: 2_000_000_000,
             maximum_boundary_edges: 3_000_000_000,
+            trim_boundary_tolerance_uv: 1.0e-10,
             cancellation_check_interval: 1_024,
         }
     }
 }
 
-/// Projects a validated linear CDT into the single canonical solver-topology contract.
+/// Projects a validated linear CDT into the requested canonical solver-topology order.
 pub fn build_delaunay_solver_topology(
     input: DelaunaySolverTopologyInput<'_>,
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<SolverMeshTopology, DelaunaySolverTopologyError> {
     validate_options(options)?;
-    if input.request.element_order != runmat_meshing_core::ElementOrder::Tet4 {
-        return Err(error::failure(
-            DelaunaySolverTopologyErrorKind::UnsupportedOrder,
-            "linear CDT projection requires Tet4; Tet10 must use deterministic order elevation",
-        ));
-    }
     input.request.validate().map_err(error::request)?;
     validate_delaunay_volume_mesh(
         input.exact_topology,
@@ -73,7 +90,13 @@ pub fn build_delaunay_solver_topology(
         cancellation,
     )
     .map_err(|failure| error::volume(failure.kind, failure.to_string()))?;
-    let result = construction::construct(&input, options, cancellation)?;
+    let linear = construction::construct(&input, options, cancellation)?;
+    let result = match input.request.element_order {
+        runmat_meshing_core::ElementOrder::Tet4 => linear,
+        runmat_meshing_core::ElementOrder::Tet10 => {
+            order_elevation::elevate(&input, linear, options, cancellation)?
+        }
+    };
     validate_solver_mesh_topology(&result, input.request).map_err(error::solver)?;
     Ok(result)
 }
@@ -83,6 +106,8 @@ fn validate_options(
 ) -> Result<(), DelaunaySolverTopologyError> {
     if options.maximum_boundary_faces == 0
         || options.maximum_boundary_edges == 0
+        || !options.trim_boundary_tolerance_uv.is_finite()
+        || options.trim_boundary_tolerance_uv < 0.0
         || options.cancellation_check_interval == 0
     {
         return Err(error::failure(
@@ -124,3 +149,7 @@ pub(super) fn require_capacity(
 #[cfg(test)]
 #[path = "solver_topology/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "solver_topology/test_evaluator.rs"]
+mod test_evaluator;

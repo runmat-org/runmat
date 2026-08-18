@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign},
-    BoundaryFaceRole, BoundaryTriangleOrder, MeshingCancellationSignal, SolverBoundaryEdge,
-    SolverBoundaryFace, StableDigest,
+    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, MeshingCancellationSignal,
+    SolverBoundaryEdge, SolverBoundaryFace, StableDigest,
 };
 
 use super::{
@@ -200,7 +200,8 @@ pub(super) fn build_edges(
             }
             Ok(SolverBoundaryEdge {
                 edge_id: index as u64 + 1,
-                node_ids,
+                order: BoundaryEdgeOrder::Line2,
+                node_ids: node_ids.into(),
                 adjacent_boundary_face_ids: face_ids.into_iter().collect(),
                 provenance: provenance.into_iter().collect(),
             })

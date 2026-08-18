@@ -122,7 +122,8 @@ pub(super) fn artifact() -> SolverMeshArtifact {
     .map(
         |(index, (node_ids, adjacent_boundary_face_ids))| SolverBoundaryEdge {
             edge_id: index as u64 + 20,
-            node_ids,
+            order: BoundaryEdgeOrder::Line2,
+            node_ids: node_ids.into(),
             adjacent_boundary_face_ids,
             provenance: vec![entity(PersistentEntityKind::Edge, &format!("edge:{index}"))],
         },
@@ -381,6 +382,114 @@ fn solver_node_exact_parameters_are_typed_bounded_and_canonical() {
     assert_eq!(
         validate(&invalid).unwrap_err().field,
         "mesh node exact parameters"
+    );
+}
+
+#[test]
+fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
+    let mut quadratic = artifact();
+    quadratic.resolved_request.element_order = ElementOrder::Tet10;
+    let midpoint_coordinates = [
+        [0.5, 0.0, 0.0],
+        [0.5, 0.5, 0.0],
+        [0.0, 0.5, 0.0],
+        [0.0, 0.0, 0.5],
+        [0.5, 0.0, 0.5],
+        [0.0, 0.5, 0.5],
+    ];
+    let source_faces = (0..4)
+        .map(|index| entity(PersistentEntityKind::Face, &format!("face:{index}")))
+        .collect::<Vec<_>>();
+    let source_edges = (0..6)
+        .map(|index| entity(PersistentEntityKind::Edge, &format!("edge:{index}")))
+        .collect::<Vec<_>>();
+    let midpoint_source_edges = [0, 3, 1, 2, 4, 5];
+    for (index, coordinates_m) in midpoint_coordinates.into_iter().enumerate() {
+        let source_edge = &source_edges[midpoint_source_edges[index]];
+        let mut provenance = quadratic.topology.nodes[0].provenance.clone();
+        provenance.extend(source_faces.iter().cloned());
+        provenance.push(source_edge.clone());
+        provenance.sort();
+        let mut exact_parameters = vec![SolverNodeExactParameter::Curve {
+            source_edge_id: source_edge.clone(),
+            parameter: 0.5,
+        }];
+        exact_parameters.extend(
+            source_faces
+                .iter()
+                .enumerate()
+                .map(|(face, source_face_id)| SolverNodeExactParameter::Surface {
+                    source_face_id: source_face_id.clone(),
+                    chart_id: digest(face as u8 + 40),
+                    evaluator_uv: [0.25, 0.25],
+                }),
+        );
+        sort_solver_node_exact_parameters(&mut exact_parameters);
+        quadratic.topology.nodes.push(SolverMeshNode {
+            node_id: index as u64 + 5,
+            coordinates_m,
+            provenance,
+            exact_parameters,
+        });
+    }
+    quadratic.topology.volume_elements[0].order = ElementOrder::Tet10;
+    quadratic.topology.volume_elements[0].node_ids = (1..=10).collect();
+    let face_midpoints = [[5, 6, 7], [5, 9, 8], [7, 10, 8], [6, 10, 9]];
+    for (face, midpoints) in quadratic
+        .topology
+        .boundary_faces
+        .iter_mut()
+        .zip(face_midpoints)
+    {
+        face.order = BoundaryTriangleOrder::Tri6;
+        face.node_ids.extend(midpoints);
+    }
+    let edge_midpoints = [5, 7, 8, 6, 9, 10];
+    for (edge, midpoint) in quadratic
+        .topology
+        .boundary_edges
+        .iter_mut()
+        .zip(edge_midpoints)
+    {
+        edge.order = BoundaryEdgeOrder::Line3;
+        edge.node_ids.push(midpoint);
+    }
+    quadratic
+        .topology
+        .field_topologies
+        .iter_mut()
+        .find(|field| field.location == FieldTopologyLocation::Node)
+        .unwrap()
+        .ordered_entity_ids = (1..=10).collect();
+    validate_solver_mesh_topology(&quadratic.topology, &quadratic.resolved_request).unwrap();
+
+    let mut invalid = quadratic.clone();
+    invalid.topology.boundary_faces[0].node_ids.swap(3, 4);
+    assert_eq!(
+        validate_solver_mesh_topology(&invalid.topology, &invalid.resolved_request)
+            .unwrap_err()
+            .field,
+        "mesh element order topology"
+    );
+
+    let mut invalid = quadratic.clone();
+    invalid.topology.boundary_edges[0].node_ids[2] = 6;
+    assert_eq!(
+        validate_solver_mesh_topology(&invalid.topology, &invalid.resolved_request)
+            .unwrap_err()
+            .field,
+        "boundary edge"
+    );
+
+    let mut invalid = quadratic;
+    invalid.topology.nodes[4]
+        .exact_parameters
+        .retain(|parameter| matches!(parameter, SolverNodeExactParameter::Curve { .. }));
+    assert_eq!(
+        validate_solver_mesh_topology(&invalid.topology, &invalid.resolved_request)
+            .unwrap_err()
+            .field,
+        "mesh element order topology"
     );
 }
 

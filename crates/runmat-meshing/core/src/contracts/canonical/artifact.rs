@@ -84,6 +84,7 @@ impl SolverMeshTopology {
             validate_provenance("volume element", &element.provenance)?;
         }
         self.validate_boundaries(&node_ids, &element_ids, &face_ids)?;
+        super::artifact_order::validate_order_topology(self, request, &node_ids)?;
         super::artifact_classification::validate_classification(self, &element_ids, &face_ids)?;
         self.validate_neighbors(&element_ids)?;
         self.validate_field_topologies(&node_ids, &element_ids, &face_ids, &edge_ids)
@@ -142,7 +143,9 @@ impl SolverMeshTopology {
             validate_provenance("boundary face", &face.provenance)?;
         }
         for edge in &self.boundary_edges {
-            if edge.node_ids[0] >= edge.node_ids[1]
+            if edge.node_ids.len() != edge.order.node_count()
+                || edge.node_ids[0] >= edge.node_ids[1]
+                || edge.node_ids.iter().collect::<BTreeSet<_>>().len() != edge.node_ids.len()
                 || !all_references_exist(&edge.node_ids, node_ids)
                 || edge.adjacent_boundary_face_ids.is_empty()
                 || !strictly_increasing(&edge.adjacent_boundary_face_ids)

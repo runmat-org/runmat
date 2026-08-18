@@ -1,5 +1,6 @@
 mod artifact;
 mod artifact_classification;
+mod artifact_order;
 mod artifact_parameters;
 mod artifact_types;
 mod cancellation;
@@ -15,11 +16,12 @@ mod request;
 mod workload;
 
 pub use artifact::validate_solver_mesh_topology;
+pub use artifact_parameters::sort_solver_node_exact_parameters;
 pub use artifact_types::{
-    BoundaryFaceRole, BoundaryTriangleOrder, ContactPair, FieldTopologyLocation, FieldTopologyMap,
-    MaterialInterface, MeshNeighbor, MeshRegion, SolverBoundaryEdge, SolverBoundaryFace,
-    SolverMeshArtifact, SolverMeshNode, SolverMeshTopology, SolverNodeExactParameter,
-    SolverVolumeElement, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ContactPair, FieldTopologyLocation,
+    FieldTopologyMap, MaterialInterface, MeshNeighbor, MeshRegion, SolverBoundaryEdge,
+    SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
+    SolverNodeExactParameter, SolverVolumeElement, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};
 pub use chunk::{

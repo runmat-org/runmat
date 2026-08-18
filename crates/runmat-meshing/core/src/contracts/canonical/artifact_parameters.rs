@@ -4,6 +4,10 @@ use super::{MeshingContractError, PersistentEntityKind, SolverMeshNode, SolverNo
 
 const MAX_EXACT_PARAMETERS_PER_NODE: usize = 64;
 
+pub fn sort_solver_node_exact_parameters(parameters: &mut [SolverNodeExactParameter]) {
+    parameters.sort_by(canonical_cmp);
+}
+
 pub(super) fn validate_node_exact_parameters(
     node: &SolverMeshNode,
 ) -> Result<(), MeshingContractError> {

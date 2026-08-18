@@ -2,7 +2,23 @@ use serde::{Deserialize, Serialize};
 
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
-pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 4;
+pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryEdgeOrder {
+    Line2,
+    Line3,
+}
+
+impl BoundaryEdgeOrder {
+    pub(super) const fn node_count(self) -> usize {
+        match self {
+            Self::Line2 => 2,
+            Self::Line3 => 3,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -78,7 +94,8 @@ pub struct SolverBoundaryFace {
 #[serde(deny_unknown_fields)]
 pub struct SolverBoundaryEdge {
     pub edge_id: u64,
-    pub node_ids: [u64; 2],
+    pub order: BoundaryEdgeOrder,
+    pub node_ids: Vec<u64>,
     pub adjacent_boundary_face_ids: Vec<u64>,
     pub provenance: Vec<PersistentEntityId>,
 }

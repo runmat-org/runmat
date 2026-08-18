@@ -108,6 +108,7 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
         volume_options,
         request: &request,
         region_materials: &region_materials,
+        exact_evaluation: None,
     };
     let result = build_delaunay_solver_topology(
         input(),
@@ -207,6 +208,7 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
             volume_options,
             request: &request,
             region_materials: &materials,
+            exact_evaluation: None,
         },
         DelaunaySolverTopologyOptions::default(),
         &NeverCancelled,
@@ -253,6 +255,7 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
                 volume_options,
                 request: &request,
                 region_materials: &materials,
+                exact_evaluation: None,
             },
             DelaunaySolverTopologyOptions::default(),
             &NeverCancelled,
@@ -260,6 +263,97 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
         .unwrap_err()
         .kind,
         DelaunaySolverTopologyErrorKind::InvalidMesh
+    );
+}
+
+#[test]
+fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
+    let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();
+    let request = request(ElementOrder::Tet10);
+    let volume_options = volume_options();
+    let volume_mesh = super::super::construct_delaunay_volume_mesh(
+        &exact_topology,
+        &exact_surface,
+        &request.metric,
+        volume_options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    let materials = [DelaunayRegionMaterial {
+        region_id: exact_topology.regions[0].id.clone(),
+        material_id: "steel".into(),
+    }];
+    let input = || DelaunaySolverTopologyInput {
+        exact_topology: &exact_topology,
+        exact_surface: &exact_surface,
+        volume_mesh: &volume_mesh,
+        volume_options,
+        request: &request,
+        region_materials: &materials,
+        exact_evaluation: Some(DelaunayExactEvaluation {
+            evaluator: &super::test_evaluator::EVALUATOR,
+            control: &super::test_evaluator::CONTROL,
+        }),
+    };
+    let topology = build_delaunay_solver_topology(
+        input(),
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let repeated = build_delaunay_solver_topology(
+        input(),
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    assert_eq!(topology, repeated);
+    assert_eq!(topology.nodes.len(), 10);
+    assert_eq!(topology.volume_elements[0].order, ElementOrder::Tet10);
+    assert_eq!(topology.volume_elements[0].node_ids.len(), 10);
+    assert!(topology.boundary_faces.iter().all(|face| {
+        face.order == runmat_meshing_core::BoundaryTriangleOrder::Tri6 && face.node_ids.len() == 6
+    }));
+    assert!(topology.boundary_edges.iter().all(|edge| {
+        edge.order == runmat_meshing_core::BoundaryEdgeOrder::Line3 && edge.node_ids.len() == 3
+    }));
+    for (local_edge, endpoints) in super::order_elevation::TETRAHEDRON_EDGES.iter().enumerate() {
+        let element = &topology.volume_elements[0];
+        let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1].coordinates_m;
+        let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1].coordinates_m;
+        let midpoint = &topology.nodes[element.node_ids[4 + local_edge] as usize - 1];
+        assert_eq!(
+            midpoint.coordinates_m,
+            [
+                left[0] * 0.5 + right[0] * 0.5,
+                left[1] * 0.5 + right[1] * 0.5,
+                left[2] * 0.5 + right[2] * 0.5,
+            ]
+        );
+        assert_eq!(midpoint.exact_parameters.len(), 3);
+        assert!(matches!(
+            midpoint.exact_parameters[0],
+            runmat_meshing_core::SolverNodeExactParameter::Curve { .. }
+        ));
+    }
+    runmat_meshing_core::validate_solver_mesh_topology(&topology, &request).unwrap();
+
+    let mut limited_request = request.clone();
+    limited_request.resources.maximum_nodes = 9;
+    let limited = DelaunaySolverTopologyInput {
+        request: &limited_request,
+        ..input()
+    };
+    assert_eq!(
+        build_delaunay_solver_topology(
+            limited,
+            DelaunaySolverTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunaySolverTopologyErrorKind::ResourceLimit
     );
 }
 
@@ -351,6 +445,7 @@ fn projection_rejects_unsupported_order_materials_and_resource_limit() {
         volume_options,
         request: &linear_request,
         region_materials: &[],
+        exact_evaluation: None,
     };
     assert_eq!(
         build_delaunay_solver_topology(
@@ -375,6 +470,7 @@ fn projection_rejects_unsupported_order_materials_and_resource_limit() {
         volume_options,
         request,
         region_materials: &materials,
+        exact_evaluation: None,
     };
     assert_eq!(
         build_delaunay_solver_topology(
@@ -384,7 +480,7 @@ fn projection_rejects_unsupported_order_materials_and_resource_limit() {
         )
         .unwrap_err()
         .kind,
-        DelaunaySolverTopologyErrorKind::UnsupportedOrder
+        DelaunaySolverTopologyErrorKind::InvalidOptions
     );
     assert_eq!(
         build_delaunay_solver_topology(
@@ -434,6 +530,7 @@ fn projection_preserves_cancellation() {
             volume_options,
             request: &request,
             region_materials: &materials,
+            exact_evaluation: None,
         },
         DelaunaySolverTopologyOptions::default(),
         &Cancelled,

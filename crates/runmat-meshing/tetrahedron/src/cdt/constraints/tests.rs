@@ -629,10 +629,6 @@ fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
     PersistentEntityId {
         kind,
         source_topology_id: value.to_owned(),
-        assembly_path: if kind == PersistentEntityKind::Assembly {
-            Vec::new()
-        } else {
-            vec!["root".to_owned()]
-        },
+        assembly_path: vec!["root".to_owned()],
     }
 }

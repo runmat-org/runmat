@@ -6,7 +6,6 @@ pub enum DelaunaySolverTopologyErrorKind {
     InvalidGeometry,
     InvalidMesh,
     InvalidMaterials,
-    UnsupportedOrder,
     ResourceLimit,
     Cancelled,
 }
@@ -80,4 +79,32 @@ pub(super) fn solver(
         DelaunaySolverTopologyErrorKind::InvalidMesh,
         error.to_string(),
     )
+}
+
+pub(super) fn geometry(
+    error: runmat_geometry_core::GeometryEvaluationError,
+) -> DelaunaySolverTopologyError {
+    use runmat_geometry_core::GeometryEvaluationErrorKind;
+
+    let kind = match error.kind {
+        GeometryEvaluationErrorKind::Cancelled => DelaunaySolverTopologyErrorKind::Cancelled,
+        GeometryEvaluationErrorKind::BudgetExceeded
+        | GeometryEvaluationErrorKind::TimeBudgetExceeded
+        | GeometryEvaluationErrorKind::AllocationBudgetExceeded
+        | GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
+        | GeometryEvaluationErrorKind::IterationBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::ResourceLimit
+        }
+        GeometryEvaluationErrorKind::UnknownEvaluator
+        | GeometryEvaluationErrorKind::ParameterOutsideDomain
+        | GeometryEvaluationErrorKind::ProjectionDidNotConverge
+        | GeometryEvaluationErrorKind::ClassificationDidNotConverge
+        | GeometryEvaluationErrorKind::InconsistentGeometry
+        | GeometryEvaluationErrorKind::KernelUnavailable
+        | GeometryEvaluationErrorKind::KernelFailure
+        | GeometryEvaluationErrorKind::InvalidResult => {
+            DelaunaySolverTopologyErrorKind::InvalidGeometry
+        }
+    };
+    failure(kind, error.to_string())
 }
