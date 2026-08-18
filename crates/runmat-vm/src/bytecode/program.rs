@@ -158,6 +158,7 @@ pub struct FunctionArgRangeInclusivity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FunctionArgValidationLiteral {
     Number(f64),
+    Integer(runmat_builtins::IntValue),
     Text(String),
     Bool(bool),
 }
@@ -165,6 +166,7 @@ pub enum FunctionArgValidationLiteral {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FunctionArgDefaultValue {
     Number(f64),
+    Integer(runmat_builtins::IntValue),
     Bool(bool),
     String(String),
     EmptyArray,

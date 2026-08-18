@@ -52,6 +52,19 @@ The enum lives in `runmat-builtins` because builtins, VM dispatch, runtime servi
 
 ## Dense Arrays And Shape
 
+### Integer literals
+
+Hexadecimal literals begin with `0x` or `0X`, and binary literals begin with `0b` or `0B`. An unsuffixed literal uses the smallest unsigned integer class that can hold its value. The suffixes `u8`, `u16`, `u32`, and `u64` select unsigned classes; `s8`, `s16`, `s32`, and `s64` select signed classes and interpret the written bits using two's-complement representation.
+
+```matlab
+small = 0x2A                 % uint8 value 42
+signed = 0xFFs8              % int8 value -1
+wide = 0xFFFFFFFFFFFFFFFFu64 % exact uint64 maximum
+bits = 0b101010u16           % uint16 value 42
+```
+
+The lexer, compiler IR, bytecode, runtime values, array construction, and host/device transfers preserve these literals as integers. In particular, a 64-bit literal does not pass through `double`, so values above `flintmax` remain exact. Invalid digits, unknown suffixes, and values whose written width exceeds the selected class are syntax errors.
+
 RunMat stores dense real numeric arrays as `Tensor` and dense complex numeric arrays as `ComplexTensor`. Each value owns one private homogeneous payload whose Rust element type matches its RunMat numeric class:
 
 ```rust

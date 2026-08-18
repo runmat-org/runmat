@@ -954,6 +954,11 @@ fn compile_semantic_functions(
                                                         runmat_hir::FunctionArgValidationLiteral::Number(value) => {
                                                             crate::bytecode::program::FunctionArgValidationLiteral::Number(*value)
                                                         }
+                                                        runmat_hir::FunctionArgValidationLiteral::Integer(value) => {
+                                                            crate::bytecode::program::FunctionArgValidationLiteral::Integer(
+                                                                runmat_hir::integer_literal_to_int_value(value),
+                                                            )
+                                                        }
                                                         runmat_hir::FunctionArgValidationLiteral::Text(value) => {
                                                             crate::bytecode::program::FunctionArgValidationLiteral::Text(value.clone())
                                                         }
@@ -992,6 +997,11 @@ fn compile_semantic_functions(
                                     match default {
                                         runmat_hir::FunctionArgDefaultValue::Number(value) => {
                                             crate::bytecode::program::FunctionArgDefaultValue::Number(*value)
+                                        }
+                                        runmat_hir::FunctionArgDefaultValue::Integer(value) => {
+                                            crate::bytecode::program::FunctionArgDefaultValue::Integer(
+                                                runmat_hir::integer_literal_to_int_value(value),
+                                            )
                                         }
                                         runmat_hir::FunctionArgDefaultValue::Bool(value) => {
                                             crate::bytecode::program::FunctionArgDefaultValue::Bool(*value)

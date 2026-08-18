@@ -90,6 +90,7 @@ impl<'a> GraphBuilder<'a> {
     fn process_instr(&mut self, pc: usize, instr: &Instr) {
         match instr {
             Instr::LoadConst(value) => self.push_constant(Type::Num, Some(Value::Num(*value))),
+            Instr::LoadInt(value) => self.push_constant(Type::Int, Some(Value::Int(value.clone()))),
             Instr::LoadComplex(re, im) => {
                 self.push_constant(Type::Num, Some(Value::Complex(*re, *im)))
             }

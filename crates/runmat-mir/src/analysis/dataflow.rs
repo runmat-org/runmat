@@ -237,17 +237,43 @@ fn aggregate_fact(
 }
 
 fn tensor_element_domain(elements: &[MirOperand]) -> TensorElementDomainFact {
-    if !elements.is_empty()
-        && elements
-            .iter()
-            .all(|element| matches!(element, MirOperand::Constant(crate::MirConstant::Number(_))))
-    {
-        TensorElementDomainFact::Numeric {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        }
-    } else {
-        TensorElementDomainFact::Unknown
+    if elements.is_empty() {
+        return TensorElementDomainFact::Unknown;
+    }
+    if !elements.iter().all(|element| {
+        matches!(
+            element,
+            MirOperand::Constant(crate::MirConstant::Number(_))
+                | MirOperand::Constant(crate::MirConstant::IntegerLiteral(_))
+        )
+    }) {
+        return TensorElementDomainFact::Unknown;
+    }
+    let class = elements
+        .iter()
+        .find_map(|element| match element {
+            MirOperand::Constant(crate::MirConstant::IntegerLiteral(literal)) => {
+                Some(integer_literal_numeric_class(literal.class()))
+            }
+            _ => None,
+        })
+        .unwrap_or(NumericClass::Double);
+    TensorElementDomainFact::Numeric {
+        class,
+        domain: NumericDomain::Real,
+    }
+}
+
+fn integer_literal_numeric_class(class: runmat_hir::IntegerLiteralClass) -> NumericClass {
+    match class {
+        runmat_hir::IntegerLiteralClass::Int8 => NumericClass::Int8,
+        runmat_hir::IntegerLiteralClass::Int16 => NumericClass::Int16,
+        runmat_hir::IntegerLiteralClass::Int32 => NumericClass::Int32,
+        runmat_hir::IntegerLiteralClass::Int64 => NumericClass::Int64,
+        runmat_hir::IntegerLiteralClass::UInt8 => NumericClass::UInt8,
+        runmat_hir::IntegerLiteralClass::UInt16 => NumericClass::UInt16,
+        runmat_hir::IntegerLiteralClass::UInt32 => NumericClass::UInt32,
+        runmat_hir::IntegerLiteralClass::UInt64 => NumericClass::UInt64,
     }
 }
 
@@ -256,6 +282,13 @@ fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
         MirOperand::Constant(crate::MirConstant::Number(_)) => {
             let ty = TypeFact::Numeric {
                 class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            };
+            scalar_single_fact(ty)
+        }
+        MirOperand::Constant(crate::MirConstant::IntegerLiteral(literal)) => {
+            let ty = TypeFact::Numeric {
+                class: integer_literal_numeric_class(literal.class()),
                 domain: NumericDomain::Real,
             };
             scalar_single_fact(ty)

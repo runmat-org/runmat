@@ -700,6 +700,7 @@ fn first_unlowered_await<'a>(
             .find_map(|arg| first_unlowered_await(arg, await_replacements)),
         HirExprKind::Spawn(inner) => first_unlowered_await(inner, await_replacements),
         HirExprKind::Number(_)
+        | HirExprKind::IntegerLiteral(_)
         | HirExprKind::String(_)
         | HirExprKind::Constant(_)
         | HirExprKind::Binding(_)

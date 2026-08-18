@@ -1,4 +1,20 @@
 pub use runmat_builtins::Type;
+pub use runmat_parser::{IntegerLiteral, IntegerLiteralClass};
+
+pub fn integer_literal_to_int_value(literal: &IntegerLiteral) -> runmat_builtins::IntValue {
+    use runmat_builtins::IntValue;
+
+    match literal.class() {
+        IntegerLiteralClass::Int8 => IntValue::I8(literal.bits() as i8),
+        IntegerLiteralClass::Int16 => IntValue::I16(literal.bits() as i16),
+        IntegerLiteralClass::Int32 => IntValue::I32(literal.bits() as i32),
+        IntegerLiteralClass::Int64 => IntValue::I64(literal.bits() as i64),
+        IntegerLiteralClass::UInt8 => IntValue::U8(literal.bits() as u8),
+        IntegerLiteralClass::UInt16 => IntValue::U16(literal.bits() as u16),
+        IntegerLiteralClass::UInt32 => IntValue::U32(literal.bits() as u32),
+        IntegerLiteralClass::UInt64 => IntValue::U64(literal.bits()),
+    }
+}
 
 mod diagnostic;
 mod error;

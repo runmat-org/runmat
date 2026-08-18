@@ -1459,6 +1459,9 @@ impl LoweringCtx {
         span: Span,
     ) -> Result<FunctionArgDefaultValue, HirError> {
         match expr {
+            AstExpr::IntegerLiteral(value, _) => {
+                Ok(FunctionArgDefaultValue::Integer(value.clone()))
+            }
             AstExpr::Number(_, _) | AstExpr::Unary(UnOp::Plus, _, _) | AstExpr::Unary(UnOp::Minus, _, _) => {
                 let parsed = Self::lower_validator_numeric_literal_expr(expr).ok_or_else(|| {
                     HirError::new("arguments default value must be a numeric literal")
@@ -1666,6 +1669,10 @@ impl LoweringCtx {
                     .with_span(expr.span()));
                 };
                 out.push(FunctionArgValidationLiteral::Number(value));
+                Ok(())
+            }
+            AstExpr::IntegerLiteral(value, _) => {
+                out.push(FunctionArgValidationLiteral::Integer(value.clone()));
                 Ok(())
             }
             AstExpr::Ident(name, _) if name == "true" => {
@@ -2300,6 +2307,7 @@ impl LoweringCtx {
         let span = expr.span();
         let kind = match expr {
             AstExpr::Number(value, _) => HirExprKind::Number(value.clone()),
+            AstExpr::IntegerLiteral(value, _) => HirExprKind::IntegerLiteral(value.clone()),
             AstExpr::String(value, _) => HirExprKind::String(StringLiteral(value.clone())),
             AstExpr::NameValueArg(_, _, _) => {
                 return Err(HirError::new(
@@ -3412,6 +3420,9 @@ fn command_argument(expr: &AstExpr) -> CommandArgument {
         AstExpr::Ident(word, _) | AstExpr::Number(word, _) => {
             CommandArgument::Word(SymbolName(word.clone()))
         }
+        AstExpr::IntegerLiteral(value, _) => {
+            CommandArgument::Word(SymbolName(value.text().to_string()))
+        }
         AstExpr::String(value, _) => CommandArgument::StringLiteral(StringLiteral(value.clone())),
         AstExpr::EndKeyword(_) => CommandArgument::Word(SymbolName("end".to_string())),
         _ => CommandArgument::StringLiteral(StringLiteral(format!("{expr:?}"))),
@@ -3531,7 +3542,10 @@ fn static_lvalue_assignment_count(lvalue: &runmat_parser::LValue) -> Option<usiz
 
 fn static_index_component_count(expr: &AstExpr) -> Option<usize> {
     match expr {
-        AstExpr::Number(_, _) | AstExpr::Ident(_, _) | AstExpr::EndKeyword(_) => Some(1),
+        AstExpr::Number(_, _)
+        | AstExpr::IntegerLiteral(_, _)
+        | AstExpr::Ident(_, _)
+        | AstExpr::EndKeyword(_) => Some(1),
         AstExpr::Tensor(rows, _) => Some(rows.iter().map(Vec::len).sum()),
         AstExpr::Range(start, step, end, _) => {
             let start = static_numeric_literal(start)?;

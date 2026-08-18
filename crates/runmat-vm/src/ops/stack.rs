@@ -55,6 +55,11 @@ pub fn load_const(stack: &mut Vec<Value>, value: f64) {
 }
 
 #[inline]
+pub fn load_int(stack: &mut Vec<Value>, value: runmat_builtins::IntValue) {
+    stack.push(Value::Int(value));
+}
+
+#[inline]
 pub fn load_complex(stack: &mut Vec<Value>, re: f64, im: f64) {
     stack.push(Value::Complex(re, im));
 }

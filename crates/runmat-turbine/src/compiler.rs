@@ -378,6 +378,7 @@ impl BytecodeCompiler {
                     Instr::LoadString(_)
                     | Instr::LoadCharRow(_)
                     | Instr::LoadBool(_)
+                    | Instr::LoadInt(_)
                     | Instr::LoadComplex(_, _) => {
                         // Strings cannot be compiled to JIT - fall back to interpreter
                         return Err(execution_error(

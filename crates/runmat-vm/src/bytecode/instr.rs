@@ -1,3 +1,4 @@
+use runmat_builtins::IntValue;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +41,7 @@ pub enum EndExpr {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PropertyDefaultLiteral {
     Num(f64),
+    Int(IntValue),
     Bool(bool),
     String(String),
 }
@@ -48,6 +50,7 @@ pub enum PropertyDefaultLiteral {
 pub enum Instr {
     // Constant and variable loads.
     LoadConst(f64),
+    LoadInt(IntValue),
     LoadComplex(f64, f64),
     LoadBool(bool),
     LoadString(String),
@@ -419,6 +422,7 @@ impl Instr {
 
         match self {
             Instr::LoadConst(_)
+            | Instr::LoadInt(_)
             | Instr::LoadComplex(_, _)
             | Instr::LoadBool(_)
             | Instr::LoadString(_)

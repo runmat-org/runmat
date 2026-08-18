@@ -1,13 +1,13 @@
 //! MATLAB-compatible `disp` builtin with GPU-aware formatting semantics.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    get_display_format, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage,
-    LogicalArray, StringArray, StructValue, Tensor, Value,
+    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, FormatMode, IntValue,
+    IntegerStorage, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -190,9 +190,8 @@ pub(crate) fn format_for_display(value: &Value) -> Vec<String> {
         return rendered;
     }
     match value {
-        Value::Tensor(_) | Value::ComplexTensor(_) | Value::LogicalArray(_) => {
-            vec!["[]".to_string()]
-        }
+        Value::Tensor(tensor) => vec![format_empty_numeric_tensor_for_display(tensor)],
+        Value::ComplexTensor(_) | Value::LogicalArray(_) => vec!["[]".to_string()],
         Value::CharArray(array) => vec![format!("{}x{} empty char array", array.rows, array.cols)],
         Value::StringArray(array) => vec![format!(
             "{} empty string array",
@@ -204,6 +203,21 @@ pub(crate) fn format_for_display(value: &Value) -> Vec<String> {
         )],
         _ => rendered,
     }
+}
+
+fn format_empty_numeric_tensor_for_display(tensor: &Tensor) -> String {
+    let shape = canonical_dims(&tensor.shape);
+    let dtype = tensor.numeric_dtype();
+    if dtype == runmat_builtins::NumericDType::F64 && shape == [0, 0] {
+        return "[]".to_string();
+    }
+    let dimensions = shape
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join("×");
+    let noun = if shape.len() <= 2 { "matrix" } else { "array" };
+    format!("{dimensions} empty {} {noun}", dtype.class_name())
 }
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
@@ -395,7 +409,7 @@ fn format_tensor_value(tensor: &Tensor, index: usize) -> String {
         .numeric_value_at(index)
         .expect("index within authoritative numeric storage");
     if let Some(value) = value.into_int_value() {
-        value.decimal_string()
+        format_int(&value)
     } else {
         format_scalar_number(value.materialize_f64())
     }
@@ -763,6 +777,18 @@ where
 }
 
 fn format_int(value: &IntValue) -> String {
+    if get_display_format() == FormatMode::Hex {
+        return match value {
+            IntValue::I8(value) => format!("{:02x}", *value as u8),
+            IntValue::I16(value) => format!("{:04x}", *value as u16),
+            IntValue::I32(value) => format!("{:08x}", *value as u32),
+            IntValue::I64(value) => format!("{:016x}", *value as u64),
+            IntValue::U8(value) => format!("{value:02x}"),
+            IntValue::U16(value) => format!("{value:04x}"),
+            IntValue::U32(value) => format!("{value:08x}"),
+            IntValue::U64(value) => format!("{value:016x}"),
+        };
+    }
     match value {
         IntValue::I8(v) => v.to_string(),
         IntValue::I16(v) => v.to_string(),
@@ -872,7 +898,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::make_cell;
-    use runmat_builtins::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
+    use runmat_builtins::{
+        set_display_format, ComplexTensor, FormatMode, IntValue, StringArray, SymbolicExpr, Tensor,
+    };
 
     #[test]
     fn disp_descriptor_signatures_cover_core_forms() {
@@ -1058,6 +1086,40 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn integer_hex_format_uses_each_class_bit_width() {
+        set_display_format(FormatMode::Hex);
+        for (value, expected) in [
+            (IntValue::I8(-1), "ff"),
+            (IntValue::I16(-1), "ffff"),
+            (IntValue::I32(-1), "ffffffff"),
+            (IntValue::I64(-1), "ffffffffffffffff"),
+            (IntValue::U8(1), "01"),
+            (IntValue::U16(1), "0001"),
+            (IntValue::U32(1), "00000001"),
+            (IntValue::U64(1), "0000000000000001"),
+        ] {
+            assert_eq!(format_for_disp(&Value::Int(value)), vec![expected]);
+        }
+        set_display_format(FormatMode::Short);
+    }
+
+    #[test]
+    fn integer_short_and_long_formats_remain_exact_decimal() {
+        for mode in [FormatMode::Short, FormatMode::Long] {
+            set_display_format(mode);
+            assert_eq!(
+                format_for_disp(&Value::Int(IntValue::U64(u64::MAX))),
+                vec![u64::MAX.to_string()]
+            );
+            assert_eq!(
+                format_for_disp(&Value::Int(IntValue::I64(i64::MIN))),
+                vec![i64::MIN.to_string()]
+            );
+        }
+        set_display_format(FormatMode::Short);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_tensor_display_uses_exact_backing_storage() {
@@ -1081,6 +1143,34 @@ pub(crate) mod tests {
         let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
 
         assert_eq!(lines, vec!["    values: [1x2 int16]".to_string()]);
+    }
+
+    #[test]
+    fn implicit_numeric_empty_summary_preserves_class_and_shape() {
+        let integer = Tensor::new_integer(IntegerStorage::I16(Vec::new()), vec![0, 5])
+            .expect("integer empty");
+        assert_eq!(
+            format_for_display(&Value::Tensor(integer)),
+            vec!["0×5 empty int16 matrix"]
+        );
+
+        let single = Tensor::from_f32(Vec::new(), vec![0, 0, 6]).expect("single empty");
+        assert_eq!(
+            format_for_display(&Value::Tensor(single)),
+            vec!["0×0×6 empty single array"]
+        );
+
+        assert_eq!(
+            format_for_display(&Value::Tensor(Tensor::zeros(vec![0, 0]))),
+            vec!["[]"]
+        );
+    }
+
+    #[test]
+    fn explicit_disp_of_numeric_empty_remains_silent() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 5]).expect("integer empty");
+        assert!(format_for_disp(&Value::Tensor(integer)).is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

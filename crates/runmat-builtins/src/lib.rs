@@ -118,7 +118,7 @@ pub enum Value {
     ClassRef(String),
     MException(MException),
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum IntValue {
     I8(i8),
     I16(i16),

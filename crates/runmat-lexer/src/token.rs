@@ -77,6 +77,10 @@ pub enum Token {
     // Identifiers and literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| { lex.extras.last_was_value = true; })]
     Ident,
+    // Hexadecimal/binary integer literal. The parser validates digits, suffix, and width.
+    #[regex(r"0[xX][0-9a-zA-Z_]*", |lex| { lex.extras.last_was_value = true; }, priority = 4)]
+    #[regex(r"0[bB][0-9a-zA-Z_]*", |lex| { lex.extras.last_was_value = true; }, priority = 4)]
+    RadixInteger,
     // Float with optional underscores as digit separators (strip later)
     #[regex(r"\d(?:_?\d)*\.(?:\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?", |lex| {
         lex.extras.last_was_value = true;

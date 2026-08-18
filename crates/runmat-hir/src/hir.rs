@@ -1,6 +1,7 @@
 use crate::{
     BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, Span, StmtId,
 };
+use runmat_parser::IntegerLiteral;
 use serde::{Deserialize, Serialize};
 
 /// Canonical semantic HIR product for one compiled source set.
@@ -215,6 +216,7 @@ impl FunctionArgRangeInclusivity {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgValidationLiteral {
     Number(f64),
+    Integer(IntegerLiteral),
     Text(String),
     Bool(bool),
 }
@@ -222,6 +224,7 @@ pub enum FunctionArgValidationLiteral {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgDefaultValue {
     Number(f64),
+    Integer(IntegerLiteral),
     Bool(bool),
     String(String),
     EmptyArray,
@@ -351,6 +354,7 @@ impl HirExpr {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
+    IntegerLiteral(IntegerLiteral),
     String(StringLiteral),
     Constant(SymbolName),
     Binding(BindingId),

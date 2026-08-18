@@ -161,6 +161,9 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
                     crate::bytecode::program::FunctionArgDefaultValue::Number(value) => {
                         Value::Num(*value)
                     }
+                    crate::bytecode::program::FunctionArgDefaultValue::Integer(value) => {
+                        Value::Int(value.clone())
+                    }
                     crate::bytecode::program::FunctionArgDefaultValue::Bool(value) => {
                         Value::Bool(*value)
                     }
@@ -782,6 +785,9 @@ fn validation_literal_to_atom(
         crate::bytecode::program::FunctionArgValidationLiteral::Number(value) => {
             arg_validation::ValidationAtom::Number(*value)
         }
+        crate::bytecode::program::FunctionArgValidationLiteral::Integer(value) => {
+            arg_validation::ValidationAtom::Integer(value.clone())
+        }
         crate::bytecode::program::FunctionArgValidationLiteral::Text(value) => {
             arg_validation::ValidationAtom::Text(value.clone())
         }
@@ -1247,6 +1253,7 @@ async fn run_interpreter_inner(
             | Instr::JumpIfFalse(_)
             | Instr::Jump(_)
             | Instr::LoadConst(_)
+            | Instr::LoadInt(_)
             | Instr::LoadComplex(_, _)
             | Instr::LoadBool(_)
             | Instr::LoadString(_)
