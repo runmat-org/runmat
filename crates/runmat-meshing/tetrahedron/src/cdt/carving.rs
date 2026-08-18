@@ -57,6 +57,15 @@ impl Default for DelaunayCarvingOptions {
 pub struct DelaunayCarving {
     pub topology: DelaunayVolumeTopology,
     pub removed_tetrahedra: Vec<[StableDigest; 4]>,
+    pub facets: Vec<DelaunayCarvedFacet>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DelaunayCarvedFacet {
+    pub constraint_index: u32,
+    pub region_ids: Vec<PersistentEntityId>,
+    pub borders_exterior: bool,
+    pub borders_void: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

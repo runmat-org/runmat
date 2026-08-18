@@ -8,9 +8,9 @@ mod segment_recovery;
 mod topology;
 
 pub use carving::{
-    carve_delaunay_volume, validate_delaunay_carving, DelaunayCarving, DelaunayCarvingError,
-    DelaunayCarvingErrorKind, DelaunayCarvingOptions, DelaunayCarvingSeeds, DelaunayRegionSeed,
-    DelaunayVoidSeed,
+    carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
+    DelaunayCarvingError, DelaunayCarvingErrorKind, DelaunayCarvingOptions, DelaunayCarvingSeeds,
+    DelaunayRegionSeed, DelaunayVoidSeed,
 };
 pub use constraints::{
     build_delaunay_constraints, validate_delaunay_constraints, DelaunayConstraintError,

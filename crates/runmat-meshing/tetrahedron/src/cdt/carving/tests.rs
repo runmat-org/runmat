@@ -75,7 +75,11 @@ fn fixture() -> (DelaunayConstraints, DelaunayFacetRecovery) {
                 ),
                 vertex_indices,
                 source_face_id: id(MeshingStage::SurfaceMesh, &format!("face:{index}")),
-                material_interface_ids: Vec::new(),
+                material_interface_ids: if index == 0 {
+                    vec!["interface:base".to_owned()]
+                } else {
+                    Vec::new()
+                },
             })
             .collect(),
     };
@@ -140,10 +144,59 @@ fn carving_floods_only_across_unconstrained_faces() {
         .incidence
         .unassigned_tetrahedron_indices
         .is_empty());
+    assert_eq!(carving.facets[0].region_ids, vec![region("upper")]);
+    assert!(carving.facets[0].borders_void);
+    assert!(!carving.facets[0].borders_exterior);
     validate_delaunay_carving(
         &recovery,
         &constraints,
         &seeds(),
+        &carving,
+        DelaunayCarvingOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
+fn carving_classifies_conformal_region_interfaces() {
+    let (constraints, recovery) = fixture();
+    let seeds = DelaunayCarvingSeeds {
+        regions: vec![
+            DelaunayRegionSeed {
+                region_id: region("lower"),
+                coordinates_m: [0.5, 0.25, -1.0],
+            },
+            DelaunayRegionSeed {
+                region_id: region("upper"),
+                coordinates_m: [0.5, 0.25, 1.0],
+            },
+        ],
+        voids: Vec::new(),
+    };
+
+    let carving = carve_delaunay_volume(
+        &recovery,
+        &constraints,
+        &seeds,
+        DelaunayCarvingOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    assert_eq!(carving.topology.tetrahedra.len(), 2);
+    assert!(carving.removed_tetrahedra.is_empty());
+    assert_eq!(carving.topology.incidence.regions.len(), 2);
+    assert_eq!(
+        carving.facets[0].region_ids,
+        vec![region("lower"), region("upper")]
+    );
+    assert!(!carving.facets[0].borders_exterior);
+    assert!(!carving.facets[0].borders_void);
+    validate_delaunay_carving(
+        &recovery,
+        &constraints,
+        &seeds,
         &carving,
         DelaunayCarvingOptions::default(),
         &NeverCancelled,

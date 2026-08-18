@@ -4,8 +4,8 @@ use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::quality::predicate::{orient3d, PredicateSign};
 
 use super::{
-    error, CarvingWork, DelaunayCarving, DelaunayCarvingError, DelaunayCarvingErrorKind,
-    DelaunayCarvingSeeds, DelaunayFacetRecovery, DelaunayVolumeTopology,
+    error, CarvingWork, DelaunayCarvedFacet, DelaunayCarving, DelaunayCarvingError,
+    DelaunayCarvingErrorKind, DelaunayCarvingSeeds, DelaunayFacetRecovery, DelaunayVolumeTopology,
 };
 use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
 
@@ -69,6 +69,7 @@ pub(super) fn classify_and_build(
             "one or more facet-bounded components have no exterior, void, or region seed",
         ));
     }
+    let facets = classify_facets(recovery, &classifications)?;
 
     let mut retained = Vec::new();
     let mut removed_tetrahedra = Vec::new();
@@ -158,7 +159,102 @@ pub(super) fn classify_and_build(
     Ok(DelaunayCarving {
         topology,
         removed_tetrahedra,
+        facets,
     })
+}
+
+fn classify_facets(
+    recovery: &DelaunayFacetRecovery,
+    classifications: &[Option<Classification>],
+) -> Result<Vec<DelaunayCarvedFacet>, DelaunayCarvingError> {
+    let topology = &recovery.segment_recovery.topology;
+    let mut result = Vec::with_capacity(recovery.facets.len());
+    for facet in &recovery.facets {
+        let mut expected = None;
+        for triangle in &facet.triangles {
+            let indices = triangle.node_identities.map(|identity| {
+                topology
+                    .nodes
+                    .binary_search_by_key(&identity, |node| node.identity)
+                    .map(|index| index as u32)
+                    .map_err(|_| {
+                        error(
+                            DelaunayCarvingErrorKind::InvalidTopology,
+                            None,
+                            "facet-classification node is missing from topology",
+                        )
+                    })
+            });
+            let [first, second, third] = indices;
+            let indices = [first?, second?, third?];
+            let uses = topology.incidence.vertex_stars[indices[0] as usize]
+                .iter()
+                .copied()
+                .filter(|tetrahedron| {
+                    let vertices = topology.tetrahedra[*tetrahedron as usize].vertex_indices;
+                    vertices.contains(&indices[1]) && vertices.contains(&indices[2])
+                })
+                .collect::<Vec<_>>();
+            if uses.is_empty() || uses.len() > 2 {
+                return Err(error(
+                    DelaunayCarvingErrorKind::InvalidTopology,
+                    None,
+                    "recovered facet support has invalid tetrahedron incidence",
+                ));
+            }
+            let mut signature = FacetSignature {
+                region_ids: BTreeSet::new(),
+                borders_exterior: uses.len() == 1,
+                borders_void: false,
+            };
+            for tetrahedron in uses {
+                match classifications[tetrahedron as usize]
+                    .as_ref()
+                    .ok_or_else(|| {
+                        error(
+                            DelaunayCarvingErrorKind::AmbiguousClassification,
+                            None,
+                            "facet support references an unclassified tetrahedron",
+                        )
+                    })? {
+                    Classification::Exterior => signature.borders_exterior = true,
+                    Classification::Void => signature.borders_void = true,
+                    Classification::Region(region_id) => {
+                        signature.region_ids.insert(region_id.clone());
+                    }
+                }
+            }
+            if expected.as_ref().is_some_and(|value| value != &signature) {
+                return Err(error(
+                    DelaunayCarvingErrorKind::AmbiguousClassification,
+                    None,
+                    "one PLC facet has inconsistent classification across its support",
+                ));
+            }
+            expected = Some(signature);
+        }
+        let signature = expected.ok_or_else(|| {
+            error(
+                DelaunayCarvingErrorKind::InvalidTopology,
+                None,
+                "recovered facet has no support triangles",
+            )
+        })?;
+        result.push(DelaunayCarvedFacet {
+            constraint_index: facet.constraint_index,
+            region_ids: signature.region_ids.into_iter().collect(),
+            borders_exterior: signature.borders_exterior,
+            borders_void: signature.borders_void,
+        });
+    }
+    Ok(result)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FacetSignature {
+    region_ids: BTreeSet<PersistentEntityId>,
+    borders_exterior: bool,
+    borders_void: bool,
 }
 
 fn blocked_faces(
