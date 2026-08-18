@@ -1,5 +1,6 @@
 mod batch;
 mod batch_codec;
+mod convergence;
 mod join;
 mod partition_result;
 mod surface_codec;
@@ -12,12 +13,20 @@ pub(crate) use batch::{validate_exact_face_mesh_batch_parts, validate_face_parti
 #[cfg(test)]
 pub(crate) use batch_codec::decode_with_byte_limit;
 pub use batch_codec::{decode_exact_face_mesh_batch, encode_exact_face_mesh_batch};
+pub use convergence::{
+    resolve_exact_surface_pass, ExactSurfaceConvergenceError, ExactSurfaceConvergenceErrorKind,
+    ExactSurfaceConvergenceOutcome,
+};
 pub use join::{join_exact_face_mesh_batches, validate_exact_surface_mesh};
 #[cfg(test)]
 pub(crate) use partition_result::decode_exact_face_partition_result_with_byte_limit;
 pub use partition_result::{
     build_exact_face_partition_result, decode_exact_face_partition_result,
     encode_exact_face_partition_result, validate_exact_face_partition_result,
+};
+pub(crate) use partition_result::{
+    build_exact_face_partition_result_with_boundary,
+    validate_exact_face_partition_result_with_boundary,
 };
 #[cfg(test)]
 pub(crate) use surface_codec::decode_exact_surface_mesh_with_byte_limit;

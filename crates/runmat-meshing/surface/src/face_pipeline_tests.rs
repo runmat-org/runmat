@@ -6,13 +6,15 @@ use runmat_meshing_core::{
 };
 use runmat_meshing_curve::{
     canonicalize_shared_curve_splits, discretize_shared_curves, CurveResolutionPolicy,
-    SharedCurveDiscretizationOptions, SharedCurveSegmentSplit, UniformCurveMetric,
+    SharedCurveDiscretizationOptions, SharedCurveEvaluationContext, SharedCurveSegmentSplit,
+    UniformCurveMetric,
 };
 
 use crate::{
     build_exact_face_partition_result, encode_exact_face_partition_result,
-    face_partition_descriptors, mesh_exact_face_partition, ExactFacePartitionContext,
-    ExactFacePartitionOptions, ExactFacePartitionOutcome,
+    face_partition_descriptors, mesh_exact_face_partition, resolve_exact_surface_pass,
+    ExactFacePartitionContext, ExactFacePartitionOptions, ExactFacePartitionOutcome,
+    ExactSurfaceConvergenceOutcome, ExactSurfaceJoinOptions,
 };
 
 #[test]
@@ -22,11 +24,12 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         panic!("fixture must be exact")
     };
     let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let curve_metric = UniformCurveMetric::from_target_size_m(0.5).unwrap();
     let curves = discretize_shared_curves(
         &topology,
         &evaluator,
         &evaluator,
-        &UniformCurveMetric::from_target_size_m(0.5).unwrap(),
+        &curve_metric,
         &Control,
         curve_options(),
     )
@@ -61,6 +64,32 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
     assert_eq!(faces.len(), 1);
     assert_eq!(faces[0].source_face_id, topology.faces[0].id);
     assert!(!faces[0].triangles.is_empty());
+    let mut sheet_topology = topology.clone();
+    sheet_topology.bodies[0].is_sheet_body = true;
+    sheet_topology.bodies[0].sheet_shell_ids = vec![sheet_topology.shells[0].id.clone()];
+    sheet_topology.bodies[0].lump_ids.clear();
+    sheet_topology.lumps.clear();
+    sheet_topology.solids.clear();
+    sheet_topology.regions.clear();
+    let converged = resolve_exact_surface_pass(
+        &curves,
+        vec![outcome.clone()],
+        SharedCurveEvaluationContext::new(
+            &sheet_topology,
+            &evaluator,
+            &evaluator,
+            &curve_metric,
+            &Control,
+        ),
+        curve_options(),
+        ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    let ExactSurfaceConvergenceOutcome::Converged(surface) = converged else {
+        panic!("complete face results must converge to the exact sheet surface")
+    };
+    assert_eq!(surface.face_ids, vec![topology.faces[0].id.clone()]);
+    assert_eq!(surface.shells[0].open_edge_count, 1);
     let encoded = encode_exact_face_partition_result(&outcome, &topology, &curves).unwrap();
     assert_eq!(
         crate::decode_exact_face_partition_result(&encoded, &topology, &curves).unwrap(),
@@ -99,6 +128,28 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         crate::decode_exact_face_partition_result(&restart_bytes, &topology, &curves).unwrap(),
         restart
     );
+    let refined = resolve_exact_surface_pass(
+        &curves,
+        vec![restart.clone()],
+        SharedCurveEvaluationContext::new(
+            &sheet_topology,
+            &evaluator,
+            &evaluator,
+            &curve_metric,
+            &Control,
+        ),
+        curve_options(),
+        ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    let ExactSurfaceConvergenceOutcome::RefinedCurves(refined) = refined else {
+        panic!("curve-restart result must refine the shared curve")
+    };
+    assert_eq!(
+        refined.edges[0].nodes.len(),
+        curves.edges[0].nodes.len() + 1
+    );
+    assert!(crate::validate_exact_face_partition_result(&outcome, &topology, &refined).is_err());
     let mut corrupted_restart = restart_bytes;
     corrupted_restart[0] ^= 1;
     assert_eq!(

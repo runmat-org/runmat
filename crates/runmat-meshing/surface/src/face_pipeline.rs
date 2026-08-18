@@ -6,8 +6,8 @@ use runmat_meshing_core::{
 use runmat_meshing_curve::{canonicalize_shared_curve_splits, SharedCurveMesh};
 
 use crate::{
-    accept_exact_face_chart_mesh, build_exact_face_charts, build_exact_face_partition_result,
-    build_exact_surface_boundary, join_exact_face_charts, recover_exact_face_chart_domains,
+    accept_exact_face_chart_mesh, build_exact_face_charts, build_exact_surface_boundary,
+    join_exact_face_charts, recover_exact_face_chart_domains,
     refine_exact_face_chart_until_blocked, triangulate_exact_face_charts,
     ExactFaceAcceptanceErrorKind, ExactFaceAcceptanceOptions, ExactFaceChartDelaunayContext,
     ExactFaceChartErrorKind, ExactFaceChartRefinedMesh, ExactFaceChartRefinementOptions,
@@ -192,17 +192,19 @@ pub fn mesh_exact_face_partition(
     }
     if !splits.is_empty() {
         canonicalize_shared_curve_splits(&mut splits);
-        return build_exact_face_partition_result(
+        return crate::surface_mesh::build_exact_face_partition_result_with_boundary(
             context.topology,
             context.curves,
+            &boundary,
             partition,
             ExactFacePartitionOutcome::RequiresCurveSplits { splits },
         )
         .map_err(|error| failure(ExactFacePartitionErrorKind::Batch(error.kind), error));
     }
-    build_exact_face_partition_result(
+    crate::surface_mesh::build_exact_face_partition_result_with_boundary(
         context.topology,
         context.curves,
+        &boundary,
         partition,
         ExactFacePartitionOutcome::Converged { faces: meshes },
     )

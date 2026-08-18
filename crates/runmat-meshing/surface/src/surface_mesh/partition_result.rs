@@ -2,6 +2,7 @@ use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
 use runmat_geometry_core::ExactBRepTopology;
 use runmat_meshing_core::MeshingPartitionDescriptor;
 use runmat_meshing_curve::{validate_shared_curve_split_set, SharedCurveMesh};
+use std::collections::BTreeSet;
 
 use super::{
     validate_exact_face_mesh_batch_parts, validate_face_partition_descriptor,
@@ -21,12 +22,24 @@ pub fn build_exact_face_partition_result(
     partition: MeshingPartitionDescriptor,
     outcome: ExactFacePartitionOutcome,
 ) -> Result<ExactFacePartitionResult, ExactSurfaceMeshError> {
+    let boundary = crate::build_exact_surface_boundary(topology, curves)
+        .map_err(|error| invalid(error.to_string()))?;
+    build_exact_face_partition_result_with_boundary(topology, curves, &boundary, partition, outcome)
+}
+
+pub(crate) fn build_exact_face_partition_result_with_boundary(
+    topology: &ExactBRepTopology,
+    curves: &SharedCurveMesh,
+    boundary: &crate::ExactSurfaceBoundary,
+    partition: MeshingPartitionDescriptor,
+    outcome: ExactFacePartitionOutcome,
+) -> Result<ExactFacePartitionResult, ExactSurfaceMeshError> {
     let result = ExactFacePartitionResult {
         schema_version: EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
         partition,
         outcome,
     };
-    validate_exact_face_partition_result(&result, topology, curves)?;
+    validate_exact_face_partition_result_with_boundary(&result, topology, curves, boundary)?;
     Ok(result)
 }
 
@@ -35,23 +48,89 @@ pub fn validate_exact_face_partition_result(
     topology: &ExactBRepTopology,
     curves: &SharedCurveMesh,
 ) -> Result<(), ExactSurfaceMeshError> {
+    let boundary = crate::build_exact_surface_boundary(topology, curves)
+        .map_err(|error| invalid(error.to_string()))?;
+    validate_exact_face_partition_result_with_boundary(result, topology, curves, &boundary)
+}
+
+pub(crate) fn validate_exact_face_partition_result_with_boundary(
+    result: &ExactFacePartitionResult,
+    topology: &ExactBRepTopology,
+    curves: &SharedCurveMesh,
+    boundary: &crate::ExactSurfaceBoundary,
+) -> Result<(), ExactSurfaceMeshError> {
     if result.schema_version != EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION {
         return Err(invalid("face partition result schema is unsupported"));
     }
     validate_face_partition_descriptor(&result.partition)?;
     match &result.outcome {
-        ExactFacePartitionOutcome::Converged { faces } => validate_exact_face_mesh_batch_parts(
-            EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
-            &result.partition,
-            faces,
-            topology,
-        ),
+        ExactFacePartitionOutcome::Converged { faces } => {
+            validate_exact_face_mesh_batch_parts(
+                EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
+                &result.partition,
+                faces,
+                topology,
+            )?;
+            validate_curve_boundary(faces, boundary)
+        }
         ExactFacePartitionOutcome::RequiresCurveSplits { splits } => {
             validate_split_ownership(&result.partition, topology, splits)?;
             validate_shared_curve_split_set(curves, topology, splits)
                 .map_err(|error| invalid(error.to_string()))
         }
     }
+}
+
+fn validate_curve_boundary(
+    faces: &[crate::ExactFaceMesh],
+    boundary: &crate::ExactSurfaceBoundary,
+) -> Result<(), ExactSurfaceMeshError> {
+    for mesh in faces {
+        let expected_face = boundary
+            .faces
+            .iter()
+            .find(|face| face.source_face_id == mesh.source_face_id)
+            .ok_or_else(|| invalid("face result is absent from the shared curve boundary"))?;
+        let expected = std::iter::once(&expected_face.outer_loop)
+            .chain(&expected_face.inner_loops)
+            .flat_map(|face_loop| &face_loop.segments)
+            .map(|segment| {
+                (
+                    &segment.source_coedge_id,
+                    &segment.source_edge_id,
+                    segment.node_ids,
+                    segment.edge_parameters.map(f64::to_bits),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        let actual = mesh
+            .boundary_segments
+            .iter()
+            .map(|segment| {
+                (
+                    &segment.source_coedge_id,
+                    &segment.source_edge_id,
+                    segment.node_ids,
+                    segment.edge_parameters.map(f64::to_bits),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        if expected.len()
+            != expected_face.outer_loop.segments.len()
+                + expected_face
+                    .inner_loops
+                    .iter()
+                    .map(|face_loop| face_loop.segments.len())
+                    .sum::<usize>()
+            || actual.len() != mesh.boundary_segments.len()
+            || actual != expected
+        {
+            return Err(invalid(
+                "converged face boundary is stale against the current shared curve",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn encode_exact_face_partition_result(
