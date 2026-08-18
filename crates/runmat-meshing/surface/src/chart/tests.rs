@@ -3,7 +3,7 @@ use runmat_geometry_core::{
     GeometryEvaluationError, GeometryModel, ParameterRange, PersistentEntityId,
     PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
 };
-use runmat_meshing_core::StableDigest;
+use runmat_meshing_core::{NeverCancelled, StableDigest};
 
 use crate::{
     ExactFaceBoundary, ExactFaceBoundaryLoop, ExactFaceBoundarySegment, ExactFacePslgSegmentSource,
@@ -140,6 +140,49 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         .iter()
         .zip(annulus_pslg.segments.iter().cycle().skip(1))
         .all(|(left, right)| left.vertex_indices[1] == right.vertex_indices[0]));
+
+    let delaunay_context = ExactFaceChartDelaunayContext {
+        topology: &topology,
+        evaluator: &evaluator,
+        geometry_control: &Control,
+        cancellation: &NeverCancelled,
+    };
+    let triangulations = triangulate_exact_face_charts(
+        &annulus_charts,
+        &annulus,
+        delaunay_context,
+        ExactFaceChartOptions::default(),
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(triangulations.len(), 1);
+    assert!(!triangulations[0].triangulation.triangles.is_empty());
+    validate_exact_face_chart_delaunay(
+        &triangulations,
+        &annulus_charts,
+        &annulus,
+        delaunay_context,
+        ExactFaceChartOptions::default(),
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    let mut tampered_triangulations = triangulations;
+    tampered_triangulations[0].triangulation.triangles[0]
+        .vertex_indices
+        .swap(1, 2);
+    assert!(matches!(
+        validate_exact_face_chart_delaunay(
+            &tampered_triangulations,
+            &annulus_charts,
+            &annulus,
+            delaunay_context,
+            ExactFaceChartOptions::default(),
+            crate::ExactFaceDelaunayOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceChartErrorKind::Delaunay(_)
+    ));
 
     let mut tampered_annulus = annulus_charts;
     let cut = tampered_annulus.charts[0]

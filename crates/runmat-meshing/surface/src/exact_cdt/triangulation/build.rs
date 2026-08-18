@@ -8,8 +8,8 @@ use runmat_meshing_core::{
 use crate::{validate_exact_face_pslg, ExactFaceBoundary, ExactFacePslg};
 
 use super::{
-    predicate_point, validate_exact_face_delaunay, ExactFaceDelaunay, ExactFaceDelaunayError,
-    ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFaceDelaunayTriangle,
+    predicate_point, ExactFaceDelaunay, ExactFaceDelaunayError, ExactFaceDelaunayErrorKind,
+    ExactFaceDelaunayOptions, ExactFaceDelaunayTriangle,
 };
 
 pub fn triangulate_exact_face_pslg(
@@ -18,7 +18,6 @@ pub fn triangulate_exact_face_pslg(
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceDelaunay, ExactFaceDelaunayError> {
-    validate_options(pslg, options)?;
     validate_exact_face_pslg(pslg, boundary).map_err(|error| {
         ExactFaceDelaunayError::new(
             ExactFaceDelaunayErrorKind::InvalidPslg,
@@ -26,6 +25,15 @@ pub fn triangulate_exact_face_pslg(
             error.to_string(),
         )
     })?;
+    triangulate_validated_face_pslg(pslg, cancellation, options)
+}
+
+pub(crate) fn triangulate_validated_face_pslg(
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<ExactFaceDelaunay, ExactFaceDelaunayError> {
+    validate_options(pslg, options)?;
     let mut budget = PredicateBudget::new(pslg, cancellation, options);
     budget.checkpoint()?;
 
@@ -111,7 +119,7 @@ pub fn triangulate_exact_face_pslg(
         source_face_id: pslg.source_face_id.clone(),
         triangles,
     };
-    validate_exact_face_delaunay(&result, pslg, boundary, cancellation, options)?;
+    super::validate::validate_face_delaunay_topology(&result, pslg, cancellation, options)?;
     Ok(result)
 }
 

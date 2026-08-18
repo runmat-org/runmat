@@ -7,11 +7,13 @@ use runmat_meshing_core::{PlanarPredicatePoint, StableDigest};
 use crate::ExactFacePslgVertex;
 
 pub use build::triangulate_exact_face_pslg;
+pub(crate) use build::triangulate_validated_face_pslg;
 pub use types::{
     ExactFaceDelaunay, ExactFaceDelaunayError, ExactFaceDelaunayErrorKind,
     ExactFaceDelaunayOptions, ExactFaceDelaunayTriangle,
 };
 pub use validate::validate_exact_face_delaunay;
+pub(crate) use validate::validate_face_delaunay_topology;
 
 #[cfg(test)]
 mod tests;

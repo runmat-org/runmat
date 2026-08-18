@@ -24,3 +24,4 @@ pub use triangulation::{
     ExactFaceDelaunayError, ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions,
     ExactFaceDelaunayTriangle,
 };
+pub(crate) use triangulation::{triangulate_validated_face_pslg, validate_face_delaunay_topology};

@@ -19,6 +19,22 @@ pub fn validate_exact_face_delaunay(
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceDelaunayError> {
+    validate_exact_face_pslg(pslg, boundary).map_err(|error| {
+        invalid(
+            pslg,
+            ExactFaceDelaunayErrorKind::InvalidPslg,
+            error.to_string(),
+        )
+    })?;
+    validate_face_delaunay_topology(triangulation, pslg, cancellation, options)
+}
+
+pub(crate) fn validate_face_delaunay_topology(
+    triangulation: &ExactFaceDelaunay,
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<(), ExactFaceDelaunayError> {
     if let Err(reason) = options.validate() {
         return Err(invalid(
             pslg,
@@ -27,13 +43,6 @@ pub fn validate_exact_face_delaunay(
         ));
     }
     check_cancelled(cancellation, pslg, "surface Delaunay validation cancelled")?;
-    validate_exact_face_pslg(pslg, boundary).map_err(|error| {
-        invalid(
-            pslg,
-            ExactFaceDelaunayErrorKind::InvalidPslg,
-            error.to_string(),
-        )
-    })?;
     if triangulation.source_face_id != pslg.source_face_id || triangulation.triangles.is_empty() {
         return Err(invalid(
             pslg,

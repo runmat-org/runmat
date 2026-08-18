@@ -1,7 +1,9 @@
-use runmat_geometry_core::PersistentEntityId;
-use runmat_meshing_core::StableDigest;
+use runmat_geometry_core::{
+    ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, PersistentEntityId,
+};
+use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
-use crate::{ExactFaceBoundary, ExactFacePslg};
+use crate::{ExactFaceBoundary, ExactFaceDelaunay, ExactFaceDelaunayErrorKind, ExactFacePslg};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceChart {
@@ -17,6 +19,20 @@ pub struct ExactFaceCharts {
     pub source_face_id: PersistentEntityId,
     pub periodicity: [Option<f64>; 2],
     pub charts: Vec<ExactFaceChart>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceChartDelaunay {
+    pub chart_id: StableDigest,
+    pub triangulation: ExactFaceDelaunay,
+}
+
+#[derive(Clone, Copy)]
+pub struct ExactFaceChartDelaunayContext<'a> {
+    pub topology: &'a ExactBRepTopology,
+    pub evaluator: &'a dyn ExactSurfaceEvaluator,
+    pub geometry_control: &'a dyn GeometryEvaluationControl,
+    pub cancellation: &'a dyn MeshingCancellationSignal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,6 +58,7 @@ pub enum ExactFaceChartErrorKind {
     InvalidInput,
     GeometryEvaluation,
     RequiresMultipleCharts,
+    Delaunay(ExactFaceDelaunayErrorKind),
 }
 
 #[derive(Clone, Debug, PartialEq)]
