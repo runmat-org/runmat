@@ -348,6 +348,14 @@ fn replacement_identity(source: StableDigest, coordinates_m: [f64; 3]) -> Stable
     StableDigest::from_bytes(hasher.finalize().into())
 }
 
+pub(super) fn relocation_identity_is_valid(relocation: &DelaunayVolumeSliverRelocation) -> bool {
+    relocation.replacement_node.identity
+        == replacement_identity(
+            relocation.source_node_identity,
+            relocation.replacement_node.coordinates_m,
+        )
+}
+
 fn compare_spectra(left: &[f64], right: &[f64]) -> Ordering {
     left.iter()
         .zip(right)

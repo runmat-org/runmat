@@ -6,7 +6,8 @@ use sha2::{Digest, Sha256};
 use super::{
     validate_delaunay_volume_quality, DelaunayTetrahedronQuality, DelaunayVolumeNode,
     DelaunayVolumeProvenance, DelaunayVolumeQuality, DelaunayVolumeQualityError,
-    DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions, DelaunayVolumeTopology,
+    DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions, DelaunayVolumeSliverOptions,
+    DelaunayVolumeSliverRelocation, DelaunayVolumeTopology,
 };
 
 mod candidate;
@@ -90,6 +91,7 @@ pub struct DelaunayVolumeRefinementStepError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DelaunayVolumeRefinementOptions {
     pub step: DelaunayVolumeRefinementStepOptions,
+    pub sliver: DelaunayVolumeSliverOptions,
     pub maximum_insertions: u64,
 }
 
@@ -97,6 +99,7 @@ impl Default for DelaunayVolumeRefinementOptions {
     fn default() -> Self {
         Self {
             step: DelaunayVolumeRefinementStepOptions::default(),
+            sliver: DelaunayVolumeSliverOptions::default(),
             maximum_insertions: 10_000_000,
         }
     }
@@ -106,8 +109,14 @@ impl Default for DelaunayVolumeRefinementOptions {
 pub struct DelaunayVolumeRefinement {
     pub topology: DelaunayVolumeTopology,
     pub quality: DelaunayVolumeQuality,
-    /// Canonically sorted inventory of nodes inserted by this refinement run.
-    pub inserted_node_identities: Vec<StableDigest>,
+    /// Deterministic mutation order used to validate exact node lineage.
+    pub mutations: Vec<DelaunayVolumeRefinementMutation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DelaunayVolumeRefinementMutation {
+    Inserted(DelaunayVolumeNode),
+    Relocated(DelaunayVolumeSliverRelocation),
 }
 
 impl std::fmt::Display for DelaunayVolumeRefinementStepError {

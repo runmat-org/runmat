@@ -281,10 +281,13 @@ pub(super) fn validate_options(
         || options.maximum_protected_faces == 0
         || options.maximum_cavity_boundary_faces == 0
         || options.maximum_predicate_evaluations == 0
+        || options.topology.maximum_nodes == 0
+        || options.topology.maximum_tetrahedra == 0
+        || options.topology.cancellation_check_interval == 0
     {
         return Err(error(
             DelaunayInsertionErrorKind::InvalidOptions,
-            "insertion work limits must be nonzero",
+            "insertion and topology work limits must be nonzero",
         ));
     }
     Ok(())

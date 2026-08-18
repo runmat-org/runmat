@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
@@ -6,11 +6,13 @@ use super::{
     insert_delaunay_volume_refinement_candidate,
     insertion::{error, insertion_error, quality_error},
     select_delaunay_volume_refinement_candidate, DelaunayVolumeRefinement,
-    DelaunayVolumeRefinementInput, DelaunayVolumeRefinementOptions,
-    DelaunayVolumeRefinementStepError, DelaunayVolumeRefinementStepErrorKind,
+    DelaunayVolumeRefinementInput, DelaunayVolumeRefinementMutation,
+    DelaunayVolumeRefinementOptions, DelaunayVolumeRefinementStepError,
+    DelaunayVolumeRefinementStepErrorKind,
 };
 use crate::cdt::{
-    insertion::validate_constrained_delaunay_volume_topology, validate_delaunay_volume_quality,
+    insertion::validate_constrained_delaunay_volume_topology, treat_delaunay_volume_slivers,
+    validate_delaunay_volume_quality, DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind,
 };
 
 pub fn refine_delaunay_volume(
@@ -21,8 +23,9 @@ pub fn refine_delaunay_volume(
     validate_options(options)?;
     let mut topology = input.topology.clone();
     let mut quality = input.quality.clone();
-    let mut inserted_node_identities = Vec::new();
-    for _ in 0..options.maximum_insertions {
+    let mut mutations = Vec::new();
+    let mut insertion_count = 0u64;
+    loop {
         let current = DelaunayVolumeRefinementInput {
             topology: &topology,
             metric_request: input.metric_request,
@@ -30,6 +33,27 @@ pub fn refine_delaunay_volume(
             quality: &quality,
             quality_options: input.quality_options,
         };
+        if quality.tetrahedra.iter().any(|tetrahedron| {
+            tetrahedron.metric_scaled_jacobian
+                < input.quality_options.minimum_metric_scaled_jacobian
+        }) {
+            match treat_delaunay_volume_slivers(current, options.sliver, cancellation) {
+                Ok(treatment) => {
+                    mutations.extend(
+                        treatment
+                            .relocations
+                            .into_iter()
+                            .map(DelaunayVolumeRefinementMutation::Relocated),
+                    );
+                    topology = treatment.topology;
+                    quality = treatment.quality;
+                    continue;
+                }
+                Err(failure)
+                    if failure.kind == DelaunayVolumeSliverErrorKind::NoAdmissibleRelocation => {}
+                Err(failure) => return Err(sliver_error(failure)),
+            }
+        }
         let Some(candidate) = select_delaunay_volume_refinement_candidate(
             current,
             options.step.candidate,
@@ -37,34 +61,27 @@ pub fn refine_delaunay_volume(
         )
         .map_err(super::insertion::candidate_error)?
         else {
-            inserted_node_identities.sort_unstable();
             let refinement = DelaunayVolumeRefinement {
                 topology,
                 quality,
-                inserted_node_identities,
+                mutations,
             };
             validate_delaunay_volume_refinement(input, &refinement, options, cancellation)?;
             return Ok(refinement);
         };
+        if insertion_count >= options.maximum_insertions {
+            break;
+        }
         let step = insert_delaunay_volume_refinement_candidate(
             current,
             &candidate,
             options.step,
             cancellation,
         )?;
-        inserted_node_identities.push(candidate.node.identity);
+        insertion_count += 1;
+        mutations.push(DelaunayVolumeRefinementMutation::Inserted(candidate.node));
         topology = step.topology;
         quality = step.quality;
-    }
-    if quality.worst_refinement_tetrahedron.is_none() {
-        inserted_node_identities.sort_unstable();
-        let refinement = DelaunayVolumeRefinement {
-            topology,
-            quality,
-            inserted_node_identities,
-        };
-        validate_delaunay_volume_refinement(input, &refinement, options, cancellation)?;
-        return Ok(refinement);
     }
     let last_violation = quality
         .tetrahedra
@@ -89,20 +106,6 @@ pub fn validate_delaunay_volume_refinement(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayVolumeRefinementStepError> {
     validate_options(options)?;
-    if refinement.inserted_node_identities.len() as u64 > options.maximum_insertions
-        || refinement
-            .inserted_node_identities
-            .contains(&StableDigest::ZERO)
-        || refinement
-            .inserted_node_identities
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-    {
-        return Err(error(
-            DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
-            "inserted node identities must be bounded, nonzero, unique, and canonical",
-        ));
-    }
     if refinement.quality.worst_refinement_tetrahedron.is_some() {
         return Err(error(
             DelaunayVolumeRefinementStepErrorKind::InvalidQuality,
@@ -112,43 +115,14 @@ pub fn validate_delaunay_volume_refinement(
     if input.quality.worst_refinement_tetrahedron.is_none()
         && (refinement.topology != *input.topology
             || refinement.quality != *input.quality
-            || !refinement.inserted_node_identities.is_empty())
+            || !refinement.mutations.is_empty())
     {
         return Err(error(
             DelaunayVolumeRefinementStepErrorKind::InvalidInput,
             "already converged input must remain unchanged",
         ));
     }
-    let inserted = refinement
-        .inserted_node_identities
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    if refinement.topology.nodes.len()
-        != input.topology.nodes.len() + refinement.inserted_node_identities.len()
-        || input.topology.nodes.iter().any(|old| {
-            refinement
-                .topology
-                .nodes
-                .binary_search_by_key(&old.identity, |node| node.identity)
-                .ok()
-                .and_then(|index| refinement.topology.nodes.get(index))
-                != Some(old)
-        })
-        || refinement.topology.nodes.iter().any(|node| {
-            input
-                .topology
-                .nodes
-                .binary_search_by_key(&node.identity, |old| old.identity)
-                .is_err()
-                && !inserted.contains(&node.identity)
-        })
-    {
-        return Err(error(
-            DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
-            "refinement topology does not exactly match old nodes plus its lineage",
-        ));
-    }
+    validate_mutation_lineage(input, refinement, options)?;
     let protected_faces = input
         .provenance
         .facets
@@ -183,5 +157,108 @@ fn validate_options(
             "maximum volume-refinement insertions must be nonzero",
         ));
     }
+    super::super::insertion::validate_options(options.step.insertion).map_err(insertion_error)?;
+    super::super::volume_sliver::validate_options(options.sliver).map_err(sliver_error)?;
     Ok(())
+}
+
+fn validate_mutation_lineage(
+    input: DelaunayVolumeRefinementInput<'_>,
+    refinement: &DelaunayVolumeRefinement,
+    options: DelaunayVolumeRefinementOptions,
+) -> Result<(), DelaunayVolumeRefinementStepError> {
+    let insertion_count = refinement
+        .mutations
+        .iter()
+        .filter(|mutation| matches!(mutation, DelaunayVolumeRefinementMutation::Inserted(_)))
+        .count() as u64;
+    let relocation_count = refinement.mutations.len() as u64 - insertion_count;
+    let maximum_relocations = insertion_count
+        .saturating_add(1)
+        .saturating_mul(options.sliver.maximum_passes);
+    if insertion_count > options.maximum_insertions || relocation_count > maximum_relocations {
+        return Err(error(
+            DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
+            "refinement mutation evidence exceeds its configured hard limits",
+        ));
+    }
+    let mut nodes = input
+        .topology
+        .nodes
+        .iter()
+        .map(|node| (node.identity, *node))
+        .collect::<BTreeMap<_, _>>();
+    for mutation in &refinement.mutations {
+        match mutation {
+            DelaunayVolumeRefinementMutation::Inserted(node) => {
+                if node.identity == StableDigest::ZERO
+                    || node.coordinates_m.iter().any(|value| !value.is_finite())
+                    || nodes.insert(node.identity, *node).is_some()
+                {
+                    return Err(invalid_lineage());
+                }
+            }
+            DelaunayVolumeRefinementMutation::Relocated(relocation) => {
+                if !relocation
+                    .source_tetrahedron_node_identities
+                    .contains(&relocation.source_node_identity)
+                    || relocation
+                        .source_tetrahedron_node_identities
+                        .iter()
+                        .any(|identity| !nodes.contains_key(identity))
+                    || !super::super::volume_sliver::relocation_identity_is_valid(relocation)
+                    || nodes.remove(&relocation.source_node_identity).is_none()
+                    || nodes
+                        .insert(
+                            relocation.replacement_node.identity,
+                            relocation.replacement_node,
+                        )
+                        .is_some()
+                {
+                    return Err(invalid_lineage());
+                }
+            }
+        }
+    }
+    if nodes.values().copied().collect::<Vec<_>>() != refinement.topology.nodes {
+        return Err(invalid_lineage());
+    }
+    Ok(())
+}
+
+fn invalid_lineage() -> DelaunayVolumeRefinementStepError {
+    error(
+        DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
+        "refinement topology does not exactly match its ordered insertion and relocation lineage",
+    )
+}
+
+fn sliver_error(failure: DelaunayVolumeSliverError) -> DelaunayVolumeRefinementStepError {
+    let kind = match failure.kind {
+        DelaunayVolumeSliverErrorKind::InvalidOptions => {
+            DelaunayVolumeRefinementStepErrorKind::InvalidOptions
+        }
+        DelaunayVolumeSliverErrorKind::InvalidInput => {
+            DelaunayVolumeRefinementStepErrorKind::InvalidInput
+        }
+        DelaunayVolumeSliverErrorKind::InvalidTopology => {
+            DelaunayVolumeRefinementStepErrorKind::InvalidTopology
+        }
+        DelaunayVolumeSliverErrorKind::InvalidProvenance => {
+            DelaunayVolumeRefinementStepErrorKind::InvalidProvenance
+        }
+        DelaunayVolumeSliverErrorKind::InvalidQuality => {
+            DelaunayVolumeRefinementStepErrorKind::InvalidQuality
+        }
+        DelaunayVolumeSliverErrorKind::NoAdmissibleRelocation => {
+            DelaunayVolumeRefinementStepErrorKind::InvalidQuality
+        }
+        DelaunayVolumeSliverErrorKind::ResourceLimit => {
+            DelaunayVolumeRefinementStepErrorKind::ResourceLimit
+        }
+        DelaunayVolumeSliverErrorKind::Cancelled => {
+            DelaunayVolumeRefinementStepErrorKind::Cancelled
+        }
+    };
+    error(kind, failure.to_string())
 }

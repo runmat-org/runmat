@@ -5,8 +5,10 @@ use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, Met
 use super::*;
 use crate::cdt::{
     assign_delaunay_volume_regions, build_delaunay_volume_topology,
-    evaluate_delaunay_volume_quality, DelaunayFacetProvenance, DelaunayTopologyOptions,
-    DelaunayVolumeProvenance, DelaunayVolumeQualityOptions, DelaunayVolumeRefinementInput,
+    evaluate_delaunay_volume_quality, refine_delaunay_volume, validate_delaunay_volume_refinement,
+    DelaunayFacetProvenance, DelaunayTopologyOptions, DelaunayVolumeProvenance,
+    DelaunayVolumeQualityOptions, DelaunayVolumeRefinementInput, DelaunayVolumeRefinementMutation,
+    DelaunayVolumeRefinementOptions, DelaunayVolumeRefinementStepErrorKind,
 };
 
 fn entity(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
@@ -160,6 +162,45 @@ fn treatment_relocates_only_the_interior_node_and_eliminates_slivers() {
 }
 
 #[test]
+fn refinement_driver_applies_sliver_treatment_before_steiner_insertion() {
+    let (topology, provenance) = interior_sliver_fixture();
+    let request = metric();
+    let initial_quality = quality(&topology, &provenance);
+    let input = DelaunayVolumeRefinementInput {
+        topology: &topology,
+        metric_request: &request,
+        provenance: &provenance,
+        quality: &initial_quality,
+        quality_options: quality_options(),
+    };
+    let options = DelaunayVolumeRefinementOptions {
+        maximum_insertions: 1,
+        ..DelaunayVolumeRefinementOptions::default()
+    };
+    let refinement = refine_delaunay_volume(input, options, &NeverCancelled).unwrap();
+
+    assert_eq!(refinement.mutations.len(), 1);
+    assert!(matches!(
+        refinement.mutations[0],
+        DelaunayVolumeRefinementMutation::Relocated(_)
+    ));
+    assert!(refinement.quality.worst_refinement_tetrahedron.is_none());
+    validate_delaunay_volume_refinement(input, &refinement, options, &NeverCancelled).unwrap();
+
+    let mut tampered = refinement;
+    let DelaunayVolumeRefinementMutation::Relocated(relocation) = &mut tampered.mutations[0] else {
+        unreachable!();
+    };
+    relocation.replacement_node.coordinates_m[0] += 0.01;
+    assert_eq!(
+        validate_delaunay_volume_refinement(input, &tampered, options, &NeverCancelled)
+            .unwrap_err()
+            .kind,
+        DelaunayVolumeRefinementStepErrorKind::InvalidTopology
+    );
+}
+
+#[test]
 fn treatment_is_a_checked_noop_and_rejects_tampering() {
     let (topology, provenance) = interior_sliver_fixture();
     let request = metric();
@@ -274,7 +315,7 @@ fn treatment_reports_immovable_slivers_limits_and_cancellation() {
         )
         .unwrap_err()
         .kind,
-        DelaunayVolumeSliverErrorKind::UnsatisfiableQuality
+        DelaunayVolumeSliverErrorKind::NoAdmissibleRelocation
     );
     assert_eq!(
         treat_delaunay_volume_slivers(

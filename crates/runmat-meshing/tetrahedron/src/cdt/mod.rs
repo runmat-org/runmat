@@ -64,9 +64,9 @@ pub use volume_refinement::{
     DelaunayRefinementCandidateKind, DelaunayVolumeRefinement, DelaunayVolumeRefinementCandidate,
     DelaunayVolumeRefinementCandidateError, DelaunayVolumeRefinementCandidateErrorKind,
     DelaunayVolumeRefinementCandidateOptions, DelaunayVolumeRefinementInput,
-    DelaunayVolumeRefinementOptions, DelaunayVolumeRefinementStep,
-    DelaunayVolumeRefinementStepError, DelaunayVolumeRefinementStepErrorKind,
-    DelaunayVolumeRefinementStepOptions,
+    DelaunayVolumeRefinementMutation, DelaunayVolumeRefinementOptions,
+    DelaunayVolumeRefinementStep, DelaunayVolumeRefinementStepError,
+    DelaunayVolumeRefinementStepErrorKind, DelaunayVolumeRefinementStepOptions,
 };
 pub use volume_sliver::{
     treat_delaunay_volume_slivers, validate_delaunay_volume_sliver_treatment,

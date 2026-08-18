@@ -637,12 +637,17 @@ fn refinement_loop_preserves_converged_input_and_rejects_false_lineage() {
     assert_eq!(first, second);
     assert_eq!(first.topology, topology);
     assert_eq!(first.quality, quality);
-    assert!(first.inserted_node_identities.is_empty());
+    assert!(first.mutations.is_empty());
 
     let mut tampered = first;
     tampered
-        .inserted_node_identities
-        .push(StableDigest::from_bytes([9; 32]));
+        .mutations
+        .push(DelaunayVolumeRefinementMutation::Inserted(
+            DelaunayVolumeNode {
+                identity: StableDigest::from_bytes([9; 32]),
+                coordinates_m: [0.25; 3],
+            },
+        ));
     assert_eq!(
         validate_delaunay_volume_refinement(
             input,

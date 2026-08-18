@@ -54,7 +54,7 @@ pub enum DelaunayVolumeSliverErrorKind {
     InvalidTopology,
     InvalidProvenance,
     InvalidQuality,
-    UnsatisfiableQuality,
+    NoAdmissibleRelocation,
     ResourceLimit,
     Cancelled,
 }
@@ -121,7 +121,7 @@ pub(super) fn run_treatment(
             relocation_candidates(current, source, &current_spectrum, options, cancellation)?;
         let Some(candidate) = candidates.into_iter().next() else {
             return Err(error(
-                DelaunayVolumeSliverErrorKind::UnsatisfiableQuality,
+                DelaunayVolumeSliverErrorKind::NoAdmissibleRelocation,
                 format!(
                     "no legal interior relocation improves metric sliver {} with scaled Jacobian {} below {}",
                     stable_simplex(source.node_identities),
@@ -176,6 +176,12 @@ pub(super) fn validate_options(
             "pass, candidate-evaluation, and cancellation limits must be nonzero",
         ));
     }
+    super::insertion::validate_options(options.insertion).map_err(|failure| {
+        error(
+            DelaunayVolumeSliverErrorKind::InvalidOptions,
+            failure.to_string(),
+        )
+    })?;
     Ok(())
 }
 
@@ -279,6 +285,10 @@ pub(super) fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayVolu
         DelaunayVolumeQualityErrorKind::Cancelled => DelaunayVolumeSliverErrorKind::Cancelled,
     };
     error(kind, failure.to_string())
+}
+
+pub(super) fn relocation_identity_is_valid(relocation: &DelaunayVolumeSliverRelocation) -> bool {
+    relocation::relocation_identity_is_valid(relocation)
 }
 
 pub(super) fn error(
