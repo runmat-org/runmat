@@ -9,7 +9,7 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -345,7 +345,6 @@ fn issorted_internal(message: impl Into<String>) -> crate::RuntimeError {
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     let (input, args) = match value {
         Value::GpuTensor(handle) => {
             let args = IssortedArgs::parse(&rest, &handle.shape)?;
@@ -820,15 +819,134 @@ fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::Built
     if let Some(values) = tensor.as_f64_slice() {
         return issorted_floating_complex(values, &tensor.shape, args);
     }
-    issorted_promoted_complex_f64(tensor, args)
+    let storage = tensor
+        .integer_storage()
+        .expect("complex tensor storage is floating or integer");
+    issorted_complex_integer(storage, &tensor.shape, args)
 }
 
-fn issorted_promoted_complex_f64(
-    tensor: &ComplexTensor,
+fn issorted_complex_integer(
+    storage: &IntegerComplexStorage,
+    shape: &[usize],
     args: &IssortedArgs,
 ) -> crate::BuiltinResult<bool> {
-    let values = tensor.materialize_f64();
-    issorted_floating_complex(&values, &tensor.shape, args)
+    match args.mode {
+        CheckMode::Dimension(dim) => Ok(check_complex_integer_dimension(storage, shape, dim, args)),
+        CheckMode::Rows => check_complex_integer_rows(storage, shape, args),
+    }
+}
+
+fn check_complex_integer_dimension(
+    storage: &IntegerComplexStorage,
+    shape: &[usize],
+    dim: usize,
+    args: &IssortedArgs,
+) -> bool {
+    let dim_index = dim.saturating_sub(1);
+    if dim_index >= shape.len() || shape[dim_index] <= 1 {
+        return true;
+    }
+    let len_dim = shape[dim_index];
+    let before = product(&shape[..dim_index]);
+    let after = product(&shape[dim_index + 1..]);
+    for after_idx in 0..after {
+        for before_idx in 0..before {
+            let indices =
+                (0..len_dim).map(|k| before_idx + k * before + after_idx * before * len_dim);
+            let indices = indices.collect::<Vec<_>>();
+            if !direction_orders(args.direction)
+                .iter()
+                .copied()
+                .any(|order| {
+                    indices.windows(2).all(|pair| {
+                        order_satisfied(
+                            compare_complex_integer_at(
+                                storage,
+                                pair[0],
+                                pair[1],
+                                order,
+                                args.comparison,
+                            ),
+                            order,
+                        )
+                    })
+                })
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn check_complex_integer_rows(
+    storage: &IntegerComplexStorage,
+    shape: &[usize],
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
+    if shape.len() > 2 {
+        return Err(issorted_error(
+            &ISSORTED_ERROR_ROWS_REQUIRES_2D,
+            ISSORTED_ERROR_ROWS_REQUIRES_2D.message,
+        ));
+    }
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    if rows <= 1 || cols == 0 {
+        return Ok(true);
+    }
+    Ok(direction_orders(args.direction)
+        .iter()
+        .copied()
+        .any(|order| {
+            (0..rows - 1).all(|row| {
+                let mut ordering = Ordering::Equal;
+                for col in 0..cols {
+                    ordering = compare_complex_integer_at(
+                        storage,
+                        row + col * rows,
+                        row + 1 + col * rows,
+                        order,
+                        args.comparison,
+                    );
+                    if ordering != Ordering::Equal {
+                        break;
+                    }
+                }
+                order_satisfied(ordering, order)
+            })
+        }))
+}
+
+fn compare_complex_integer_at(
+    storage: &IntegerComplexStorage,
+    a: usize,
+    b: usize,
+    order: OrderSpec,
+    comparison: ComparisonMethod,
+) -> Ordering {
+    let a_real = storage
+        .real
+        .value_at(a)
+        .expect("validated complex integer index");
+    let a_imag = storage
+        .imag
+        .value_at(a)
+        .expect("validated complex integer index");
+    let b_real = storage
+        .real
+        .value_at(b)
+        .expect("validated complex integer index");
+    let b_imag = storage
+        .imag
+        .value_at(b)
+        .expect("validated complex integer index");
+    integer_order::compare_complex(
+        (&a_real, &a_imag),
+        (&b_real, &b_imag),
+        matches!(order.direction, SortDirection::Descend),
+        matches!(comparison, ComparisonMethod::Real),
+    )
 }
 
 fn issorted_floating_complex<T: SetFloat>(
@@ -1565,7 +1683,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Type, Value};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type, Value,
+    };
 
     fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::issorted_builtin(value, rest))
@@ -1577,6 +1697,36 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let result = issorted_builtin(Value::Tensor(tensor), vec![]).expect("issorted");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn issorted_compares_typed_complex_uint64_exactly() {
+        let sorted = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 0]),
+                IntegerStorage::U64(vec![1, 0, u64::MAX]),
+            )
+            .unwrap(),
+            vec![3, 1],
+        )
+        .unwrap();
+        assert_eq!(
+            issorted_builtin(Value::ComplexTensor(sorted), vec![]).unwrap(),
+            Value::Bool(true)
+        );
+        let unsorted = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]),
+                IntegerStorage::U64(vec![0, 1]),
+            )
+            .unwrap(),
+            vec![2, 1],
+        )
+        .unwrap();
+        assert_eq!(
+            issorted_builtin(Value::ComplexTensor(unsorted), vec![]).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[test]

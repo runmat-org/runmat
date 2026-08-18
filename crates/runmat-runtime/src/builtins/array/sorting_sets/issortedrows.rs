@@ -607,11 +607,41 @@ fn check_complex(tensor: &ComplexTensor, rows: usize, cols: usize, args: &Args) 
     match tensor.complex_storage() {
         ComplexStorage::F64(values) => check_complex_values(values, rows, cols, args),
         ComplexStorage::F32(values) => check_complex_values(values, rows, cols, args),
-        ComplexStorage::Integer(_) => {
-            let values = tensor.materialize_f64();
-            check_complex_values(&values, rows, cols, args)
-        }
+        ComplexStorage::Integer(storage) => check_complex_integer(storage, rows, args),
     }
+}
+
+fn check_complex_integer(
+    storage: &runmat_builtins::IntegerComplexStorage,
+    rows: usize,
+    args: &Args,
+) -> bool {
+    check_adjacent(rows, args, |row, column, direction| {
+        let left = row + column * rows;
+        let right = row + 1 + column * rows;
+        let left_real = storage
+            .real
+            .value_at(left)
+            .expect("validated complex row index");
+        let left_imag = storage
+            .imag
+            .value_at(left)
+            .expect("validated complex row index");
+        let right_real = storage
+            .real
+            .value_at(right)
+            .expect("validated complex row index");
+        let right_imag = storage
+            .imag
+            .value_at(right)
+            .expect("validated complex row index");
+        integer_order::compare_complex(
+            (&left_real, &left_imag),
+            (&right_real, &right_imag),
+            matches!(direction, BaseDirection::Descend),
+            matches!(args.comparison, ComparisonMethod::Real),
+        )
+    })
 }
 
 fn check_complex_values<T: SetFloat>(
@@ -866,7 +896,10 @@ fn is_vector(shape: &[usize]) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntValue, StringArray, Tensor};
+    use runmat_builtins::{
+        CellArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, StringArray,
+        Tensor,
+    };
 
     fn builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(issortedrows_builtin(value, rest))
@@ -881,6 +914,23 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn issortedrows_compares_typed_complex_uint64_exactly() {
+        let sorted = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+                IntegerStorage::U64(vec![1, 0]),
+            )
+            .unwrap(),
+            vec![2, 1],
+        )
+        .unwrap();
+        assert_eq!(
+            builtin(Value::ComplexTensor(sorted), vec![]).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[test]

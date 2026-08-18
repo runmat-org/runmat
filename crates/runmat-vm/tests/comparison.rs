@@ -183,6 +183,23 @@ fn vm_complex_ordering_compares_real_components_and_preserves_wide_integers() {
 }
 
 #[test]
+fn compiled_complex_integer_sorting_remains_exact_and_class_preserving() {
+    execute_source(
+        r#"
+        maximum = intmax('uint64');
+        z = complex([maximum maximum-uint64(1) uint64(0)], [uint64(0) uint64(1) maximum]);
+        [sorted, indices] = sort(z);
+        if ~isa(sorted,'uint64') || real(sorted(1)) ~= maximum-uint64(1) || imag(sorted(1)) ~= uint64(1) || real(sorted(2)) ~= maximum || imag(sorted(3)) ~= maximum || ~isequal(indices,[2 1 3]); error('exact complex integer sort'); end;
+        if ~issorted(sorted); error('exact complex integer issorted'); end;
+        rows = reshape(z(1:2),[2 1]);
+        [sortedRows,rowIndices] = sortrows(rows);
+        if real(sortedRows(1)) ~= maximum-uint64(1) || ~isequal(rowIndices,[2;1]) || ~issortedrows(sortedRows); error('exact complex integer row order'); end;
+        "#,
+    )
+    .expect("compiled exact complex integer ordering");
+}
+
+#[test]
 fn vm_integer_scalar_mtimes_is_exact_and_rejects_matrix_forms() {
     let vars = execute_source(
         r#"
