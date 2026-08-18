@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
-pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 2;
+pub const ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,7 +87,8 @@ pub struct MeshRegion {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MaterialInterface {
-    pub interface_id: String,
+    /// The authoritative exact face shared by both conformal regions.
+    pub source_face_id: PersistentEntityId,
     pub side_a_region_id: PersistentEntityId,
     pub side_b_region_id: PersistentEntityId,
     pub boundary_face_ids: Vec<u64>,

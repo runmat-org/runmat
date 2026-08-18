@@ -282,6 +282,18 @@ fn artifact_rejects_noncanonical_or_dangling_connectivity() {
     let mut invalid = artifact();
     invalid.topology.regions[0].element_ids.clear();
     assert_eq!(invalid.validate().unwrap_err().field, "mesh region");
+
+    let mut invalid = artifact();
+    invalid.topology.volume_elements[0].node_ids[3] = 1;
+    assert_eq!(invalid.validate().unwrap_err().field, "volume element");
+
+    let mut invalid = artifact();
+    invalid.topology.boundary_faces[0].role = BoundaryFaceRole::MaterialInterface;
+    assert_eq!(invalid.validate().unwrap_err().field, "boundary face");
+
+    let mut invalid = artifact();
+    invalid.topology.boundary_edges[0].adjacent_boundary_face_ids = vec![12];
+    assert_eq!(invalid.validate().unwrap_err().field, "boundary edge");
 }
 
 #[test]

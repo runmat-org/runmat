@@ -5,6 +5,7 @@ mod incidence;
 mod insertion;
 mod point_set;
 mod segment_recovery;
+mod solver_topology;
 mod topology;
 mod volume_mesh;
 mod volume_provenance;
@@ -43,6 +44,10 @@ pub use segment_recovery::{
     recover_delaunay_segments, validate_delaunay_segment_recovery, DelaunayRecoveredSegment,
     DelaunayRecoveredSegmentNode, DelaunaySegmentRecovery, DelaunaySegmentRecoveryError,
     DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions,
+};
+pub use solver_topology::{
+    build_delaunay_solver_topology, DelaunayRegionMaterial, DelaunaySolverTopologyError,
+    DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
 };
 pub use topology::{
     build_delaunay_volume_topology, DelaunayTopologyError, DelaunayTopologyErrorKind,

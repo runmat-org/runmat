@@ -71,6 +71,7 @@ impl SolverMeshTopology {
                         ElementOrder::Tet10 => 10,
                     }
                 || !all_references_exist(&element.node_ids, &node_ids)
+                || element.node_ids.iter().collect::<BTreeSet<_>>().len() != element.node_ids.len()
             {
                 return Err(MeshingContractError::invalid(
                     "volume element",
@@ -93,12 +94,44 @@ impl SolverMeshTopology {
         element_ids: &BTreeSet<u64>,
         face_ids: &BTreeSet<u64>,
     ) -> Result<(), MeshingContractError> {
+        let element_nodes = self
+            .volume_elements
+            .iter()
+            .map(|element| {
+                (
+                    element.element_id,
+                    element.node_ids.iter().copied().collect::<BTreeSet<_>>(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let boundary_face_nodes = self
+            .boundary_faces
+            .iter()
+            .map(|face| (face.face_id, face.node_ids.as_slice()))
+            .collect::<BTreeMap<_, _>>();
         for face in &self.boundary_faces {
             if face.node_ids.len() != face.order.node_count()
+                || face.node_ids.iter().collect::<BTreeSet<_>>().len() != face.node_ids.len()
                 || !all_references_exist(&face.node_ids, node_ids)
                 || !(1..=2).contains(&face.adjacent_volume_element_ids.len())
                 || !strictly_increasing(&face.adjacent_volume_element_ids)
                 || !all_references_exist(&face.adjacent_volume_element_ids, element_ids)
+                || face.adjacent_volume_element_ids.iter().any(|element| {
+                    !face
+                        .node_ids
+                        .iter()
+                        .all(|node| element_nodes[element].contains(node))
+                })
+                || match face.role {
+                    super::BoundaryFaceRole::MaterialInterface => {
+                        face.adjacent_volume_element_ids.len() != 2
+                    }
+                    super::BoundaryFaceRole::Exterior
+                    | super::BoundaryFaceRole::ContactPrimary
+                    | super::BoundaryFaceRole::ContactSecondary => {
+                        face.adjacent_volume_element_ids.len() != 1
+                    }
+                }
             {
                 return Err(MeshingContractError::invalid(
                     "boundary face",
@@ -113,6 +146,12 @@ impl SolverMeshTopology {
                 || edge.adjacent_boundary_face_ids.is_empty()
                 || !strictly_increasing(&edge.adjacent_boundary_face_ids)
                 || !all_references_exist(&edge.adjacent_boundary_face_ids, face_ids)
+                || edge.adjacent_boundary_face_ids.iter().any(|face_id| {
+                    !edge
+                        .node_ids
+                        .iter()
+                        .all(|node| boundary_face_nodes[face_id].contains(node))
+                })
             {
                 return Err(MeshingContractError::invalid(
                     "boundary edge",
@@ -208,6 +247,15 @@ impl SolverMeshTopology {
         }
         Ok(())
     }
+}
+
+/// Independently admits a solver topology against its fully resolved request.
+pub fn validate_solver_mesh_topology(
+    topology: &SolverMeshTopology,
+    request: &MeshingRequest,
+) -> Result<(), MeshingContractError> {
+    request.validate()?;
+    topology.validate(request)
 }
 
 fn validate_region_id(id: &PersistentEntityId) -> Result<(), MeshingContractError> {

@@ -13,6 +13,7 @@ mod metric;
 mod request;
 mod workload;
 
+pub use artifact::validate_solver_mesh_topology;
 pub use artifact_types::{
     BoundaryFaceRole, BoundaryTriangleOrder, ContactPair, FieldTopologyLocation, FieldTopologyMap,
     MaterialInterface, MeshNeighbor, MeshRegion, SolverBoundaryEdge, SolverBoundaryFace,

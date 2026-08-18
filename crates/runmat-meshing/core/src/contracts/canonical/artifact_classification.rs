@@ -12,7 +12,7 @@ pub(super) fn validate_classification(
 ) -> Result<(), MeshingContractError> {
     if !strictly_increasing_by(&topology.regions, |region| &region.region_id)
         || !strictly_increasing_by(&topology.material_interfaces, |interface| {
-            &interface.interface_id
+            &interface.source_face_id
         })
         || !strictly_increasing_by(&topology.contacts, |contact| &contact.contact_id)
     {
@@ -31,8 +31,30 @@ pub(super) fn validate_classification(
             ));
         }
     }
-    validate_interfaces(topology, face_ids, &region_materials)?;
-    validate_contacts(topology, face_ids)
+    let mut classified_faces = BTreeSet::new();
+    let faces = topology
+        .boundary_faces
+        .iter()
+        .map(|face| (face.face_id, face))
+        .collect::<BTreeMap<_, _>>();
+    validate_interfaces(
+        topology,
+        face_ids,
+        &faces,
+        &region_materials,
+        &mut classified_faces,
+    )?;
+    validate_contacts(topology, face_ids, &faces, &mut classified_faces)?;
+    for face in &topology.boundary_faces {
+        let requires_classification = face.role != super::BoundaryFaceRole::Exterior;
+        if classified_faces.contains(&face.face_id) != requires_classification {
+            return Err(MeshingContractError::invalid(
+                "boundary face classification",
+                "every interface/contact face must be classified exactly once and exterior faces must remain unclassified",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_regions<'a>(
@@ -71,10 +93,18 @@ fn validate_regions<'a>(
 fn validate_interfaces(
     topology: &SolverMeshTopology,
     face_ids: &BTreeSet<u64>,
+    faces: &BTreeMap<u64, &super::SolverBoundaryFace>,
     region_materials: &BTreeMap<&PersistentEntityId, &str>,
+    classified_faces: &mut BTreeSet<u64>,
 ) -> Result<(), MeshingContractError> {
     for interface in &topology.material_interfaces {
-        validate_token("material interface id", &interface.interface_id, 256)?;
+        if interface.source_face_id.kind != PersistentEntityKind::Face {
+            return Err(MeshingContractError::invalid(
+                "material interface source face",
+                "must identify a persistent face entity",
+            ));
+        }
+        interface.source_face_id.validate()?;
         validate_region_id(&interface.side_a_region_id)?;
         validate_region_id(&interface.side_b_region_id)?;
         if interface.side_a_region_id == interface.side_b_region_id
@@ -91,6 +121,18 @@ fn validate_interfaces(
             &interface.boundary_face_ids,
             face_ids,
         )?;
+        for face_id in &interface.boundary_face_ids {
+            let face = faces[face_id];
+            if face.role != super::BoundaryFaceRole::MaterialInterface
+                || !face.provenance.contains(&interface.source_face_id)
+                || !classified_faces.insert(*face_id)
+            {
+                return Err(MeshingContractError::invalid(
+                    "material interface faces",
+                    "faces must have the interface role and exact source-face provenance exactly once",
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -98,6 +140,8 @@ fn validate_interfaces(
 fn validate_contacts(
     topology: &SolverMeshTopology,
     face_ids: &BTreeSet<u64>,
+    faces: &BTreeMap<u64, &super::SolverBoundaryFace>,
+    classified_faces: &mut BTreeSet<u64>,
 ) -> Result<(), MeshingContractError> {
     for contact in &topology.contacts {
         if contact.contact_id.kind != PersistentEntityKind::Contact {
@@ -112,11 +156,47 @@ fn validate_contacts(
             &contact.primary_boundary_face_ids,
             face_ids,
         )?;
+        validate_contact_faces(
+            faces,
+            &contact.primary_boundary_face_ids,
+            super::BoundaryFaceRole::ContactPrimary,
+            &contact.contact_id,
+            classified_faces,
+        )?;
+        validate_contact_faces(
+            faces,
+            &contact.secondary_boundary_face_ids,
+            super::BoundaryFaceRole::ContactSecondary,
+            &contact.contact_id,
+            classified_faces,
+        )?;
         validate_face_set(
             "contact secondary faces",
             &contact.secondary_boundary_face_ids,
             face_ids,
         )?;
+    }
+    Ok(())
+}
+
+fn validate_contact_faces(
+    faces: &BTreeMap<u64, &super::SolverBoundaryFace>,
+    face_ids: &[u64],
+    role: super::BoundaryFaceRole,
+    contact_id: &PersistentEntityId,
+    classified_faces: &mut BTreeSet<u64>,
+) -> Result<(), MeshingContractError> {
+    for face_id in face_ids {
+        let face = faces[face_id];
+        if face.role != role
+            || !face.provenance.contains(contact_id)
+            || !classified_faces.insert(*face_id)
+        {
+            return Err(MeshingContractError::invalid(
+                "contact faces",
+                "faces must have the declared contact-side role and persistent contact provenance exactly once",
+            ));
+        }
     }
     Ok(())
 }
