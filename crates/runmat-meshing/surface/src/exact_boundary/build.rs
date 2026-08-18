@@ -108,6 +108,7 @@ fn push_segments(
             source_edge_id: curve.source_edge_id.clone(),
             seam_image: face_use.seam_image,
             node_ids: pair.map(|index| curve.nodes[index].node_id),
+            edge_parameters: pair.map(|index| curve.nodes[index].parameter),
             node_uv: pair.map(|index| face_use.node_uv[index]),
         });
     }

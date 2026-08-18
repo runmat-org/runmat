@@ -78,11 +78,16 @@ pub fn validate_exact_face_pslg(
                 || actual.source_edge_id != expected.source_edge_id
                 || start.node_id != expected.node_ids[0]
                 || finish.node_id != expected.node_ids[1]
+                || actual.edge_parameters != expected.edge_parameters
                 || start.seam_image != expected.seam_image
                 || finish.seam_image != expected.seam_image
                 || start.uv != expected.node_uv[0]
                 || finish.uv != expected.node_uv[1]
                 || actual.vertex_indices[0] == actual.vertex_indices[1]
+                || actual
+                    .edge_parameters
+                    .iter()
+                    .any(|value| !value.is_finite())
             {
                 return Err(invalid(boundary, "face PSLG segment differs from boundary"));
             }

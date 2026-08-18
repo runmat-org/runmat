@@ -206,6 +206,7 @@ mod tests {
                 StableDigest::from_bytes([start; 32]),
                 StableDigest::from_bytes([end; 32]),
             ],
+            edge_parameters: [0.0, 1.0],
             node_uv,
         }
     }

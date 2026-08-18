@@ -121,6 +121,7 @@ fn push_loop(
             source_coedge_id: segment.source_coedge_id.clone(),
             source_edge_id: segment.source_edge_id.clone(),
             vertex_indices: [vertex_index[&key(0)], vertex_index[&key(1)]],
+            edge_parameters: segment.edge_parameters,
         });
     }
     loops.push(ExactFacePslgLoop {

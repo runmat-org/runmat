@@ -157,6 +157,7 @@ fn boundary(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> ExactFaceBoundary {
                     ),
                     seam_image: None,
                     node_ids: [nodes[index], nodes[(index + 1) % nodes.len()]],
+                    edge_parameters: [0.0, 1.0],
                     node_uv: [
                         coordinates[index],
                         coordinates[(index + 1) % coordinates.len()],

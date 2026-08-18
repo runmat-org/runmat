@@ -46,6 +46,14 @@ fn coedge_orientation_reverses_nodes_and_face_local_uv_together() {
         first.node_uv[1],
         face_use.node_uv[face_use.node_uv.len() - 2]
     );
+    assert_eq!(
+        first.edge_parameters[0],
+        curve.nodes.last().unwrap().parameter
+    );
+    assert_eq!(
+        first.edge_parameters[1],
+        curve.nodes[curve.nodes.len() - 2].parameter
+    );
 }
 
 #[test]
@@ -63,6 +71,16 @@ fn independent_admission_rejects_seam_image_substitution() {
     let (topology, curves) = fixture();
     let mut boundary = build_exact_surface_boundary(&topology, &curves).unwrap();
     boundary.faces[0].outer_loop.segments[0].seam_image = Some(7);
+
+    let error = validate_exact_surface_boundary(&boundary, &topology, &curves).unwrap_err();
+    assert_eq!(error.kind, ExactSurfaceBoundaryErrorKind::InvalidContract);
+}
+
+#[test]
+fn independent_admission_rejects_edge_parameter_substitution() {
+    let (topology, curves) = fixture();
+    let mut boundary = build_exact_surface_boundary(&topology, &curves).unwrap();
+    boundary.faces[0].outer_loop.segments[0].edge_parameters[0] += 1.0e-6;
 
     let error = validate_exact_surface_boundary(&boundary, &topology, &curves).unwrap_err();
     assert_eq!(error.kind, ExactSurfaceBoundaryErrorKind::InvalidContract);

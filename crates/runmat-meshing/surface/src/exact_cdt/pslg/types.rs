@@ -16,11 +16,13 @@ pub struct ExactFacePslgVertex {
     pub uv: [f64; 2],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ExactFacePslgSegment {
     pub source_coedge_id: PersistentEntityId,
     pub source_edge_id: PersistentEntityId,
     pub vertex_indices: [u32; 2],
+    /// Exact curve parameters oriented with this face-local coedge segment.
+    pub edge_parameters: [f64; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

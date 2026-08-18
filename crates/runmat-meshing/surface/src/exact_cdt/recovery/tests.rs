@@ -183,6 +183,7 @@ fn loop_segments(
             source_edge_id: id(PersistentEntityKind::Edge, &format!("{scope}:edge:{index}")),
             seam_image: None,
             node_ids: [nodes[index], nodes[(index + 1) % nodes.len()]],
+            edge_parameters: [0.0, 1.0],
             node_uv: [
                 coordinates[index],
                 coordinates[(index + 1) % coordinates.len()],

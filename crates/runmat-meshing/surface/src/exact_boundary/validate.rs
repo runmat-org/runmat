@@ -128,7 +128,12 @@ fn validate_loop(
                 || segment.source_edge_id != coedge.edge_id
                 || segment.seam_image != face_use.seam_image
                 || segment.node_ids != pair.map(|index| curve.nodes[index].node_id)
+                || segment.edge_parameters != pair.map(|index| curve.nodes[index].parameter)
                 || segment.node_uv != pair.map(|index| face_use.node_uv[index])
+                || segment
+                    .edge_parameters
+                    .iter()
+                    .any(|value| !value.is_finite())
                 || segment
                     .node_uv
                     .iter()
