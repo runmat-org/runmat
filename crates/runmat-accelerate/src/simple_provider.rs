@@ -1835,6 +1835,29 @@ impl InProcessProvider {
         self.f64_handle_for_existing_buffer(id, shape, storage)
     }
 
+    fn allocate_f32_tensor_with_storage(
+        &self,
+        data: Vec<f32>,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
+        let id = self
+            .next_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current < self.id_limit {
+                    current.checked_add(1)
+                } else {
+                    None
+                }
+            })
+            .expect("in-process provider id range exhausted");
+        numeric_registry()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(id, InProcessNumericData::F32(data));
+        self.f32_handle_for_existing_buffer(id, shape, storage)
+    }
+
     fn f64_handle_for_existing_buffer(
         &self,
         buffer_id: u64,
@@ -4269,7 +4292,9 @@ impl AccelProvider for InProcessProvider {
             .ok_or_else(|| anyhow!("ndgrid: tensor size exceeds provider limits"))?;
         let strides = compute_strides(request.output_shape);
         let axis_data = {
-            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            let guard = numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             let mut axes = Vec::with_capacity(request.output_count);
             for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
                 ensure!(
@@ -4281,12 +4306,19 @@ impl AccelProvider for InProcessProvider {
                     .get(&axis.handle.buffer_id)
                     .cloned()
                     .ok_or_else(|| anyhow!("ndgrid: unknown buffer {}", axis.handle.buffer_id))?;
+                let data_len = match &data {
+                    InProcessNumericData::F64(values) => values.len(),
+                    InProcessNumericData::F32(values) => values.len(),
+                    InProcessNumericData::Integer(_) => {
+                        return Err(anyhow!("ndgrid: integer axes require typed host fallback"));
+                    }
+                };
                 let expected = request.output_shape.get(dim).copied().unwrap_or(1);
                 ensure!(
-                    data.len() == expected,
+                    data_len == expected,
                     "ndgrid: axis {} length {} does not match output extent {}",
                     dim + 1,
-                    data.len(),
+                    data_len,
                     expected
                 );
                 axes.push(data);
@@ -4299,24 +4331,36 @@ impl AccelProvider for InProcessProvider {
             let axis = &axis_data[dim];
             let stride = strides[dim];
             let extent = request.output_shape[dim];
-            let mut out = Vec::with_capacity(total);
-            for linear_idx in 0..total {
-                let coord = if extent == 0 {
+            let coordinate = |linear_idx: usize| {
+                if extent == 0 {
                     0
                 } else {
                     (linear_idx / stride) % extent
-                };
-                out.push(axis.get(coord).copied().unwrap_or(0.0));
-            }
-
-            let handle = self.allocate_tensor(out, request.output_shape.to_vec());
+                }
+            };
+            let handle = match axis {
+                InProcessNumericData::F64(axis) => {
+                    let mut out = Vec::with_capacity(total);
+                    for linear_idx in 0..total {
+                        out.push(axis.get(coordinate(linear_idx)).copied().unwrap_or(0.0));
+                    }
+                    self.allocate_tensor(out, request.output_shape.to_vec())
+                }
+                InProcessNumericData::F32(axis) => {
+                    let mut out = Vec::with_capacity(total);
+                    for linear_idx in 0..total {
+                        out.push(axis.get(coordinate(linear_idx)).copied().unwrap_or(0.0));
+                    }
+                    self.allocate_f32_tensor_with_storage(
+                        out,
+                        request.output_shape.to_vec(),
+                        GpuTensorStorage::Real,
+                    )
+                }
+                InProcessNumericData::Integer(_) => unreachable!("filtered above"),
+            };
             if runmat_accelerate_api::handle_is_logical(request.axes[dim].handle) {
                 runmat_accelerate_api::set_handle_logical(&handle, true);
-            }
-            if let Some(precision) =
-                runmat_accelerate_api::handle_precision(request.axes[dim].handle)
-            {
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
             }
             outputs.push(handle);
         }
@@ -11168,6 +11212,60 @@ mod tests {
             &result.outputs[1],
             &[10.0, 10.0, 20.0, 20.0, 30.0, 30.0],
             &[2, 3],
+        );
+    }
+
+    #[test]
+    fn ndgrid_preserves_native_single_storage_without_side_metadata() {
+        let provider = InProcessProvider::new();
+        let x_values = [1.25_f32, 2.5];
+        let y_values = [10.0_f32, 20.0, 30.0];
+        let x = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&x_values),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("upload native single x");
+        let y = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&y_values),
+                shape: &[3, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("upload native single y");
+        let axes = [
+            ProviderNdgridAxis { handle: &x },
+            ProviderNdgridAxis { handle: &y },
+        ];
+        let result = provider
+            .ndgrid(&ProviderNdgridRequest {
+                axes: &axes,
+                output_shape: &[2, 3],
+                output_count: 2,
+            })
+            .expect("native single ndgrid");
+
+        for output in &result.outputs {
+            assert_eq!(
+                output.descriptor.element_type,
+                Some(NumericElementType::F32)
+            );
+            assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+            runmat_accelerate_api::clear_handle_precision(output);
+            runmat_accelerate_api::clear_handle_class_name(output);
+        }
+        let x_output = block_on(provider.download_numeric(&result.outputs[0]))
+            .expect("download native single x grid");
+        let y_output = block_on(provider.download_numeric(&result.outputs[1]))
+            .expect("download native single y grid");
+        assert_eq!(
+            x_output.data,
+            HostNumericDataOwned::F32(vec![1.25, 2.5, 1.25, 2.5, 1.25, 2.5])
+        );
+        assert_eq!(
+            y_output.data,
+            HostNumericDataOwned::F32(vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0])
         );
     }
 

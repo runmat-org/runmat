@@ -328,28 +328,11 @@ fn try_provider_outputs(
 
 fn annotate_provider_output(handle: &GpuTensorHandle, class: OutputClass) {
     match class {
-        OutputClass::Real(dtype) => {
+        OutputClass::Real(_) => {
             runmat_accelerate_api::set_handle_logical(handle, false);
-            let precision = match dtype {
-                NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                NumericDType::F64
-                | NumericDType::I8
-                | NumericDType::I16
-                | NumericDType::I32
-                | NumericDType::I64
-                | NumericDType::U8
-                | NumericDType::U16
-                | NumericDType::U32
-                | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
-            };
-            runmat_accelerate_api::set_handle_precision(handle, precision);
         }
         OutputClass::Logical => {
             runmat_accelerate_api::set_handle_logical(handle, true);
-            runmat_accelerate_api::set_handle_precision(
-                handle,
-                runmat_accelerate_api::ProviderPrecision::F64,
-            );
         }
         OutputClass::Complex => {}
     }
@@ -1490,20 +1473,10 @@ mod tests {
     #[test]
     fn ndgrid_gpu_inputs_use_provider_resident_outputs() {
         test_support::with_test_provider(|provider| {
-            let x = tensor(vec![1.0, 2.0], vec![1, 2]);
-            let y = tensor(vec![10.0, 20.0, 30.0], vec![1, 3]);
-            let x_handle = provider
-                .upload(&HostTensorView {
-                    data: &x.materialize_f64(),
-                    shape: &x.shape,
-                })
-                .expect("upload x");
-            let y_handle = provider
-                .upload(&HostTensorView {
-                    data: &y.materialize_f64(),
-                    shape: &y.shape,
-                })
-                .expect("upload y");
+            let x = Tensor::from_f32(vec![1.25, 2.5], vec![1, 2]).expect("single x");
+            let y = Tensor::from_f32(vec![10.0, 20.0, 30.0], vec![1, 3]).expect("single y");
+            let x_handle = gpu_helpers::upload_tensor(provider, &x).expect("upload x");
+            let y_handle = gpu_helpers::upload_tensor(provider, &y).expect("upload y");
             provider.reset_telemetry();
             let eval = eval(
                 &[
@@ -1521,9 +1494,10 @@ mod tests {
             assert_eq!(telemetry.upload_bytes, 0);
             let gathered = test_support::gather(y_out).expect("gather");
             assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(
-                gathered.materialize_f64(),
-                vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]
+                gathered.as_f32_slice(),
+                Some(&[10.0, 10.0, 20.0, 20.0, 30.0, 30.0][..])
             );
         });
     }

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, Pod, Zeroable};
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_time::Instant;
 use std::sync::Arc;
 
@@ -253,17 +253,13 @@ impl WgpuProvider {
             )
         } else {
             let shader = complex_from_real_shader(self.precision);
-            let out = self.fused_elementwise_with_telemetry_exec(
+            self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 std::slice::from_ref(real),
                 &entry.shape,
                 out_len,
-            )?;
-            runmat_accelerate_api::set_handle_storage(
-                &out,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-            out
+            )?
         };
         Ok(handle)
     }
@@ -313,17 +309,13 @@ impl WgpuProvider {
             )
         } else {
             let shader = complex_from_real_imag_shader(self.precision, real_scalar, imag_scalar);
-            let out = self.fused_elementwise_with_telemetry_exec(
+            self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 &[real.clone(), imag.clone()],
                 &out_shape,
                 out_len,
-            )?;
-            runmat_accelerate_api::set_handle_storage(
-                &out,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-            out
+            )?
         };
         Ok(handle)
     }
@@ -470,18 +462,18 @@ impl WgpuProvider {
             entry.len / 2
         };
         let shader = complex_unary_shader(op, self.precision);
-        let out = self.fused_elementwise_with_telemetry_exec(
+        let output_storage = if output_complex {
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        } else {
+            runmat_accelerate_api::GpuTensorStorage::Real
+        };
+        let out = self.fused_elementwise_with_telemetry_and_storage_exec(
             &shader,
             std::slice::from_ref(a),
             &entry.shape,
             len,
+            output_storage,
         )?;
-        if output_complex {
-            runmat_accelerate_api::set_handle_storage(
-                &out,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-        }
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
             runmat_accelerate_api::record_handle_transpose(&out, info.base_rows, info.base_cols);
         }
@@ -509,14 +501,17 @@ impl WgpuProvider {
         let input_is_complex = runmat_accelerate_api::handle_storage(a)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         if len == 0 {
-            let out = self.register_existing_buffer(out_buffer, entry.shape, entry.len);
-            if input_is_complex {
-                runmat_accelerate_api::set_handle_storage(
-                    &out,
-                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-                );
-            }
-            return Ok(out);
+            let storage = if input_is_complex {
+                GpuTensorStorage::ComplexInterleaved
+            } else {
+                GpuTensorStorage::Real
+            };
+            return Ok(self.register_existing_buffer_with_storage(
+                out_buffer,
+                entry.shape,
+                entry.len,
+                storage,
+            ));
         }
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("round_digits", len));
@@ -609,13 +604,12 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        let out = self.register_existing_buffer(out_buffer, entry.shape, len);
-        if input_is_complex {
-            runmat_accelerate_api::set_handle_storage(
-                &out,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-        }
+        let storage = if input_is_complex {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            GpuTensorStorage::Real
+        };
+        let out = self.register_existing_buffer_with_storage(out_buffer, entry.shape, len, storage);
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(out)
@@ -1406,17 +1400,13 @@ impl WgpuProvider {
         } else {
             let shader =
                 complex_binary_shader(complex_op, self.precision, lhs_complex, rhs_complex);
-            let out = self.fused_elementwise_with_telemetry_exec(
+            self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 out_len,
-            )?;
-            runmat_accelerate_api::set_handle_storage(
-                &out,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-            out
+            )?
         };
         Ok(handle)
     }
@@ -1511,12 +1501,13 @@ impl WgpuProvider {
 
         let shader =
             complex_binary_broadcast_shader(complex_op, self.precision, lhs_complex, rhs_complex);
-        let handle =
-            self.fused_elementwise_exec(&shader, &[a.clone(), b.clone()], &out_shape, out_len)?;
-        runmat_accelerate_api::set_handle_storage(
-            &handle,
+        let handle = self.fused_elementwise_exec(
+            &shader,
+            &[a.clone(), b.clone()],
+            &out_shape,
+            out_len,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
+        )?;
         Ok(handle)
     }
 
@@ -1652,6 +1643,7 @@ impl WgpuProvider {
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         len: usize,
+        output_storage: GpuTensorStorage,
     ) -> Result<GpuTensorHandle> {
         if inputs.is_empty() {
             return Err(anyhow!("fused_elementwise: no inputs"));
@@ -1908,10 +1900,11 @@ impl WgpuProvider {
             offset_elems += chunk_len;
             chunk_index += 1;
         }
-        let handle = self.register_existing_buffer_with_usage(
+        let handle = self.register_existing_buffer_with_usage_and_storage(
             output_buffer,
             output_shape.to_vec(),
             len,
+            output_storage,
             BufferUsageClass::FusionOut,
         );
         log::trace!(
@@ -3493,6 +3486,11 @@ mod tests {
 
         for handle in [&add, &sub, &mul, &div] {
             assert_eq!(
+                handle.descriptor.storage,
+                Some(GpuTensorStorage::ComplexInterleaved)
+            );
+            runmat_accelerate_api::clear_handle_storage(handle);
+            assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 GpuTensorStorage::ComplexInterleaved
             );
@@ -3554,6 +3552,11 @@ mod tests {
         let tan = provider.unary_tan(&handle).await.expect("complex tan");
 
         for handle in [&sin, &cos, &tan] {
+            assert_eq!(
+                handle.descriptor.storage,
+                Some(GpuTensorStorage::ComplexInterleaved)
+            );
+            runmat_accelerate_api::clear_handle_storage(handle);
             assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 GpuTensorStorage::ComplexInterleaved

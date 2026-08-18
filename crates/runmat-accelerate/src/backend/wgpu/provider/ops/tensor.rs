@@ -246,7 +246,7 @@ impl WgpuProvider {
         entry.storage = storage;
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
-        runmat_accelerate_api::set_handle_storage(&updated, storage);
+        updated.descriptor.storage = Some(storage);
         runmat_accelerate_api::clear_handle_transpose(&updated);
         Ok(updated)
     }

@@ -88,11 +88,12 @@ impl WgpuProvider {
             self.precision,
         );
         let frame_inputs = [request.input.clone(), window.clone()];
-        let framed = match self.fused_elementwise_with_telemetry_exec(
+        let framed = match self.fused_elementwise_with_telemetry_and_storage_exec(
             &frame_shader,
             &frame_inputs,
             &[request.nfft, request.frame_count],
             framed_len,
+            GpuTensorStorage::ComplexInterleaved,
         ) {
             Ok(framed) => framed,
             Err(err) => {
@@ -101,7 +102,6 @@ impl WgpuProvider {
             }
         };
         self.free_exec(&window).ok();
-        runmat_accelerate_api::set_handle_storage(&framed, GpuTensorStorage::ComplexInterleaved);
 
         let spectrum = match self.fft_dim_exec(&framed, None, 0).await {
             Ok(spectrum) => spectrum,
@@ -125,11 +125,12 @@ impl WgpuProvider {
                     anyhow!("uniform_spectral_estimate: output too large")
                 })?;
             let shader = spectral_select_shader(request.nfft, rows, range, self.precision);
-            let handle = match self.fused_elementwise_with_telemetry_exec(
+            let handle = match self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 std::slice::from_ref(&spectrum),
                 &[rows, request.frame_count],
                 selected_len,
+                GpuTensorStorage::ComplexInterleaved,
             ) {
                 Ok(handle) => handle,
                 Err(err) => {
@@ -138,10 +139,6 @@ impl WgpuProvider {
                 }
             };
             self.free_exec(&spectrum).ok();
-            runmat_accelerate_api::set_handle_storage(
-                &handle,
-                GpuTensorStorage::ComplexInterleaved,
-            );
             handle
         };
 
@@ -289,11 +286,12 @@ impl WgpuProvider {
                 spectrum_entry.len,
                 self.precision,
             );
-            self.fused_elementwise_with_telemetry_exec(
+            self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 std::slice::from_ref(&spectrum),
                 &spectrum_entry.shape,
                 spectrum_entry.len,
+                GpuTensorStorage::ComplexInterleaved,
             )
         })();
         let filtered = match filtered_result {
@@ -304,7 +302,6 @@ impl WgpuProvider {
             }
         };
         self.free_exec(&spectrum).ok();
-        runmat_accelerate_api::set_handle_storage(&filtered, GpuTensorStorage::ComplexInterleaved);
 
         let analytic = match self.ifft_dim_exec(&filtered, None, request.dim).await {
             Ok(analytic) => analytic,
@@ -314,7 +311,6 @@ impl WgpuProvider {
             }
         };
         self.free_exec(&filtered).ok();
-        runmat_accelerate_api::set_handle_storage(&analytic, GpuTensorStorage::ComplexInterleaved);
         Ok(analytic)
     }
 
@@ -333,13 +329,13 @@ impl WgpuProvider {
             request.channel_count,
             self.precision,
         );
-        let centered = self.fused_elementwise_with_telemetry_exec(
+        let centered = self.fused_elementwise_with_telemetry_and_storage_exec(
             &center_shader,
             std::slice::from_ref(request.input),
             &channel_shape,
             complex_len,
+            GpuTensorStorage::ComplexInterleaved,
         )?;
-        runmat_accelerate_api::set_handle_storage(&centered, GpuTensorStorage::ComplexInterleaved);
 
         let spectrum = match self.fft_dim_exec(&centered, None, 0).await {
             Ok(spectrum) => spectrum,
@@ -355,11 +351,12 @@ impl WgpuProvider {
             request.channel_count,
             self.precision,
         );
-        let filtered = match self.fused_elementwise_with_telemetry_exec(
+        let filtered = match self.fused_elementwise_with_telemetry_and_storage_exec(
             &mask_shader,
             std::slice::from_ref(&spectrum),
             &channel_shape,
             complex_len,
+            GpuTensorStorage::ComplexInterleaved,
         ) {
             Ok(filtered) => filtered,
             Err(err) => {
@@ -368,7 +365,6 @@ impl WgpuProvider {
             }
         };
         self.free_exec(&spectrum).ok();
-        runmat_accelerate_api::set_handle_storage(&filtered, GpuTensorStorage::ComplexInterleaved);
 
         let analytic = match self.ifft_dim_exec(&filtered, None, 0).await {
             Ok(analytic) => analytic,
@@ -2713,6 +2709,11 @@ mod tests {
                 dim,
             }))
             .expect("hilbert");
+            assert_eq!(
+                output.descriptor.storage,
+                Some(GpuTensorStorage::ComplexInterleaved)
+            );
+            runmat_accelerate_api::clear_handle_storage(&output);
             let host = pollster::block_on(provider.download(&output)).expect("download");
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.data.len() % 2, 0);

@@ -18,8 +18,25 @@ impl WgpuProvider {
         output_shape: &[usize],
         len: usize,
     ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_with_telemetry_and_storage_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            GpuTensorStorage::Real,
+        )
+    }
+
+    pub(crate) fn fused_elementwise_with_telemetry_and_storage_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        output_storage: GpuTensorStorage,
+    ) -> Result<GpuTensorHandle> {
         let start = Instant::now();
-        let result = self.fused_elementwise_exec(shader, inputs, output_shape, len);
+        let result = self.fused_elementwise_exec(shader, inputs, output_shape, len, output_storage);
         if result.is_ok() {
             let elapsed = start.elapsed();
             self.telemetry.record_fused_elementwise_duration(elapsed);
