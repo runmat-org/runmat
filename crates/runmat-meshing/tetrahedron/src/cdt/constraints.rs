@@ -9,6 +9,10 @@ use sha2::{Digest as _, Sha256};
 
 use super::DelaunayVolumeNode;
 
+mod validation;
+
+pub use validation::validate_delaunay_constraints;
+
 const NODE_IDENTITY_DOMAIN: &[u8] = b"runmat-meshing-cdt-plc-node/v1\0";
 const MAXIMUM_ENTITY_ID_BYTES: usize = 512;
 
@@ -202,11 +206,13 @@ pub fn build_delaunay_constraints(
             }
         })
         .collect();
-    Ok(DelaunayConstraints {
+    let constraints = DelaunayConstraints {
         nodes,
         segments,
         facets,
-    })
+    };
+    validate_delaunay_constraints(&constraints, options, cancellation)?;
+    Ok(constraints)
 }
 
 fn node_identity(entity_id: &TopologyEntityId) -> StableDigest {
@@ -232,12 +238,14 @@ fn stage_tag(stage: MeshingStage) -> u8 {
     }
 }
 
-fn sorted_segment(mut vertices: [u32; 2]) -> [u32; 2] {
+pub(super) fn sorted_segment(mut vertices: [u32; 2]) -> [u32; 2] {
     vertices.sort_unstable();
     vertices
 }
 
-fn validate_options(options: DelaunayConstraintOptions) -> Result<(), DelaunayConstraintError> {
+pub(super) fn validate_options(
+    options: DelaunayConstraintOptions,
+) -> Result<(), DelaunayConstraintError> {
     if options.maximum_nodes == 0
         || options.maximum_segments == 0
         || options.maximum_facets == 0
@@ -251,11 +259,13 @@ fn validate_options(options: DelaunayConstraintOptions) -> Result<(), DelaunayCo
     Ok(())
 }
 
-fn validate_entity_id(entity_id: &TopologyEntityId) -> Result<(), DelaunayConstraintError> {
+pub(super) fn validate_entity_id(
+    entity_id: &TopologyEntityId,
+) -> Result<(), DelaunayConstraintError> {
     validate_token("topology entity", &entity_id.id)
 }
 
-fn validate_token(field: &str, value: &str) -> Result<(), DelaunayConstraintError> {
+pub(super) fn validate_token(field: &str, value: &str) -> Result<(), DelaunayConstraintError> {
     if value.is_empty()
         || value.len() > MAXIMUM_ENTITY_ID_BYTES
         || !value.is_ascii()
@@ -272,7 +282,7 @@ fn validate_token(field: &str, value: &str) -> Result<(), DelaunayConstraintErro
     Ok(())
 }
 
-fn checkpoint(
+pub(super) fn checkpoint(
     index: usize,
     options: DelaunayConstraintOptions,
     cancellation: &dyn MeshingCancellationSignal,
@@ -285,11 +295,14 @@ fn checkpoint(
     Ok(())
 }
 
-fn resource(reason: impl Into<String>) -> DelaunayConstraintError {
+pub(super) fn resource(reason: impl Into<String>) -> DelaunayConstraintError {
     error(DelaunayConstraintErrorKind::ResourceLimit, reason)
 }
 
-fn error(kind: DelaunayConstraintErrorKind, reason: impl Into<String>) -> DelaunayConstraintError {
+pub(super) fn error(
+    kind: DelaunayConstraintErrorKind,
+    reason: impl Into<String>,
+) -> DelaunayConstraintError {
     DelaunayConstraintError {
         kind,
         reason: reason.into(),

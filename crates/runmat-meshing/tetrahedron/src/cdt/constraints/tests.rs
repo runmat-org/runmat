@@ -134,6 +134,55 @@ fn constraint_build_rejects_invalid_plc_and_noncanonical_identity() {
     );
 }
 
+#[test]
+fn constraint_validation_rejects_tampered_canonical_state() {
+    let constraints = build_delaunay_constraints(
+        &tetrahedron_plc(),
+        DelaunayConstraintOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    let mut unordered_nodes = constraints.clone();
+    unordered_nodes.nodes.swap(0, 1);
+    assert_eq!(
+        validate_delaunay_constraints(
+            &unordered_nodes,
+            DelaunayConstraintOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayConstraintErrorKind::InvalidIdentity
+    );
+
+    let mut incomplete_provenance = constraints.clone();
+    incomplete_provenance.segments[0].protected_edge_id = Some(plc_id("protected:tampered"));
+    assert_eq!(
+        validate_delaunay_constraints(
+            &incomplete_provenance,
+            DelaunayConstraintOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayConstraintErrorKind::InvalidPlc
+    );
+
+    let mut degenerate_facet = constraints;
+    degenerate_facet.facets[0].vertex_indices[1] = degenerate_facet.facets[0].vertex_indices[0];
+    assert_eq!(
+        validate_delaunay_constraints(
+            &degenerate_facet,
+            DelaunayConstraintOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayConstraintErrorKind::InvalidPlc
+    );
+}
+
 struct Cancelled;
 
 impl MeshingCancellationSignal for Cancelled {
