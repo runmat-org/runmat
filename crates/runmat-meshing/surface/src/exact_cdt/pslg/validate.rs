@@ -2,12 +2,25 @@ use std::collections::BTreeSet;
 
 use crate::ExactFaceBoundary;
 
-use super::{ExactFacePslg, ExactFacePslgError, ExactFacePslgErrorKind};
+use super::{
+    exact_face_interior_node_id, ExactFacePslg, ExactFacePslgError, ExactFacePslgErrorKind,
+    MAX_FACE_PSLG_ITEMS,
+};
 
 pub fn validate_exact_face_pslg(
     pslg: &ExactFacePslg,
     boundary: &ExactFaceBoundary,
 ) -> Result<(), ExactFacePslgError> {
+    if pslg.vertices.len() > MAX_FACE_PSLG_ITEMS
+        || pslg.segments.len() > MAX_FACE_PSLG_ITEMS
+        || pslg.loops.len() > MAX_FACE_PSLG_ITEMS
+    {
+        return Err(ExactFacePslgError::new(
+            ExactFacePslgErrorKind::ResourceLimit,
+            &boundary.source_face_id,
+            "face PSLG inventory exceeds its hard bound",
+        ));
+    }
     if pslg.source_face_id != boundary.source_face_id
         || pslg.loops.len() != 1 + boundary.inner_loops.len()
         || pslg.vertices.is_empty()
@@ -109,8 +122,16 @@ pub fn validate_exact_face_pslg(
     if expected_offset != pslg.segments.len() {
         return Err(invalid(boundary, "face PSLG contains unowned segments"));
     }
-    if referenced_vertices.len() != pslg.vertices.len() {
-        return Err(invalid(boundary, "face PSLG contains unowned vertices"));
+    for (index, vertex) in pslg.vertices.iter().enumerate() {
+        if !referenced_vertices.contains(&(index as u32))
+            && (vertex.seam_image.is_some()
+                || vertex.node_id != exact_face_interior_node_id(&pslg.source_face_id, vertex.uv))
+        {
+            return Err(invalid(
+                boundary,
+                "face PSLG interior vertex identity is not canonical",
+            ));
+        }
     }
     Ok(())
 }

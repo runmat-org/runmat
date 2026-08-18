@@ -8,9 +8,11 @@ pub use domain::{
     carve_exact_face_domain, validate_exact_face_trimmed_delaunay, ExactFaceTrimmedDelaunay,
 };
 
+pub(crate) use pslg::MAX_FACE_PSLG_ITEMS;
 pub use pslg::{
-    build_exact_face_pslg, validate_exact_face_pslg, ExactFacePslg, ExactFacePslgError,
-    ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex,
+    build_exact_face_pslg, exact_face_interior_node_id, validate_exact_face_pslg, ExactFacePslg,
+    ExactFacePslgError, ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment,
+    ExactFacePslgVertex,
 };
 pub use recovery::{
     recover_exact_face_segments, validate_exact_face_constrained_delaunay,

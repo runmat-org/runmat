@@ -22,13 +22,14 @@ pub use exact_boundary::{
     EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
 };
 pub use exact_cdt::{
-    build_exact_face_pslg, carve_exact_face_domain, recover_exact_face_segments,
-    triangulate_exact_face_pslg, validate_exact_face_constrained_delaunay,
-    validate_exact_face_delaunay, validate_exact_face_pslg, validate_exact_face_trimmed_delaunay,
-    ExactFaceConstrainedDelaunay, ExactFaceDelaunay, ExactFaceDelaunayError,
-    ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFaceDelaunayTriangle, ExactFacePslg,
-    ExactFacePslgError, ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment,
-    ExactFacePslgVertex, ExactFaceRecoveredSegment, ExactFaceTrimmedDelaunay,
+    build_exact_face_pslg, carve_exact_face_domain, exact_face_interior_node_id,
+    recover_exact_face_segments, triangulate_exact_face_pslg,
+    validate_exact_face_constrained_delaunay, validate_exact_face_delaunay,
+    validate_exact_face_pslg, validate_exact_face_trimmed_delaunay, ExactFaceConstrainedDelaunay,
+    ExactFaceDelaunay, ExactFaceDelaunayError, ExactFaceDelaunayErrorKind,
+    ExactFaceDelaunayOptions, ExactFaceDelaunayTriangle, ExactFacePslg, ExactFacePslgError,
+    ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex,
+    ExactFaceRecoveredSegment, ExactFaceTrimmedDelaunay,
 };
 pub use exact_metric::{
     validate_exact_face_metric_evaluation, ExactFaceMetricError, ExactFaceMetricErrorKind,
@@ -52,8 +53,9 @@ pub use recovery::{
     validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
 };
 pub use refinement::{
-    classify_exact_face_refinement_candidate, select_exact_face_refinement_candidate,
-    ExactFaceCandidateDisposition, ExactFaceRefinementCandidate, ExactFaceRefinementError,
+    classify_exact_face_refinement_candidate, insert_exact_face_refinement_candidate,
+    select_exact_face_refinement_candidate, ExactFaceCandidateDisposition,
+    ExactFaceRefinedTopology, ExactFaceRefinementCandidate, ExactFaceRefinementError,
     ExactFaceRefinementErrorKind, ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
 pub use validate::{

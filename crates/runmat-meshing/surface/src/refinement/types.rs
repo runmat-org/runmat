@@ -1,7 +1,10 @@
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_curve::SharedCurveSegmentSplit;
 
-use crate::{ExactFaceDelaunayTriangle, ExactFaceMetricErrorKind};
+use crate::{
+    ExactFaceConstrainedDelaunay, ExactFaceDelaunay, ExactFaceDelaunayErrorKind,
+    ExactFaceDelaunayTriangle, ExactFaceMetricErrorKind, ExactFacePslg, ExactFaceTrimmedDelaunay,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExactFaceRefinementReason {
@@ -35,11 +38,20 @@ pub struct ExactProtectedSegmentSplit {
     pub curve_split: SharedCurveSegmentSplit,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceRefinedTopology {
+    pub pslg: ExactFacePslg,
+    pub delaunay: ExactFaceDelaunay,
+    pub constrained: ExactFaceConstrainedDelaunay,
+    pub trimmed: ExactFaceTrimmedDelaunay,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExactFaceRefinementErrorKind {
     InvalidQuality,
     InvalidGeometry,
     Metric(ExactFaceMetricErrorKind),
+    Delaunay(ExactFaceDelaunayErrorKind),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

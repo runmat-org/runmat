@@ -6,10 +6,8 @@ use crate::{ExactFaceBoundary, ExactFaceBoundaryLoop};
 
 use super::{
     validate_exact_face_pslg, ExactFacePslg, ExactFacePslgError, ExactFacePslgErrorKind,
-    ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex,
+    ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex, MAX_FACE_PSLG_ITEMS,
 };
-
-const MAX_FACE_PSLG_ITEMS: usize = 10_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct VertexKey {

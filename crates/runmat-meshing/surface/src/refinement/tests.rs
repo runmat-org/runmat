@@ -3,8 +3,8 @@ use runmat_geometry_core::{
     PersistentEntityKind, PortableExactEvaluator,
 };
 use runmat_meshing_core::{
-    MetricCombinationRule, MetricFieldRequest, MetricSourceKind, MetricTensor3, StableDigest,
-    SurfaceQualityTargets,
+    MeshingCancellationSignal, MetricCombinationRule, MetricFieldRequest, MetricSourceKind,
+    MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
 };
 use runmat_meshing_curve::{
     apply_shared_curve_splits, discretize_shared_curves, shared_curve_interior_node_id,
@@ -198,6 +198,157 @@ fn protected_split_rebuilds_the_global_curve_and_face_pslg() {
     );
 }
 
+#[test]
+fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let metric = UniformCurveMetric::from_target_size_m(1.0).unwrap();
+    let curves = discretize_shared_curves(
+        &topology,
+        &evaluator,
+        &evaluator,
+        &metric,
+        &Control,
+        curve_options(),
+    )
+    .unwrap();
+    let boundary = crate::build_exact_surface_boundary(&topology, &curves).unwrap();
+    let face_boundary = &boundary.faces[0];
+    let pslg = crate::build_exact_face_pslg(face_boundary).unwrap();
+    let options = crate::ExactFaceDelaunayOptions::default();
+    let delaunay =
+        crate::triangulate_exact_face_pslg(&pslg, face_boundary, &NeverCancelled, options).unwrap();
+    let constrained = crate::recover_exact_face_segments(
+        &delaunay,
+        &pslg,
+        face_boundary,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+    let trimmed = crate::carve_exact_face_domain(
+        &constrained,
+        &pslg,
+        face_boundary,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+    let triangle = trimmed.triangles[0];
+    let corners = triangle
+        .vertex_indices
+        .map(|index| pslg.vertices[index as usize].uv);
+    let uv = [
+        corners.iter().map(|point| point[0]).sum::<f64>() / 3.0,
+        corners.iter().map(|point| point[1]).sum::<f64>() / 3.0,
+    ];
+    let candidate = ExactFaceRefinementCandidate {
+        source_face_id: pslg.source_face_id.clone(),
+        triangle_index: 0,
+        triangle,
+        reason: ExactFaceRefinementReason::PhysicalAspectRatio,
+        uv,
+    };
+
+    let refined = insert_exact_face_refinement_candidate(
+        face_boundary,
+        &pslg,
+        &constrained,
+        &trimmed,
+        &candidate,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+    let repeated = insert_exact_face_refinement_candidate(
+        face_boundary,
+        &pslg,
+        &constrained,
+        &trimmed,
+        &candidate,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+
+    assert_eq!(refined, repeated);
+    assert_eq!(refined.pslg.vertices.len(), pslg.vertices.len() + 1);
+    assert_eq!(
+        refined
+            .pslg
+            .vertices
+            .iter()
+            .filter(|vertex| {
+                vertex.node_id == crate::exact_face_interior_node_id(&pslg.source_face_id, uv)
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        refined.trimmed.boundary_segments.len(),
+        trimmed.boundary_segments.len()
+    );
+    let mut tampered = refined.pslg.clone();
+    let interior = tampered
+        .vertices
+        .iter_mut()
+        .find(|vertex| vertex.uv == uv)
+        .unwrap();
+    interior.node_id = node(99);
+    assert!(crate::validate_exact_face_pslg(&tampered, face_boundary).is_err());
+
+    let mut duplicate = candidate.clone();
+    duplicate.uv = pslg.vertices[triangle.vertex_indices[0] as usize].uv;
+    assert_eq!(
+        insert_exact_face_refinement_candidate(
+            face_boundary,
+            &pslg,
+            &constrained,
+            &trimmed,
+            &duplicate,
+            &NeverCancelled,
+            options,
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::InvalidGeometry
+    );
+
+    let mut limited = options;
+    limited.maximum_triangles = trimmed.triangles.len();
+    assert_eq!(
+        insert_exact_face_refinement_candidate(
+            face_boundary,
+            &pslg,
+            &constrained,
+            &trimmed,
+            &candidate,
+            &NeverCancelled,
+            limited,
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::Delaunay(crate::ExactFaceDelaunayErrorKind::ResourceLimit)
+    );
+    assert_eq!(
+        insert_exact_face_refinement_candidate(
+            face_boundary,
+            &pslg,
+            &constrained,
+            &trimmed,
+            &candidate,
+            &CancelledSignal,
+            options,
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::Delaunay(crate::ExactFaceDelaunayErrorKind::Cancelled)
+    );
+}
+
 fn geometry(
     metric_edges: [f64; 3],
     minimum_angle: f64,
@@ -349,6 +500,14 @@ fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
 }
 
 struct Control;
+
+struct CancelledSignal;
+
+impl MeshingCancellationSignal for CancelledSignal {
+    fn is_cancelled(&self) -> bool {
+        true
+    }
+}
 
 impl GeometryEvaluationControl for Control {
     fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {

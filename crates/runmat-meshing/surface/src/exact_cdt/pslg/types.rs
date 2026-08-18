@@ -4,6 +4,8 @@ use runmat_meshing_core::StableDigest;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFacePslg {
     pub source_face_id: PersistentEntityId,
+    /// Canonically ordered boundary vertices and face-owned interior Steiner vertices.
+    /// Only boundary vertices are referenced by `segments`.
     pub vertices: Vec<ExactFacePslgVertex>,
     pub segments: Vec<ExactFacePslgSegment>,
     pub loops: Vec<ExactFacePslgLoop>,
@@ -11,6 +13,7 @@ pub struct ExactFacePslg {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactFacePslgVertex {
+    /// Shared-curve identity on the boundary, or deterministic face-owned identity in the interior.
     pub node_id: StableDigest,
     pub seam_image: Option<u8>,
     pub uv: [f64; 2],
