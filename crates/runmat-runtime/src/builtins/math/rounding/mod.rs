@@ -6,7 +6,7 @@ pub(crate) mod floor;
 pub(crate) mod rem;
 pub(crate) mod round;
 
-use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -261,12 +261,8 @@ fn upload_mod_result(
             .map_err(|err| mod_error_with_detail(&MOD_ERROR_INTERNAL, err))?,
         other => return Ok(other),
     };
-    let dtype = tensor.numeric_dtype();
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|err| mod_error_with_detail(&MOD_ERROR_INTERNAL, err))?;
-    if dtype == NumericDType::F32 {
-        runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
-    }
     Ok(gpu_helpers::resident_gpu_value(handle))
 }
 

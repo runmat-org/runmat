@@ -202,15 +202,8 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let output = gamma_tensor(gathered)?;
     if let Some(provider) = provider {
-        let dtype = output.numeric_dtype();
         let handle = gpu_helpers::upload_tensor(provider, &output)
             .map_err(|detail| gamma_error_with_detail(&GAMMA_ERROR_INTERNAL, detail))?;
-        if dtype == runmat_builtins::NumericDType::F32 {
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
-        }
         Ok(gpu_helpers::resident_gpu_value(handle))
     } else {
         Ok(tensor::tensor_into_value(output))

@@ -8,7 +8,7 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -357,14 +357,8 @@ fn upload_real_gpu_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: Tensor,
 ) -> BuiltinResult<Value> {
-    let precision = if tensor.numeric_dtype() == NumericDType::F32 {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))?;
-    runmat_accelerate_api::set_handle_precision(&handle, precision);
     Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
@@ -372,13 +366,7 @@ fn upload_complex_gpu_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: ComplexTensor,
 ) -> BuiltinResult<Value> {
-    let precision = if tensor.numeric_dtype() == NumericDType::F32 {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
     let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-    runmat_accelerate_api::set_handle_precision(&handle, precision);
     Ok(gpu_helpers::complex_gpu_value(handle))
 }
 
@@ -412,7 +400,7 @@ pub(crate) mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
         HostTensorView, ProviderPrecision,
     };
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
     use std::sync::Mutex;

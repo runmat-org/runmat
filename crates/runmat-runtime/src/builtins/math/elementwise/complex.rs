@@ -482,11 +482,6 @@ fn upload_real_tensor(
     let handle = gpu_helpers::upload_tensor(provider, tensor)
         .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
     runmat_accelerate_api::set_handle_logical(&handle, false);
-    runmat_accelerate_api::set_handle_storage(
-        &handle,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
     Ok(handle)
 }
 

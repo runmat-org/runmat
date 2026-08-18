@@ -1026,13 +1026,6 @@ fn finish_cdf(
             })?;
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|err| invalid_for(CDF_NAME, format!("cdf: {err}")))?;
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            match precision {
-                CdfOutputPrecision::Double => ProviderPrecision::F64,
-                CdfOutputPrecision::Single => ProviderPrecision::F32,
-            },
-        );
         return Ok(gpu_helpers::resident_gpu_value(handle));
     }
     match precision {

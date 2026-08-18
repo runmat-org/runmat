@@ -334,15 +334,8 @@ fn restore_gammaln_gpu_output(
             ))
         }
     };
-    let dtype = tensor.numeric_dtype();
     let output = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
-    if dtype == NumericDType::F32 {
-        runmat_accelerate_api::set_handle_precision(
-            &output,
-            runmat_accelerate_api::ProviderPrecision::F32,
-        );
-    }
     if output.shape != input.shape
         || runmat_accelerate_api::provider_for_handle(&output)
             .is_none_or(|owner| !std::ptr::eq(owner, provider))

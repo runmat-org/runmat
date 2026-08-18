@@ -651,12 +651,15 @@ pub fn upload_complex_tensor(
 ) -> crate::BuiltinResult<GpuTensorHandle> {
     let data = interleaved_complex_data(tensor)
         .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())?;
-    provider
-        .upload_numeric(&HostNumericTensorView {
-            data: data.as_view(),
-            shape: &tensor.shape,
-            storage: GpuTensorStorage::ComplexInterleaved,
-        })
+    let transfer = HostNumericTensorView {
+        data: data.as_view(),
+        shape: &tensor.shape,
+        storage: GpuTensorStorage::ComplexInterleaved,
+    };
+    let handle = provider
+        .upload_numeric(&transfer)
+        .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())?;
+    validate_numeric_upload(provider, handle, transfer)
         .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())
 }
 
@@ -687,13 +690,42 @@ pub fn upload_tensor(
     provider: &dyn AccelProvider,
     tensor: &Tensor,
 ) -> Result<GpuTensorHandle, String> {
-    provider
-        .upload_numeric(&HostNumericTensorView {
-            data: tensor_numeric_view(tensor),
-            shape: &tensor.shape,
-            storage: GpuTensorStorage::Real,
-        })
-        .map_err(|error| error.to_string())
+    let transfer = HostNumericTensorView {
+        data: tensor_numeric_view(tensor),
+        shape: &tensor.shape,
+        storage: GpuTensorStorage::Real,
+    };
+    let handle = provider
+        .upload_numeric(&transfer)
+        .map_err(|error| error.to_string())?;
+    validate_numeric_upload(provider, handle, transfer)
+}
+
+fn validate_numeric_upload(
+    provider: &dyn AccelProvider,
+    handle: GpuTensorHandle,
+    transfer: HostNumericTensorView<'_>,
+) -> Result<GpuTensorHandle, String> {
+    let valid = handle.device_id == provider.device_id()
+        && handle.shape == transfer.shape
+        && handle.descriptor.element_type == Some(transfer.element_type())
+        && handle.descriptor.storage == Some(transfer.storage);
+    if valid {
+        return Ok(handle);
+    }
+    let detail = format!(
+        "provider returned descriptor {:?}, shape {:?}, and device {} for {:?} {:?} upload with shape {:?} on device {}",
+        handle.descriptor,
+        handle.shape,
+        handle.device_id,
+        transfer.element_type(),
+        transfer.storage,
+        transfer.shape,
+        provider.device_id()
+    );
+    let _ = provider.free(&handle);
+    runmat_accelerate_api::clear_handle_metadata(&handle);
+    Err(detail)
 }
 
 /// Restore a class-preserving host value to the provider that owns `source`.
@@ -1177,6 +1209,48 @@ mod preserving_download_tests {
     }
 
     struct MalformedDownloadProvider;
+
+    struct MalformedUploadProvider;
+
+    impl runmat_accelerate_api::AccelProvider for MalformedUploadProvider {
+        fn upload(
+            &self,
+            _host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("unused")
+        }
+
+        fn upload_numeric(
+            &self,
+            host: &runmat_accelerate_api::HostNumericTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            Ok(GpuTensorHandle::new(host.shape.to_vec(), 0, u64::MAX - 9))
+        }
+
+        fn download<'a>(
+            &'a self,
+            _handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+
+        fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "malformed upload test provider".into()
+        }
+    }
+
+    #[test]
+    fn shared_upload_boundary_rejects_descriptor_empty_provider_handles() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let error = upload_tensor(&MalformedUploadProvider, &tensor)
+            .expect_err("provider upload must publish its physical descriptor");
+        assert!(error.contains("provider returned descriptor"));
+        assert!(error.contains("F32 Real upload"));
+    }
 
     impl runmat_accelerate_api::AccelProvider for MalformedDownloadProvider {
         fn upload(

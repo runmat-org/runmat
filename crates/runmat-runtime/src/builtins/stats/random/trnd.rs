@@ -243,13 +243,6 @@ fn build_output(
             })?;
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            match output_precision {
-                OutputPrecision::Double => ProviderPrecision::F64,
-                OutputPrecision::Single => ProviderPrecision::F32,
-            },
-        );
         return Ok(gpu_helpers::resident_gpu_value(handle));
     }
 
