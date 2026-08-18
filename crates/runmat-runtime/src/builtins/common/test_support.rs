@@ -110,12 +110,13 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
         &self,
         host: &runmat_accelerate_api::HostTensorView,
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-        let handle = self.inner.upload(host)?;
-        runmat_accelerate_api::set_handle_precision(
-            &handle,
-            runmat_accelerate_api::ProviderPrecision::F32,
-        );
-        Ok(handle)
+        let values: Vec<f32> = host.data.iter().map(|value| *value as f32).collect();
+        self.inner
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&values),
+                shape: host.shape,
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
     }
 
     fn download<'a>(

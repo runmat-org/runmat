@@ -7,8 +7,7 @@
 //! - Defer actual kernel authoring to backend crates/modules; this crate defines traits and wiring.
 
 use once_cell::sync::Lazy;
-use runmat_accelerate_api::HostIntegerDataOwned;
-use runmat_builtins::{IntegerStorage, Tensor, Value};
+use runmat_builtins::{Tensor, Value};
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -496,22 +495,6 @@ pub struct Accelerator {
     planner: Planner,
 }
 
-fn integer_tensor_from_download(
-    integer: runmat_accelerate_api::HostIntegerTensorOwned,
-) -> anyhow::Result<Tensor> {
-    let storage = match integer.data {
-        HostIntegerDataOwned::I8(data) => IntegerStorage::I8(data),
-        HostIntegerDataOwned::I16(data) => IntegerStorage::I16(data),
-        HostIntegerDataOwned::I32(data) => IntegerStorage::I32(data),
-        HostIntegerDataOwned::I64(data) => IntegerStorage::I64(data),
-        HostIntegerDataOwned::U8(data) => IntegerStorage::U8(data),
-        HostIntegerDataOwned::U16(data) => IntegerStorage::U16(data),
-        HostIntegerDataOwned::U32(data) => IntegerStorage::U32(data),
-        HostIntegerDataOwned::U64(data) => IntegerStorage::U64(data),
-    };
-    Tensor::new_integer(storage, integer.shape).map_err(|e| anyhow::anyhow!(e))
-}
-
 impl Accelerator {
     pub fn new(planner: Planner) -> Self {
         Self { planner }
@@ -564,47 +547,56 @@ impl Accelerator {
         &self,
         h: &runmat_accelerate_api::GpuTensorHandle,
     ) -> anyhow::Result<Value> {
-        if let Some(p) = runmat_accelerate_api::provider() {
-            if runmat_accelerate_api::handle_integer_type(h).is_some() {
-                let integer = p
-                    .download_integer(h)
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e))?;
-                let tensor = integer_tensor_from_download(integer)?;
-                return Ok(Value::Tensor(tensor));
-            }
-            let ht = p.download(h).await.map_err(|e| anyhow::anyhow!(e))?;
-            let t = Tensor::new(ht.data, ht.shape).map_err(|e| anyhow::anyhow!(e))?;
-            Ok(Value::Tensor(t))
-        } else {
-            // Fallback to zeros with same shape if no provider is registered
-            let shape = h.shape.clone();
-            let total: usize = shape.iter().product();
-            let zeros = Tensor::new(vec![0.0; total], shape).map_err(|e| anyhow::anyhow!(e))?;
-            Ok(Value::Tensor(zeros))
-        }
+        runmat_runtime::gather_if_needed_async(&Value::GpuTensor(h.clone()))
+            .await
+            .map_err(|error| anyhow::anyhow!(error))
     }
 }
 
 #[cfg(test)]
-mod integer_download_tests {
+mod native_gather_tests {
     use super::*;
+    use futures::executor::block_on;
+    use runmat_builtins::{ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     #[test]
-    fn integer_download_preserves_wide_uint64_without_a_float_mirror() {
-        let tensor = integer_tensor_from_download(runmat_accelerate_api::HostIntegerTensorOwned {
-            data: HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX]),
-            shape: vec![1, 2],
-        })
-        .expect("integer download");
+    fn accelerator_gather_preserves_native_complex_integer_and_source_lifetime() {
+        crate::simple_provider::register_inprocess_provider();
+        let provider = runmat_accelerate_api::provider().expect("in-process provider");
+        let expected = ComplexTensor::from_complex_storage(
+            ComplexStorage::Integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                    IntegerStorage::U64(vec![3, 4]),
+                )
+                .unwrap(),
+            ),
+            vec![1, 2],
+        )
+        .unwrap();
+        let handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
+            provider, &expected,
+        )
+        .expect("native complex integer upload");
+        runmat_accelerate_api::mark_handle_automatic(&handle);
+        let accelerator = Accelerator::new(Planner::new(None));
 
+        let gathered = block_on(accelerator.gather_handle(&handle)).expect("native gather");
+        assert_eq!(gathered, Value::ComplexTensor(expected.clone()));
+        let gathered_again = block_on(accelerator.gather_handle(&handle)).expect("source survives");
+        assert_eq!(gathered_again, Value::ComplexTensor(expected));
         assert_eq!(
-            tensor.integer_storage(),
-            Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
+            runmat_accelerate_api::handle_provenance(&handle),
+            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         );
-        assert_eq!(
-            tensor.integer_storage(),
-            Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
-        );
+        provider.free(&handle).expect("free handle");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+
+        let unowned = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        };
+        assert!(block_on(accelerator.gather_handle(&unowned)).is_err());
     }
 }

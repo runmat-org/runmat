@@ -1,5 +1,7 @@
 use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, HostNumericDataOwned, HostTensorOwned,
+};
 use runmat_builtins::{builtin_functions, Value};
 use std::cell::RefCell;
 
@@ -72,7 +74,42 @@ pub async fn download_handle_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> anyhow::Result<HostTensorOwned> {
-    provider.download(handle).await
+    if provider.device_id() != handle.device_id {
+        anyhow::bail!("provider does not own the input handle");
+    }
+    let expected_element =
+        crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(handle)
+            .map_err(anyhow::Error::msg)?;
+    let host = provider.download_numeric(handle).await?;
+    host.validate()?;
+    let expected_storage = runmat_accelerate_api::handle_storage(handle);
+    if host.shape != handle.shape
+        || host.storage != expected_storage
+        || host.data.element_type() != expected_element
+    {
+        anyhow::bail!(
+            "provider returned numeric payload metadata that contradicts the input handle"
+        );
+    }
+    let data = match host.data {
+        HostNumericDataOwned::F64(values) => values,
+        HostNumericDataOwned::F32(values) => values.into_iter().map(f64::from).collect(),
+        HostNumericDataOwned::I8(_)
+        | HostNumericDataOwned::I16(_)
+        | HostNumericDataOwned::I32(_)
+        | HostNumericDataOwned::I64(_)
+        | HostNumericDataOwned::U8(_)
+        | HostNumericDataOwned::U16(_)
+        | HostNumericDataOwned::U32(_)
+        | HostNumericDataOwned::U64(_) => {
+            anyhow::bail!("floating projection cannot download native integer storage")
+        }
+    };
+    Ok(HostTensorOwned {
+        data,
+        shape: host.shape,
+        storage: host.storage,
+    })
 }
 
 fn gather_if_needed_async_impl<'a>(
@@ -770,16 +807,45 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
 #[cfg(test)]
 mod tests {
     use super::{
-        call_builtin, gather_if_needed_async, should_retry_with_gpu_gather, value_contains_gpu,
+        call_builtin, download_handle_async, gather_if_needed_async, should_retry_with_gpu_gather,
+        value_contains_gpu,
     };
+    use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
     use runmat_builtins::{
-        register_class, Access, ClassDef, Closure, MethodDef, StructValue, Value,
+        register_class, Access, ClassDef, Closure, IntegerStorage, MethodDef, StructValue, Tensor,
+        Value,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn operation_floating_projection_uses_native_download_and_rejects_integers() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).unwrap();
+            let single_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &single).unwrap();
+            let projected = block_on(download_handle_async(provider, &single_handle)).unwrap();
+            assert_eq!(projected.data, vec![1.25, -2.5]);
+            assert_eq!(projected.shape, vec![1, 2]);
+
+            let integer =
+                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                    .unwrap();
+            let integer_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &integer).unwrap();
+            let error = block_on(download_handle_async(provider, &integer_handle))
+                .expect_err("floating projection must reject native integer storage");
+            assert!(error.to_string().contains("cannot download native integer"));
+
+            for handle in [&single_handle, &integer_handle] {
+                provider.free(handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(handle);
+            }
+        });
+    }
 
     #[test]
     fn compatibility_errors_never_trigger_automatic_gpu_gather_retry() {

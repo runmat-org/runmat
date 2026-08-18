@@ -147,6 +147,22 @@ mod tests {
         let canonical_policy = workspace_root.join("docs/development/backwards-compat.md");
         let runtime_policy = workspace_root.join("crates/runmat-runtime/src/compatibility.rs");
         let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
+        let bare_release_label = release_label.strip_prefix('r').unwrap_or(&release_label);
+        let contains_release_token = |contents: &str| {
+            let contents = contents.to_ascii_lowercase();
+            [release_label.as_str(), bare_release_label]
+                .into_iter()
+                .any(|needle| {
+                    contents.match_indices(needle).any(|(start, _)| {
+                        let end = start + needle.len();
+                        let starts_at_boundary =
+                            start == 0 || !contents.as_bytes()[start - 1].is_ascii_alphanumeric();
+                        let ends_at_boundary = end == contents.len()
+                            || !contents.as_bytes()[end].is_ascii_alphanumeric();
+                        starts_at_boundary && ends_at_boundary
+                    })
+                })
+        };
         let mut pending = vec![workspace_root.clone()];
         while let Some(directory) = pending.pop() {
             for entry in std::fs::read_dir(&directory).expect("read repository directory") {
@@ -163,7 +179,7 @@ mod tests {
                         continue;
                     };
                     assert!(
-                        !contents.to_ascii_lowercase().contains(&release_label),
+                        !contains_release_token(&contents),
                         "the compatibility release label must appear only in {} and the runtime policy: {}",
                         canonical_policy.display(),
                         path.display()
@@ -1644,6 +1660,38 @@ mod tests {
             ("write", "write-nonvector-data"),
             ("write", "write-sparse-data"),
             ("writecell", "writecell-explicit-gpu-input"),
+            ("writecell", "writecell-bytes-written-output"),
+            ("writematrix", "writematrix-bytes-written-output"),
+            ("writematrix", "writematrix-explicit-gpu-input"),
+            ("writematrix", "writematrix-quote-strings-logical-alias"),
+            ("writematrix", "writematrix-text-format-options"),
+            ("writetable", "writetable-bytes-written-output"),
+            ("writetable", "writetable-explicit-gpu-input"),
+            ("writetable", "writetable-integer-logical-option"),
+            ("writetimetable", "writetimetable-bytes-written-output"),
+            ("writetimetable", "writetimetable-explicit-gpu-input"),
+            ("writetimetable", "writetimetable-integer-logical-option"),
+            ("xlabel", "xlabel-integer-axes-handle"),
+            ("xlsread", "xlsread-explicit-gpu-input"),
+            ("xlsread", "xlsread-numeric-range"),
+            ("xlswrite", "xlswrite-explicit-gpu-input"),
+            ("xlswrite", "xlswrite-numeric-range"),
+            ("xtickangle", "xtickangle-integer-axes-handle"),
+            ("xticklabels", "xticklabels-integer-axes-handle"),
+            ("xticks", "xticks-integer-axes-handle"),
+            ("year", "datetime-logical-numeric-input"),
+            ("year", "datetime-resident-numeric-input"),
+            ("year", "year-typed-legacy-serial-input"),
+            ("ylabel", "ylabel-integer-axes-handle"),
+            ("ytickangle", "ytickangle-integer-axes-handle"),
+            ("yticklabels", "yticklabels-integer-axes-handle"),
+            ("yticks", "yticks-integer-axes-handle"),
+            ("zeros", "zeros-column-size-vector"),
+            ("zeros", "zeros-implicit-prototype"),
+            ("zeros", "zeros-resident-size-control"),
+            ("zlabel", "zlabel-integer-axes-handle"),
+            ("zoom", "zoom-integer-target-handle"),
+            ("zplane", "zplane-nonfloating-input"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2259,6 +2307,10 @@ mod tests {
                 "word2vec",
                 "writeWordEmbedding",
                 "writelines",
+                "xmlread",
+                "xticklabels",
+                "yticklabels",
+                "zero",
             ]
         );
         for (name, audit) in audited {

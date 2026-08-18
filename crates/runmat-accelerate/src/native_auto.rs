@@ -17,10 +17,7 @@ use anyhow::{anyhow, Result};
 use futures::lock::Mutex as AsyncMutex;
 use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
-use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-    ProviderPrecision,
-};
+use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::builtins::common::{
     spec::{builtin_residency_policy, ResidencyPolicy},
@@ -796,9 +793,9 @@ impl NativeAutoOffload {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
                 // Exact integer buffers are a residency/transfer capability, not a
-                // float-kernel precision.  Try the provider's typed upload below;
-                // a provider that does not implement it simply leaves the value on
-                // the host rather than coercing it through f64.
+                // floating-kernel precision. Try the provider's native numeric
+                // transfer below; an older provider that cannot represent the class
+                // leaves the value on the host rather than coercing it.
                 if t.integer_storage().is_none()
                     && ensure_provider_supports_dtype(self.provider, t.numeric_dtype()).is_err()
                 {
@@ -831,36 +828,9 @@ impl NativeAutoOffload {
     }
 
     fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
-        if let Some(storage) = tensor.integer_storage() {
-            let data = match storage {
-                runmat_builtins::IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-                runmat_builtins::IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-                runmat_builtins::IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-                runmat_builtins::IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-                runmat_builtins::IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-                runmat_builtins::IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-                runmat_builtins::IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-                runmat_builtins::IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-            };
-            let handle = self
-                .provider
-                .upload_integer(&HostIntegerTensorView {
-                    data,
-                    shape: &tensor.shape,
-                })
-                .map_err(|e| anyhow!(e.to_string()))?;
-            runmat_accelerate_api::mark_handle_automatic(&handle);
-            return Ok(Value::GpuTensor(handle));
-        }
-        let data = tensor.materialize_f64();
-        let view = HostTensorView {
-            data: &data,
-            shape: &tensor.shape,
-        };
-        let handle = self
-            .provider
-            .upload(&view)
-            .map_err(|e| anyhow!(e.to_string()))?;
+        let handle =
+            runmat_runtime::builtins::common::gpu_helpers::upload_tensor(self.provider, tensor)
+                .map_err(|error| anyhow!(error))?;
         runmat_accelerate_api::mark_handle_automatic(&handle);
         Ok(Value::GpuTensor(handle))
     }
@@ -1393,7 +1363,7 @@ fn value_kind(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::HostIntegerDataOwned;
+    use runmat_accelerate_api::{HostNumericDataOwned, NumericElementType};
 
     #[test]
     fn max_detection_handles_placeholders() {
@@ -1412,7 +1382,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_promotion_uploads_native_integer_storage_without_f64_conversion() {
+    fn auto_promotion_uploads_native_numeric_storage_without_conversion() {
         crate::simple_provider::register_inprocess_provider();
         let provider = runmat_accelerate_api::provider().expect("in-process provider");
         let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
@@ -1430,12 +1400,25 @@ mod tests {
             Some(runmat_accelerate_api::IntegerElementType::U64)
         );
         assert_eq!(
-            futures::executor::block_on(provider.download_integer(&handle))
+            futures::executor::block_on(provider.download_numeric(&handle))
                 .expect("exact integer download")
                 .data,
-            HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
+            HostNumericDataOwned::U64(vec![1_u64 << 63, u64::MAX])
         );
         provider.free(&handle).expect("free integer handle");
+
+        let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).expect("single tensor");
+        let promoted = auto
+            .promote_tensor_if_large(&Value::Tensor(single), 1)
+            .expect("native single promotion");
+        let Value::GpuTensor(handle) = promoted else {
+            panic!("expected resident single gpuArray");
+        };
+        let downloaded = futures::executor::block_on(provider.download_numeric(&handle))
+            .expect("native single download");
+        assert_eq!(downloaded.data.element_type(), NumericElementType::F32);
+        assert_eq!(downloaded.data, HostNumericDataOwned::F32(vec![1.25, -2.5]));
+        provider.free(&handle).expect("free single handle");
     }
 
     #[test]

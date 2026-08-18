@@ -1832,16 +1832,45 @@ impl InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
+        self.f64_handle_for_existing_buffer(id, shape, storage)
+    }
+
+    fn f64_handle_for_existing_buffer(
+        &self,
+        buffer_id: u64,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
         let handle = GpuTensorHandle {
             shape,
             device_id: self.device_id,
-            buffer_id: id,
+            buffer_id,
         };
         runmat_accelerate_api::set_handle_storage(&handle, storage);
         runmat_accelerate_api::set_handle_logical(&handle, false);
         runmat_accelerate_api::set_handle_precision(
             &handle,
             runmat_accelerate_api::ProviderPrecision::F64,
+        );
+        handle
+    }
+
+    fn f32_handle_for_existing_buffer(
+        &self,
+        buffer_id: u64,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
+        let handle = GpuTensorHandle {
+            shape,
+            device_id: self.device_id,
+            buffer_id,
+        };
+        runmat_accelerate_api::set_handle_storage(&handle, storage);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::set_handle_precision(
+            &handle,
+            runmat_accelerate_api::ProviderPrecision::F32,
         );
         handle
     }
@@ -4726,11 +4755,11 @@ impl AccelProvider for InProcessProvider {
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: vec![out_rows, out_cols],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(
+            id,
+            vec![out_rows, out_cols],
+            GpuTensorStorage::Real,
+        ))
     }
 
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
@@ -4759,11 +4788,7 @@ impl AccelProvider for InProcessProvider {
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: vec![diag_len, 1],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, vec![diag_len, 1], GpuTensorStorage::Real))
     }
 
     fn tril<'a>(
@@ -4939,11 +4964,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap();
         guard.insert(id, vec![1.0; len]);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn ones_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -4956,11 +4977,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap();
         guard.insert(id, data);
-        Ok(GpuTensorHandle {
-            shape,
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
     }
 
     fn eye_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -5000,11 +5017,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut buf_guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         buf_guard.insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_normal(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -5026,11 +5039,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_exponential(&self, mu: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -5048,11 +5057,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_normrnd(&self, mu: f64, sigma: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -5073,11 +5078,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_unifrnd(&self, a: f64, b: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -5094,11 +5095,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn set_rng_state(&self, state: u64) -> Result<()> {
@@ -5193,11 +5190,7 @@ impl AccelProvider for InProcessProvider {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, data);
-        Ok(GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
@@ -5235,11 +5228,7 @@ impl AccelProvider for InProcessProvider {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, values);
-        Ok(GpuTensorHandle {
-            shape: vec![1, k],
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, vec![1, k], GpuTensorStorage::Real))
     }
 
     fn random_permutation_like(
@@ -6393,11 +6382,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: y.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, y.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6527,11 +6512,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_asinh<'a>(
@@ -6548,11 +6529,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_sinh<'a>(
@@ -6628,11 +6605,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_acos<'a>(
@@ -6649,11 +6622,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_acosh<'a>(
@@ -6670,11 +6639,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6733,11 +6698,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_atanh<'a>(
@@ -6754,11 +6715,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6776,11 +6733,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6798,11 +6751,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6820,11 +6769,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6883,11 +6828,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -6916,11 +6857,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7259,11 +7196,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7281,11 +7214,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, abuf);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7298,16 +7227,14 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| (x as f32) as f64).collect();
+            let out: Vec<f32> = abuf.iter().map(|&x| x as f32).collect();
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            numeric_registry()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(id, InProcessNumericData::F32(out));
+            Ok(self.f32_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7325,11 +7252,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7357,11 +7280,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7388,11 +7307,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard2 = registry().lock().unwrap();
         guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: mantissa.shape.clone(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, mantissa.shape.clone(), GpuTensorStorage::Real))
     }
 
     fn scalar_add(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
@@ -8388,11 +8303,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, vec![s]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -8449,11 +8360,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -8519,11 +8426,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, vec![p]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -8575,11 +8478,7 @@ impl AccelProvider for InProcessProvider {
             } else {
                 vec![rows, 1]
             };
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -8722,11 +8621,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![mean]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -8777,11 +8672,7 @@ impl AccelProvider for InProcessProvider {
             } else {
                 vec![rows, 1]
             };
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -9012,11 +8903,7 @@ impl AccelProvider for InProcessProvider {
             };
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![median]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -9087,11 +8974,7 @@ impl AccelProvider for InProcessProvider {
             } else {
                 vec![rows, 1]
             };
-            Ok(GpuTensorHandle {
-                shape,
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, shape, GpuTensorStorage::Real))
         })
     }
 
@@ -9118,11 +9001,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![m]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -9192,16 +9071,16 @@ impl AccelProvider for InProcessProvider {
             let shape_vals = vshape.clone();
             let shape_inds = vshape;
             Ok(runmat_accelerate_api::ReduceDimResult {
-                values: GpuTensorHandle {
-                    shape: shape_vals,
-                    device_id: self.device_id,
-                    buffer_id: idv,
-                },
-                indices: GpuTensorHandle {
-                    shape: shape_inds,
-                    device_id: self.device_id,
-                    buffer_id: idi,
-                },
+                values: self.f64_handle_for_existing_buffer(
+                    idv,
+                    shape_vals,
+                    GpuTensorStorage::Real,
+                ),
+                indices: self.f64_handle_for_existing_buffer(
+                    idi,
+                    shape_inds,
+                    GpuTensorStorage::Real,
+                ),
             })
         })
     }
@@ -9219,11 +9098,7 @@ impl AccelProvider for InProcessProvider {
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, vec![m]);
-            Ok(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![1, 1], GpuTensorStorage::Real))
         })
     }
 
@@ -9293,16 +9168,16 @@ impl AccelProvider for InProcessProvider {
             let shape_vals = vshape.clone();
             let shape_inds = vshape;
             Ok(runmat_accelerate_api::ReduceDimResult {
-                values: GpuTensorHandle {
-                    shape: shape_vals,
-                    device_id: self.device_id,
-                    buffer_id: idv,
-                },
-                indices: GpuTensorHandle {
-                    shape: shape_inds,
-                    device_id: self.device_id,
-                    buffer_id: idi,
-                },
+                values: self.f64_handle_for_existing_buffer(
+                    idv,
+                    shape_vals,
+                    GpuTensorStorage::Real,
+                ),
+                indices: self.f64_handle_for_existing_buffer(
+                    idi,
+                    shape_inds,
+                    GpuTensorStorage::Real,
+                ),
             })
         })
     }
@@ -9660,11 +9535,7 @@ impl AccelProvider for InProcessProvider {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();
             guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: vec![ar, bc],
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.f64_handle_for_existing_buffer(id, vec![ar, bc], GpuTensorStorage::Real))
         })
     }
 
@@ -10295,11 +10166,11 @@ impl AccelProvider for InProcessProvider {
         if len == 0 {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             registry().lock().unwrap().insert(id, Vec::new());
-            return Ok(GpuTensorHandle {
-                shape: output_shape.to_vec(),
-                device_id: self.device_id,
-                buffer_id: id,
-            });
+            return Ok(self.f64_handle_for_existing_buffer(
+                id,
+                output_shape.to_vec(),
+                GpuTensorStorage::Real,
+            ));
         }
 
         let mut host_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
@@ -10344,11 +10215,7 @@ impl AccelProvider for InProcessProvider {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry().lock().unwrap().insert(id, output);
-        Ok(GpuTensorHandle {
-            shape: output_shape.to_vec(),
-            device_id: self.device_id,
-            buffer_id: id,
-        })
+        Ok(self.f64_handle_for_existing_buffer(id, output_shape.to_vec(), GpuTensorStorage::Real))
     }
 
     fn fused_elementwise(

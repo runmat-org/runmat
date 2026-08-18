@@ -1,7 +1,7 @@
 //! MATLAB-compatible `single` builtin with GPU-aware semantics for RunMat.
 
 use log::trace;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -344,16 +344,7 @@ async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let converted = single_tensor_to_host(tensor)?;
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
-        let upload_data = converted
-            .clone()
-            .into_numeric_storage()
-            .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
-            .materialize_f64();
-        let view = HostTensorView {
-            data: &upload_data,
-            shape: &converted.shape,
-        };
-        match provider.upload(&view) {
+        match gpu_helpers::upload_tensor(provider, &converted) {
             Ok(new_handle) => {
                 return Ok(Value::GpuTensor(new_handle));
             }
@@ -499,23 +490,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let upload_data = tensor
-                .into_numeric_storage()
-                .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
-                .materialize_f64();
-            let view = HostTensorView {
-                data: &upload_data,
-                shape: &shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
+            let tensor =
+                Tensor::from_numeric_storage(NumericStorage::F32(vec![n as f32]), vec![1, 1])
+                    .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
@@ -789,6 +771,7 @@ pub(crate) mod tests {
                         .map(|v| v as f64)
                         .collect();
                     assert_eq!(gathered.shape, vec![2, 2]);
+                    assert!(gathered.as_f32_slice().is_some());
                     assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),

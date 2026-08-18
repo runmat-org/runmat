@@ -493,7 +493,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn deg2rad_rejects_forged_single_metadata_on_double_provider() {
+    fn deg2rad_rejects_contradictory_physical_class_metadata() {
         test_support::with_test_provider(|provider| {
             let tensor = ComplexTensor::new(vec![(180.0, 90.0)], vec![1, 1]).expect("complex");
             let input = gpu_helpers::upload_complex_tensor(provider, &tensor).expect("upload");
@@ -502,8 +502,12 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F32,
             );
             let error = deg2rad_builtin(Value::GpuTensor(input))
-                .expect_err("double provider cannot restore requested single precision");
-            assert!(error.message().contains("requested result precision"));
+                .expect_err("contradictory physical class metadata must reject");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:gpu:ProviderPayloadMismatch")
+            );
+            assert!(error.message().contains("class metadata contradicts"));
         });
     }
 
