@@ -2,11 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{ExactFaceDelaunayError, ExactFaceDelaunayTriangle, ExactFacePslg};
 
-use super::{
-    ear::triangulate_polygon,
-    recover::RecoveryControl,
-    topology::{edge_uses, properly_crosses, sorted_edge},
-};
+use super::{ear::triangulate_polygon, recover::RecoveryControl};
+use crate::exact_cdt::topology::{edge_uses, properly_crosses, sorted_edge};
 
 /// Replaces the triangle strip intersected by `target` with two deterministic
 /// polygon triangulations sharing `target`. Returning `false` means that the

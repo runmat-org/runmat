@@ -2,10 +2,8 @@ use runmat_meshing_core::{predicate::orient2d, PredicateSign};
 
 use crate::{ExactFaceDelaunayError, ExactFaceDelaunayTriangle, ExactFacePslg};
 
-use super::{
-    recover::RecoveryControl,
-    topology::{canonical_triangle, oriented_triangle},
-};
+use super::recover::RecoveryControl;
+use crate::exact_cdt::topology::{canonical_triangle, oriented_triangle};
 
 /// Triangulates one simple cavity side. The input is an open chain whose implicit
 /// closing edge joins the last vertex to the first protected-segment endpoint.

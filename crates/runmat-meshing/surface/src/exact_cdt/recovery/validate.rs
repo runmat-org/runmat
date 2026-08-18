@@ -10,11 +10,8 @@ use crate::{
     ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFacePslg,
 };
 
-use super::{
-    planarity::validate_planar_edges,
-    topology::{edge_uses, sorted_edge},
-    ExactFaceConstrainedDelaunay,
-};
+use super::{planarity::validate_planar_edges, ExactFaceConstrainedDelaunay};
+use crate::exact_cdt::topology::{edge_uses, sorted_edge};
 
 pub fn validate_exact_face_constrained_delaunay(
     constrained: &ExactFaceConstrainedDelaunay,

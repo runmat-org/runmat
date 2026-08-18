@@ -1,6 +1,12 @@
+mod domain;
 mod pslg;
 mod recovery;
+mod topology;
 mod triangulation;
+
+pub use domain::{
+    carve_exact_face_domain, validate_exact_face_trimmed_delaunay, ExactFaceTrimmedDelaunay,
+};
 
 pub use pslg::{
     build_exact_face_pslg, validate_exact_face_pslg, ExactFacePslg, ExactFacePslgError,

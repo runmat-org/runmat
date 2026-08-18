@@ -10,11 +10,10 @@ use crate::{
 };
 
 use super::{
-    cavity::recover_segment_cavity,
-    topology::{edge_uses, flip_edge, properly_crosses, sorted_edge},
-    validate_exact_face_constrained_delaunay, ExactFaceConstrainedDelaunay,
-    ExactFaceRecoveredSegment,
+    cavity::recover_segment_cavity, validate_exact_face_constrained_delaunay,
+    ExactFaceConstrainedDelaunay, ExactFaceRecoveredSegment,
 };
+use crate::exact_cdt::topology::{edge_uses, flip_edge, properly_crosses, sorted_edge};
 
 pub fn recover_exact_face_segments(
     delaunay: &ExactFaceDelaunay,

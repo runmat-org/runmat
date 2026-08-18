@@ -67,7 +67,7 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
     assert_eq!(triangles.len(), delaunay.triangles.len());
     assert!(triangle_edges(&triangles).contains(&target));
     super::planarity::validate_planar_edges(
-        &super::topology::edge_uses(&triangles),
+        &super::super::topology::edge_uses(&triangles),
         &pslg,
         &NeverCancelled,
         options,

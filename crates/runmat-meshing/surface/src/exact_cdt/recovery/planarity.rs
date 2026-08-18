@@ -6,7 +6,7 @@ use crate::{
     ExactFaceDelaunayError, ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFacePslg,
 };
 
-use super::topology::EdgeUse;
+use crate::exact_cdt::topology::EdgeUse;
 
 pub(super) fn validate_planar_edges(
     edges: &BTreeMap<[u32; 2], Vec<EdgeUse>>,
