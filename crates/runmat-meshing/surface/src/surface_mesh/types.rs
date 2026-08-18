@@ -9,6 +9,25 @@ use crate::{
 pub const EXACT_FACE_MESH_BATCH_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_SURFACE_MESH_SCHEMA_VERSION: u16 = 1;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExactSurfaceJoinOptions {
+    pub coordinate_tolerance_m: f64,
+    pub maximum_nodes: u64,
+    pub maximum_triangles: u64,
+    pub maximum_boundary_segments: u64,
+}
+
+impl Default for ExactSurfaceJoinOptions {
+    fn default() -> Self {
+        Self {
+            coordinate_tolerance_m: 1.0e-10,
+            maximum_nodes: 1_000_000_000,
+            maximum_triangles: 2_000_000_000,
+            maximum_boundary_segments: 1_000_000_000,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExactFaceMeshBatch {
@@ -70,6 +89,11 @@ impl ExactSurfaceMeshError {
 
     pub(super) fn with_face(mut self, face_id: &PersistentEntityId) -> Self {
         self.source_face_id = Some(Box::new(face_id.clone()));
+        self
+    }
+
+    pub(super) fn with_shell(mut self, shell_id: &PersistentEntityId) -> Self {
+        self.source_shell_id = Some(Box::new(shell_id.clone()));
         self
     }
 }

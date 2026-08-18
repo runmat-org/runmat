@@ -16,7 +16,7 @@ pub(super) fn rotate<T: Copy>(values: [T; 3], rotation: usize) -> [T; 3] {
     ]
 }
 
-pub(super) fn exact_face_triangle_id(
+pub(crate) fn exact_face_triangle_id(
     chart_id: StableDigest,
     node_ids: [StableDigest; 3],
 ) -> StableDigest {

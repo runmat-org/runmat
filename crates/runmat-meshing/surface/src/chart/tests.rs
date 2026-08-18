@@ -334,6 +334,152 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
             .kind,
         crate::ExactSurfaceMeshErrorKind::InvalidEncoding
     );
+    let mut sheet_topology = topology.clone();
+    sheet_topology.bodies[0].is_sheet_body = true;
+    sheet_topology.bodies[0].sheet_shell_ids = vec![sheet_topology.shells[0].id.clone()];
+    sheet_topology.bodies[0].lump_ids.clear();
+    sheet_topology.lumps.clear();
+    sheet_topology.solids.clear();
+    sheet_topology.regions.clear();
+    let surface = crate::join_exact_face_mesh_batches(
+        &sheet_topology,
+        vec![face_batch.clone()],
+        crate::ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(surface.face_ids, vec![topology.faces[0].id.clone()]);
+    assert_eq!(surface.shells.len(), 1);
+    assert!(surface.shells[0].is_sheet_shell);
+    assert_eq!(surface.shells[0].open_edge_count, 1);
+    assert!(!surface.shells[0].is_watertight);
+    crate::validate_exact_surface_mesh(
+        &surface,
+        &sheet_topology,
+        vec![face_batch.clone()],
+        crate::ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::join_exact_face_mesh_batches(
+            &topology,
+            vec![face_batch.clone()],
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidInput
+    );
+    assert_eq!(
+        crate::join_exact_face_mesh_batches(
+            &sheet_topology,
+            vec![face_batch.clone()],
+            crate::ExactSurfaceJoinOptions {
+                maximum_nodes: 1,
+                ..crate::ExactSurfaceJoinOptions::default()
+            },
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::ResourceLimit
+    );
+    let mut tampered_surface = surface;
+    tampered_surface.shells[0].open_edge_count = 0;
+    assert_eq!(
+        crate::validate_exact_surface_mesh(
+            &tampered_surface,
+            &sheet_topology,
+            vec![face_batch.clone()],
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidInput
+    );
+    let mut two_face_topology = sheet_topology.clone();
+    let mut second_face = two_face_topology.faces[0].clone();
+    second_face.id.source_topology_id = "face-2".to_owned();
+    let mut second_wire = two_face_topology.wires[0].clone();
+    second_wire.id.source_topology_id = "wire-2".to_owned();
+    let mut second_coedge = two_face_topology.coedges[0].clone();
+    second_coedge.id.source_topology_id = "coedge-2".to_owned();
+    let mut second_shell = two_face_topology.shells[0].clone();
+    second_shell.id.source_topology_id = "shell-2".to_owned();
+    second_face.outer_wire_id = second_wire.id.clone();
+    second_wire.coedge_ids = vec![second_coedge.id.clone()];
+    second_coedge.face_id = second_face.id.clone();
+    second_coedge.edge_id = two_face_topology.edges[0].id.clone();
+    second_shell.face_uses[0].entity_id = second_face.id.clone();
+    two_face_topology.bodies[0]
+        .sheet_shell_ids
+        .push(second_shell.id.clone());
+    two_face_topology.faces.push(second_face.clone());
+    two_face_topology.wires.push(second_wire);
+    two_face_topology.coedges.push(second_coedge.clone());
+    two_face_topology.shells.push(second_shell);
+    let mut second_mesh = joined.clone();
+    second_mesh.source_face_id = second_face.id.clone();
+    let second_chart_id = node(88);
+    for node in &mut second_mesh.nodes {
+        for use_record in &mut node.uses {
+            use_record.source_face_id = second_face.id.clone();
+            use_record.chart_id = second_chart_id;
+            for parameter in &mut use_record.exact_edge_parameters {
+                parameter.source_coedge_id = second_coedge.id.clone();
+                parameter.source_edge_id = second_coedge.edge_id.clone();
+            }
+        }
+    }
+    for triangle in &mut second_mesh.triangles {
+        triangle.source_face_id = second_face.id.clone();
+        triangle.chart_id = second_chart_id;
+        triangle.triangle_id =
+            crate::face_mesh::exact_face_triangle_id(second_chart_id, triangle.node_ids);
+    }
+    for segment in &mut second_mesh.boundary_segments {
+        segment.source_coedge_id = second_coedge.id.clone();
+        segment.source_edge_id = second_coedge.edge_id.clone();
+    }
+    let two_face_partitions = crate::face_partition_descriptors(&two_face_topology, 1).unwrap();
+    assert_eq!(two_face_partitions.len(), 2);
+    let first_batch = crate::build_exact_face_mesh_batch(
+        &two_face_topology,
+        two_face_partitions[0].clone(),
+        vec![joined.clone()],
+    )
+    .unwrap();
+    let second_batch = crate::build_exact_face_mesh_batch(
+        &two_face_topology,
+        two_face_partitions[1].clone(),
+        vec![second_mesh],
+    )
+    .unwrap();
+    let canonical_surface = crate::join_exact_face_mesh_batches(
+        &two_face_topology,
+        vec![first_batch.clone(), second_batch.clone()],
+        crate::ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    let reversed_surface = crate::join_exact_face_mesh_batches(
+        &two_face_topology,
+        vec![second_batch.clone(), first_batch.clone()],
+        crate::ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(reversed_surface, canonical_surface);
+    assert_eq!(canonical_surface.face_ids.len(), 2);
+    assert_eq!(canonical_surface.shells.len(), 2);
+    let mut mismatched_second_batch = second_batch.clone();
+    mismatched_second_batch.faces[0].boundary_segments[0].edge_parameters[1] += 0.125;
+    assert_eq!(
+        crate::join_exact_face_mesh_batches(
+            &two_face_topology,
+            vec![first_batch, mismatched_second_batch],
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidInput
+    );
     let mut tampered_batch = face_batch;
     tampered_batch.schema_version += 1;
     assert_eq!(

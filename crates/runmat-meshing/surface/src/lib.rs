@@ -91,8 +91,9 @@ pub use refinement::{
 };
 pub use surface_mesh::{
     build_exact_face_mesh_batch, decode_exact_face_mesh_batch, encode_exact_face_mesh_batch,
-    face_partition_descriptors, validate_exact_face_mesh_batch, ExactFaceMeshBatch,
-    ExactSurfaceMesh, ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence,
+    face_partition_descriptors, join_exact_face_mesh_batches, validate_exact_face_mesh_batch,
+    validate_exact_surface_mesh, ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh,
+    ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence,
     EXACT_FACE_MESH_BATCH_SCHEMA_VERSION, EXACT_SURFACE_MESH_SCHEMA_VERSION,
 };
 pub use validate::{
