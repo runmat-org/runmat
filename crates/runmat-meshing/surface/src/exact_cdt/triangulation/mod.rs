@@ -18,7 +18,7 @@ mod tests;
 
 /// Symbolic predicate identity is chart-local vertex order, not the shared 3D node identity.
 /// This keeps distinct seam images independent while preserving deterministic tie-breaking.
-fn predicate_point(vertex: ExactFacePslgVertex, index: u32) -> PlanarPredicatePoint {
+pub(crate) fn predicate_point(vertex: ExactFacePslgVertex, index: u32) -> PlanarPredicatePoint {
     let mut bytes = [0x50; 32];
     bytes[..4].copy_from_slice(&index.to_be_bytes());
     PlanarPredicatePoint {

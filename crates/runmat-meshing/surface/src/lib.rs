@@ -19,11 +19,12 @@ pub use exact_boundary::{
     EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
 };
 pub use exact_cdt::{
-    build_exact_face_pslg, triangulate_exact_face_pslg, validate_exact_face_delaunay,
-    validate_exact_face_pslg, ExactFaceDelaunay, ExactFaceDelaunayError,
-    ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFaceDelaunayTriangle, ExactFacePslg,
-    ExactFacePslgError, ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgSegment,
-    ExactFacePslgVertex,
+    build_exact_face_pslg, recover_exact_face_segments, triangulate_exact_face_pslg,
+    validate_exact_face_constrained_delaunay, validate_exact_face_delaunay,
+    validate_exact_face_pslg, ExactFaceConstrainedDelaunay, ExactFaceDelaunay,
+    ExactFaceDelaunayError, ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions,
+    ExactFaceDelaunayTriangle, ExactFacePslg, ExactFacePslgError, ExactFacePslgErrorKind,
+    ExactFacePslgLoop, ExactFacePslgSegment, ExactFacePslgVertex, ExactFaceRecoveredSegment,
 };
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,

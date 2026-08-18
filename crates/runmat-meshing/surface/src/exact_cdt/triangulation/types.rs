@@ -16,6 +16,7 @@ pub struct ExactFaceDelaunayTriangle {
 pub struct ExactFaceDelaunayOptions {
     pub maximum_triangles: usize,
     pub maximum_predicate_evaluations: u64,
+    pub maximum_edge_flips: u64,
     pub cancellation_check_interval: u64,
 }
 
@@ -24,6 +25,7 @@ impl Default for ExactFaceDelaunayOptions {
         Self {
             maximum_triangles: 10_000_000,
             maximum_predicate_evaluations: 100_000_000,
+            maximum_edge_flips: 100_000_000,
             cancellation_check_interval: 1_024,
         }
     }
@@ -41,12 +43,13 @@ pub enum ExactFaceDelaunayErrorKind {
     InvalidPslg,
     InvalidOptions,
     InvalidTopology,
+    UnsatisfiedConstraint,
     ResourceLimit,
     Cancelled,
 }
 
 impl ExactFaceDelaunayError {
-    pub(super) fn new(
+    pub(crate) fn new(
         kind: ExactFaceDelaunayErrorKind,
         source_face_id: &PersistentEntityId,
         reason: impl Into<String>,

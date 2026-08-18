@@ -121,6 +121,7 @@ fn validate_options(
 ) -> Result<(), ExactFaceDelaunayError> {
     if options.maximum_triangles == 0
         || options.maximum_predicate_evaluations == 0
+        || options.maximum_edge_flips == 0
         || options.cancellation_check_interval == 0
     {
         return Err(ExactFaceDelaunayError::new(
