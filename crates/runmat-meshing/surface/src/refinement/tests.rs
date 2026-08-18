@@ -1,6 +1,6 @@
 use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryModel, PersistentEntityId,
-    PersistentEntityKind, PortableExactEvaluator,
+    PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
 };
 use runmat_meshing_core::{
     MeshingCancellationSignal, MetricCombinationRule, MetricFieldRequest, MetricSourceKind,
@@ -14,8 +14,8 @@ use runmat_meshing_curve::{
 
 use crate::{
     ExactFaceDelaunayTriangle, ExactFaceGeometry, ExactFaceGeometryVertex,
-    ExactFaceMetricEvaluation, ExactFacePslg, ExactFacePslgSegment, ExactFacePslgVertex,
-    ExactFaceTriangleGeometry, ParametricMetricTensor,
+    ExactFaceMetricEvaluation, ExactFacePslg, ExactFacePslgLoop, ExactFacePslgSegment,
+    ExactFacePslgVertex, ExactFaceTriangleGeometry, ParametricMetricTensor,
 };
 
 use super::*;
@@ -23,7 +23,9 @@ use super::*;
 #[test]
 fn canonical_bad_triangle_selects_its_metric_circumcenter() {
     let geometry = geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);
-    let candidate = select_exact_face_refinement_candidate(&geometry, quality())
+    let pslg = triangle_pslg(&geometry);
+    let collars = empty_collars(&geometry);
+    let candidate = select_exact_face_refinement_candidate(&geometry, &pslg, &collars, quality())
         .unwrap()
         .unwrap();
 
@@ -37,7 +39,7 @@ fn canonical_bad_triangle_selects_its_metric_circumcenter() {
     let mut invalid = quality();
     invalid.minimum_metric_angle_degrees = 60.0;
     assert_eq!(
-        select_exact_face_refinement_candidate(&geometry, invalid)
+        select_exact_face_refinement_candidate(&geometry, &pslg, &collars, invalid)
             .unwrap_err()
             .kind,
         ExactFaceRefinementErrorKind::InvalidQuality
@@ -45,9 +47,54 @@ fn canonical_bad_triangle_selects_its_metric_circumcenter() {
 }
 
 #[test]
+fn acute_material_corner_has_canonical_independently_validated_collar() {
+    let (pslg, geometry) = acute_corner_geometry();
+    let mut targets = quality();
+    targets.minimum_metric_angle_degrees = 20.0;
+    let collars = derive_exact_face_feature_collars(&pslg, &geometry, targets).unwrap();
+
+    assert_eq!(collars.collars.len(), 1);
+    assert_eq!(collars.collars[0].pslg_vertex_index, 0);
+    assert_eq!(collars.collars[0].incident_segment_indices, [0, 2]);
+    assert!((collars.collars[0].feature_angle_rad.to_degrees() - 10.0).abs() < 1.0e-12);
+    validate_exact_face_feature_collars(&collars, &pslg, &geometry, targets).unwrap();
+    assert!(
+        select_exact_face_refinement_candidate(&geometry, &pslg, &collars, targets)
+            .unwrap()
+            .is_none()
+    );
+    let mut long_edge = geometry.clone();
+    long_edge.triangles[0].metric_edge_lengths[0] = 2.0;
+    assert_eq!(
+        select_exact_face_refinement_candidate(&long_edge, &pslg, &collars, targets)
+            .unwrap()
+            .unwrap()
+            .reason,
+        ExactFaceRefinementReason::MetricEdgeLength
+    );
+
+    let mut tampered = collars;
+    tampered.collars[0].feature_angle_rad += 0.01;
+    assert_eq!(
+        validate_exact_face_feature_collars(&tampered, &pslg, &geometry, targets)
+            .unwrap_err()
+            .kind,
+        ExactFaceRefinementErrorKind::InvalidGeometry
+    );
+
+    targets.minimum_metric_angle_degrees = 5.0;
+    assert!(derive_exact_face_feature_collars(&pslg, &geometry, targets)
+        .unwrap()
+        .collars
+        .is_empty());
+}
+
+#[test]
 fn geometric_deviation_uses_the_exact_triangle_centroid() {
     let geometry = geometry([0.5; 3], 0.5, 1.0, 0.25, 0.0);
-    let candidate = select_exact_face_refinement_candidate(&geometry, quality())
+    let pslg = triangle_pslg(&geometry);
+    let collars = empty_collars(&geometry);
+    let candidate = select_exact_face_refinement_candidate(&geometry, &pslg, &collars, quality())
         .unwrap()
         .unwrap();
 
@@ -516,6 +563,101 @@ fn one_segment_pslg(source_face_id: PersistentEntityId) -> ExactFacePslg {
             edge_parameters: [6.0, 2.0],
         }],
         loops: Vec::new(),
+    }
+}
+
+fn acute_corner_geometry() -> (ExactFacePslg, ExactFaceGeometry) {
+    let face_id = id(PersistentEntityKind::Face, "acute-face");
+    let angle = 10.0_f64.to_radians();
+    let uvs = [[0.0, 0.0], [angle.cos(), angle.sin()], [1.0, 0.0]];
+    let pslg = ExactFacePslg {
+        source_face_id: face_id.clone(),
+        vertices: uvs
+            .into_iter()
+            .enumerate()
+            .map(|(index, uv)| ExactFacePslgVertex {
+                node_id: node(index as u8 + 1),
+                seam_image: None,
+                uv,
+            })
+            .collect(),
+        segments: (0..3)
+            .map(|index| ExactFacePslgSegment {
+                source_coedge_id: id(
+                    PersistentEntityKind::Coedge,
+                    &format!("acute-coedge-{index}"),
+                ),
+                source_edge_id: id(PersistentEntityKind::Edge, &format!("acute-edge-{index}")),
+                vertex_indices: [index, (index + 1) % 3],
+                edge_parameters: [0.0, 1.0],
+            })
+            .collect(),
+        loops: vec![ExactFacePslgLoop {
+            source_wire_id: id(PersistentEntityKind::Wire, "acute-wire"),
+            orientation: TopologicalOrientation::Forward,
+            first_segment: 0,
+            segment_count: 3,
+        }],
+    };
+    let centroid_uv = [
+        uvs.iter().map(|uv| uv[0]).sum::<f64>() / 3.0,
+        uvs.iter().map(|uv| uv[1]).sum::<f64>() / 3.0,
+    ];
+    let geometry = ExactFaceGeometry {
+        source_face_id: face_id.clone(),
+        vertices: uvs
+            .into_iter()
+            .enumerate()
+            .map(|(index, uv)| ExactFaceGeometryVertex {
+                pslg_vertex_index: index as u32,
+                evaluation: evaluation(&face_id, uv),
+                unit_normal: [0.0, 0.0, 1.0],
+            })
+            .collect(),
+        triangles: vec![ExactFaceTriangleGeometry {
+            triangle: ExactFaceDelaunayTriangle {
+                vertex_indices: [0, 1, 2],
+            },
+            centroid: evaluation(&face_id, centroid_uv),
+            unit_normal: [0.0, 0.0, 1.0],
+            physical_area_m2: 0.1,
+            metric_edge_lengths: [0.5; 3],
+            minimum_metric_angle_rad: 5.0_f64.to_radians(),
+            physical_aspect_ratio: 100.0,
+            chordal_deviation_m: 0.0,
+            normal_deviation_rad: 0.0,
+        }],
+        maximum_metric_edge_length: 0.5,
+        minimum_metric_angle_rad: 5.0_f64.to_radians(),
+        maximum_physical_aspect_ratio: 100.0,
+        maximum_chordal_deviation_m: 0.0,
+        maximum_normal_deviation_rad: 0.0,
+    };
+    (pslg, geometry)
+}
+
+fn triangle_pslg(geometry: &ExactFaceGeometry) -> ExactFacePslg {
+    ExactFacePslg {
+        source_face_id: geometry.source_face_id.clone(),
+        vertices: geometry
+            .vertices
+            .iter()
+            .enumerate()
+            .map(|(index, vertex)| ExactFacePslgVertex {
+                node_id: node(index as u8 + 1),
+                seam_image: None,
+                uv: vertex.evaluation.uv,
+            })
+            .collect(),
+        segments: Vec::new(),
+        loops: Vec::new(),
+    }
+}
+
+fn empty_collars(geometry: &ExactFaceGeometry) -> ExactFaceFeatureCollars {
+    ExactFaceFeatureCollars {
+        source_face_id: geometry.source_face_id.clone(),
+        collars: Vec::new(),
     }
 }
 

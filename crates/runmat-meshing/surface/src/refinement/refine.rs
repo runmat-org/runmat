@@ -4,10 +4,11 @@ use crate::{
 };
 
 use super::{
-    classify_exact_face_refinement_candidate, insert_exact_face_refinement_candidate,
-    select_exact_face_refinement_candidate, ExactFaceCandidateDisposition, ExactFaceRefinedMesh,
-    ExactFaceRefinedTopology, ExactFaceRefinementContext, ExactFaceRefinementError,
-    ExactFaceRefinementErrorKind, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
+    classify_exact_face_refinement_candidate, derive_exact_face_feature_collars,
+    insert_exact_face_refinement_candidate, select_exact_face_refinement_candidate,
+    ExactFaceCandidateDisposition, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
+    ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
+    ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
 };
 
 pub fn refine_exact_face_until_blocked(
@@ -52,12 +53,19 @@ pub fn refine_exact_face_until_blocked(
             context.geometry_control,
         )
         .map_err(map_geometry)?;
-        let Some(candidate) = select_exact_face_refinement_candidate(&geometry, policy.quality)?
+        let collars = derive_exact_face_feature_collars(&current.pslg, &geometry, policy.quality)?;
+        let Some(candidate) = select_exact_face_refinement_candidate(
+            &geometry,
+            &current.pslg,
+            &collars,
+            policy.quality,
+        )?
         else {
             return Ok(ExactFaceRefinementOutcome::Converged(Box::new(
                 ExactFaceRefinedMesh {
                     topology: current,
                     geometry,
+                    feature_collars: collars,
                     interior_insertion_count: insertion_count,
                 },
             )));

@@ -1,16 +1,18 @@
 use runmat_meshing_core::SurfaceQualityTargets;
 
-use crate::{ExactFaceGeometry, ExactFaceTriangleGeometry, ParametricMetricTensor};
+use crate::{ExactFaceGeometry, ExactFacePslg, ExactFaceTriangleGeometry, ParametricMetricTensor};
 
 use super::{
-    ExactFaceRefinementCandidate, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
-    ExactFaceRefinementReason,
+    validate_exact_face_feature_collars, ExactFaceFeatureCollars, ExactFaceRefinementCandidate,
+    ExactFaceRefinementError, ExactFaceRefinementErrorKind, ExactFaceRefinementReason,
 };
 
 const MAXIMUM_NORMALIZED_METRIC_EDGE_LENGTH: f64 = 1.0;
 
 pub fn select_exact_face_refinement_candidate(
     geometry: &ExactFaceGeometry,
+    pslg: &ExactFacePslg,
+    collars: &ExactFaceFeatureCollars,
     quality: SurfaceQualityTargets,
 ) -> Result<Option<ExactFaceRefinementCandidate>, ExactFaceRefinementError> {
     quality.validate().map_err(|error| {
@@ -20,11 +22,12 @@ pub fn select_exact_face_refinement_candidate(
             error.to_string(),
         )
     })?;
+    validate_exact_face_feature_collars(collars, pslg, geometry, quality)?;
     if geometry.triangles.is_empty() || geometry.vertices.is_empty() {
         return Err(invalid(geometry, "face geometry inventory is empty"));
     }
     for (triangle_index, triangle) in geometry.triangles.iter().enumerate() {
-        let reason = violation(triangle, quality);
+        let reason = violation(triangle, collars, quality);
         let Some(reason) = reason else {
             continue;
         };
@@ -51,10 +54,17 @@ pub fn select_exact_face_refinement_candidate(
 
 fn violation(
     triangle: &ExactFaceTriangleGeometry,
+    collars: &ExactFaceFeatureCollars,
     quality: SurfaceQualityTargets,
 ) -> Option<ExactFaceRefinementReason> {
     let minimum_angle = quality.minimum_metric_angle_degrees.to_radians();
     let maximum_normal = quality.maximum_normal_deviation_degrees.to_radians();
+    let protected_feature_triangle = collars.collars.iter().any(|collar| {
+        triangle
+            .triangle
+            .vertex_indices
+            .contains(&collar.pslg_vertex_index)
+    });
     if triangle.chordal_deviation_m > quality.maximum_chordal_deviation_m {
         Some(ExactFaceRefinementReason::ChordalDeviation)
     } else if triangle.normal_deviation_rad > maximum_normal {
@@ -65,9 +75,11 @@ fn violation(
         .any(|length| length > MAXIMUM_NORMALIZED_METRIC_EDGE_LENGTH)
     {
         Some(ExactFaceRefinementReason::MetricEdgeLength)
-    } else if triangle.minimum_metric_angle_rad < minimum_angle {
+    } else if triangle.minimum_metric_angle_rad < minimum_angle && !protected_feature_triangle {
         Some(ExactFaceRefinementReason::MetricAngle)
-    } else if triangle.physical_aspect_ratio > quality.maximum_physical_aspect_ratio {
+    } else if triangle.physical_aspect_ratio > quality.maximum_physical_aspect_ratio
+        && !protected_feature_triangle
+    {
         Some(ExactFaceRefinementReason::PhysicalAspectRatio)
     } else {
         None

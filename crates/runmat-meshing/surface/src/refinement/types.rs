@@ -42,6 +42,19 @@ pub struct ExactProtectedSegmentSplit {
     pub curve_split: SharedCurveSegmentSplit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExactFaceFeatureCollar {
+    pub pslg_vertex_index: u32,
+    pub incident_segment_indices: [u32; 2],
+    pub feature_angle_rad: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceFeatureCollars {
+    pub source_face_id: PersistentEntityId,
+    pub collars: Vec<ExactFaceFeatureCollar>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceRefinedTopology {
     pub pslg: ExactFacePslg,
@@ -99,6 +112,7 @@ impl Default for ExactFaceRefinementOptions {
 pub struct ExactFaceRefinedMesh {
     pub topology: ExactFaceRefinedTopology,
     pub geometry: ExactFaceGeometry,
+    pub feature_collars: ExactFaceFeatureCollars,
     pub interior_insertion_count: u32,
 }
 

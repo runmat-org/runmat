@@ -53,12 +53,14 @@ pub use recovery::{
     validate_surface_recovery, SurfaceRecoveryError, SurfaceRecoveryOptions, SurfaceRecoveryReport,
 };
 pub use refinement::{
-    classify_exact_face_refinement_candidate, insert_exact_face_refinement_candidate,
-    refine_exact_face_until_blocked, select_exact_face_refinement_candidate,
-    ExactFaceCandidateDisposition, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
-    ExactFaceRefinementCandidate, ExactFaceRefinementContext, ExactFaceRefinementError,
-    ExactFaceRefinementErrorKind, ExactFaceRefinementOptions, ExactFaceRefinementOutcome,
-    ExactFaceRefinementPolicy, ExactFaceRefinementReason, ExactProtectedSegmentSplit,
+    classify_exact_face_refinement_candidate, derive_exact_face_feature_collars,
+    insert_exact_face_refinement_candidate, refine_exact_face_until_blocked,
+    select_exact_face_refinement_candidate, validate_exact_face_feature_collars,
+    ExactFaceCandidateDisposition, ExactFaceFeatureCollar, ExactFaceFeatureCollars,
+    ExactFaceRefinedMesh, ExactFaceRefinedTopology, ExactFaceRefinementCandidate,
+    ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
+    ExactFaceRefinementOptions, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
+    ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,
