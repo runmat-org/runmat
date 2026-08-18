@@ -6,10 +6,12 @@ use super::{
 };
 
 mod flip;
+mod support;
 mod validation;
 mod work;
 
 use flip::try_recover_facet_with_edge_flip;
+use support::facet_support;
 pub use validation::validate_delaunay_facet_recovery;
 use validation::{face_exists, validate_inputs};
 use work::FacetRecoveryWork;
@@ -19,6 +21,7 @@ pub struct DelaunayFacetRecoveryOptions {
     pub segment_recovery: DelaunaySegmentRecoveryOptions,
     pub maximum_search_steps: u64,
     pub maximum_flip_attempts: u64,
+    pub maximum_support_steps: u64,
 }
 
 impl Default for DelaunayFacetRecoveryOptions {
@@ -27,6 +30,7 @@ impl Default for DelaunayFacetRecoveryOptions {
             segment_recovery: DelaunaySegmentRecoveryOptions::default(),
             maximum_search_steps: 1_000_000_000,
             maximum_flip_attempts: 100_000_000,
+            maximum_support_steps: 100_000_000,
         }
     }
 }
@@ -87,36 +91,42 @@ pub fn recover_delaunay_facets(
     validate_inputs(&segment_recovery, constraints, options, cancellation)?;
     let mut work = FacetRecoveryWork::new(options, cancellation);
     let mut facets = Vec::with_capacity(constraints.facets.len());
-    for (constraint_index, facet) in constraints.facets.iter().enumerate() {
-        let identities = facet
-            .vertex_indices
-            .map(|index| constraints.nodes[index as usize].identity);
-        if !face_exists(
-            &segment_recovery.topology,
-            identities,
+    let mut protected_triangles = Vec::new();
+    for constraint_index in 0..constraints.facets.len() {
+        let support = facet_support(
+            &segment_recovery,
+            constraints,
             constraint_index as u32,
             &mut work,
-        )? {
-            let Some(updated) = try_recover_facet_with_edge_flip(
-                &segment_recovery,
-                identities,
+        )?;
+        for triangle in &support {
+            if !face_exists(
+                &segment_recovery.topology,
+                triangle.node_identities,
                 constraint_index as u32,
                 &mut work,
-            )?
-            else {
-                return Err(error(
-                    DelaunayFacetRecoveryErrorKind::UnsatisfiableConstraint,
-                    Some(constraint_index as u32),
-                    "facet is absent and no legal protected edge-star flip recovers it",
-                ));
-            };
-            segment_recovery.topology = updated;
+            )? {
+                let Some(updated) = try_recover_facet_with_edge_flip(
+                    &segment_recovery,
+                    triangle.node_identities,
+                    &protected_triangles,
+                    constraint_index as u32,
+                    &mut work,
+                )?
+                else {
+                    return Err(error(
+                        DelaunayFacetRecoveryErrorKind::UnsatisfiableConstraint,
+                        Some(constraint_index as u32),
+                        "facet support is absent and no legal protected edge-star flip recovers it",
+                    ));
+                };
+                segment_recovery.topology = updated;
+            }
+            protected_triangles.push(*triangle);
         }
         facets.push(DelaunayRecoveredFacet {
             constraint_index: constraint_index as u32,
-            triangles: vec![DelaunayRecoveredFacetTriangle {
-                node_identities: identities,
-            }],
+            triangles: support,
         });
     }
     let recovery = DelaunayFacetRecovery {
@@ -137,7 +147,10 @@ fn node_index(topology: &DelaunayVolumeTopology, identity: StableDigest) -> Opti
 fn validate_options(
     options: DelaunayFacetRecoveryOptions,
 ) -> Result<(), DelaunayFacetRecoveryError> {
-    if options.maximum_search_steps == 0 || options.maximum_flip_attempts == 0 {
+    if options.maximum_search_steps == 0
+        || options.maximum_flip_attempts == 0
+        || options.maximum_support_steps == 0
+    {
         return Err(error(
             DelaunayFacetRecoveryErrorKind::InvalidOptions,
             None,

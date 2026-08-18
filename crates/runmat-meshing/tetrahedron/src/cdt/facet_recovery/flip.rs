@@ -17,6 +17,7 @@ use crate::cdt::{
 pub(super) fn try_recover_facet_with_edge_flip(
     recovery: &DelaunaySegmentRecovery,
     facet: [StableDigest; 3],
+    protected_facets: &[super::DelaunayRecoveredFacetTriangle],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<DelaunayVolumeTopology>, DelaunayFacetRecoveryError> {
@@ -29,7 +30,24 @@ pub(super) fn try_recover_facet_with_edge_flip(
     let [first, second, third] = facet_indices;
     let mut facet_indices = [first? as u32, second? as u32, third? as u32];
     facet_indices.sort_unstable();
-    let protected_edges = protected_segment_edges(recovery, constraint_index)?;
+    let mut protected_edges = protected_segment_edges(recovery, constraint_index)?;
+    for triangle in protected_facets {
+        let indices = triangle.node_identities.map(|identity| {
+            node_index(topology, identity).ok_or_else(|| {
+                invalid_topology(constraint_index, "protected facet node is missing")
+            })
+        });
+        let [first, second, third] = indices;
+        let indices = [first? as u32, second? as u32, third? as u32];
+        for mut edge in [
+            [indices[0], indices[1]],
+            [indices[1], indices[2]],
+            [indices[2], indices[0]],
+        ] {
+            edge.sort_unstable();
+            protected_edges.insert(edge);
+        }
+    }
     let edge_stars = edge_stars(topology, constraint_index, work)?;
 
     for (edge, tetrahedra) in edge_stars {

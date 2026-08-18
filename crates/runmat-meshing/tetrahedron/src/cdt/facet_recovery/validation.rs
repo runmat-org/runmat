@@ -1,5 +1,6 @@
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
+use super::support::facet_support;
 use super::{
     error, node_index, segment_error, validate_options, DelaunayConstraints, DelaunayFacetRecovery,
     DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
@@ -29,32 +30,32 @@ pub fn validate_delaunay_facet_recovery(
     }
     let mut work = FacetRecoveryWork::new(options, cancellation);
     for (expected_index, recovered) in recovery.facets.iter().enumerate() {
-        let expected = constraints.facets[expected_index]
-            .vertex_indices
-            .map(|index| constraints.nodes[index as usize].identity);
-        if recovered.constraint_index != expected_index as u32
-            || recovered.triangles.as_slice()
-                != [super::DelaunayRecoveredFacetTriangle {
-                    node_identities: expected,
-                }]
-        {
+        let expected = facet_support(
+            &recovery.segment_recovery,
+            constraints,
+            expected_index as u32,
+            &mut work,
+        )?;
+        if recovered.constraint_index != expected_index as u32 || recovered.triangles != expected {
             return Err(error(
                 DelaunayFacetRecoveryErrorKind::InvalidConstraints,
                 Some(expected_index as u32),
                 "recovered facet does not retain its oriented constraint support",
             ));
         }
-        if !face_exists(
-            &recovery.segment_recovery.topology,
-            expected,
-            expected_index as u32,
-            &mut work,
-        )? {
-            return Err(error(
-                DelaunayFacetRecoveryErrorKind::InvalidTopology,
-                Some(expected_index as u32),
-                "recovered facet is absent from tetrahedron face incidence",
-            ));
+        for triangle in &recovered.triangles {
+            if !face_exists(
+                &recovery.segment_recovery.topology,
+                triangle.node_identities,
+                expected_index as u32,
+                &mut work,
+            )? {
+                return Err(error(
+                    DelaunayFacetRecoveryErrorKind::InvalidTopology,
+                    Some(expected_index as u32),
+                    "recovered facet support is absent from tetrahedron face incidence",
+                ));
+            }
         }
     }
     Ok(())

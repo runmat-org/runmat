@@ -6,7 +6,7 @@ use runmat_meshing_core::{
 use super::*;
 use crate::cdt::{
     build_delaunay_volume_topology, recover_delaunay_segments, DelaunayConstraintFacet,
-    DelaunayConstraintNode, DelaunayConstraintSegment, DelaunayTopologyOptions,
+    DelaunayConstraintNode, DelaunayConstraintSegment, DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
 fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
@@ -82,6 +82,49 @@ fn segment_recovery(
     .unwrap()
 }
 
+fn split_boundary_segment_recovery(
+    constraints: &DelaunayConstraints,
+) -> (DelaunaySegmentRecovery, StableDigest) {
+    let mut midpoint_identity = [50; 32];
+    midpoint_identity[31] = 51;
+    let midpoint_identity = StableDigest::from_bytes(midpoint_identity);
+    let mut nodes = vec![DelaunayVolumeNode {
+        identity: constraints.nodes[0].identity,
+        coordinates_m: constraints.nodes[0].coordinates_m,
+    }];
+    nodes.push(DelaunayVolumeNode {
+        identity: midpoint_identity,
+        coordinates_m: [2.5, 2.5, 0.0],
+    });
+    nodes.extend(
+        constraints
+            .nodes
+            .iter()
+            .skip(1)
+            .map(|node| DelaunayVolumeNode {
+                identity: node.identity,
+                coordinates_m: node.coordinates_m,
+            }),
+    );
+    let topology = build_delaunay_volume_topology(
+        nodes,
+        vec![[0, 1, 3, 4], [1, 2, 3, 4], [0, 3, 1, 5], [1, 3, 2, 5]],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    (
+        recover_delaunay_segments(
+            topology,
+            constraints,
+            DelaunaySegmentRecoveryOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap(),
+        midpoint_identity,
+    )
+}
+
 #[test]
 fn facet_recovery_uses_a_checked_edge_star_flip() {
     let constraints = constraints(false);
@@ -134,6 +177,41 @@ fn facet_recovery_is_a_noop_for_existing_support_and_rejects_tampering() {
 }
 
 #[test]
+fn facet_recovery_triangulates_subdivided_segment_chains_canonically() {
+    let constraints = constraints(false);
+    let (segments, midpoint_identity) = split_boundary_segment_recovery(&constraints);
+
+    let recovered = recover_delaunay_facets(
+        segments,
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let repeated = recover_delaunay_facets(
+        split_boundary_segment_recovery(&constraints).0,
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    assert_eq!(recovered, repeated);
+    assert_eq!(recovered.facets[0].triangles.len(), 2);
+    assert!(recovered.facets[0]
+        .triangles
+        .iter()
+        .all(|triangle| triangle.node_identities.contains(&midpoint_identity)));
+    validate_delaunay_facet_recovery(
+        &recovered,
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
 fn facet_recovery_never_removes_a_recovered_segment() {
     let constraints = constraints(true);
     assert_eq!(
@@ -169,6 +247,21 @@ fn facet_recovery_enforces_search_limits_and_cancellation() {
         recover_delaunay_facets(segments.clone(), &constraints, bounded, &NeverCancelled)
             .unwrap_err()
             .kind,
+        DelaunayFacetRecoveryErrorKind::ResourceLimit
+    );
+    let support_bounded = DelaunayFacetRecoveryOptions {
+        maximum_support_steps: 1,
+        ..DelaunayFacetRecoveryOptions::default()
+    };
+    assert_eq!(
+        recover_delaunay_facets(
+            split_boundary_segment_recovery(&constraints).0,
+            &constraints,
+            support_bounded,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
         DelaunayFacetRecoveryErrorKind::ResourceLimit
     );
     let cancelled = DelaunayFacetRecoveryOptions {

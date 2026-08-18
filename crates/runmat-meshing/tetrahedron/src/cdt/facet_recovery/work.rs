@@ -10,6 +10,7 @@ pub(super) struct FacetRecoveryWork<'a> {
     pub(super) cancellation: &'a dyn MeshingCancellationSignal,
     search_steps: u64,
     flip_attempts: u64,
+    support_steps: u64,
 }
 
 impl<'a> FacetRecoveryWork<'a> {
@@ -22,6 +23,7 @@ impl<'a> FacetRecoveryWork<'a> {
             cancellation,
             search_steps: 0,
             flip_attempts: 0,
+            support_steps: 0,
         }
     }
 
@@ -51,6 +53,20 @@ impl<'a> FacetRecoveryWork<'a> {
             ));
         }
         self.check_cancelled(constraint_index, self.flip_attempts)
+    }
+
+    pub(super) fn support_step(
+        &mut self,
+        constraint_index: u32,
+    ) -> Result<(), DelaunayFacetRecoveryError> {
+        self.support_steps += 1;
+        if self.support_steps > self.options.maximum_support_steps {
+            return Err(resource(
+                constraint_index,
+                "facet support-construction limit exceeded",
+            ));
+        }
+        self.check_cancelled(constraint_index, self.support_steps)
     }
 
     fn check_cancelled(
