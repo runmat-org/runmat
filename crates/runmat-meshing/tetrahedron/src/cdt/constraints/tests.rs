@@ -8,9 +8,11 @@ use runmat_meshing_surface::{
 
 use super::*;
 use crate::cdt::{
-    build_delaunay_volume_point_set, carve_delaunay_volume, recover_delaunay_facets,
-    recover_delaunay_segments, DelaunayCarvingOptions, DelaunayFacetRecoveryOptions,
-    DelaunayPointSetOptions, DelaunaySegmentRecoveryOptions,
+    build_delaunay_volume_point_set, build_delaunay_volume_provenance, carve_delaunay_volume,
+    recover_delaunay_facets, recover_delaunay_segments,
+    validate_delaunay_volume_provenance_sources, DelaunayCarvingOptions,
+    DelaunayFacetRecoveryOptions, DelaunayPointSetOptions, DelaunaySegmentRecoveryOptions,
+    DelaunayVolumeProvenanceOptions,
 };
 
 const FACETS: [[usize; 3]; 4] = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
@@ -78,6 +80,74 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
     assert_eq!(
         carved.topology.incidence.regions[0].region_id,
         entity(PersistentEntityKind::Region, "region")
+    );
+    let provenance = build_delaunay_volume_provenance(
+        &facets,
+        &constraints,
+        &carved,
+        DelaunayCarvingOptions::default(),
+        DelaunayVolumeProvenanceOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(provenance.nodes.len(), 4);
+    assert_eq!(provenance.segments.len(), 6);
+    assert_eq!(provenance.facets.len(), 4);
+    validate_delaunay_volume_provenance_sources(
+        &facets,
+        &constraints,
+        &carved,
+        &provenance,
+        DelaunayCarvingOptions::default(),
+        DelaunayVolumeProvenanceOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    let mut stale_source = provenance;
+    stale_source.facets[0].entity_ids = vec![entity(PersistentEntityKind::Face, "face:stale")];
+    assert_eq!(
+        validate_delaunay_volume_provenance_sources(
+            &facets,
+            &constraints,
+            &carved,
+            &stale_source,
+            DelaunayCarvingOptions::default(),
+            DelaunayVolumeProvenanceOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        crate::cdt::DelaunayVolumeProvenanceErrorKind::InvalidProvenance
+    );
+    assert_eq!(
+        build_delaunay_volume_provenance(
+            &facets,
+            &constraints,
+            &carved,
+            DelaunayCarvingOptions::default(),
+            DelaunayVolumeProvenanceOptions {
+                maximum_facet_bindings: 3,
+                ..DelaunayVolumeProvenanceOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        crate::cdt::DelaunayVolumeProvenanceErrorKind::ResourceLimit
+    );
+    assert_eq!(
+        build_delaunay_volume_provenance(
+            &facets,
+            &constraints,
+            &carved,
+            DelaunayCarvingOptions::default(),
+            DelaunayVolumeProvenanceOptions::default(),
+            &Cancelled,
+        )
+        .unwrap_err()
+        .kind,
+        crate::cdt::DelaunayVolumeProvenanceErrorKind::Cancelled
     );
 }
 

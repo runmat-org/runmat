@@ -3,9 +3,13 @@ use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::{volume_quality::context::DelaunayVolumeMetricContext, DelaunayVolumeTopology};
 
+mod construction;
 mod derivation;
 mod validation;
 
+pub use construction::{
+    build_delaunay_volume_provenance, validate_delaunay_volume_provenance_sources,
+};
 pub(super) use derivation::derive_delaunay_volume_metric_contexts;
 pub use validation::validate_delaunay_volume_provenance;
 
@@ -83,7 +87,7 @@ impl std::fmt::Display for DelaunayVolumeProvenanceError {
 
 impl std::error::Error for DelaunayVolumeProvenanceError {}
 
-fn validate_options(
+pub(super) fn validate_options(
     options: DelaunayVolumeProvenanceOptions,
 ) -> Result<(), DelaunayVolumeProvenanceError> {
     if options.maximum_node_bindings == 0
@@ -99,7 +103,7 @@ fn validate_options(
     Ok(())
 }
 
-fn checkpoint(
+pub(super) fn checkpoint(
     step: u64,
     options: DelaunayVolumeProvenanceOptions,
     cancellation: &dyn MeshingCancellationSignal,
@@ -113,7 +117,7 @@ fn checkpoint(
     Ok(())
 }
 
-fn error(
+pub(super) fn error(
     kind: DelaunayVolumeProvenanceErrorKind,
     reason: impl Into<String>,
 ) -> DelaunayVolumeProvenanceError {

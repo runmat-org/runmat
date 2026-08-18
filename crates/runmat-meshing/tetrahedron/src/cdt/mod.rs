@@ -48,7 +48,8 @@ pub use topology::{
     DelaunayTopologyOptions, DelaunayVolumeNode, DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
 };
 pub use volume_provenance::{
-    validate_delaunay_volume_provenance, DelaunayFacetProvenance, DelaunayNodeProvenance,
+    build_delaunay_volume_provenance, validate_delaunay_volume_provenance,
+    validate_delaunay_volume_provenance_sources, DelaunayFacetProvenance, DelaunayNodeProvenance,
     DelaunaySegmentProvenance, DelaunayVolumeProvenance, DelaunayVolumeProvenanceError,
     DelaunayVolumeProvenanceErrorKind, DelaunayVolumeProvenanceOptions,
 };
