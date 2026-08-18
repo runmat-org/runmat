@@ -271,6 +271,42 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         .triangles
         .iter()
         .all(|triangle| triangle.triangle_id != StableDigest::ZERO));
+    let mut reversed_topology = topology.clone();
+    reversed_topology.faces[0].orientation = TopologicalOrientation::Reversed;
+    let reversed_evaluator =
+        PortableExactEvaluator::new(&registry, &reversed_topology, model).unwrap();
+    let reversed_joined = crate::join_exact_face_charts(
+        &annulus_charts,
+        std::slice::from_ref(refined.as_ref()),
+        std::slice::from_ref(&acceptance),
+        crate::ExactFaceJoinContext::new(
+            crate::ExactFaceRefinementContext::new(
+                &reversed_topology,
+                &metric_request,
+                &reversed_evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            quality,
+            acceptance_options,
+        ),
+        crate::ExactFaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert!(joined
+        .triangles
+        .iter()
+        .zip(&reversed_joined.triangles)
+        .all(|(forward, reversed)| {
+            forward.triangle_id != reversed.triangle_id
+                && forward
+                    .unit_normal
+                    .into_iter()
+                    .zip(reversed.unit_normal)
+                    .map(|(left, right)| left * right)
+                    .sum::<f64>()
+                    < -0.999_999
+        }));
     assert_eq!(
         crate::join_exact_face_charts(
             &annulus_charts,

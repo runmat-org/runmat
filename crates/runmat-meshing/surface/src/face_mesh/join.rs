@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::PersistentEntityId;
+use runmat_geometry_core::TopologicalOrientation;
 use runmat_meshing_core::{StableDigest, SurfaceQualityTargets};
 
 use crate::{
@@ -34,6 +35,19 @@ pub fn join_exact_face_charts(
             "chart, refined-mesh, and acceptance inventories differ",
         ));
     }
+    let face_orientation = context
+        .refinement
+        .topology
+        .faces
+        .iter()
+        .find(|face| face.id == charts.source_face_id)
+        .ok_or_else(|| {
+            invalid(
+                &charts.source_face_id,
+                "joined face is absent from exact topology",
+            )
+        })?
+        .orientation;
 
     let mut nodes = BTreeMap::<StableDigest, NodeBuilder>::new();
     let mut triangles = Vec::new();
@@ -142,15 +156,29 @@ pub fn join_exact_face_charts(
                 )
                 .with_chart(chart.chart_id));
             }
+            let (node_ids, metric_edge_lengths, unit_normal) = match face_orientation {
+                TopologicalOrientation::Forward => {
+                    (node_ids, geometry.metric_edge_lengths, geometry.unit_normal)
+                }
+                TopologicalOrientation::Reversed => (
+                    [node_ids[0], node_ids[2], node_ids[1]],
+                    [
+                        geometry.metric_edge_lengths[2],
+                        geometry.metric_edge_lengths[1],
+                        geometry.metric_edge_lengths[0],
+                    ],
+                    geometry.unit_normal.map(|value| -value),
+                ),
+            };
             let (node_ids, rotation) = canonical_triangle(node_ids);
             triangles.push(ExactFaceMeshTriangle {
                 triangle_id: exact_face_triangle_id(chart.chart_id, node_ids),
                 chart_id: chart.chart_id,
                 source_face_id: charts.source_face_id.clone(),
                 node_ids,
-                unit_normal: geometry.unit_normal,
+                unit_normal,
                 physical_area_m2: geometry.physical_area_m2,
-                metric_edge_lengths: rotate(geometry.metric_edge_lengths, rotation),
+                metric_edge_lengths: rotate(metric_edge_lengths, rotation),
                 minimum_metric_angle_rad: geometry.minimum_metric_angle_rad,
                 physical_aspect_ratio: geometry.physical_aspect_ratio,
                 chordal_deviation_m: geometry.chordal_deviation_m,
