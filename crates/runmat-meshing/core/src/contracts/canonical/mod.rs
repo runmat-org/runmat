@@ -14,6 +14,7 @@ mod identity;
 mod manifest;
 mod metric;
 mod request;
+mod transfer;
 mod workload;
 
 pub use artifact::validate_solver_mesh_topology;
@@ -67,6 +68,10 @@ pub use request::{
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
+pub use transfer::{
+    SolverEntityTransfer, SolverMeshTransferMap, SolverTransferMethod, SolverTransferSource,
+    SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
+};
 pub use workload::{
     MeshingCapabilityRequirement, MeshingProgress, MeshingWorkloadRequest, MeshingWorkloadResult,
     MESHING_PROGRESS_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
