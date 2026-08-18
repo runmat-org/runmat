@@ -7,10 +7,32 @@ use runmat_meshing_surface::{
     ExactFaceAcceptanceErrorKind, ExactFaceChartErrorKind, ExactFaceDelaunayErrorKind,
     ExactFaceGeometryErrorKind, ExactFaceJoinErrorKind, ExactFaceMetricErrorKind,
     ExactFacePartitionError, ExactFacePartitionErrorKind, ExactFaceRefinementErrorKind,
-    ExactSurfaceBoundaryErrorKind, ExactSurfaceMeshErrorKind,
+    ExactSurfaceBoundaryErrorKind, ExactSurfaceConvergenceError, ExactSurfaceConvergenceErrorKind,
+    ExactSurfaceMeshErrorKind,
 };
 
-pub(super) fn map_surface_error(error: ExactFacePartitionError) -> Box<MeshingFailure> {
+pub(crate) fn map_convergence_error(error: ExactSurfaceConvergenceError) -> Box<MeshingFailure> {
+    let category = match error.kind {
+        ExactSurfaceConvergenceErrorKind::InvalidResultSet => {
+            MeshingFailureCategory::InvalidGeometry
+        }
+        ExactSurfaceConvergenceErrorKind::Curve(kind) => {
+            crate::curve_kernel::shared_curve_failure_category(kind)
+        }
+        ExactSurfaceConvergenceErrorKind::Surface(ExactSurfaceMeshErrorKind::ResourceLimit) => {
+            MeshingFailureCategory::ElementBudgetExceeded
+        }
+        ExactSurfaceConvergenceErrorKind::Surface(_) => MeshingFailureCategory::InvalidGeometry,
+    };
+    surface_failure(
+        category,
+        None,
+        "regenerate the complete surface pass from one current curve and face result set",
+        &error.to_string(),
+    )
+}
+
+pub(crate) fn map_surface_error(error: ExactFacePartitionError) -> Box<MeshingFailure> {
     let category = match error.kind {
         ExactFacePartitionErrorKind::Chart(ExactFaceChartErrorKind::GeometryEvaluation(kind)) => {
             geometry_category(kind)
@@ -122,7 +144,7 @@ fn geometry_category(kind: GeometryEvaluationErrorKind) -> MeshingFailureCategor
     }
 }
 
-pub(super) fn invalid_input(detail: &str) -> Box<MeshingFailure> {
+pub(crate) fn invalid_input(detail: &str) -> Box<MeshingFailure> {
     surface_failure(
         MeshingFailureCategory::InvalidGeometry,
         None,
@@ -131,7 +153,7 @@ pub(super) fn invalid_input(detail: &str) -> Box<MeshingFailure> {
     )
 }
 
-pub(super) fn surface_failure(
+pub(crate) fn surface_failure(
     category: MeshingFailureCategory,
     entity_id: Option<PersistentEntityId>,
     remediation: &str,

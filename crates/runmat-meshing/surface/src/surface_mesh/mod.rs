@@ -32,8 +32,8 @@ pub(crate) use partition_result::{
 #[cfg(test)]
 pub(crate) use pass_result::decode_exact_surface_pass_result_with_byte_limit;
 pub use pass_result::{
-    decode_exact_surface_pass_result, encode_exact_surface_pass_result,
-    validate_exact_surface_pass_result,
+    decode_exact_surface_pass_result, encode_decided_exact_surface_pass_result,
+    encode_exact_surface_pass_result, validate_exact_surface_pass_result,
 };
 #[cfg(test)]
 pub(crate) use surface_codec::decode_exact_surface_mesh_with_byte_limit;

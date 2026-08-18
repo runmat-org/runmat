@@ -45,6 +45,17 @@ pub fn encode_exact_surface_pass_result(
         .map_err(map_codec_error)
 }
 
+/// Encodes a pass result returned directly by [`decide_exact_surface_pass`].
+///
+/// Artifact consumers still reconstruct the decision during decoding. Callers with any other
+/// source must use [`encode_exact_surface_pass_result`] so prerequisite validation is not skipped.
+pub fn encode_decided_exact_surface_pass_result(
+    result: &ExactSurfacePassResult,
+) -> Result<Vec<u8>, ExactSurfaceMeshError> {
+    runmat_canonical_codec::encode_contract(CODEC_PREFIX, CONTRACT_DOMAIN, result, CONTRACT_LIMITS)
+        .map_err(map_codec_error)
+}
+
 pub fn decode_exact_surface_pass_result(
     bytes: &[u8],
     topology: &ExactBRepTopology,

@@ -18,6 +18,7 @@ mod objects;
 mod publication;
 mod response;
 mod serial;
+mod surface_join_kernel;
 mod surface_kernel;
 mod task;
 
@@ -75,6 +76,7 @@ pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
+pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{
     build_task_submission, MeshingExecutionContext, MeshingTaskEffectPolicy,

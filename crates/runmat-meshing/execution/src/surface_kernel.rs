@@ -7,10 +7,10 @@ use runmat_meshing_curve::{decode_shared_curve_mesh, SHARED_CURVE_MESH_SCHEMA_VE
 use runmat_meshing_surface::{
     encode_exact_face_partition_result, mesh_exact_face_partition, ExactFaceJoinOptions,
     ExactFacePartitionContext, ExactFacePartitionOptions, ExactFacePartitionOutcome,
-    EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
+    ExactSurfaceJoinOptions, EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
 };
 
-mod error;
+pub(crate) mod error;
 
 use error::{invalid_input, map_surface_error, surface_failure};
 
@@ -186,7 +186,7 @@ fn inputs(
     ))
 }
 
-fn curve_record(
+pub(crate) fn curve_record(
     geometry: &PreparedExactGeometryObjects,
     publication: &PreparedMeshingResultPublication,
 ) -> Result<Vec<u8>, Box<MeshingFailure>> {
@@ -253,16 +253,33 @@ fn surface_options(host: &crate::MeshingHostWorkload) -> ExactFacePartitionOptio
             refinement_margin_ratio: 0.5,
             maximum_samples: resources.maximum_search_work,
         },
-        face_join: ExactFaceJoinOptions {
-            coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
-            maximum_nodes: resources.maximum_nodes,
-            maximum_triangles: resources.maximum_elements,
-            maximum_boundary_segments: resources.maximum_elements,
-        },
+        face_join: surface_join_options(host),
     }
 }
 
-fn checked_count(
+pub(crate) fn surface_join_options(host: &crate::MeshingHostWorkload) -> ExactFaceJoinOptions {
+    let resources = &host.resolved_request.resources;
+    ExactFaceJoinOptions {
+        coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
+        maximum_nodes: resources.maximum_nodes,
+        maximum_triangles: resources.maximum_elements,
+        maximum_boundary_segments: resources.maximum_elements,
+    }
+}
+
+pub(crate) fn exact_surface_join_options(
+    host: &crate::MeshingHostWorkload,
+) -> ExactSurfaceJoinOptions {
+    let resources = &host.resolved_request.resources;
+    ExactSurfaceJoinOptions {
+        coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
+        maximum_nodes: resources.maximum_nodes,
+        maximum_triangles: resources.maximum_elements,
+        maximum_boundary_segments: resources.maximum_elements,
+    }
+}
+
+pub(crate) fn checked_count(
     mut lengths: impl Iterator<Item = usize>,
     detail: &str,
 ) -> Result<u64, Box<MeshingFailure>> {

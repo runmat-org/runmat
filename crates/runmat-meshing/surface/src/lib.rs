@@ -100,8 +100,8 @@ pub use refinement::{
 pub use surface_mesh::{
     build_exact_face_mesh_batch, build_exact_face_partition_result, decide_exact_surface_pass,
     decode_exact_face_mesh_batch, decode_exact_face_partition_result, decode_exact_surface_mesh,
-    decode_exact_surface_pass_result, encode_exact_face_mesh_batch,
-    encode_exact_face_partition_result, encode_exact_surface_mesh,
+    decode_exact_surface_pass_result, encode_decided_exact_surface_pass_result,
+    encode_exact_face_mesh_batch, encode_exact_face_partition_result, encode_exact_surface_mesh,
     encode_exact_surface_pass_result, face_partition_descriptors, join_exact_face_mesh_batches,
     resolve_exact_surface_pass, validate_exact_face_mesh_batch,
     validate_exact_face_partition_result, validate_exact_surface_mesh,

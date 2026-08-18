@@ -1,8 +1,9 @@
 use runmat_meshing_core::MeshingPartitionKind;
 
 use crate::{
-    ExactCurveJoinKernel, ExactCurveStageKernel, ExactSurfacePartitionKernel,
-    MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,
+    ExactCurveJoinKernel, ExactCurveStageKernel, ExactSurfaceJoinKernel,
+    ExactSurfacePartitionKernel, MeshingStageInvocation, MeshingStageKernel,
+    ValidatedMeshingStageOutput,
 };
 
 /// Dispatches admitted meshing stage semantics without acquiring any scheduling responsibility.
@@ -27,6 +28,10 @@ impl MeshingStageKernel for MeshingKernelDispatcher {
             (runmat_meshing_core::MeshingStageKind::CurveMesh, _) => {
                 ExactCurveStageKernel::default().execute(invocation)
             }
+            (
+                runmat_meshing_core::MeshingStageKind::SurfaceMesh,
+                MeshingPartitionKind::DeterministicJoin,
+            ) => ExactSurfaceJoinKernel.execute(invocation),
             (
                 runmat_meshing_core::MeshingStageKind::SurfaceMesh,
                 MeshingPartitionKind::CanonicalEntityBatch,

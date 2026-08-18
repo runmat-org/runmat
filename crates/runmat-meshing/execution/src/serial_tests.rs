@@ -35,9 +35,9 @@ use runmat_meshing_core::{
 
 use super::{
     execute_serial_stage, CompletedMeshingStage, ExactCurveJoinKernel, ExactCurveStageKernel,
-    ExactSurfacePartitionKernel, MeshingProgressSink, MeshingSerialExecutionError,
-    MeshingStageCheckpoint, MeshingStageControl, MeshingStageInvocation, MeshingStageKernel,
-    ValidatedMeshingStageOutput,
+    ExactSurfaceJoinKernel, ExactSurfacePartitionKernel, MeshingProgressSink,
+    MeshingSerialExecutionError, MeshingStageCheckpoint, MeshingStageControl,
+    MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,
 };
 
 #[derive(Default)]
@@ -310,6 +310,177 @@ fn serial_curve_join_reloads_partitions_and_publishes_the_global_curve_mesh() {
 
 #[test]
 fn serial_surface_partition_consumes_the_global_curve_artifact() {
+    let (fixture, host, exact_root, joined, completed, partition) = execute_surface_pipeline();
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        host.geometry_document.clone().unwrap(),
+        &exact_root,
+        host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let streams = completed
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(
+        streams[0].media_type,
+        MeshingChunkMediaType::SurfacePartitions
+    );
+    assert_eq!(streams[0].records.len(), 1);
+    let curve_streams = joined
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    let curves = runmat_meshing_curve::decode_shared_curve_mesh(
+        &curve_streams[0].records[0],
+        &exact.geometry_objects().topology,
+    )
+    .unwrap();
+    let result = runmat_meshing_surface::decode_exact_face_partition_result(
+        &streams[0].records[0],
+        &exact.geometry_objects().topology,
+        &curves,
+    )
+    .unwrap();
+    assert_eq!(result.partition, partition);
+}
+
+#[test]
+fn serial_surface_join_publishes_the_reconstructed_pass_decision() {
+    let (mut fixture, partition_host, exact_root, joined, partition, _) =
+        execute_surface_pipeline();
+    let curve_root = root(joined.publication().root_output());
+    let partition_root = root(partition.publication().root_output());
+    let exact_input = partition_host.workload.inputs[0].clone();
+    let curve_input = partition_host.workload.inputs[1].clone();
+    let partition_input = MeshingInputRef {
+        kind: MeshingInputKind::StageArtifact,
+        digest: StableDigest::from_bytes(*partition_root.logical_digest.bytes()),
+    };
+    let request = partition_host.resolved_request.clone();
+    let mut dependencies = vec![
+        (exact_input, exact_root.clone()),
+        (curve_input, curve_root),
+        (partition_input, partition_root),
+    ];
+    dependencies.sort_by(|left, right| left.0.cmp(&right.0));
+    let inputs = dependencies
+        .iter()
+        .map(|(input, _)| input.clone())
+        .collect::<Vec<_>>();
+    let roots = dependencies
+        .into_iter()
+        .map(|(_, root)| root)
+        .collect::<Vec<_>>();
+    let identity = MeshingStageIdentity {
+        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
+        stage: MeshingStageKind::SurfaceMesh,
+        geometry: partition_host.stage_identity.geometry.clone(),
+        resolved_request_digest: request.canonical_digest().unwrap(),
+        tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
+        metric_policy_digest: request.metric.canonical_digest().unwrap(),
+        algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
+        deterministic_seed: request.deterministic_seed,
+        prerequisites: inputs.clone(),
+        capability_cohort: partition_host.stage_identity.capability_cohort.clone(),
+    };
+    let workload = MeshingWorkloadRequest {
+        schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
+        stage: MeshingStageKind::SurfaceMesh,
+        stage_identity_digest: identity.canonical_digest().unwrap(),
+        partition: MeshingPartitionDescriptor {
+            kind: MeshingPartitionKind::DeterministicJoin,
+            partition_index: 0,
+            partition_count: 1,
+            entity_range: None,
+        },
+        inputs,
+        required_capabilities: partition_host.workload.required_capabilities.clone(),
+    };
+    let host = MeshingHostWorkload::new(
+        workload,
+        identity,
+        request,
+        partition_host.artifact_access.clone(),
+        partition_host.geometry_document.clone(),
+    )
+    .unwrap();
+    let program = host.program_request(revision(), &roots).unwrap();
+    let completed = execute_serial_stage(
+        &program,
+        &mut fixture.store,
+        &ExactSurfaceJoinKernel,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1_000_000),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        host.geometry_document.clone().unwrap(),
+        &exact_root,
+        host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let curve_streams = joined
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    let curves = runmat_meshing_curve::decode_shared_curve_mesh(
+        &curve_streams[0].records[0],
+        &exact.geometry_objects().topology,
+    )
+    .unwrap();
+    let partition_streams = partition
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    let partition_result = runmat_meshing_surface::decode_exact_face_partition_result(
+        &partition_streams[0].records[0],
+        &exact.geometry_objects().topology,
+        &curves,
+    )
+    .unwrap();
+    let streams = completed
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    let pass = runmat_meshing_surface::decode_exact_surface_pass_result(
+        &streams[0].records[0],
+        &exact.geometry_objects().topology,
+        &curves,
+        &[partition_result],
+        runmat_meshing_surface::ExactSurfaceJoinOptions {
+            coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
+            maximum_nodes: host.resolved_request.resources.maximum_nodes,
+            maximum_triangles: host.resolved_request.resources.maximum_elements,
+            maximum_boundary_segments: host.resolved_request.resources.maximum_elements,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        pass.outcome,
+        runmat_meshing_surface::ExactSurfacePassOutcome::Converged { .. }
+    ));
+}
+
+fn execute_surface_pipeline() -> (
+    Fixture,
+    MeshingHostWorkload,
+    ValueRef,
+    CompletedMeshingStage,
+    CompletedMeshingStage,
+    MeshingPartitionDescriptor,
+) {
     let (mut fixture, curve_host, exact_root, joined) = execute_curve_pipeline();
     let curve_root = root(joined.publication().root_output());
     let exact = import_exact_geometry_input(
@@ -359,7 +530,7 @@ fn serial_surface_partition_consumes_the_global_curve_artifact() {
     )
     .unwrap();
     let program = host
-        .program_request(revision(), &[exact_root, curve_root])
+        .program_request(revision(), &[exact_root.clone(), curve_root])
         .unwrap();
     let completed = execute_serial_stage(
         &program,
@@ -371,34 +542,7 @@ fn serial_surface_partition_consumes_the_global_curve_artifact() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let streams = completed
-        .publication()
-        .stage_objects()
-        .decoded_streams()
-        .unwrap();
-    assert_eq!(streams.len(), 1);
-    assert_eq!(
-        streams[0].media_type,
-        MeshingChunkMediaType::SurfacePartitions
-    );
-    assert_eq!(streams[0].records.len(), 1);
-    let curve_streams = joined
-        .publication()
-        .stage_objects()
-        .decoded_streams()
-        .unwrap();
-    let curves = runmat_meshing_curve::decode_shared_curve_mesh(
-        &curve_streams[0].records[0],
-        &exact.geometry_objects().topology,
-    )
-    .unwrap();
-    let result = runmat_meshing_surface::decode_exact_face_partition_result(
-        &streams[0].records[0],
-        &exact.geometry_objects().topology,
-        &curves,
-    )
-    .unwrap();
-    assert_eq!(result.partition, partition);
+    (fixture, host, exact_root, joined, completed, partition)
 }
 
 fn execute_curve_pipeline() -> (
@@ -974,7 +1118,30 @@ impl Fixture {
             authorization_scope: "serial-exact-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-exact-geometry-context"),
         };
-        let (document, topology, evaluators) = runmat_geometry_fixtures::exact_circle();
+        let (mut document, mut topology, mut evaluators) = runmat_geometry_fixtures::exact_circle();
+        if stage == MeshingStageKind::CurveMesh {
+            topology.bodies[0].is_sheet_body = true;
+            topology.bodies[0].sheet_shell_ids = vec![topology.shells[0].id.clone()];
+            topology.bodies[0].lump_ids.clear();
+            topology.lumps.clear();
+            topology.solids.clear();
+            topology.regions.clear();
+            let runmat_geometry_core::GeometryModel::ExactBRep { model } = &mut document.model
+            else {
+                unreachable!()
+            };
+            model.lump_count = 0;
+            model.solid_count = 0;
+            model.region_count = 0;
+            let runmat_geometry_core::ExactMassPropertiesImplementation::KernelValidated {
+                properties,
+                ..
+            } = &mut evaluators.mass_properties[0].implementation
+            else {
+                unreachable!()
+            };
+            properties.volume_m3 = 0.0;
+        }
         let partition = if stage == MeshingStageKind::CurveMesh {
             runmat_meshing_curve::curve_partition_descriptors(&topology, 32)
                 .unwrap()

@@ -230,7 +230,17 @@ fn validation_digest(encoded: &[u8]) -> StableDigest {
 }
 
 pub(super) fn map_curve_error(error: SharedCurveError) -> Box<MeshingFailure> {
-    let category = match error.kind {
+    let category = shared_curve_failure_category(error.kind);
+    curve_failure(
+        category,
+        error.edge_id,
+        "repair the named geometry or relax the resolved curve constraints",
+        &format!("{}: {}", error.field, error.reason),
+    )
+}
+
+pub(crate) fn shared_curve_failure_category(kind: SharedCurveErrorKind) -> MeshingFailureCategory {
+    match kind {
         SharedCurveErrorKind::GeometryEvaluation(
             runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled,
         ) => MeshingFailureCategory::Cancelled,
@@ -255,13 +265,7 @@ pub(super) fn map_curve_error(error: SharedCurveError) -> Box<MeshingFailure> {
         | SharedCurveErrorKind::InvalidRequest
         | SharedCurveErrorKind::GeometricMismatch => MeshingFailureCategory::InvalidGeometry,
         SharedCurveErrorKind::GeometryEvaluation(_) => MeshingFailureCategory::NumericalFailure,
-    };
-    curve_failure(
-        category,
-        error.edge_id,
-        "repair the named geometry or relax the resolved curve constraints",
-        &format!("{}: {}", error.field, error.reason),
-    )
+    }
 }
 
 pub(super) fn curve_failure(
