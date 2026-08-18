@@ -31,19 +31,25 @@ pub(crate) fn validate_constructor_gpu_output(
             None => "",
         }
     };
-    let existing_precision = runmat_accelerate_api::handle_precision(&output);
-    let effective_precision = expected_precision
-        .is_some()
-        .then(|| existing_precision.unwrap_or_else(|| provider.precision()));
+    let expected_element = expected_integer
+        .map(runmat_accelerate_api::NumericElementType::from)
+        .or_else(|| {
+            expected_precision.map(|precision| match precision {
+                runmat_accelerate_api::ProviderPrecision::F32 => {
+                    runmat_accelerate_api::NumericElementType::F32
+                }
+                runmat_accelerate_api::ProviderPrecision::F64 => {
+                    runmat_accelerate_api::NumericElementType::F64
+                }
+            })
+        });
     let existing_class = runmat_accelerate_api::handle_class_name(&output);
     let valid = output.device_id == provider.device_id()
         && output.shape == expected_shape
         && runmat_accelerate_api::provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(&output) == expected_storage
-        && effective_precision == expected_precision
-        && runmat_accelerate_api::handle_integer_type(&output) == expected_integer
-        && (expected_integer.is_none() || existing_precision.is_none())
+        && output.descriptor.storage == Some(expected_storage)
+        && output.descriptor.element_type == expected_element
         && (!runmat_accelerate_api::handle_is_logical(&output) || expected_logical)
         && existing_class
             .as_deref()
@@ -53,10 +59,6 @@ pub(crate) fn validate_constructor_gpu_output(
         return Err(format!(
             "{label}: provider returned an invalid constructor result"
         ));
-    }
-    match expected_precision {
-        Some(precision) => runmat_accelerate_api::set_handle_precision(&output, precision),
-        None => runmat_accelerate_api::clear_handle_precision(&output),
     }
     runmat_accelerate_api::set_handle_logical(&output, expected_logical);
     runmat_accelerate_api::set_handle_class_name(&output, expected_class);
@@ -339,7 +341,7 @@ mod constructor_dimension_tests {
     }
 
     #[test]
-    fn constructor_validation_rejects_integer_output_with_floating_precision_metadata() {
+    fn constructor_validation_ignores_stale_floating_side_metadata_on_integer_output() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let values = [1_i32, 2_i32];
             let handle = provider
@@ -352,7 +354,7 @@ mod constructor_dimension_tests {
                 &handle,
                 runmat_accelerate_api::ProviderPrecision::F64,
             );
-            let error = validate_constructor_gpu_output(
+            let output = validate_constructor_gpu_output(
                 "constructor",
                 provider,
                 handle,
@@ -362,8 +364,11 @@ mod constructor_dimension_tests {
                 Some(runmat_accelerate_api::IntegerElementType::I32),
                 false,
             )
-            .expect_err("integer output cannot carry floating precision metadata");
-            assert!(error.contains("invalid constructor result"));
+            .expect("durable integer descriptor must override stale side metadata");
+            assert_eq!(
+                output.descriptor.element_type,
+                Some(runmat_accelerate_api::NumericElementType::I32)
+            );
         });
     }
 }

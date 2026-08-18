@@ -250,28 +250,14 @@ fn upload_complex_without_precision_override(
         .with_builtin(builtin)
         .build());
     }
-    let mut interleaved = Vec::with_capacity(tensor.len().saturating_mul(2));
-    for &(real, imag) in tensor.materialize_f64().iter() {
-        interleaved.push(real);
-        interleaved.push(imag);
-    }
-    let handle = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &interleaved,
-            shape: &tensor.shape,
-        })
-        .map_err(|error| {
-            build_runtime_error(format!(
-                "{builtin}: failed to restore result to input provider: {error}"
-            ))
-            .with_builtin(builtin)
-            .build()
-        })?;
+    let handle = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|error| {
+        build_runtime_error(format!(
+            "{builtin}: failed to restore result to input provider: {error}"
+        ))
+        .with_builtin(builtin)
+        .build()
+    })?;
     runmat_accelerate_api::set_handle_logical(&handle, false);
-    runmat_accelerate_api::set_handle_storage(
-        &handle,
-        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-    );
     Ok(handle)
 }
 

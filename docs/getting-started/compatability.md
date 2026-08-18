@@ -15,7 +15,7 @@ RunMat provides three distinct compatibility modes to balance parity with MATLAB
 
 RunMat-only syntax and builtin forms are documented in [MATLAB Language Extensions](/docs/runtime/getting-started/matlab-language-extensions). That page also explains why internal optimizations such as automatic GPU residency and transparent gathering are not language extensions.
 
-The current release pin and the rules used to interpret it are maintained in the [Semantic Compatibility Engineering Policy](/docs/runtime/development/backwards-compat). Individual builtin pages describe their observable contract without repeating the release label.
+The current compatibility version pin and the rules used to interpret it are maintained in the [Semantic Compatibility Engineering Policy](/docs/runtime/development/backwards-compat). Individual builtin pages describe their observable contract without repeating the release label.
 
 | Mode   | Behavior                                                                                                                                |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------- |

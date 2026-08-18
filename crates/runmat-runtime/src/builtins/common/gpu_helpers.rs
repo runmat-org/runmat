@@ -211,6 +211,28 @@ pub(crate) fn expected_handle_numeric_element_type(
     }
 }
 
+pub(crate) fn numeric_descriptor_matches(
+    handle: &GpuTensorHandle,
+    element_type: NumericElementType,
+    storage: GpuTensorStorage,
+) -> bool {
+    handle.descriptor.element_type == Some(element_type)
+        && handle.descriptor.storage == Some(storage)
+}
+
+pub(crate) fn numeric_descriptor_matches_source(
+    source: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+) -> bool {
+    expected_handle_numeric_element_type(source).is_ok_and(|element_type| {
+        numeric_descriptor_matches(
+            output,
+            element_type,
+            runmat_accelerate_api::handle_storage(source),
+        )
+    })
+}
+
 fn deinterleave<T: Copy>(values: &[T]) -> (Vec<T>, Vec<T>) {
     let mut real = Vec::with_capacity(values.len() / 2);
     let mut imag = Vec::with_capacity(values.len() / 2);

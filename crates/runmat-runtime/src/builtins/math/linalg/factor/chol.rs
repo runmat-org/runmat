@@ -379,7 +379,7 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
                 .map_err(with_chol_context)?;
             ensure_exact_integer_boundary(&Value::Tensor(tensor.clone()))?;
             let eval = evaluate_host_value(Value::Tensor(tensor), triangle).await?;
-            reupload_factor(eval, provider, &handle)
+            reupload_factor(eval, provider)
         }
         other => {
             ensure_exact_integer_boundary(&other)?;
@@ -442,7 +442,6 @@ fn numeric_scalar_as_i128(value: NumericScalar) -> Option<i128> {
 fn reupload_factor(
     mut eval: CholEval,
     provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-    source: &GpuTensorHandle,
 ) -> BuiltinResult<CholEval> {
     let Some(provider) = provider else {
         return Ok(eval);
@@ -467,15 +466,6 @@ fn reupload_factor(
         }
     }
     .map_err(|err| chol_internal_error(format!("chol: GPU fallback upload failed: {err}")))?;
-    if runmat_accelerate_api::handle_integer_type(source).is_some() {
-        runmat_accelerate_api::clear_handle_integer_type(&uploaded);
-        runmat_accelerate_api::set_handle_precision(
-            &uploaded,
-            runmat_accelerate_api::ProviderPrecision::F64,
-        );
-    } else if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
-        runmat_accelerate_api::set_handle_precision(&uploaded, precision);
-    }
     eval.factor = gpu_helpers::resident_gpu_value(uploaded);
     Ok(eval)
 }

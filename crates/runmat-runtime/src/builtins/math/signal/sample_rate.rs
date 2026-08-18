@@ -982,10 +982,29 @@ async fn resample_gpu(
 
     if input_len == 0 || output_len == 0 {
         return match provider.zeros_with_storage(&output_shape, storage) {
-            Ok(output) => Ok(Some(ResampleEval {
-                y: wrap_resampled_gpu(handle, output),
-                filter: options.filter.clone(),
-            })),
+            Ok(output)
+                if valid_class_preserving_gpu_output(
+                    provider,
+                    handle,
+                    &output,
+                    &output_shape,
+                    false,
+                ) =>
+            {
+                Ok(Some(ResampleEval {
+                    y: wrap_resampled_gpu(output),
+                    filter: options.filter.clone(),
+                }))
+            }
+            Ok(output) => {
+                let _ = provider.free(&output);
+                runmat_accelerate_api::clear_handle_metadata(&output);
+                Err(sample_error_with_detail(
+                    RESAMPLE_NAME,
+                    &SAMPLE_ERROR_GATHER_FAILED,
+                    "provider returned an incompatible empty resample result",
+                ))
+            }
             Err(_) => Ok(None),
         };
     }
@@ -1106,10 +1125,29 @@ async fn resample_gpu(
     let _ = provider.free(&padded);
 
     match output {
-        Ok(output) => Ok(Some(ResampleEval {
-            y: wrap_resampled_gpu(handle, output),
-            filter: options.filter.clone(),
-        })),
+        Ok(output)
+            if valid_class_preserving_gpu_output(
+                provider,
+                handle,
+                &output,
+                &output_shape,
+                false,
+            ) =>
+        {
+            Ok(Some(ResampleEval {
+                y: wrap_resampled_gpu(output),
+                filter: options.filter.clone(),
+            }))
+        }
+        Ok(output) => {
+            let _ = provider.free(&output);
+            runmat_accelerate_api::clear_handle_metadata(&output);
+            Err(sample_error_with_detail(
+                RESAMPLE_NAME,
+                &SAMPLE_ERROR_GATHER_FAILED,
+                "provider returned an incompatible resample result",
+            ))
+        }
         Err(_) => Ok(None),
     }
 }
@@ -1580,6 +1618,15 @@ fn upsample_gpu(
         Ok(output) => output,
         Err(_) => return Ok(None),
     };
+    if !valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, false) {
+        let _ = provider.free(&output);
+        runmat_accelerate_api::clear_handle_metadata(&output);
+        return Err(sample_error_with_detail(
+            builtin,
+            &SAMPLE_ERROR_GATHER_FAILED,
+            "provider returned an incompatible upsample allocation",
+        ));
+    }
     match provider.scatter_linear(&output, &indices, handle) {
         Ok(()) => Ok(Some(wrap_sample_rate_gpu(handle, output))),
         Err(_) => {
@@ -1627,20 +1674,8 @@ fn downsample_gpu(
         Ok(output) => {
             let output_identity = (output.device_id, output.buffer_id);
             let input_identity = (handle.device_id, handle.buffer_id);
-            let valid = output_identity != input_identity
-                && output.shape == output_shape
-                && output.device_id == handle.device_id
-                && resolved_actual_downsample_owner(&output)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
-                && runmat_accelerate_api::handle_storage(&output)
-                    == runmat_accelerate_api::handle_storage(handle)
-                && runmat_accelerate_api::handle_integer_type(&output)
-                    == runmat_accelerate_api::handle_integer_type(handle)
-                && runmat_accelerate_api::handle_is_logical(&output)
-                    == runmat_accelerate_api::handle_is_logical(handle)
-                && (runmat_accelerate_api::handle_integer_type(handle).is_some()
-                    || runmat_accelerate_api::handle_precision(&output)
-                        == runmat_accelerate_api::handle_precision(handle));
+            let valid =
+                valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, true);
             if valid {
                 Ok(Some(wrap_sample_rate_gpu(handle, output)))
             } else {
@@ -1671,33 +1706,33 @@ fn wrap_sample_rate_gpu(
     source: &runmat_accelerate_api::GpuTensorHandle,
     output: runmat_accelerate_api::GpuTensorHandle,
 ) -> Value {
-    if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
-        runmat_accelerate_api::set_handle_precision(&output, precision);
-    }
     if runmat_accelerate_api::handle_is_logical(source) {
         gpu_helpers::logical_gpu_value(output)
     } else {
-        runmat_accelerate_api::set_handle_storage(
-            &output,
-            runmat_accelerate_api::handle_storage(source),
-        );
         gpu_helpers::resident_gpu_value(output)
     }
 }
 
-fn wrap_resampled_gpu(
-    source: &runmat_accelerate_api::GpuTensorHandle,
-    output: runmat_accelerate_api::GpuTensorHandle,
-) -> Value {
-    if let Some(precision) = runmat_accelerate_api::handle_precision(source) {
-        runmat_accelerate_api::set_handle_precision(&output, precision);
-    }
-    runmat_accelerate_api::set_handle_storage(
-        &output,
-        runmat_accelerate_api::handle_storage(source),
-    );
+fn wrap_resampled_gpu(output: runmat_accelerate_api::GpuTensorHandle) -> Value {
     runmat_accelerate_api::clear_handle_logical(&output);
     gpu_helpers::resident_gpu_value(output)
+}
+
+fn valid_class_preserving_gpu_output(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    output: &runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    require_distinct: bool,
+) -> bool {
+    (!require_distinct || !gpu_helpers::same_gpu_handle(source, output))
+        && output.device_id == provider.device_id()
+        && output.shape == expected_shape
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && gpu_helpers::numeric_descriptor_matches_source(source, output)
+        && (!runmat_accelerate_api::handle_is_logical(output)
+            || runmat_accelerate_api::handle_is_logical(source))
 }
 
 fn upsample_linear_indices(
@@ -2107,7 +2142,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
-        HostTensorView, IntegerElementType, ProviderPrecision,
+        HostTensorView, ProviderPrecision,
     };
     use runmat_builtins::IntegerStorage;
     use std::collections::HashMap;
@@ -2156,7 +2191,7 @@ mod tests {
                     storage,
                 },
             );
-            let handle = GpuTensorHandle {
+            GpuTensorHandle {
                 shape,
                 device_id,
                 buffer_id,
@@ -2167,10 +2202,7 @@ mod tests {
                     },
                     storage,
                 ),
-            };
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
-            runmat_accelerate_api::set_handle_storage(&handle, storage);
-            handle
+            }
         }
     }
 
@@ -2256,7 +2288,7 @@ mod tests {
             } else {
                 GpuTensorStorage::Real
             };
-            let output = self.allocate(
+            let mut output = self.allocate(
                 vec![99.0; shape.iter().product()],
                 shape,
                 device_id,
@@ -2264,7 +2296,8 @@ mod tests {
                 storage,
             );
             if mode == 4 {
-                runmat_accelerate_api::set_handle_integer_type(&output, IntegerElementType::U8);
+                output.descriptor.element_type =
+                    Some(runmat_accelerate_api::NumericElementType::U8);
             }
             if mode == 5 {
                 runmat_accelerate_api::set_handle_logical(&output, true);

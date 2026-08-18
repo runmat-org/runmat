@@ -874,27 +874,8 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id)
         .or_else(runmat_accelerate_api::provider)
     {
-        let dtype = tensor.numeric_dtype();
-        let data = tensor.materialize_f64();
-        let view = HostTensorView {
-            data: &data,
-            shape: &tensor.shape,
-        };
-        match provider.upload(&view) {
+        match gpu_helpers::upload_tensor(provider, &tensor) {
             Ok(handle) => {
-                let precision = match dtype {
-                    NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                    NumericDType::F64
-                    | NumericDType::I8
-                    | NumericDType::I16
-                    | NumericDType::I32
-                    | NumericDType::I64
-                    | NumericDType::U8
-                    | NumericDType::U16
-                    | NumericDType::U32
-                    | NumericDType::U64 => runmat_accelerate_api::ProviderPrecision::F64,
-                };
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
                 return Ok(Value::GpuTensor(handle));
             }
             Err(err) => {

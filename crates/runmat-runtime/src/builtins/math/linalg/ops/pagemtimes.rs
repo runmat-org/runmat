@@ -1,6 +1,6 @@
 //! MATLAB-compatible `pagemtimes` builtin.
 
-use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -568,19 +568,12 @@ impl PageOutput {
             Self::Real(tensor) => {
                 if wants_gpu {
                     if let Some(provider) = provider {
-                        let dtype = tensor.numeric_dtype();
-                        let values = tensor::tensor_values_f64_cow(&tensor);
-                        let view = HostTensorView {
-                            data: values.as_ref(),
-                            shape: &tensor.shape,
-                        };
-                        let handle = provider.upload(&view).map_err(|err| {
-                            pagemtimes_internal(format!("pagemtimes: gpu upload failed ({err})"))
-                        })?;
-                        runmat_accelerate_api::set_handle_precision(
-                            &handle,
-                            precision_for_dtype(dtype),
-                        );
+                        let handle =
+                            gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
+                                pagemtimes_internal(format!(
+                                    "pagemtimes: gpu upload failed ({err})"
+                                ))
+                            })?;
                         return Ok(gpu_helpers::resident_gpu_value(handle));
                     }
                 }
@@ -815,21 +808,6 @@ fn broadcast_page_dims(lhs: &[usize], rhs: &[usize]) -> BuiltinResult<Vec<usize>
         };
     }
     Ok(out)
-}
-
-fn precision_for_dtype(dtype: NumericDType) -> ProviderPrecision {
-    match dtype {
-        NumericDType::F32 => ProviderPrecision::F32,
-        NumericDType::F64
-        | NumericDType::I8
-        | NumericDType::I16
-        | NumericDType::I32
-        | NumericDType::I64
-        | NumericDType::U8
-        | NumericDType::U16
-        | NumericDType::U32
-        | NumericDType::U64 => ProviderPrecision::F64,
-    }
 }
 
 fn source_page_index(page_dims: &[usize], coords: &[usize]) -> BuiltinResult<usize> {
@@ -1262,18 +1240,12 @@ mod tests {
     }
 
     #[test]
-    fn gpu_single_input_preserves_single_precision_metadata() {
+    fn gpu_single_input_preserves_native_single_storage() {
         test_support::with_test_provider(|provider| {
             let lhs =
                 Tensor::new_with_dtype(vec![1.25, 2.5, 3.75, 4.5], vec![2, 2], NumericDType::F32)
                     .unwrap();
-            let upload_values = lhs.materialize_f64();
-            let view = HostTensorView {
-                data: &upload_values,
-                shape: &lhs.shape,
-            };
-            let handle = provider.upload(&view).unwrap();
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
+            let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("single upload");
             let rhs = Value::Tensor(
                 Tensor::new_with_dtype(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2], NumericDType::F32)
                     .unwrap(),

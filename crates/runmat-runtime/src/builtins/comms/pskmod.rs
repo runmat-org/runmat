@@ -4,7 +4,6 @@ use std::f64::consts::TAU;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, IntegerElementType, ProviderBitModulationRequest, ProviderModulationRequest,
-    ProviderPrecision,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -13,7 +12,8 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, ResolveContext, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -274,8 +274,10 @@ async fn pskmod_gpu(
                 constellation: &constellation,
             };
             if let Ok(out) = provider.modulate_constellation(request).await {
-                set_output_precision(&out, options.output_dtype);
-                return Ok(gpu_helpers::complex_gpu_value(out));
+                if valid_gpu_output(provider, &handle, &out, options.output_dtype, &handle.shape) {
+                    return Ok(gpu_helpers::complex_gpu_value(out));
+                }
+                gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
             }
         }
         InputType::Bit => {
@@ -288,8 +290,18 @@ async fn pskmod_gpu(
                     constellation: &constellation,
                 };
                 if let Ok(out) = provider.modulate_bits_constellation(request).await {
-                    set_output_precision(&out, options.output_dtype);
-                    return Ok(gpu_helpers::complex_gpu_value(out));
+                    let mut output_shape = handle.shape.clone();
+                    output_shape[0] = input_rows / bits_per_symbol(order)?;
+                    if valid_gpu_output(
+                        provider,
+                        &handle,
+                        &out,
+                        options.output_dtype,
+                        &output_shape,
+                    ) {
+                        return Ok(gpu_helpers::complex_gpu_value(out));
+                    }
+                    gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
                 }
             }
         }
@@ -302,16 +314,31 @@ async fn pskmod_gpu(
     };
     let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
         .map_err(|err| pskmod_error(format!("pskmod: {err}")))?;
-    set_output_precision(&out, options.output_dtype);
     Ok(gpu_helpers::complex_gpu_value(out))
 }
 
-fn set_output_precision(handle: &GpuTensorHandle, dtype: OutputDType) {
-    let precision = match dtype {
-        OutputDType::Double => ProviderPrecision::F64,
-        OutputDType::Single => ProviderPrecision::F32,
+fn valid_gpu_output(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    handle: &GpuTensorHandle,
+    dtype: OutputDType,
+    shape: &[usize],
+) -> bool {
+    let element_type = match dtype {
+        OutputDType::Double => runmat_accelerate_api::NumericElementType::F64,
+        OutputDType::Single => runmat_accelerate_api::NumericElementType::F32,
     };
-    runmat_accelerate_api::set_handle_precision(handle, precision);
+    !gpu_helpers::same_gpu_handle(input, handle)
+        && handle.device_id == provider.device_id()
+        && handle.shape == shape
+        && runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && gpu_helpers::numeric_descriptor_matches(
+            handle,
+            element_type,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        )
+        && !runmat_accelerate_api::handle_is_logical(handle)
 }
 
 fn validate_gpu_symbol_class(class: IntegerElementType) -> BuiltinResult<()> {
@@ -660,8 +687,12 @@ fn modulate_symbols(
         out.push((constellation[point], constellation[point + 1]));
     }
 
-    let tensor =
-        ComplexTensor::new(out, symbols.shape).map_err(|e| pskmod_error(format!("pskmod: {e}")))?;
+    let dtype = match options.output_dtype {
+        OutputDType::Double => NumericDType::F64,
+        OutputDType::Single => NumericDType::F32,
+    };
+    let tensor = ComplexTensor::from_f64_values_with_dtype(out, symbols.shape, dtype)
+        .map_err(|e| pskmod_error(format!("pskmod: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -973,6 +1004,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::ProviderPrecision;
 
     fn pskmod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
         match block_on(super::pskmod_builtin(x, Value::Num(order as f64), rest)).expect("pskmod") {

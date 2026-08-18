@@ -491,17 +491,6 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         }
         return Err(error);
     }
-    if dtype.is_integer() {
-        runmat_accelerate_api::clear_handle_precision(&handle);
-    } else {
-        let precision = match dtype {
-            DataClass::Single => ProviderPrecision::F32,
-            DataClass::Double => ProviderPrecision::F64,
-            DataClass::Logical => prepared.provider.precision(),
-            _ => unreachable!("noninteger gpuArray class is floating or logical"),
-        };
-        runmat_accelerate_api::set_handle_precision(&handle, precision);
-    }
     runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
     runmat_accelerate_api::set_handle_class_name(&handle, dtype.class_name());
     handle.descriptor.provenance = Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
@@ -1231,32 +1220,37 @@ fn validate_prepared_handle(
     dtype: DataClass,
     logical: bool,
 ) -> BuiltinResult<()> {
+    let expected_element = match dtype {
+        DataClass::Double => runmat_accelerate_api::NumericElementType::F64,
+        DataClass::Single => runmat_accelerate_api::NumericElementType::F32,
+        DataClass::Logical => match provider.precision() {
+            ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+            ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+        },
+        DataClass::Int8 => runmat_accelerate_api::NumericElementType::I8,
+        DataClass::Int16 => runmat_accelerate_api::NumericElementType::I16,
+        DataClass::Int32 => runmat_accelerate_api::NumericElementType::I32,
+        DataClass::Int64 => runmat_accelerate_api::NumericElementType::I64,
+        DataClass::UInt8 => runmat_accelerate_api::NumericElementType::U8,
+        DataClass::UInt16 => runmat_accelerate_api::NumericElementType::U16,
+        DataClass::UInt32 => runmat_accelerate_api::NumericElementType::U32,
+        DataClass::UInt64 => runmat_accelerate_api::NumericElementType::U64,
+    };
     let owner_matches = runmat_accelerate_api::provider_for_handle(handle)
         .is_some_and(|owner| std::ptr::eq(owner, provider));
     if !owner_matches
         || handle.device_id != provider.device_id()
         || handle.shape != expected_shape
-        || runmat_accelerate_api::handle_storage(handle) != expected_storage
+        || handle.descriptor.storage != Some(expected_storage)
+        || handle.descriptor.element_type != Some(expected_element)
     {
         return Err(gpu_array_error_with_message(
             "gpuArray: provider returned a handle with the wrong owner or shape",
             &GPUARRAY_ERROR_PROVIDER_IO,
         ));
     }
-    let expected_integer = integer_prototype(dtype).map(|storage| match storage {
-        IntegerStorage::I8(_) => runmat_accelerate_api::IntegerElementType::I8,
-        IntegerStorage::I16(_) => runmat_accelerate_api::IntegerElementType::I16,
-        IntegerStorage::I32(_) => runmat_accelerate_api::IntegerElementType::I32,
-        IntegerStorage::I64(_) => runmat_accelerate_api::IntegerElementType::I64,
-        IntegerStorage::U8(_) => runmat_accelerate_api::IntegerElementType::U8,
-        IntegerStorage::U16(_) => runmat_accelerate_api::IntegerElementType::U16,
-        IntegerStorage::U32(_) => runmat_accelerate_api::IntegerElementType::U32,
-        IntegerStorage::U64(_) => runmat_accelerate_api::IntegerElementType::U64,
-    });
     let existing_class = runmat_accelerate_api::handle_class_name(handle);
-    if runmat_accelerate_api::handle_integer_type(handle) != expected_integer
-        || (expected_integer.is_some() && runmat_accelerate_api::handle_precision(handle).is_some())
-        || (runmat_accelerate_api::handle_is_logical(handle) && !logical)
+    if (runmat_accelerate_api::handle_is_logical(handle) && !logical)
         || existing_class
             .as_deref()
             .is_some_and(|class_name| class_name != dtype.class_name())
@@ -1265,22 +1259,6 @@ fn validate_prepared_handle(
             "gpuArray: provider returned contradictory class metadata",
             &GPUARRAY_ERROR_PROVIDER_IO,
         ));
-    }
-    if expected_integer.is_none() {
-        let expected_precision = match dtype {
-            DataClass::Single => ProviderPrecision::F32,
-            DataClass::Double => ProviderPrecision::F64,
-            DataClass::Logical => provider.precision(),
-            _ => unreachable!("integer classes were handled above"),
-        };
-        let effective_precision =
-            runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
-        if effective_precision != expected_precision {
-            return Err(gpu_array_error_with_message(
-                "gpuArray: provider cannot preserve the requested floating precision",
-                &GPUARRAY_ERROR_PROVIDER_IO,
-            ));
-        }
     }
     Ok(())
 }

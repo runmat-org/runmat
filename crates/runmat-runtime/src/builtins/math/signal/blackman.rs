@@ -1,3 +1,4 @@
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -290,12 +291,24 @@ async fn blackman_builtin(
                 options.len,
                 matches!(options.sampling, WindowSampling::Periodic),
             ) {
-                let precision = match options.output_type {
-                    WindowOutputType::Double => runmat_accelerate_api::ProviderPrecision::F64,
-                    WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
+                let element_type = match options.output_type {
+                    WindowOutputType::Double => runmat_accelerate_api::NumericElementType::F64,
+                    WindowOutputType::Single => runmat_accelerate_api::NumericElementType::F32,
                 };
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
-                return Ok(runmat_builtins::Value::GpuTensor(handle));
+                let valid = handle.device_id == provider.device_id()
+                    && handle.shape == [options.len, 1]
+                    && runmat_accelerate_api::provider_for_handle(&handle)
+                        .is_some_and(|owner| std::ptr::eq(owner, provider))
+                    && gpu_helpers::numeric_descriptor_matches(
+                        &handle,
+                        element_type,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    );
+                if valid {
+                    return Ok(runmat_builtins::Value::GpuTensor(handle));
+                }
+                let _ = provider.free(&handle);
+                runmat_accelerate_api::clear_handle_metadata(&handle);
             }
         }
     }
