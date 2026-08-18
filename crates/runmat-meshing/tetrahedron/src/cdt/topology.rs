@@ -104,7 +104,7 @@ pub fn build_delaunay_volume_topology(
 
     let mut oriented = Vec::with_capacity(tetrahedra.len());
     let mut tetrahedron_keys = BTreeSet::new();
-    for (index, mut vertices) in tetrahedra.into_iter().enumerate() {
+    for (index, vertices) in tetrahedra.into_iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         if vertices
             .iter()
@@ -123,11 +123,12 @@ pub fn build_delaunay_volume_topology(
                 "tetrahedron vertices must be distinct and tetrahedra unique",
             ));
         }
-        match orient3d(vertices.map(|vertex| nodes[vertex as usize].coordinates_m))
+        let mut canonical_vertices = key;
+        match orient3d(canonical_vertices.map(|vertex| nodes[vertex as usize].coordinates_m))
             .map_err(predicate_error)?
         {
             PredicateSign::Positive => {}
-            PredicateSign::Negative => vertices.swap(0, 1),
+            PredicateSign::Negative => canonical_vertices.swap(0, 1),
             PredicateSign::Zero => {
                 return Err(error(
                     DelaunayTopologyErrorKind::DegenerateTetrahedron,
@@ -135,7 +136,7 @@ pub fn build_delaunay_volume_topology(
                 ));
             }
         }
-        oriented.push((key, vertices));
+        oriented.push((key, canonical_vertices));
     }
     oriented.sort_by_key(|(key, _)| *key);
 
