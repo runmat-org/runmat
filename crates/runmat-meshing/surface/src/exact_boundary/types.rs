@@ -37,11 +37,18 @@ pub struct ExactFaceBoundarySegment {
     pub node_uv: [[f64; 2]; 2],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ExactSurfaceBoundaryError {
     pub kind: ExactSurfaceBoundaryErrorKind,
     pub entity_id: Option<PersistentEntityId>,
+    pub conflict: Option<Box<ExactSurfaceBoundaryConflict>>,
     pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactSurfaceBoundaryConflict {
+    pub source_edge_ids: [PersistentEntityId; 2],
+    pub segment_uv: [[[f64; 2]; 2]; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +56,7 @@ pub enum ExactSurfaceBoundaryErrorKind {
     InvalidCurveInput,
     MissingTopology,
     InvalidContract,
+    InvalidPslg,
     ResourceLimit,
 }
 
@@ -61,8 +69,14 @@ impl ExactSurfaceBoundaryError {
         Self {
             kind,
             entity_id,
+            conflict: None,
             reason: reason.into(),
         }
+    }
+
+    pub(super) fn with_conflict(mut self, conflict: ExactSurfaceBoundaryConflict) -> Self {
+        self.conflict = Some(Box::new(conflict));
+        self
     }
 }
 

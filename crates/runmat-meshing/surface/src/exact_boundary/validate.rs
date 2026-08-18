@@ -6,8 +6,9 @@ use runmat_geometry_core::{
 use runmat_meshing_curve::{SharedCurve, SharedCurveMesh};
 
 use super::{
-    ExactFaceBoundaryLoop, ExactSurfaceBoundary, ExactSurfaceBoundaryError,
-    ExactSurfaceBoundaryErrorKind, EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
+    crossings::validate_face_segment_intersections, ExactFaceBoundaryLoop, ExactSurfaceBoundary,
+    ExactSurfaceBoundaryError, ExactSurfaceBoundaryErrorKind,
+    EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
 };
 
 const MAX_BOUNDARY_SEGMENTS: usize = 100_000_000;
@@ -67,6 +68,7 @@ pub fn validate_exact_surface_boundary(
             validate_loop(loop_boundary, &wires, &coedges, &curves)?;
             segment_count = segment_count.saturating_add(loop_boundary.segments.len());
         }
+        validate_face_segment_intersections(actual)?;
     }
     if segment_count > MAX_BOUNDARY_SEGMENTS {
         return Err(ExactSurfaceBoundaryError::new(

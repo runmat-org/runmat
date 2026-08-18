@@ -14,7 +14,7 @@ pub use contract::build_surface_mesh_contract;
 pub use exact_boundary::{
     build_exact_surface_boundary, validate_exact_surface_boundary, ExactFaceBoundary,
     ExactFaceBoundaryLoop, ExactFaceBoundarySegment, ExactSurfaceBoundary,
-    ExactSurfaceBoundaryError, ExactSurfaceBoundaryErrorKind,
+    ExactSurfaceBoundaryConflict, ExactSurfaceBoundaryError, ExactSurfaceBoundaryErrorKind,
     EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
 };
 pub use param_tri::{
