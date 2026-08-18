@@ -33,7 +33,8 @@ pub use chart::{
     validate_exact_face_chart_delaunay, validate_exact_face_chart_domains,
     validate_exact_face_charts, ExactFaceChart, ExactFaceChartConstrainedDomain,
     ExactFaceChartDelaunay, ExactFaceChartDelaunayContext, ExactFaceChartError,
-    ExactFaceChartErrorKind, ExactFaceChartOptions, ExactFaceCharts,
+    ExactFaceChartErrorKind, ExactFaceChartOptions, ExactFaceChartParameterization,
+    ExactFaceCharts,
 };
 pub use contract::build_surface_mesh_contract;
 pub use exact_boundary::{

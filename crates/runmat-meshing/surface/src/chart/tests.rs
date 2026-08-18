@@ -792,6 +792,93 @@ fn nonperiodic_chart_is_identity_and_tamper_evident() {
 }
 
 #[test]
+fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
+    let (document, mut topology, mut registry) = runmat_geometry_fixtures::exact_circle();
+    topology.faces[0].periodic_u = true;
+    topology.faces[0].has_singularity = true;
+    registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
+        definition: ExactSurfaceDefinition::Sphere {
+            center_m: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+            z_axis: [0.0, 0.0, 1.0],
+            radius_m: 1.0,
+            domains: [
+                range(0.0, std::f64::consts::TAU),
+                range(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
+            ],
+        },
+    };
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let uv = [
+        [0.0, 0.0],
+        [0.0, std::f64::consts::FRAC_PI_2],
+        [std::f64::consts::FRAC_PI_2, 0.0],
+    ];
+    let nodes = [node(1), node(2), node(3)];
+    let source = ExactFaceBoundary {
+        source_face_id: topology.faces[0].id.clone(),
+        outer_loop: ExactFaceBoundaryLoop {
+            source_wire_id: topology.wires[0].id.clone(),
+            orientation: TopologicalOrientation::Forward,
+            segments: (0..3)
+                .map(|index| ExactFaceBoundarySegment {
+                    source_coedge_id: topology.coedges[0].id.clone(),
+                    source_edge_id: topology.edges[0].id.clone(),
+                    seam_image: None,
+                    node_ids: [nodes[index], nodes[(index + 1) % 3]],
+                    edge_parameters: [index as f64, index as f64 + 1.0],
+                    node_uv: [uv[index], uv[(index + 1) % 3]],
+                })
+                .collect(),
+        },
+        inner_loops: Vec::new(),
+    };
+    let options = ExactFaceChartOptions::default();
+    let charts =
+        build_exact_face_charts(&source, &topology, &evaluator, &Control, options).unwrap();
+    let chart = &charts.charts[0];
+    let ExactFaceChartParameterization::ClosestPointProjection {
+        axes,
+        differential_step_m,
+        ..
+    } = &chart.parameterization
+    else {
+        panic!("declared singular face must not retain singular evaluator UV topology")
+    };
+    assert!(*differential_step_m > 0.0);
+    assert!(axes
+        .iter()
+        .all(|axis| (axis.iter().map(|value| value * value).sum::<f64>() - 1.0).abs() < 1.0e-12));
+    assert_eq!(chart.pslg.vertices.len(), 3);
+    let [first, second, third] = chart.pslg.vertices[..]
+        .try_into()
+        .expect("singular wedge has three chart vertices");
+    let twice_area = (second.uv[0] - first.uv[0]) * (third.uv[1] - first.uv[1])
+        - (second.uv[1] - first.uv[1]) * (third.uv[0] - first.uv[0]);
+    assert_ne!(twice_area, 0.0);
+    assert_ne!(chart.boundary, source);
+    validate_exact_face_charts(&charts, &source, &topology, &evaluator, &Control, options).unwrap();
+
+    let mut tampered = charts;
+    let ExactFaceChartParameterization::ClosestPointProjection { axes, .. } =
+        &mut tampered.charts[0].parameterization
+    else {
+        unreachable!()
+    };
+    axes[0][0] += 0.25;
+    assert_eq!(
+        validate_exact_face_charts(&tampered, &source, &topology, &evaluator, &Control, options,)
+            .unwrap_err()
+            .kind,
+        ExactFaceChartErrorKind::InvalidInput
+    );
+}
+
+#[test]
 fn chart_construction_preserves_typed_geometry_cancellation() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
     let GeometryModel::ExactBRep { model } = &document.model else {

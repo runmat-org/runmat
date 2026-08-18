@@ -479,6 +479,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         chart_id,
         source_face_id: pslg.source_face_id.clone(),
         periodicity: [None, None],
+        parameterization: crate::ExactFaceChartParameterization::EvaluatorParameters,
         boundary: face_boundary.clone(),
         pslg: pslg.clone(),
     };

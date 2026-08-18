@@ -5,8 +5,9 @@ use sha2::{Digest, Sha256};
 use crate::{build_exact_face_pslg, ExactFaceBoundary, ExactFaceBoundaryLoop};
 
 use super::{
-    annulus::build_periodic_annulus_pslg, ExactFaceChart, ExactFaceChartError,
-    ExactFaceChartErrorKind, ExactFaceChartOptions, ExactFaceCharts,
+    annulus::build_periodic_annulus_pslg, parameterization::build_projected_parameterization,
+    ExactFaceChart, ExactFaceChartError, ExactFaceChartErrorKind, ExactFaceChartOptions,
+    ExactFaceChartParameterization, ExactFaceCharts,
 };
 
 pub fn build_exact_face_charts(
@@ -90,21 +91,42 @@ fn build_without_validation(
         windings.push(lift_loop(loop_boundary, periodicity, options, source)?);
     }
     let chart_id = chart_id(&source.source_face_id, 0);
-    let pslg = if windings.iter().all(|winding| *winding == [0, 0]) {
-        build_exact_face_pslg(&boundary).map_err(|failure| {
+    let zero_winding = windings.iter().all(|winding| *winding == [0, 0]);
+    let (parameterization, pslg) = if face.has_singularity && zero_winding {
+        let parameterization = build_projected_parameterization(
+            &mut boundary,
+            &face.surface_evaluator_id,
+            evaluator,
+            control,
+            options,
+        )?;
+        let pslg = build_exact_face_pslg(&boundary).map_err(|failure| {
             ExactFaceChartError::new(
                 ExactFaceChartErrorKind::InvalidInput,
                 &source.source_face_id,
                 failure.to_string(),
             )
-        })?
+        })?;
+        (parameterization, pslg)
+    } else if zero_winding {
+        let pslg = build_exact_face_pslg(&boundary).map_err(|failure| {
+            ExactFaceChartError::new(
+                ExactFaceChartErrorKind::InvalidInput,
+                &source.source_face_id,
+                failure.to_string(),
+            )
+        })?;
+        (ExactFaceChartParameterization::EvaluatorParameters, pslg)
     } else {
-        build_periodic_annulus_pslg(&mut boundary, &windings, periodicity, chart_id, options)?
+        let pslg =
+            build_periodic_annulus_pslg(&mut boundary, &windings, periodicity, chart_id, options)?;
+        (ExactFaceChartParameterization::EvaluatorParameters, pslg)
     };
     let chart = ExactFaceChart {
         chart_id,
         source_face_id: source.source_face_id.clone(),
         periodicity,
+        parameterization,
         boundary,
         pslg,
     };
@@ -251,11 +273,13 @@ fn validate_options(
         || options.maximum_periodic_residual <= 0.0
         || options.maximum_period_shifts <= 0
         || options.maximum_charts_per_face == 0
+        || !options.projection_tolerance_m.is_finite()
+        || options.projection_tolerance_m <= 0.0
     {
         return Err(ExactFaceChartError::new(
             ExactFaceChartErrorKind::InvalidOptions,
             &source.source_face_id,
-            "chart residual, shift, and per-face chart bounds must be positive",
+            "chart residual, shift, projection tolerance, and per-face chart bounds must be positive",
         ));
     }
     Ok(())
