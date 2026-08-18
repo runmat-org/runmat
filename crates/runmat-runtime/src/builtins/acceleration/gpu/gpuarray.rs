@@ -9,10 +9,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use runmat_accelerate_api::{
-    GpuTensorHandle, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
-    HostTensorView, ProviderPrecision,
-};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -20,8 +17,8 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor,
-    Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+    NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -71,7 +68,7 @@ const GPUARRAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes upload as exact same-class gpuArray storage with the original shape.",
+        notes: "All eight integer classes upload as exact same-class real or paired-complex gpuArray storage with the original shape.",
     }];
 
 const GPUARRAY_INTEGER_DTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -92,7 +89,7 @@ pub const GPUARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The transfer preserves exact values, class, and shape. An existing gpuArray input is returned unchanged and remains valid.",
+        notes: "The transfer preserves exact values, class, shape, and supported complexity. An existing gpuArray input is returned unchanged and remains valid.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "G = gpuArray(X, integer_dtype)",
@@ -302,13 +299,6 @@ const GPUARRAY_ERROR_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     message: "gpuArray: unsupported input type",
 };
 
-const GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.TYPED_COMPLEX_INTEGER",
-    identifier: Some("RunMat:gpuArray:TypedComplexIntegerUnsupported"),
-    when: "A typed complex integer array is uploaded without a matching provider storage format.",
-    message: "gpuArray: typed complex integer arrays are not supported by the active acceleration provider",
-};
-
 const GPUARRAY_ERROR_TYPED_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GPUARRAY.TYPED_INTEGER",
     identifier: Some("RunMat:gpuArray:TypedIntegerUnsupported"),
@@ -344,7 +334,7 @@ const GPUARRAY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "gpuArray: internal error",
 };
 
-const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 16] = [
+const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 15] = [
     GPUARRAY_ERROR_NO_PROVIDER,
     GPUARRAY_ERROR_OPTION_ARGUMENT,
     GPUARRAY_ERROR_LIKE_MISSING,
@@ -355,7 +345,6 @@ const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 16] = [
     GPUARRAY_ERROR_SIZE_ARGUMENT,
     GPUARRAY_ERROR_LIKE_PROTOTYPE,
     GPUARRAY_ERROR_INPUT_TYPE,
-    GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER,
     GPUARRAY_ERROR_TYPED_INTEGER,
     GPUARRAY_ERROR_CONVERSION,
     GPUARRAY_ERROR_RESHAPE,
@@ -398,14 +387,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("upload"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("upload")],
+    provider_hooks: &[ProviderHook::Custom("upload_numeric")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Invokes the provider `upload` hook, including complex interleaved uploads, and reuploads gpuArray inputs when dtype conversion is requested. Handles class strings, size vectors, and `'like'` prototypes.",
+    notes: "Invokes the provider's native numeric upload contract for real or complex double, single, and integer storage, and reuploads gpuArray inputs when dtype conversion is requested. Handles class strings, size vectors, and `'like'` prototypes.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -788,6 +777,9 @@ fn resolve_dtype(value: &Value, options: &ParsedOptions) -> BuiltinResult<DataCl
     if let Value::Tensor(tensor) = value {
         return Ok(data_class_from_numeric_dtype(tensor.numeric_dtype()));
     }
+    if let Value::ComplexTensor(tensor) = value {
+        return Ok(data_class_from_numeric_dtype(tensor.numeric_dtype()));
+    }
     if value_defaults_to_logical(value) {
         return Ok(DataClass::Logical);
     }
@@ -861,7 +853,10 @@ fn infer_dtype_from_prototype(proto: &Value) -> BuiltinResult<DataClass> {
             "gpuArray: 'like' does not accept string arrays; convert to char arrays first",
             &GPUARRAY_ERROR_LIKE_PROTOTYPE,
         )),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(DataClass::Double),
+        Value::Complex(_, _) => Ok(DataClass::Double),
+        Value::ComplexTensor(tensor) => {
+            Ok(data_class_from_numeric_dtype(tensor.numeric_dtype()))
+        }
         other => Err(gpu_array_error_with_message(
             format!(
                 "gpuArray: unsupported 'like' prototype type {other:?}; expected numeric or logical values"
@@ -906,10 +901,6 @@ struct PreparedHandle {
 }
 
 fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHandle> {
-    if matches!(&value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()) {
-        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER));
-    }
-
     #[cfg(all(test, feature = "wgpu"))]
     {
         if runmat_accelerate_api::provider().is_none() {
@@ -980,8 +971,10 @@ fn upload_real_host_value(
                 (storage, shape)
             }
         };
-        let view = integer_tensor_view(&storage, &shape);
-        let handle = provider.upload_integer(&view).map_err(|err| {
+        let tensor = Tensor::new_integer(storage, shape).map_err(|err| {
+            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
+        })?;
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
         })?;
         return Ok(PreparedHandle {
@@ -994,15 +987,13 @@ fn upload_real_host_value(
     }
     let tensor = coerce_host_value(value)?;
     let (tensor, logical) = cast_tensor(tensor, dtype)?;
-
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    let view = HostTensorView {
-        data: &values,
-        shape: &tensor.shape,
-    };
-    let new_handle = provider.upload(&view).map_err(|err| {
+    let tensor = physical_logical_tensor(tensor, logical, provider.precision())?;
+    let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
         gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
     })?;
+    if logical {
+        runmat_accelerate_api::set_handle_logical(&new_handle, true);
+    }
 
     Ok(PreparedHandle {
         handle: new_handle,
@@ -1030,51 +1021,59 @@ fn cast_integer_storage(
     })
 }
 
-fn integer_tensor_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
-}
-
 fn upload_complex_host_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     tensor: ComplexTensor,
     dtype: DataClass,
 ) -> BuiltinResult<PreparedHandle> {
-    if tensor.integer_storage().is_some() {
-        return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER));
-    }
-
     let shape = tensor.shape.clone();
-    let tensor = match dtype {
-        DataClass::Double => ComplexTensor::new(tensor.materialize_f64(), shape),
-        DataClass::Single => ComplexTensor::from_f32(
-            tensor
-                .materialize_f64()
-                .into_iter()
-                .map(|(real, imag)| (real as f32, imag as f32))
-                .collect(),
-            shape,
-        ),
-        _ => {
+    let storage = tensor.into_complex_storage();
+    let storage = match dtype {
+        DataClass::Double => match storage {
+            storage @ ComplexStorage::F64(_) => storage,
+            storage => ComplexStorage::F64(storage.materialize_f64()),
+        },
+        DataClass::Single => match storage {
+            storage @ ComplexStorage::F32(_) => storage,
+            storage => ComplexStorage::F32(
+                storage
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|(real, imag)| (real as f32, imag as f32))
+                    .collect(),
+            ),
+        },
+        dtype @ (DataClass::Int8
+        | DataClass::Int16
+        | DataClass::Int32
+        | DataClass::Int64
+        | DataClass::UInt8
+        | DataClass::UInt16
+        | DataClass::UInt32
+        | DataClass::UInt64) => {
+            let ComplexStorage::Integer(storage) = storage else {
+                return Err(gpu_array_error_with_message(
+                    "gpuArray: converting floating complex input to an integer class is not supported",
+                    &GPUARRAY_ERROR_INPUT_TYPE,
+                ));
+            };
+            ComplexStorage::Integer(
+                IntegerComplexStorage::new(
+                    cast_integer_storage(&storage.real, dtype)?,
+                    cast_integer_storage(&storage.imag, dtype)?,
+                )
+                .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_CONVERSION))?,
+            )
+        }
+        DataClass::Logical => {
             return Err(gpu_array_error_with_message(
-                "gpuArray: complex inputs can only be uploaded as double or single precision",
+                "gpuArray: complex inputs cannot be uploaded as logical storage",
                 &GPUARRAY_ERROR_INPUT_TYPE,
             ));
         }
-    }
-    .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_INPUT_TYPE))?;
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_INPUT_TYPE))?;
 
     let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| {
         gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
@@ -1139,7 +1138,11 @@ async fn convert_device_value(
                     handle,
                     provider,
                     logical: false,
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    storage: if was_complex {
+                        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                    } else {
+                        runmat_accelerate_api::GpuTensorStorage::Real
+                    },
                     owns_handle: false,
                 });
             }
@@ -1147,12 +1150,6 @@ async fn convert_device_value(
         _ => {}
     }
 
-    if dtype == DataClass::Double && provider.precision() != ProviderPrecision::F64 {
-        return Err(gpu_array_error_with_message(
-            "gpuArray: owning provider cannot preserve requested double precision",
-            &GPUARRAY_ERROR_PROVIDER_IO,
-        ));
-    }
     if was_complex {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
@@ -1170,21 +1167,26 @@ async fn convert_device_value(
     }
 
     if integer_type.is_some() && dtype.is_integer() {
-        let downloaded = provider.download_integer(&handle).await.map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-        })?;
-        if downloaded.shape != handle.shape
-            || downloaded.data.element_type() != integer_type.expect("guarded integer handle")
-        {
-            return Err(gpu_array_error_with_message(
-                "gpuArray: provider returned contradictory integer payload metadata",
-                &GPUARRAY_ERROR_PROVIDER_IO,
-            ));
-        }
-        let storage = integer_storage_from_owned(downloaded.data);
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|err| {
+                gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
+            })?;
+        let shape = tensor.shape.clone();
+        let storage = tensor
+            .integer_storage()
+            .ok_or_else(|| {
+                gpu_array_error_with_message(
+                    "gpuArray: gathered integer handle did not reconstruct integer storage",
+                    &GPUARRAY_ERROR_PROVIDER_IO,
+                )
+            })?
+            .clone();
         let cast = cast_integer_storage(&storage, dtype)?;
-        let view = integer_tensor_view(&cast, &downloaded.shape);
-        let new_handle = provider.upload_integer(&view).map_err(|err| {
+        let tensor = Tensor::new_integer(cast, shape).map_err(|err| {
+            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
+        })?;
+        let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
         })?;
         return Ok(PreparedHandle {
@@ -1202,15 +1204,13 @@ async fn convert_device_value(
             gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
         })?;
     let (tensor, logical) = cast_tensor(tensor, dtype)?;
-
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    let view = HostTensorView {
-        data: &values,
-        shape: &tensor.shape,
-    };
-    let new_handle = provider.upload(&view).map_err(|err| {
+    let tensor = physical_logical_tensor(tensor, logical, provider.precision())?;
+    let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
         gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
     })?;
+    if logical {
+        runmat_accelerate_api::set_handle_logical(&new_handle, true);
+    }
 
     Ok(PreparedHandle {
         handle: new_handle,
@@ -1283,19 +1283,6 @@ fn validate_prepared_handle(
     Ok(())
 }
 
-fn integer_storage_from_owned(data: HostIntegerDataOwned) -> IntegerStorage {
-    match data {
-        HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),
-        HostIntegerDataOwned::I16(values) => IntegerStorage::I16(values),
-        HostIntegerDataOwned::I32(values) => IntegerStorage::I32(values),
-        HostIntegerDataOwned::I64(values) => IntegerStorage::I64(values),
-        HostIntegerDataOwned::U8(values) => IntegerStorage::U8(values),
-        HostIntegerDataOwned::U16(values) => IntegerStorage::U16(values),
-        HostIntegerDataOwned::U32(values) => IntegerStorage::U32(values),
-        HostIntegerDataOwned::U64(values) => IntegerStorage::U64(values),
-    }
-}
-
 fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t),
@@ -1333,9 +1320,33 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
     }
 }
 
+fn physical_logical_tensor(
+    tensor: Tensor,
+    logical: bool,
+    precision: ProviderPrecision,
+) -> BuiltinResult<Tensor> {
+    if !logical || precision == ProviderPrecision::F64 {
+        return Ok(tensor);
+    }
+    let shape = tensor.shape.clone();
+    let values = tensor
+        .into_numeric_storage()
+        .map(numeric_storage_into_f64)
+        .map_err(|err| {
+            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
+        })?;
+    Tensor::from_f32(
+        values.into_iter().map(|value| value as f32).collect(),
+        shape,
+    )
+    .map_err(|err| {
+        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
+    })
+}
+
 fn cast_tensor(tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, bool)> {
     // This function is reached for non-integer destinations only.  Native integer
-    // inputs take the upload_integer path above unless the caller explicitly
+    // inputs take the native integer upload path above unless the caller explicitly
     // requested a floating or logical class, in which case this is the deliberate
     // MATLAB-style cast boundary.
     let shape = tensor.shape.clone();
@@ -1465,7 +1476,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
+    use runmat_accelerate_api::{
+        GpuTensorStorage, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    };
     use runmat_builtins::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type,
     };
@@ -1909,7 +1922,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gpu_array_rejects_typed_complex_integer_tensor_without_uploading() {
+    fn gpu_array_round_trips_typed_complex_integer_tensor_exactly() {
         test_support::with_test_provider(|_| {
             let complex = ComplexTensor::new_integer(
                 IntegerComplexStorage::new(
@@ -1920,15 +1933,20 @@ pub(crate) mod tests {
                 vec![1, 2],
             )
             .unwrap();
-            let err = call(Value::ComplexTensor(complex), Vec::new())
-                .expect_err("typed complex integer gpuArray input must be rejected");
+            let result = call(Value::ComplexTensor(complex.clone()), Vec::new())
+                .expect("typed complex integer upload");
+            let Value::GpuTensor(handle) = &result else {
+                panic!("expected gpuArray handle")
+            };
             assert_eq!(
-                err.identifier.as_deref(),
-                Some("RunMat:gpuArray:TypedComplexIntegerUnsupported")
+                runmat_accelerate_api::handle_integer_type(handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert!(err
-                .to_string()
-                .contains("typed complex integer arrays are not supported"));
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(gather_complex(result), complex);
         });
     }
 
@@ -2036,7 +2054,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gpu_array_complex_gpu_to_single_rejects_when_owner_is_physically_double() {
+    fn gpu_array_complex_gpu_to_single_uses_native_transfer_storage() {
         test_support::with_test_provider(|provider| {
             let complex = ComplexTensor::new(
                 vec![(1.234_567_89, -2.345_678_91), (3.456_789_12, 4.567_891_23)],
@@ -2044,14 +2062,21 @@ pub(crate) mod tests {
             )
             .unwrap();
             let handle = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
-            let error = call(
+            let converted = call(
                 Value::GpuTensor(handle.clone()),
                 vec![Value::from("single")],
             )
-            .expect_err("double-only owner cannot preserve complex single storage");
-            assert_eq!(error.identifier(), Some("RunMat:gpuArray:ProviderIO"));
-            let gathered = gather_complex(Value::GpuTensor(handle));
-            assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
+            .expect("shared transfer storage preserves complex single");
+            let gathered = gather_complex(converted);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            let expected: Vec<(f64, f64)> = complex
+                .materialize_f64()
+                .into_iter()
+                .map(|(real, imag)| (f64::from(real as f32), f64::from(imag as f32)))
+                .collect();
+            assert_complex_close(&gathered.materialize_f64(), &expected);
+            let source = gather_complex(Value::GpuTensor(handle));
+            assert_eq!(source, complex);
         });
     }
 
@@ -2366,7 +2391,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn gpu_array_wgpu_complex_roundtrip() {
+    fn gpu_array_wgpu_complex_and_integer_roundtrip() {
         use runmat_accelerate_api::AccelProvider;
 
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -2375,16 +2400,8 @@ pub(crate) mod tests {
             Ok(provider) => {
                 let complex =
                     ComplexTensor::new(vec![(1.25, -0.5), (-3.0, 4.0)], vec![1, 2]).unwrap();
-                let result = call(Value::ComplexTensor(complex.clone()), Vec::new());
-                if provider.precision() == ProviderPrecision::F32 {
-                    let error = result.expect_err(
-                        "an F32 provider cannot preserve an implicit complex-double gpuArray",
-                    );
-                    assert_eq!(error.identifier(), Some("RunMat:gpuArray:ProviderIO"));
-                    runmat_accelerate::simple_provider::register_inprocess_provider();
-                    return;
-                }
-                let result = result.expect("wgpu complex-double upload");
+                let result = call(Value::ComplexTensor(complex.clone()), Vec::new())
+                    .expect("wgpu complex-double upload");
                 let Value::GpuTensor(handle) = result else {
                     panic!("expected gpu tensor");
                 };
@@ -2395,6 +2412,30 @@ pub(crate) mod tests {
                 let gathered = gather_complex(Value::GpuTensor(handle.clone()));
                 assert_eq!(gathered.shape, vec![1, 2]);
                 assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
+                provider.free(&handle).ok();
+
+                let complex_integer = ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                        IntegerStorage::U64(vec![3, 4]),
+                    )
+                    .unwrap(),
+                    vec![1, 2],
+                )
+                .unwrap();
+                let result = call(Value::ComplexTensor(complex_integer.clone()), Vec::new())
+                    .expect("wgpu complex-integer upload");
+                let Value::GpuTensor(handle) = result else {
+                    panic!("expected complex integer gpu tensor")
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&handle),
+                    Some(runmat_accelerate_api::IntegerElementType::U64)
+                );
+                assert_eq!(
+                    gather_complex(Value::GpuTensor(handle.clone())),
+                    complex_integer
+                );
                 provider.free(&handle).ok();
             }
             Err(err) => {

@@ -22,14 +22,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("gather"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("download")],
+    provider_hooks: &[ProviderHook::Custom("download_numeric")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Downloads gpuArray handles via the provider's `download` hook without mutating the source handle; host inputs pass through unchanged.",
+    notes: "Downloads gpuArray handles through the provider's native numeric contract without mutating the source handle; host inputs pass through unchanged.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]

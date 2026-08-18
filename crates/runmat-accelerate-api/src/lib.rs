@@ -190,6 +190,18 @@ pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
             }
         }
     }
+    if logical {
+        if let Ok(mut classes) = HANDLE_CLASS_NAMES.write() {
+            classes.insert(identity, "logical".into());
+        }
+    } else if let Ok(mut classes) = HANDLE_CLASS_NAMES.write() {
+        if classes
+            .get(&identity)
+            .is_some_and(|class| class == "logical")
+        {
+            classes.remove(&identity);
+        }
+    }
 }
 
 /// Convenience helper for clearing logical annotations explicitly.
@@ -4716,7 +4728,7 @@ mod tests {
 
         assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
         assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
-        assert_eq!(handle_class_name(&first).as_deref(), Some("single"));
+        assert_eq!(handle_class_name(&first).as_deref(), Some("logical"));
         assert_eq!(handle_class_name(&second).as_deref(), Some("uint64"));
         assert_eq!(handle_integer_type(&first), None);
         assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));

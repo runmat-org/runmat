@@ -1,11 +1,6 @@
 use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
-use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
-};
-use runmat_builtins::{
-    builtin_functions, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType,
-    Tensor, Value,
-};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
+use runmat_builtins::{builtin_functions, Value};
 use std::cell::RefCell;
 
 thread_local! {
@@ -71,6 +66,8 @@ pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError
     gather_if_needed_async_impl(value).await
 }
 
+/// Legacy floating projection used by operation-specific provider fallbacks.
+/// Central gather uses the shared native numeric transfer path below.
 pub async fn download_handle_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
@@ -103,127 +100,49 @@ fn gather_if_needed_async_impl<'a>(
                             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
-                let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-                if let Some(expected_integer_type) =
-                    runmat_accelerate_api::handle_integer_type(handle)
-                {
-                    let integer = provider.download_integer(handle).await.map_err(|err| {
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:DownloadFailed")
+                let expected_element =
+                    crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(
+                        handle,
+                    )
+                    .map_err(|error| {
+                        build_runtime_error(format!("gather: {error}"))
+                            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
                             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
-                    if integer.shape != handle.shape
-                        || integer.data.element_type() != expected_integer_type
-                    {
-                        return Err(provider_payload_mismatch(
-                            handle,
-                            &integer.shape,
-                            format!(
-                                "integer class {:?}, expected {:?}",
-                                integer.data.element_type(),
-                                expected_integer_type
-                            ),
-                        ));
-                    }
-                    let storage = match integer.data {
-                        HostIntegerDataOwned::I8(data) => IntegerStorage::I8(data),
-                        HostIntegerDataOwned::I16(data) => IntegerStorage::I16(data),
-                        HostIntegerDataOwned::I32(data) => IntegerStorage::I32(data),
-                        HostIntegerDataOwned::I64(data) => IntegerStorage::I64(data),
-                        HostIntegerDataOwned::U8(data) => IntegerStorage::U8(data),
-                        HostIntegerDataOwned::U16(data) => IntegerStorage::U16(data),
-                        HostIntegerDataOwned::U32(data) => IntegerStorage::U32(data),
-                        HostIntegerDataOwned::U64(data) => IntegerStorage::U64(data),
-                    };
-                    let tensor = Tensor::new_integer(storage, integer.shape).map_err(|err| {
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:TensorShapeError")
-                            .build()
-                    })?;
-                    return Ok(Value::Tensor(tensor));
-                }
-                let host = download_handle_async(provider, handle)
-                    .await
-                    .map_err(|err| {
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:DownloadFailed")
-                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                            .build()
-                    })?;
+                let host = provider.download_numeric(handle).await.map_err(|err| {
+                    build_runtime_error(format!("gather: {err}"))
+                        .with_identifier("RunMat:gather:DownloadFailed")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build()
+                })?;
                 let expected_storage = runmat_accelerate_api::handle_storage(handle);
-                if host.shape != handle.shape || host.storage != expected_storage {
+                if host.shape != handle.shape
+                    || host.storage != expected_storage
+                    || host.data.element_type() != expected_element
+                {
                     return Err(provider_payload_mismatch(
                         handle,
                         &host.shape,
                         format!(
-                            "storage {:?}, expected {:?}",
-                            host.storage, expected_storage
+                            "{:?} {:?}, expected {:?} {:?}",
+                            host.data.element_type(),
+                            host.storage,
+                            expected_element,
+                            expected_storage
                         ),
                     ));
                 }
-                let runmat_accelerate_api::HostTensorOwned {
-                    data,
-                    shape,
-                    storage,
-                } = host;
-                if is_logical {
-                    let bits: Vec<u8> =
-                        data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
-                    let logical = LogicalArray::new(bits, shape).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:LogicalShapeError")
-                            .build()
-                    })?;
-                    Ok(Value::LogicalArray(logical))
-                } else if storage == GpuTensorStorage::ComplexInterleaved {
-                    let precision = runmat_accelerate_api::handle_precision(handle)
-                        .unwrap_or_else(|| provider.precision());
-                    if data.len() % 2 != 0 {
-                        return Err(provider_payload_mismatch(
-                            handle,
-                            &shape,
-                            "complex-interleaved scalar count is odd".to_string(),
-                        ));
-                    }
-                    let pairs = data.chunks_exact(2).map(|chunk| (chunk[0], chunk[1]));
-                    let storage = match precision {
-                        runmat_accelerate_api::ProviderPrecision::F32 => ComplexStorage::F32(
-                            pairs
-                                .map(|(real, imag)| (real as f32, imag as f32))
-                                .collect(),
-                        ),
-                        runmat_accelerate_api::ProviderPrecision::F64 => {
-                            ComplexStorage::F64(pairs.collect())
-                        }
-                    };
-                    let tensor =
-                        ComplexTensor::from_complex_storage(storage, shape).map_err(|e| {
-                            build_runtime_error(format!("gather: {e}"))
-                                .with_identifier("RunMat:gather:TensorShapeError")
-                                .build()
-                        })?;
-                    Ok(Value::ComplexTensor(tensor))
-                } else {
-                    let mut data = data;
-                    let precision = runmat_accelerate_api::handle_precision(handle)
-                        .unwrap_or_else(|| provider.precision());
-                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-                        for value in &mut data {
-                            *value = (*value as f32) as f64;
-                        }
-                    }
-                    let dtype = match precision {
-                        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-                    };
-                    let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:TensorShapeError")
-                            .build()
-                    })?;
-                    Ok(Value::Tensor(tensor))
-                }
+                crate::builtins::common::gpu_helpers::value_from_numeric_download(
+                    host,
+                    runmat_accelerate_api::handle_is_logical(handle),
+                )
+                .map_err(|error| {
+                    build_runtime_error(format!("gather: {error}"))
+                        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build()
+                })
             }
             Value::Cell(ca) => {
                 let mut gathered = Vec::with_capacity(ca.data.len());

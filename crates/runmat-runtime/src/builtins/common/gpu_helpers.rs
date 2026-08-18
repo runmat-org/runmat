@@ -1,13 +1,14 @@
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
-    HostIntegerTensorView, HostTensorView, IntegerElementType, ProviderPrecision,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostNumericTensorView, IntegerElementType, NumericElementType,
+    ProviderPrecision,
 };
 use runmat_builtins::{
-    ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericDType, NumericStorage, Tensor, Value,
 };
 
 use crate::build_runtime_error;
-use crate::builtins::common::tensor;
 
 /// Resolve the provider that actually owns `handle`.
 ///
@@ -165,6 +166,134 @@ pub fn gpu_class_metadata_matches(
         .is_none_or(|actual| expected == Some(actual))
 }
 
+fn integer_element_type(storage: &IntegerStorage) -> IntegerElementType {
+    match storage {
+        IntegerStorage::I8(_) => IntegerElementType::I8,
+        IntegerStorage::I16(_) => IntegerElementType::I16,
+        IntegerStorage::I32(_) => IntegerElementType::I32,
+        IntegerStorage::I64(_) => IntegerElementType::I64,
+        IntegerStorage::U8(_) => IntegerElementType::U8,
+        IntegerStorage::U16(_) => IntegerElementType::U16,
+        IntegerStorage::U32(_) => IntegerElementType::U32,
+        IntegerStorage::U64(_) => IntegerElementType::U64,
+    }
+}
+
+pub(crate) fn expected_handle_numeric_element_type(
+    handle: &GpuTensorHandle,
+) -> Result<NumericElementType, String> {
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let integer = runmat_accelerate_api::handle_integer_type(handle);
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    let expected_class = expected_gpu_class_name(precision, integer, logical);
+    if runmat_accelerate_api::handle_class_name(handle)
+        .as_deref()
+        .is_some_and(|actual| expected_class != Some(actual))
+    {
+        return Err("class metadata contradicts the physical payload metadata".into());
+    }
+    if logical && integer.is_some() {
+        return Err("logical metadata cannot annotate native integer storage".into());
+    }
+    match (precision, integer) {
+        (Some(ProviderPrecision::F64), None) => Ok(NumericElementType::F64),
+        (Some(ProviderPrecision::F32), None) => Ok(NumericElementType::F32),
+        (None, Some(integer)) => Ok(integer.into()),
+        (Some(_), Some(_)) => {
+            Err("floating precision and integer class metadata are both present".into())
+        }
+        (None, None) => Err("physical numeric element metadata is missing".into()),
+    }
+}
+
+fn deinterleave<T: Copy>(values: &[T]) -> (Vec<T>, Vec<T>) {
+    let mut real = Vec::with_capacity(values.len() / 2);
+    let mut imag = Vec::with_capacity(values.len() / 2);
+    for pair in values.chunks_exact(2) {
+        real.push(pair[0]);
+        imag.push(pair[1]);
+    }
+    (real, imag)
+}
+
+pub(crate) fn value_from_numeric_download(
+    host: HostNumericTensorOwned,
+    logical: bool,
+) -> Result<Value, String> {
+    host.validate().map_err(|error| error.to_string())?;
+    if logical {
+        if host.storage != GpuTensorStorage::Real {
+            return Err("logical payload must use real storage".into());
+        }
+        let bits = match host.data {
+            HostNumericDataOwned::F64(values) => values
+                .into_iter()
+                .map(|value| u8::from(value != 0.0))
+                .collect(),
+            HostNumericDataOwned::F32(values) => values
+                .into_iter()
+                .map(|value| u8::from(value != 0.0))
+                .collect(),
+            HostNumericDataOwned::I8(_)
+            | HostNumericDataOwned::I16(_)
+            | HostNumericDataOwned::I32(_)
+            | HostNumericDataOwned::I64(_)
+            | HostNumericDataOwned::U8(_)
+            | HostNumericDataOwned::U16(_)
+            | HostNumericDataOwned::U32(_)
+            | HostNumericDataOwned::U64(_) => {
+                return Err("logical payload cannot use native integer storage".into())
+            }
+        };
+        return LogicalArray::new(bits, host.shape).map(Value::LogicalArray);
+    }
+
+    if host.storage == GpuTensorStorage::Real {
+        let storage = match host.data {
+            HostNumericDataOwned::F64(values) => NumericStorage::F64(values),
+            HostNumericDataOwned::F32(values) => NumericStorage::F32(values),
+            HostNumericDataOwned::I8(values) => NumericStorage::I8(values),
+            HostNumericDataOwned::I16(values) => NumericStorage::I16(values),
+            HostNumericDataOwned::I32(values) => NumericStorage::I32(values),
+            HostNumericDataOwned::I64(values) => NumericStorage::I64(values),
+            HostNumericDataOwned::U8(values) => NumericStorage::U8(values),
+            HostNumericDataOwned::U16(values) => NumericStorage::U16(values),
+            HostNumericDataOwned::U32(values) => NumericStorage::U32(values),
+            HostNumericDataOwned::U64(values) => NumericStorage::U64(values),
+        };
+        return Tensor::from_numeric_storage(storage, host.shape).map(Value::Tensor);
+    }
+
+    macro_rules! integer_complex {
+        ($values:expr, $variant:ident) => {{
+            let (real, imag) = deinterleave(&$values);
+            ComplexStorage::Integer(IntegerComplexStorage::new(
+                IntegerStorage::$variant(real),
+                IntegerStorage::$variant(imag),
+            )?)
+        }};
+    }
+    let storage = match host.data {
+        HostNumericDataOwned::F64(values) => {
+            let (real, imag) = deinterleave(&values);
+            ComplexStorage::F64(real.into_iter().zip(imag).collect())
+        }
+        HostNumericDataOwned::F32(values) => {
+            let (real, imag) = deinterleave(&values);
+            ComplexStorage::F32(real.into_iter().zip(imag).collect())
+        }
+        HostNumericDataOwned::I8(values) => integer_complex!(values, I8),
+        HostNumericDataOwned::I16(values) => integer_complex!(values, I16),
+        HostNumericDataOwned::I32(values) => integer_complex!(values, I32),
+        HostNumericDataOwned::I64(values) => integer_complex!(values, I64),
+        HostNumericDataOwned::U8(values) => integer_complex!(values, U8),
+        HostNumericDataOwned::U16(values) => integer_complex!(values, U16),
+        HostNumericDataOwned::U32(values) => integer_complex!(values, U32),
+        HostNumericDataOwned::U64(values) => integer_complex!(values, U64),
+    };
+    ComplexTensor::from_complex_storage(storage, host.shape).map(Value::ComplexTensor)
+}
+
 pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
     left.device_id == right.device_id && left.buffer_id == right.buffer_id
 }
@@ -242,138 +371,40 @@ pub async fn download_value_preserving_residency_async(
                 .build(),
         );
     }
-    let precision = source_guard.snapshot.precision;
-    let integer = source_guard.snapshot.integer;
-    let logical = source_guard.snapshot.logical;
-    let expected_class = expected_gpu_class_name(precision, integer, logical);
-    if source_guard
-        .snapshot
-        .class_name
-        .as_deref()
-        .is_some_and(|actual| expected_class != Some(actual))
+    let expected_element = expected_handle_numeric_element_type(handle).map_err(|error| {
+        build_runtime_error(format!("gpu download: {error}"))
+            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    let host = provider.download_numeric(handle).await.map_err(|error| {
+        build_runtime_error(format!("gpu download: {error}"))
+            .with_identifier("RunMat:gpu:DownloadFailed")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    if host.shape != handle.shape
+        || host.storage != source_guard.snapshot.storage
+        || host.data.element_type() != expected_element
     {
-        return Err(build_runtime_error(
-            "gpu download: class metadata contradicts the physical payload metadata",
-        )
-        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build());
-    }
-    if integer.is_none() && precision != Some(provider.precision()) {
-        return Err(build_runtime_error(
-            "gpu download: floating precision metadata contradicts the owning provider",
-        )
-        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build());
-    }
-    if let Some(expected_type) = integer {
-        let host = provider.download_integer(handle).await.map_err(|error| {
-            build_runtime_error(format!("gpu download: {error}"))
-                .with_identifier("RunMat:gpu:DownloadFailed")
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build()
-        })?;
-        if host.shape != handle.shape || host.data.element_type() != expected_type {
-            return Err(provider_payload_mismatch(
-                handle,
-                &host.shape,
-                format!(
-                    "integer class {:?}, expected {:?}",
-                    host.data.element_type(),
-                    expected_type
-                ),
-            ));
-        }
-        let storage = match host.data {
-            HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),
-            HostIntegerDataOwned::I16(values) => IntegerStorage::I16(values),
-            HostIntegerDataOwned::I32(values) => IntegerStorage::I32(values),
-            HostIntegerDataOwned::I64(values) => IntegerStorage::I64(values),
-            HostIntegerDataOwned::U8(values) => IntegerStorage::U8(values),
-            HostIntegerDataOwned::U16(values) => IntegerStorage::U16(values),
-            HostIntegerDataOwned::U32(values) => IntegerStorage::U32(values),
-            HostIntegerDataOwned::U64(values) => IntegerStorage::U64(values),
-        };
-        return Tensor::new_integer(storage, host.shape)
-            .map(Value::Tensor)
-            .map_err(|error| {
-                build_runtime_error(format!("gpu download: {error}"))
-                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                    .build()
-            });
-    }
-
-    let host = crate::dispatcher::download_handle_async(provider, handle)
-        .await
-        .map_err(|error| {
-            build_runtime_error(format!("gpu download: {error}"))
-                .with_identifier("RunMat:gpu:DownloadFailed")
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build()
-        })?;
-    let expected_storage = source_guard.snapshot.storage;
-    if host.shape != handle.shape || host.storage != expected_storage {
         return Err(provider_payload_mismatch(
             handle,
             &host.shape,
             format!(
-                "storage {:?}, expected {:?}",
-                host.storage, expected_storage
+                "{:?} {:?}, expected {:?} {:?}",
+                host.data.element_type(),
+                host.storage,
+                expected_element,
+                source_guard.snapshot.storage
             ),
         ));
     }
-    if logical {
-        let bits = host
-            .data
-            .into_iter()
-            .map(|value| u8::from(value != 0.0))
-            .collect();
-        return LogicalArray::new(bits, host.shape)
-            .map(Value::LogicalArray)
-            .map_err(|error| {
-                build_runtime_error(format!("gpu download: {error}"))
-                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                    .build()
-            });
-    }
-
-    let precision = precision.unwrap_or_else(|| provider.precision());
-    if host.storage == GpuTensorStorage::ComplexInterleaved {
-        if host.data.len() % 2 != 0 {
-            return Err(build_runtime_error(
-                "gpu download: complex-interleaved buffer has odd scalar length",
-            )
+    value_from_numeric_download(host, source_guard.snapshot.logical).map_err(|error| {
+        build_runtime_error(format!("gpu download: {error}"))
+            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build());
-        }
-        let pairs = host.data.chunks_exact(2).map(|pair| (pair[0], pair[1]));
-        let storage = match precision {
-            ProviderPrecision::F32 => {
-                ComplexStorage::F32(pairs.map(|(re, im)| (re as f32, im as f32)).collect())
-            }
-            ProviderPrecision::F64 => ComplexStorage::F64(pairs.collect()),
-        };
-        return ComplexTensor::from_complex_storage(storage, host.shape)
-            .map(Value::ComplexTensor)
-            .map_err(|error| {
-                build_runtime_error(format!("gpu download: {error}"))
-                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                    .build()
-            });
-    }
-
-    let dtype = match precision {
-        ProviderPrecision::F32 => NumericDType::F32,
-        ProviderPrecision::F64 => NumericDType::F64,
-    };
-    Tensor::new_with_dtype(host.data, host.shape, dtype)
-        .map(Value::Tensor)
-        .map_err(|error| {
-            build_runtime_error(format!("gpu download: {error}"))
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build()
-        })
+            .build()
+    })
 }
 
 fn provider_payload_mismatch(
@@ -390,68 +421,114 @@ fn provider_payload_mismatch(
     .build()
 }
 
-/// Upload a host complex tensor as an interleaved GPU buffer and record complex
-/// storage metadata on the returned handle.
+fn interleave<T: Copy>(real: &[T], imag: &[T]) -> Vec<T> {
+    let mut values = Vec::with_capacity(real.len().saturating_mul(2));
+    for (&real, &imag) in real.iter().zip(imag) {
+        values.push(real);
+        values.push(imag);
+    }
+    values
+}
+
+fn interleaved_complex_data(tensor: &ComplexTensor) -> Result<HostNumericDataOwned, String> {
+    macro_rules! integer_interleaved {
+        ($real:expr, $imag:expr, $variant:ident) => {
+            HostNumericDataOwned::$variant(interleave($real, $imag))
+        };
+    }
+    match tensor.complex_storage() {
+        ComplexStorage::F64(values) => Ok(HostNumericDataOwned::F64(
+            values
+                .iter()
+                .flat_map(|&(real, imag)| [real, imag])
+                .collect(),
+        )),
+        ComplexStorage::F32(values) => Ok(HostNumericDataOwned::F32(
+            values
+                .iter()
+                .flat_map(|&(real, imag)| [real, imag])
+                .collect(),
+        )),
+        ComplexStorage::Integer(storage) => match (&storage.real, &storage.imag) {
+            (IntegerStorage::I8(real), IntegerStorage::I8(imag)) => {
+                Ok(integer_interleaved!(real, imag, I8))
+            }
+            (IntegerStorage::I16(real), IntegerStorage::I16(imag)) => {
+                Ok(integer_interleaved!(real, imag, I16))
+            }
+            (IntegerStorage::I32(real), IntegerStorage::I32(imag)) => {
+                Ok(integer_interleaved!(real, imag, I32))
+            }
+            (IntegerStorage::I64(real), IntegerStorage::I64(imag)) => {
+                Ok(integer_interleaved!(real, imag, I64))
+            }
+            (IntegerStorage::U8(real), IntegerStorage::U8(imag)) => {
+                Ok(integer_interleaved!(real, imag, U8))
+            }
+            (IntegerStorage::U16(real), IntegerStorage::U16(imag)) => {
+                Ok(integer_interleaved!(real, imag, U16))
+            }
+            (IntegerStorage::U32(real), IntegerStorage::U32(imag)) => {
+                Ok(integer_interleaved!(real, imag, U32))
+            }
+            (IntegerStorage::U64(real), IntegerStorage::U64(imag)) => {
+                Ok(integer_interleaved!(real, imag, U64))
+            }
+            _ => Err("complex integer components must have matching classes".into()),
+        },
+    }
+}
+
+/// Upload a host complex tensor through the shared native numeric transfer contract.
 pub fn upload_complex_tensor(
     provider: &dyn AccelProvider,
     tensor: &ComplexTensor,
 ) -> crate::BuiltinResult<GpuTensorHandle> {
-    if tensor.integer_storage().is_some() {
-        return Err(build_runtime_error(
-            "typed complex integer GPU buffers are not supported by the active acceleration provider",
-        )
-        .build());
-    }
-
-    let mut interleaved = Vec::with_capacity(tensor.materialize_f64().len() * 2);
-    for &(re, im) in &tensor.materialize_f64() {
-        interleaved.push(re);
-        interleaved.push(im);
-    }
-    let view = HostTensorView {
-        data: &interleaved,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
-        .map_err(|e| build_runtime_error(format!("gpu upload: {e}")).build())?;
-    runmat_accelerate_api::set_handle_logical(&handle, false);
-    runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
-    runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
-    Ok(handle)
+    let data = interleaved_complex_data(tensor)
+        .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())?;
+    provider
+        .upload_numeric(&HostNumericTensorView {
+            data: data.as_view(),
+            shape: &tensor.shape,
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())
 }
 
-/// Upload a host tensor while retaining its exact typed-integer backing store.
+fn tensor_numeric_view(tensor: &Tensor) -> HostNumericDataView<'_> {
+    if let Some(values) = tensor.as_f64_slice() {
+        return HostNumericDataView::F64(values);
+    }
+    if let Some(values) = tensor.as_f32_slice() {
+        return HostNumericDataView::F32(values);
+    }
+    match tensor
+        .integer_storage()
+        .expect("non-floating tensor has integer storage")
+    {
+        IntegerStorage::I8(values) => HostNumericDataView::I8(values),
+        IntegerStorage::I16(values) => HostNumericDataView::I16(values),
+        IntegerStorage::I32(values) => HostNumericDataView::I32(values),
+        IntegerStorage::I64(values) => HostNumericDataView::I64(values),
+        IntegerStorage::U8(values) => HostNumericDataView::U8(values),
+        IntegerStorage::U16(values) => HostNumericDataView::U16(values),
+        IntegerStorage::U32(values) => HostNumericDataView::U32(values),
+        IntegerStorage::U64(values) => HostNumericDataView::U64(values),
+    }
+}
+
+/// Upload a host tensor through the shared native numeric transfer contract.
 pub fn upload_tensor(
     provider: &dyn AccelProvider,
     tensor: &Tensor,
 ) -> Result<GpuTensorHandle, String> {
-    if let Some(storage) = tensor.integer_storage() {
-        let data = match storage {
-            IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-            IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-            IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-            IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-            IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-            IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-            IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-            IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-        };
-        provider
-            .upload_integer(&HostIntegerTensorView {
-                data,
-                shape: &tensor.shape,
-            })
-            .map_err(|error| error.to_string())
-    } else {
-        let data = tensor::tensor_values_f64_cow(tensor);
-        provider
-            .upload(&HostTensorView {
-                data: data.as_ref(),
-                shape: &tensor.shape,
-            })
-            .map_err(|error| error.to_string())
-    }
+    provider
+        .upload_numeric(&HostNumericTensorView {
+            data: tensor_numeric_view(tensor),
+            shape: &tensor.shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .map_err(|error| error.to_string())
 }
 
 /// Restore a class-preserving host value to the provider that owns `source`.
@@ -476,16 +553,7 @@ pub fn restore_class_preserving_value(
     let (output, expected_shape, expected_storage, expected_precision, expected_integer, logical) =
         match &value {
             Value::Tensor(tensor) => {
-                let expected_integer = tensor.integer_storage().map(|storage| match storage {
-                    IntegerStorage::I8(_) => IntegerElementType::I8,
-                    IntegerStorage::I16(_) => IntegerElementType::I16,
-                    IntegerStorage::I32(_) => IntegerElementType::I32,
-                    IntegerStorage::I64(_) => IntegerElementType::I64,
-                    IntegerStorage::U8(_) => IntegerElementType::U8,
-                    IntegerStorage::U16(_) => IntegerElementType::U16,
-                    IntegerStorage::U32(_) => IntegerElementType::U32,
-                    IntegerStorage::U64(_) => IntegerElementType::U64,
-                });
+                let expected_integer = tensor.integer_storage().map(integer_element_type);
                 let expected_precision = if expected_integer.is_some() {
                     None
                 } else {
@@ -494,14 +562,17 @@ pub fn restore_class_preserving_value(
                         _ => ProviderPrecision::F64,
                     })
                 };
-                if expected_precision.is_some_and(|precision| provider.precision() != precision) {
-                    return Ok(value);
-                }
-                let output = upload_tensor(provider, tensor).map_err(|error| {
-                    build_runtime_error(format!("{builtin}: failed to restore GPU result: {error}"))
+                let output = match upload_tensor(provider, tensor) {
+                    Ok(output) => output,
+                    Err(_) if expected_precision != Some(provider.precision()) => return Ok(value),
+                    Err(error) => {
+                        return Err(build_runtime_error(format!(
+                            "{builtin}: failed to restore GPU result: {error}"
+                        ))
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                })?;
+                        .build())
+                    }
+                };
                 (
                     output,
                     tensor.shape.clone(),
@@ -512,15 +583,21 @@ pub fn restore_class_preserving_value(
                 )
             }
             Value::LogicalArray(array) => {
-                let tensor = Tensor::new(
-                    array.data.iter().map(|bit| f64::from(*bit != 0)).collect(),
-                    array.shape.clone(),
-                )
-                .map_err(|error| {
-                    build_runtime_error(format!("{builtin}: invalid logical result: {error}"))
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                })?;
+                let storage = match provider.precision() {
+                    ProviderPrecision::F32 => NumericStorage::F32(
+                        array.data.iter().map(|bit| f32::from(*bit != 0)).collect(),
+                    ),
+                    ProviderPrecision::F64 => NumericStorage::F64(
+                        array.data.iter().map(|bit| f64::from(*bit != 0)).collect(),
+                    ),
+                };
+                let tensor = Tensor::from_numeric_storage(storage, array.shape.clone()).map_err(
+                    |error| {
+                        build_runtime_error(format!("{builtin}: invalid logical result: {error}"))
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                            .build()
+                    },
+                )?;
                 let output = upload_tensor(provider, &tensor).map_err(|error| {
                     build_runtime_error(format!("{builtin}: failed to restore GPU result: {error}"))
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -537,27 +614,38 @@ pub fn restore_class_preserving_value(
                 )
             }
             Value::ComplexTensor(tensor) => {
-                if tensor.integer_storage().is_some() {
-                    return Ok(value);
-                }
-                let expected_precision = match tensor.numeric_dtype() {
-                    NumericDType::F32 => ProviderPrecision::F32,
-                    _ => ProviderPrecision::F64,
-                };
-                if provider.precision() != expected_precision {
-                    return Ok(value);
-                }
-                let output = upload_complex_tensor(provider, tensor).map_err(|error| {
-                    build_runtime_error(format!("{builtin}: failed to restore GPU result: {error}"))
+                let expected_integer = tensor
+                    .integer_storage()
+                    .map(|storage| integer_element_type(&storage.real));
+                let expected_precision =
+                    expected_integer
+                        .is_none()
+                        .then(|| match tensor.numeric_dtype() {
+                            NumericDType::F32 => ProviderPrecision::F32,
+                            _ => ProviderPrecision::F64,
+                        });
+                let output = match upload_complex_tensor(provider, tensor) {
+                    Ok(output) => output,
+                    Err(_)
+                        if expected_integer.is_some()
+                            || expected_precision != Some(provider.precision()) =>
+                    {
+                        return Ok(value)
+                    }
+                    Err(error) => {
+                        return Err(build_runtime_error(format!(
+                            "{builtin}: failed to restore GPU result: {error}"
+                        ))
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                })?;
+                        .build())
+                    }
+                };
                 (
                     output,
                     tensor.shape.clone(),
                     GpuTensorStorage::ComplexInterleaved,
-                    Some(expected_precision),
-                    None,
+                    expected_precision,
+                    expected_integer,
                     false,
                 )
             }
@@ -619,9 +707,10 @@ pub fn upload_exact_integer_scalar_like(
         ($value:expr, $variant:ident) => {{
             let values = [$value];
             provider
-                .upload_integer(&HostIntegerTensorView {
-                    data: HostIntegerDataView::$variant(&values),
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::$variant(&values),
                     shape: &shape,
+                    storage: GpuTensorStorage::Real,
                 })
                 .ok()
         }};
@@ -676,6 +765,199 @@ mod preserving_download_tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[test]
+    fn central_runtime_transfer_round_trips_every_native_real_and_complex_class() {
+        test_support::with_test_provider(|provider| {
+            let real_cases = vec![
+                NumericStorage::F64(vec![-1.25, 2.5]),
+                NumericStorage::F32(vec![-1.25, 2.5]),
+                NumericStorage::I8(vec![i8::MIN, i8::MAX]),
+                NumericStorage::I16(vec![i16::MIN, i16::MAX]),
+                NumericStorage::I32(vec![i32::MIN, i32::MAX]),
+                NumericStorage::I64(vec![i64::MIN, i64::MAX]),
+                NumericStorage::U8(vec![0, u8::MAX]),
+                NumericStorage::U16(vec![0, u16::MAX]),
+                NumericStorage::U32(vec![0, u32::MAX]),
+                NumericStorage::U64(vec![1_u64 << 63, u64::MAX]),
+            ];
+            for storage in real_cases {
+                let expected = storage.clone();
+                let tensor = Tensor::from_numeric_storage(storage, vec![1, 2]).unwrap();
+                let handle = upload_tensor(provider, &tensor).expect("native real upload");
+                let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                    &Value::GpuTensor(handle.clone()),
+                ))
+                .expect("native real gather");
+                let Value::Tensor(gathered) = gathered else {
+                    panic!("real transfer reconstructed the wrong value kind")
+                };
+                assert_eq!(gathered.into_numeric_storage().unwrap(), expected);
+                provider.free(&handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(&handle);
+            }
+
+            macro_rules! integer_complex_case {
+                ($variant:ident, $real:expr, $imag:expr) => {
+                    ComplexStorage::Integer(
+                        IntegerComplexStorage::new(
+                            IntegerStorage::$variant($real),
+                            IntegerStorage::$variant($imag),
+                        )
+                        .unwrap(),
+                    )
+                };
+            }
+            let complex_cases = vec![
+                ComplexStorage::F64(vec![(-1.25, 3.5), (2.5, -4.75)]),
+                ComplexStorage::F32(vec![(-1.25, 3.5), (2.5, -4.75)]),
+                integer_complex_case!(I8, vec![i8::MIN, i8::MAX], vec![1, -1]),
+                integer_complex_case!(I16, vec![i16::MIN, i16::MAX], vec![1, -1]),
+                integer_complex_case!(I32, vec![i32::MIN, i32::MAX], vec![1, -1]),
+                integer_complex_case!(I64, vec![i64::MIN, i64::MAX], vec![1, -1]),
+                integer_complex_case!(U8, vec![0, u8::MAX], vec![1, 2]),
+                integer_complex_case!(U16, vec![0, u16::MAX], vec![1, 2]),
+                integer_complex_case!(U32, vec![0, u32::MAX], vec![1, 2]),
+                integer_complex_case!(U64, vec![1_u64 << 63, u64::MAX], vec![1, 2]),
+            ];
+            for storage in complex_cases {
+                let expected = storage.clone();
+                let tensor = ComplexTensor::from_complex_storage(storage, vec![1, 2]).unwrap();
+                let handle =
+                    upload_complex_tensor(provider, &tensor).expect("native complex upload");
+                let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                    &Value::GpuTensor(handle.clone()),
+                ))
+                .expect("native complex gather");
+                let Value::ComplexTensor(gathered) = gathered else {
+                    panic!("complex transfer reconstructed the wrong value kind")
+                };
+                assert_eq!(gathered.into_complex_storage(), expected);
+                provider.free(&handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(&handle);
+            }
+        });
+    }
+
+    #[test]
+    fn class_preserving_restore_uses_shared_single_and_complex_integer_storage() {
+        test_support::with_test_provider(|provider| {
+            let source =
+                upload_tensor(provider, &Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()).unwrap();
+            runmat_accelerate_api::mark_handle_automatic(&source);
+
+            let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).unwrap();
+            let restored =
+                restore_class_preserving_value(&source, Value::Tensor(single.clone()), "test")
+                    .expect("native single restore");
+            let Value::GpuTensor(single_handle) = restored else {
+                panic!("shared provider should preserve native single residency")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&single_handle),
+                Some(ProviderPrecision::F32)
+            );
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(single_handle.clone()),
+            ))
+            .unwrap();
+            assert_eq!(gathered, Value::Tensor(single));
+
+            let complex = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                    IntegerStorage::U64(vec![3, 4]),
+                )
+                .unwrap(),
+                vec![1, 2],
+            )
+            .unwrap();
+            let restored = restore_class_preserving_value(
+                &source,
+                Value::ComplexTensor(complex.clone()),
+                "test",
+            )
+            .expect("complex integer restore");
+            let Value::GpuTensor(complex_handle) = restored else {
+                panic!("shared provider should preserve complex integer residency")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&complex_handle),
+                Some(IntegerElementType::U64)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&complex_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(complex_handle.clone()),
+            ))
+            .unwrap();
+            assert_eq!(gathered, Value::ComplexTensor(complex));
+
+            let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
+            let restored = restore_class_preserving_value(
+                &source,
+                Value::LogicalArray(logical.clone()),
+                "test",
+            )
+            .expect("logical restore");
+            let Value::GpuTensor(logical_handle) = restored else {
+                panic!("logical restoration should retain residency")
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(&logical_handle));
+            assert_eq!(
+                runmat_accelerate_api::handle_class_name(&logical_handle).as_deref(),
+                Some("logical")
+            );
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(logical_handle.clone()),
+            ))
+            .unwrap();
+            assert_eq!(gathered, Value::LogicalArray(logical));
+
+            for handle in [&single_handle, &complex_handle, &logical_handle, &source] {
+                provider.free(handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(handle);
+            }
+        });
+    }
+
+    #[test]
+    fn class_preserving_logical_restore_uses_owner_physical_precision() {
+        test_support::with_f32_test_provider(|provider| {
+            let source = upload_tensor(
+                provider,
+                &Tensor::from_f32(vec![0.0, 0.0], vec![1, 2]).unwrap(),
+            )
+            .unwrap();
+            runmat_accelerate_api::mark_handle_automatic(&source);
+            let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
+            let restored = restore_class_preserving_value(
+                &source,
+                Value::LogicalArray(logical.clone()),
+                "test",
+            )
+            .expect("logical restore");
+            let Value::GpuTensor(handle) = restored else {
+                panic!("logical restoration should retain residency")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(ProviderPrecision::F32)
+            );
+            assert!(runmat_accelerate_api::handle_is_logical(&handle));
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(handle.clone()),
+            ))
+            .unwrap();
+            assert_eq!(gathered, Value::LogicalArray(logical));
+            for handle in [&handle, &source] {
+                provider.free(handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(handle);
+            }
+        });
+    }
 
     #[test]
     fn resident_output_source_prefers_explicit_intent_independent_of_order() {

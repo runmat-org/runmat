@@ -710,6 +710,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntegerComplexStorage, IntegerStorage, ResolveContext, Type};
 
     fn assert_close(actual: f64, expected: f64) {

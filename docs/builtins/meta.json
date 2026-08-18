@@ -64500,12 +64500,6 @@
           "message": "gpuArray: unsupported input type"
         },
         {
-          "code": "RM.GPUARRAY.TYPED_COMPLEX_INTEGER",
-          "identifier": "RunMat:gpuArray:TypedComplexIntegerUnsupported",
-          "when": "A typed complex integer array is uploaded without a matching provider storage format.",
-          "message": "gpuArray: typed complex integer arrays are not supported by the active acceleration provider"
-        },
-        {
           "code": "RM.GPUARRAY.TYPED_INTEGER",
           "identifier": "RunMat:gpuArray:TypedIntegerUnsupported",
           "when": "A native integer value or integer GPU class is requested without matching provider storage.",
@@ -64580,7 +64574,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "All eight integer classes upload as exact same-class gpuArray storage with the original shape."
+              "notes": "All eight integer classes upload as exact same-class real or paired-complex gpuArray storage with the original shape."
             }
           ],
           "computation_domain": "Structural",
@@ -64588,7 +64582,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "The transfer preserves exact values, class, and shape. An existing gpuArray input is returned unchanged and remains valid."
+          "notes": "The transfer preserves exact values, class, shape, and supported complexity. An existing gpuArray input is returned unchanged and remains valid."
         },
         {
           "form": "G = gpuArray(X, integer_dtype)",
