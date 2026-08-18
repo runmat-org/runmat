@@ -640,7 +640,6 @@ pub(crate) mod tests {
                 Some("RunMat:compatibility:AndComplexInputExtension")
             );
         }
-        runmat_accelerate_api::clear_handle_storage(&complex_handle);
         let chars = CharArray::new_row("A");
         let error = run_and(Value::CharArray(chars), Value::Bool(true))
             .expect_err("MATLAB mode rejects character arrays");

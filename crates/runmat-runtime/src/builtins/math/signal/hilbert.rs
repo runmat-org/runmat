@@ -623,44 +623,22 @@ fn valid_hilbert_gpu_output(
             .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
-type HilbertGpuMetadata = (
-    GpuTensorStorage,
-    Option<runmat_accelerate_api::ProviderPrecision>,
-    Option<runmat_accelerate_api::IntegerElementType>,
-    bool,
-);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct HilbertGpuMetadata {
+    descriptor: runmat_accelerate_api::GpuTensorDescriptor,
+    logical: bool,
+}
 
 fn hilbert_input_metadata(handle: &GpuTensorHandle) -> HilbertGpuMetadata {
-    (
-        runmat_accelerate_api::handle_storage(handle),
-        runmat_accelerate_api::handle_precision(handle),
-        runmat_accelerate_api::handle_integer_type(handle),
-        runmat_accelerate_api::handle_is_logical(handle),
-    )
+    HilbertGpuMetadata {
+        descriptor: handle.descriptor,
+        logical: runmat_accelerate_api::handle_is_logical(handle),
+    }
 }
 
 fn restore_hilbert_input_metadata(handle: &GpuTensorHandle, metadata: HilbertGpuMetadata) {
-    if handle.descriptor.storage.is_none() {
-        runmat_accelerate_api::set_handle_storage(handle, metadata.0);
-    } else {
-        runmat_accelerate_api::clear_handle_storage(handle);
-    }
-    if handle.descriptor.element_type.is_none() {
-        if let Some(precision) = metadata.1 {
-            runmat_accelerate_api::set_handle_precision(handle, precision);
-        } else {
-            runmat_accelerate_api::clear_handle_precision(handle);
-        }
-        if let Some(integer) = metadata.2 {
-            runmat_accelerate_api::set_handle_integer_type(handle, integer);
-        } else {
-            runmat_accelerate_api::clear_handle_integer_type(handle);
-        }
-    } else {
-        runmat_accelerate_api::clear_handle_precision(handle);
-        runmat_accelerate_api::clear_handle_integer_type(handle);
-    }
-    runmat_accelerate_api::set_handle_logical(handle, metadata.3);
+    debug_assert_eq!(handle.descriptor, metadata.descriptor);
+    runmat_accelerate_api::set_handle_logical(handle, metadata.logical);
 }
 
 fn hilbert_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {

@@ -59,9 +59,7 @@ pub fn select_resident_output_source(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GpuHandleMetadataSnapshot {
-    storage: GpuTensorStorage,
-    precision: Option<ProviderPrecision>,
-    integer: Option<IntegerElementType>,
+    descriptor: runmat_accelerate_api::GpuTensorDescriptor,
     logical: bool,
     transpose: Option<runmat_accelerate_api::TransposeInfo>,
     class_name: Option<String>,
@@ -70,9 +68,7 @@ pub struct GpuHandleMetadataSnapshot {
 
 pub fn snapshot_handle_metadata(handle: &GpuTensorHandle) -> GpuHandleMetadataSnapshot {
     GpuHandleMetadataSnapshot {
-        storage: runmat_accelerate_api::handle_storage(handle),
-        precision: runmat_accelerate_api::handle_precision(handle),
-        integer: runmat_accelerate_api::handle_integer_type(handle),
+        descriptor: handle.descriptor,
         logical: runmat_accelerate_api::handle_is_logical(handle),
         transpose: runmat_accelerate_api::handle_transpose_info(handle),
         class_name: runmat_accelerate_api::handle_class_name(handle),
@@ -81,24 +77,7 @@ pub fn snapshot_handle_metadata(handle: &GpuTensorHandle) -> GpuHandleMetadataSn
 }
 
 pub fn restore_handle_metadata(handle: &GpuTensorHandle, snapshot: &GpuHandleMetadataSnapshot) {
-    if handle.descriptor.storage.is_none() {
-        runmat_accelerate_api::set_handle_storage(handle, snapshot.storage);
-    } else {
-        runmat_accelerate_api::clear_handle_storage(handle);
-    }
-    if handle.descriptor.element_type.is_none() {
-        match snapshot.precision {
-            Some(precision) => runmat_accelerate_api::set_handle_precision(handle, precision),
-            None => runmat_accelerate_api::clear_handle_precision(handle),
-        }
-        match snapshot.integer {
-            Some(integer) => runmat_accelerate_api::set_handle_integer_type(handle, integer),
-            None => runmat_accelerate_api::clear_handle_integer_type(handle),
-        }
-    } else {
-        runmat_accelerate_api::clear_handle_precision(handle);
-        runmat_accelerate_api::clear_handle_integer_type(handle);
-    }
+    debug_assert_eq!(handle.descriptor, snapshot.descriptor);
     runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
     match snapshot.transpose {
         Some(info) => {
@@ -411,7 +390,7 @@ pub async fn download_value_preserving_residency_async(
             .build()
     })?;
     if host.shape != handle.shape
-        || host.storage != source_guard.snapshot.storage
+        || Some(host.storage) != source_guard.snapshot.descriptor.storage
         || host.data.element_type() != expected_element
     {
         return Err(provider_payload_mismatch(
@@ -422,7 +401,7 @@ pub async fn download_value_preserving_residency_async(
                 host.data.element_type(),
                 host.storage,
                 expected_element,
-                source_guard.snapshot.storage
+                source_guard.snapshot.descriptor.storage
             ),
         ));
     }
@@ -553,7 +532,7 @@ pub async fn download_floating_projection_async(
             .build()
     })?;
     if host.shape != handle.shape
-        || host.storage != source_guard.snapshot.storage
+        || Some(host.storage) != source_guard.snapshot.descriptor.storage
         || host.data.element_type() != expected_element
     {
         return Err(provider_payload_mismatch(
@@ -564,7 +543,7 @@ pub async fn download_floating_projection_async(
                 host.data.element_type(),
                 host.storage,
                 expected_element,
-                source_guard.snapshot.storage
+                source_guard.snapshot.descriptor.storage
             ),
         ));
     }
@@ -1441,10 +1420,11 @@ mod preserving_download_tests {
             shape: vec![1, 1],
             device_id: 0,
             buffer_id: u64::MAX - 8,
-            descriptor: Default::default(),
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            ),
         };
-        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F64);
         runmat_accelerate_api::set_handle_logical(&handle, false);
         runmat_accelerate_api::set_handle_class_name(&handle, "double");
         let result = block_on(download_value_preserving_residency_async(
@@ -1481,33 +1461,23 @@ mod preserving_download_tests {
     }
 
     #[test]
-    fn preserving_download_uses_durable_precision_and_validates_legacy_fallback() {
+    fn preserving_download_requires_durable_physical_metadata() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let handle = upload_tensor(provider, &tensor).expect("upload");
-            let contradictory = match provider.precision() {
-                ProviderPrecision::F32 => ProviderPrecision::F64,
-                ProviderPrecision::F64 => ProviderPrecision::F32,
-            };
-            runmat_accelerate_api::set_handle_precision(&handle, contradictory);
             let downloaded = block_on(download_value_preserving_residency_async(provider, &handle))
-                .expect("durable descriptor must outrank a stale side annotation");
+                .expect("durable descriptor must be accepted");
             assert!(matches!(downloaded, Value::Tensor(_)));
 
-            let mut legacy = handle.clone();
-            legacy.descriptor.element_type = None;
-            runmat_accelerate_api::clear_handle_precision(&legacy);
-            let missing = block_on(download_value_preserving_residency_async(provider, &legacy))
-                .expect_err("missing physical precision must reject");
+            let mut descriptorless = handle.clone();
+            descriptorless.descriptor.element_type = None;
+            let missing = block_on(download_value_preserving_residency_async(
+                provider,
+                &descriptorless,
+            ))
+            .expect_err("missing physical precision must reject");
             assert_eq!(
                 missing.identifier(),
-                Some("RunMat:gpu:ProviderPayloadMismatch")
-            );
-            runmat_accelerate_api::set_handle_precision(&legacy, contradictory);
-            let mismatch = block_on(download_value_preserving_residency_async(provider, &legacy))
-                .expect_err("contradictory physical precision must reject");
-            assert_eq!(
-                mismatch.identifier(),
                 Some("RunMat:gpu:ProviderPayloadMismatch")
             );
         });
@@ -1518,7 +1488,6 @@ mod preserving_download_tests {
 pub fn complex_gpu_value(mut handle: GpuTensorHandle) -> Value {
     handle.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
     runmat_accelerate_api::set_handle_logical(&handle, false);
-    runmat_accelerate_api::clear_handle_storage(&handle);
     resident_gpu_value(handle)
 }
 

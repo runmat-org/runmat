@@ -1589,7 +1589,6 @@ mod tests {
             error.identifier(),
             Some("RunMat:compatibility:BinorndIntegerTrialsExtension")
         );
-        runmat_accelerate_api::clear_handle_integer_type(&resident);
     }
 
     #[test]

@@ -735,7 +735,6 @@ mod tests {
                 Some("RunMat:compatibility:SincNonfloatingInputExtension")
             );
         }
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]

@@ -1102,7 +1102,6 @@ pub(crate) mod tests {
             error.identifier(),
             Some("RunMat:compatibility:FprintfResidentFormatExtension")
         );
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]

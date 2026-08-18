@@ -425,7 +425,6 @@ fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
         }
     }
 
-    runmat_accelerate_api::clear_handle_integer_type(&integer_handle);
     runmat_accelerate_api::clear_handle_logical(&logical_handle);
 }
 
@@ -1230,6 +1229,5 @@ fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dis
                 );
             }
         }
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 }

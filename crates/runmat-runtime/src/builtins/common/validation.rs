@@ -2706,7 +2706,6 @@ mod tests {
             provider
                 .free(&handle)
                 .expect("free payload before predicates");
-            runmat_accelerate_api::clear_handle_precision(&handle);
             runmat_accelerate_api::set_handle_logical(&handle, false);
             let value = Value::GpuTensor(handle.clone());
 

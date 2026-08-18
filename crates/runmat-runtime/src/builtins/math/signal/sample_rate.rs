@@ -2239,9 +2239,6 @@ mod tests {
             {
                 self.frees.fetch_add(1, Ordering::Relaxed);
             }
-            runmat_accelerate_api::clear_handle_precision(handle);
-            runmat_accelerate_api::clear_handle_storage(handle);
-            runmat_accelerate_api::clear_handle_integer_type(handle);
             runmat_accelerate_api::clear_handle_logical(handle);
             Ok(())
         }

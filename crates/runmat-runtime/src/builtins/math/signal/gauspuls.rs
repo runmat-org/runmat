@@ -989,8 +989,6 @@ mod tests {
             typed_resident_error.identifier(),
             GAUSPULS_INTEGER_TIME_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_integer_type(&resident);
-        runmat_accelerate_api::clear_handle_precision(&resident);
     }
 
     #[test]

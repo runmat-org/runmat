@@ -3489,7 +3489,6 @@ mod tests {
                 handle.descriptor.storage,
                 Some(GpuTensorStorage::ComplexInterleaved)
             );
-            runmat_accelerate_api::clear_handle_storage(handle);
             assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 GpuTensorStorage::ComplexInterleaved
@@ -3556,7 +3555,6 @@ mod tests {
                 handle.descriptor.storage,
                 Some(GpuTensorStorage::ComplexInterleaved)
             );
-            runmat_accelerate_api::clear_handle_storage(handle);
             assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 GpuTensorStorage::ComplexInterleaved

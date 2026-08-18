@@ -492,27 +492,6 @@ pub(crate) mod tests {
         });
     }
 
-    #[test]
-    fn deg2rad_ignores_stale_side_metadata_when_descriptor_is_authoritative() {
-        test_support::with_test_provider(|provider| {
-            let tensor = ComplexTensor::new(vec![(180.0, 90.0)], vec![1, 1]).expect("complex");
-            let input = gpu_helpers::upload_complex_tensor(provider, &tensor).expect("upload");
-            runmat_accelerate_api::set_handle_precision(
-                &input,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
-            let output = deg2rad_builtin(Value::GpuTensor(input))
-                .expect("durable descriptor must override stale side metadata");
-            let Value::GpuTensor(handle) = output else {
-                panic!("expected resident result")
-            };
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&handle),
-                Some(runmat_accelerate_api::ProviderPrecision::F64)
-            );
-        });
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deg2rad_string_errors() {

@@ -851,8 +851,6 @@ pub(crate) mod tests {
             {
                 self.frees.fetch_add(1, Ordering::Relaxed);
             }
-            runmat_accelerate_api::clear_handle_precision(handle);
-            runmat_accelerate_api::clear_handle_storage(handle);
             Ok(())
         }
 

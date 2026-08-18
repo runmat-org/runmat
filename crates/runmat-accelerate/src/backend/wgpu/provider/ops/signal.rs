@@ -2714,7 +2714,6 @@ mod tests {
                 output.descriptor.storage,
                 Some(GpuTensorStorage::ComplexInterleaved)
             );
-            runmat_accelerate_api::clear_handle_storage(&output);
             let host = pollster::block_on(provider.download(&output)).expect("download");
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.data.len() % 2, 0);

@@ -911,7 +911,6 @@ pub(crate) mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:DbNonfloatingInputExtension")
             );
-            runmat_accelerate_api::clear_handle_integer_type(&resident);
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);

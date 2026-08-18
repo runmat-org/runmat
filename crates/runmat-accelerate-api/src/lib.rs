@@ -32,13 +32,7 @@ static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<GpuHandleIdentity, u64>>> =
 static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<GpuHandleIdentity, TransposeInfo>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<GpuHandleIdentity, ProviderPrecision>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
 static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<GpuHandleIdentity, String>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_STORAGES: Lazy<RwLock<HashMap<GpuHandleIdentity, GpuTensorStorage>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static HANDLE_INTEGER_TYPES: Lazy<RwLock<HashMap<GpuHandleIdentity, IntegerElementType>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 pub const fn handle_identity(handle: &GpuTensorHandle) -> GpuHandleIdentity {
@@ -122,32 +116,12 @@ pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
     provider().and_then(|p| p.export_wgpu_buffer(handle))
 }
 
-/// Record fallback precision for a legacy handle without durable element metadata.
-///
-/// Provider-created handles must populate `descriptor.element_type`; when present,
-/// that durable physical type is authoritative over this compatibility annotation.
-pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecision) {
-    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.insert(handle_identity(handle), precision);
-    }
-}
-
-/// Look up the recorded precision for a GPU tensor handle, if any.
+/// Return the floating precision encoded by the handle's durable element type.
 pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
-    match handle.descriptor.element_type {
-        Some(element_type) => element_type.precision(),
-        None => HANDLE_PRECISIONS
-            .read()
-            .ok()
-            .and_then(|guard| guard.get(&handle_identity(handle)).copied()),
-    }
-}
-
-/// Clear any recorded precision metadata for a GPU tensor handle.
-pub fn clear_handle_precision(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
-        guard.remove(&handle_identity(handle));
-    }
+    handle
+        .descriptor
+        .element_type
+        .and_then(NumericElementType::precision)
 }
 
 /// Record the MATLAB underlying class associated with a GPU tensor handle.
@@ -306,32 +280,12 @@ impl IntegerElementType {
     }
 }
 
-/// Record fallback integer class metadata for a legacy handle.
-///
-/// Provider-created handles must populate `descriptor.element_type`; when present,
-/// that durable physical type is authoritative over this compatibility annotation.
-pub fn set_handle_integer_type(handle: &GpuTensorHandle, element_type: IntegerElementType) {
-    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
-        guard.insert(handle_identity(handle), element_type);
-    }
-}
-
 /// Look up the exact native integer class stored by a GPU tensor handle.
 pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementType> {
-    match handle.descriptor.element_type {
-        Some(element_type) => element_type.integer_type(),
-        None => HANDLE_INTEGER_TYPES
-            .read()
-            .ok()
-            .and_then(|guard| guard.get(&handle_identity(handle)).copied()),
-    }
-}
-
-/// Clear the native integer class annotation for a released handle.
-pub fn clear_handle_integer_type(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
-        guard.remove(&handle_identity(handle));
-    }
+    handle
+        .descriptor
+        .element_type
+        .and_then(NumericElementType::integer_type)
 }
 
 impl Default for GpuTensorStorage {
@@ -342,11 +296,11 @@ impl Default for GpuTensorStorage {
 
 /// Durable physical description of a provider-owned numeric buffer.
 ///
-/// Legacy and synthetic handles may leave fields unset while their creation
-/// sites migrate. Provider-created handles populate element type and storage
-/// at allocation time so cloning or serializing a handle does not discard its
-/// physical interpretation. Provenance is populated by ownership-aware
-/// runtime boundaries as those call sites migrate.
+/// Provider-created numeric handles populate element type and storage at
+/// allocation time so cloning or serializing a handle cannot discard its
+/// physical interpretation. A missing physical field is invalid at numeric
+/// provider boundaries. Provenance is populated by ownership-aware runtime
+/// boundaries.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GpuTensorDescriptor {
     pub element_type: Option<NumericElementType>,
@@ -439,12 +393,9 @@ pub fn handle_is_explicit(handle: &GpuTensorHandle) -> bool {
 /// available on existing handle values.
 pub fn clear_handle_metadata(handle: &GpuTensorHandle) {
     clear_residency(handle);
-    clear_handle_precision(handle);
     clear_handle_class_name(handle);
     clear_handle_logical(handle);
     clear_handle_transpose(handle);
-    clear_handle_storage(handle);
-    clear_handle_integer_type(handle);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -762,33 +713,8 @@ pub struct WgpuBufferRef {
     pub precision: ProviderPrecision,
 }
 
-/// Record fallback layout metadata for a legacy handle.
-///
-/// Provider-created handles must populate `descriptor.storage`; when present,
-/// that durable physical layout is authoritative over this compatibility annotation.
-pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
-    if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.insert(handle_identity(handle), storage);
-    }
-}
-
 pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
-    handle
-        .descriptor
-        .storage
-        .or_else(|| {
-            HANDLE_STORAGES
-                .read()
-                .ok()
-                .and_then(|guard| guard.get(&handle_identity(handle)).copied())
-        })
-        .unwrap_or(GpuTensorStorage::Real)
-}
-
-pub fn clear_handle_storage(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_STORAGES.write() {
-        guard.remove(&handle_identity(handle));
-    }
+    handle.descriptor.storage.unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1594,7 +1520,7 @@ pub trait AccelProvider: Send + Sync {
         host: &crate::HostNumericTensorView,
     ) -> anyhow::Result<GpuTensorHandle> {
         host.validate()?;
-        match (host.data, host.storage) {
+        let handle = match (host.data, host.storage) {
             (crate::HostNumericDataView::F64(data), GpuTensorStorage::Real) => {
                 self.upload(&crate::HostTensorView {
                     data,
@@ -1625,7 +1551,24 @@ pub trait AccelProvider: Send + Sync {
                 data.element_type(),
                 storage
             )),
+        }?;
+        let expected_element = host.data.element_type();
+        if handle.shape != host.shape
+            || handle.descriptor.element_type != Some(expected_element)
+            || handle.descriptor.storage != Some(host.storage)
+        {
+            let _ = self.free(&handle);
+            return Err(anyhow!(
+                "provider returned an invalid numeric upload descriptor: expected shape {:?}, element {:?}, storage {:?}; got shape {:?}, element {:?}, storage {:?}",
+                host.shape,
+                expected_element,
+                host.storage,
+                handle.shape,
+                handle.descriptor.element_type,
+                handle.descriptor.storage
+            ));
         }
+        Ok(handle)
     }
 
     /// Download one native numeric payload through the shared all-class
@@ -1634,28 +1577,33 @@ pub trait AccelProvider: Send + Sync {
     /// single data as native `f32`.
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
-            let storage = handle_storage(h);
-            if handle_integer_type(h).is_some() {
+            let element_type = h.descriptor.element_type.ok_or_else(|| {
+                anyhow!("numeric handle is missing its durable element descriptor")
+            })?;
+            let storage = h.descriptor.storage.ok_or_else(|| {
+                anyhow!("numeric handle is missing its durable storage descriptor")
+            })?;
+            if element_type.integer_type().is_some() {
                 if storage != GpuTensorStorage::Real {
                     return Err(anyhow!(
                         "provider must implement native complex integer downloads through download_numeric"
                     ));
                 }
-                let legacy = self.download_integer(h).await?;
-                let numeric: crate::HostNumericTensorOwned = legacy.into();
+                let downloaded = self.download_integer(h).await?;
+                let numeric: crate::HostNumericTensorOwned = downloaded.into();
                 numeric.validate()?;
                 return Ok(numeric);
             }
-            if handle_precision(h) == Some(ProviderPrecision::F32) {
+            if element_type == NumericElementType::F32 {
                 return Err(anyhow!(
                     "provider must implement native single downloads through download_numeric"
                 ));
             }
-            let legacy = self.download(h).await?;
+            let downloaded = self.download(h).await?;
             let numeric = crate::HostNumericTensorOwned {
-                data: crate::HostNumericDataOwned::F64(legacy.data),
-                shape: legacy.shape,
-                storage: legacy.storage,
+                data: crate::HostNumericDataOwned::F64(downloaded.data),
+                shape: downloaded.shape,
+                storage: downloaded.storage,
             };
             numeric.validate()?;
             Ok(numeric)
@@ -4453,16 +4401,19 @@ mod tests {
         spawn_concurrency: SpawnHandleConcurrency,
     }
 
-    struct LegacyNumericProvider;
+    struct DefaultNumericAdapterProvider;
 
-    impl AccelProvider for LegacyNumericProvider {
+    impl AccelProvider for DefaultNumericAdapterProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
             assert_eq!(host.data, &[1.0, 2.0]);
             Ok(GpuTensorHandle {
                 shape: host.shape.to_vec(),
                 device_id: 404,
                 buffer_id: 1,
-                descriptor: Default::default(),
+                descriptor: GpuTensorDescriptor::numeric(
+                    NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                ),
             })
         }
 
@@ -4478,14 +4429,15 @@ mod tests {
 
         fn upload_integer(&self, host: &HostIntegerTensorView) -> anyhow::Result<GpuTensorHandle> {
             assert!(matches!(host.data, HostIntegerDataView::U64([1, u64::MAX])));
-            let handle = GpuTensorHandle {
+            Ok(GpuTensorHandle {
                 shape: host.shape.to_vec(),
                 device_id: 404,
                 buffer_id: 2,
-                descriptor: Default::default(),
-            };
-            set_handle_integer_type(&handle, IntegerElementType::U64);
-            Ok(handle)
+                descriptor: GpuTensorDescriptor::numeric(
+                    NumericElementType::U64,
+                    GpuTensorStorage::Real,
+                ),
+            })
         }
 
         fn download_integer<'a>(
@@ -4694,7 +4646,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_handle_descriptor_survives_clone_serialization_and_side_table_cleanup() {
+    fn gpu_handle_descriptor_survives_clone_serialization_and_semantic_metadata_cleanup() {
         let handle = GpuTensorHandle::new(vec![2, 3], 17, 29)
             .with_numeric_descriptor(
                 NumericElementType::U64,
@@ -4728,14 +4680,11 @@ mod tests {
     }
 
     #[test]
-    fn durable_physical_descriptor_wins_over_conflicting_legacy_annotations() {
+    fn durable_physical_descriptor_is_the_only_numeric_authority() {
         let floating = GpuTensorHandle::new(vec![1, 2], 23, 31).with_numeric_descriptor(
             NumericElementType::F32,
             GpuTensorStorage::ComplexInterleaved,
         );
-        set_handle_precision(&floating, ProviderPrecision::F64);
-        set_handle_integer_type(&floating, IntegerElementType::U64);
-        set_handle_storage(&floating, GpuTensorStorage::Real);
 
         assert_eq!(handle_precision(&floating), Some(ProviderPrecision::F32));
         assert_eq!(handle_integer_type(&floating), None);
@@ -4748,8 +4697,6 @@ mod tests {
 
         let integer = GpuTensorHandle::new(vec![1, 2], 37, 41)
             .with_numeric_descriptor(NumericElementType::U64, GpuTensorStorage::Real);
-        set_handle_precision(&integer, ProviderPrecision::F32);
-        set_handle_integer_type(&integer, IntegerElementType::I8);
 
         assert_eq!(handle_precision(&integer), None);
         assert_eq!(handle_integer_type(&integer), Some(IntegerElementType::U64));
@@ -4758,8 +4705,30 @@ mod tests {
     }
 
     #[test]
+    fn removed_physical_side_metadata_surface_stays_absent() {
+        let source = include_str!("lib.rs");
+        let forbidden = [
+            ["set_handle_", "precision"].concat(),
+            ["set_handle_", "integer_type"].concat(),
+            ["set_handle_", "storage"].concat(),
+            ["clear_handle_", "precision"].concat(),
+            ["clear_handle_", "integer_type"].concat(),
+            ["clear_handle_", "storage"].concat(),
+            ["HANDLE_", "PRECISIONS"].concat(),
+            ["HANDLE_", "INTEGER_TYPES"].concat(),
+            ["HANDLE_", "STORAGES"].concat(),
+        ];
+        for symbol in forbidden {
+            assert!(
+                !source.contains(&symbol),
+                "removed symbol returned: {symbol}"
+            );
+        }
+    }
+
+    #[test]
     fn numeric_transfer_default_adapter_preserves_double_and_integer_storage() {
-        let provider = LegacyNumericProvider;
+        let provider = DefaultNumericAdapterProvider;
         let double = HostNumericTensorView {
             data: HostNumericDataView::F64(&[1.0, 2.0]),
             shape: &[1, 2],
@@ -4794,7 +4763,7 @@ mod tests {
 
     #[test]
     fn numeric_transfer_default_adapter_rejects_widened_single_and_complex_integer() {
-        let provider = LegacyNumericProvider;
+        let provider = DefaultNumericAdapterProvider;
         let single = HostNumericTensorView {
             data: HostNumericDataView::F32(&[1.0, 2.0]),
             shape: &[1, 2],
@@ -4813,9 +4782,11 @@ mod tests {
             shape: vec![1, 2],
             device_id: 404,
             buffer_id: 3,
-            descriptor: Default::default(),
+            descriptor: GpuTensorDescriptor::numeric(
+                NumericElementType::F32,
+                GpuTensorStorage::Real,
+            ),
         };
-        set_handle_precision(&single_handle, ProviderPrecision::F32);
         let error = resolve_ready(provider.download_numeric(&single_handle))
             .expect_err("widened single download must reject");
         assert!(error.to_string().contains("native single"));
@@ -4825,39 +4796,42 @@ mod tests {
             shape: vec![1, 2],
             device_id: 404,
             buffer_id: 4,
-            descriptor: Default::default(),
+            descriptor: GpuTensorDescriptor::numeric(
+                NumericElementType::I16,
+                GpuTensorStorage::ComplexInterleaved,
+            ),
         };
-        set_handle_integer_type(&complex_integer_handle, IntegerElementType::I16);
-        set_handle_storage(
-            &complex_integer_handle,
-            GpuTensorStorage::ComplexInterleaved,
-        );
         let error = resolve_ready(provider.download_numeric(&complex_integer_handle))
             .expect_err("complex integer default download must reject");
         assert!(error.to_string().contains("complex integer"));
         clear_handle_metadata(&complex_integer_handle);
+
+        let descriptorless = GpuTensorHandle::new(vec![1, 2], 404, 5);
+        let error = resolve_ready(provider.download_numeric(&descriptorless))
+            .expect_err("descriptorless numeric download must reject");
+        assert!(error.to_string().contains("durable element descriptor"));
     }
 
     #[test]
-    fn handle_metadata_is_namespaced_by_device_and_buffer() {
-        let mut first = test_handle(PROVIDER_A.device_id());
-        let mut second = test_handle(PROVIDER_B.device_id());
+    fn semantic_handle_metadata_is_namespaced_by_device_and_buffer() {
+        let mut first = test_handle(PROVIDER_A.device_id())
+            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
+        let mut second = test_handle(PROVIDER_B.device_id()).with_numeric_descriptor(
+            NumericElementType::U64,
+            GpuTensorStorage::ComplexInterleaved,
+        );
         clear_handle_metadata(&first);
         clear_handle_metadata(&second);
 
-        set_handle_precision(&first, ProviderPrecision::F32);
-        set_handle_precision(&second, ProviderPrecision::F64);
         set_handle_class_name(&first, "single");
         set_handle_class_name(&second, "uint64");
-        set_handle_integer_type(&second, IntegerElementType::U64);
         set_handle_logical(&first, true);
         record_handle_transpose(&first, 2, 3);
-        set_handle_storage(&second, GpuTensorStorage::ComplexInterleaved);
         mark_handle_automatic(&mut first);
         mark_handle_explicit(&mut second);
 
         assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
-        assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
+        assert_eq!(handle_precision(&second), None);
         assert_eq!(handle_class_name(&first).as_deref(), Some("logical"));
         assert_eq!(handle_class_name(&second).as_deref(), Some("uint64"));
         assert_eq!(handle_integer_type(&first), None);
@@ -4881,15 +4855,15 @@ mod tests {
         assert!(handle_is_explicit(&second));
 
         clear_handle_metadata(&first);
-        assert_eq!(handle_precision(&first), None);
-        assert_eq!(handle_class_name(&first), None);
+        assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
+        assert_eq!(handle_class_name(&first).as_deref(), Some("single"));
         assert!(!handle_is_logical(&first));
         assert_eq!(handle_transpose_info(&first), None);
         assert_eq!(
             handle_provenance(&first),
             Some(GpuHandleProvenance::Automatic)
         );
-        assert_eq!(handle_precision(&second), Some(ProviderPrecision::F64));
+        assert_eq!(handle_precision(&second), None);
         assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
         assert!(handle_is_explicit(&second));
         clear_handle_metadata(&second);

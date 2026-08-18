@@ -10466,9 +10466,6 @@ mod tests {
                     .expect("shared native upload");
                 assert_eq!(handle.descriptor.element_type, Some(expected_type));
                 assert_eq!(handle.descriptor.storage, Some(storage));
-                runmat_accelerate_api::clear_handle_precision(&handle);
-                runmat_accelerate_api::clear_handle_integer_type(&handle);
-                runmat_accelerate_api::clear_handle_storage(&handle);
                 runmat_accelerate_api::clear_handle_class_name(&handle);
                 assert_eq!(runmat_accelerate_api::handle_storage(&handle), storage);
                 assert_eq!(
@@ -11464,7 +11461,6 @@ mod tests {
                 Some(NumericElementType::F32)
             );
             assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
-            runmat_accelerate_api::clear_handle_precision(output);
             runmat_accelerate_api::clear_handle_class_name(output);
         }
         let x_output = block_on(provider.download_numeric(&result.outputs[0]))
@@ -11708,7 +11704,7 @@ mod tests {
     }
 
     #[test]
-    fn upload_overwrites_stale_handle_metadata() {
+    fn upload_overwrites_stale_semantic_handle_metadata() {
         let provider = InProcessProvider::new();
         provider.next_id.store(9_000_000, Ordering::Relaxed);
         let stale = GpuTensorHandle {
@@ -11717,8 +11713,6 @@ mod tests {
             buffer_id: 9_000_000,
             descriptor: Default::default(),
         };
-        runmat_accelerate_api::set_handle_precision(&stale, ProviderPrecision::F32);
-        runmat_accelerate_api::set_handle_storage(&stale, GpuTensorStorage::ComplexInterleaved);
         runmat_accelerate_api::set_handle_logical(&stale, true);
 
         let data = [1.0, 2.0, 3.0];

@@ -343,42 +343,22 @@ pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool 
     left.device_id == right.device_id && left.buffer_id == right.buffer_id
 }
 
-pub type GpuMetadataSnapshot = (
-    GpuTensorStorage,
-    Option<runmat_accelerate_api::ProviderPrecision>,
-    Option<IntegerElementType>,
-    bool,
-);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuMetadataSnapshot {
+    descriptor: runmat_accelerate_api::GpuTensorDescriptor,
+    logical: bool,
+}
 
 pub fn gpu_metadata_snapshot(handle: &GpuTensorHandle) -> GpuMetadataSnapshot {
-    (
-        runmat_accelerate_api::handle_storage(handle),
-        runmat_accelerate_api::handle_precision(handle),
-        runmat_accelerate_api::handle_integer_type(handle),
-        runmat_accelerate_api::handle_is_logical(handle),
-    )
+    GpuMetadataSnapshot {
+        descriptor: handle.descriptor,
+        logical: runmat_accelerate_api::handle_is_logical(handle),
+    }
 }
 
 pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnapshot) {
-    if handle.descriptor.storage.is_none() {
-        runmat_accelerate_api::set_handle_storage(handle, snapshot.0);
-    } else {
-        runmat_accelerate_api::clear_handle_storage(handle);
-    }
-    if handle.descriptor.element_type.is_none() {
-        match snapshot.1 {
-            Some(precision) => runmat_accelerate_api::set_handle_precision(handle, precision),
-            None => runmat_accelerate_api::clear_handle_precision(handle),
-        }
-        match snapshot.2 {
-            Some(integer) => runmat_accelerate_api::set_handle_integer_type(handle, integer),
-            None => runmat_accelerate_api::clear_handle_integer_type(handle),
-        }
-    } else {
-        runmat_accelerate_api::clear_handle_precision(handle);
-        runmat_accelerate_api::clear_handle_integer_type(handle);
-    }
-    runmat_accelerate_api::set_handle_logical(handle, snapshot.3);
+    debug_assert_eq!(handle.descriptor, snapshot.descriptor);
+    runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
 }
 
 pub fn provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {

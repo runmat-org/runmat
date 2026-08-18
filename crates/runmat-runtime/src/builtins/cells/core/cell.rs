@@ -908,7 +908,6 @@ pub(crate) mod tests {
             gpu.identifier(),
             Some("RunMat:compatibility:CellGpuSizeExtension")
         );
-        runmat_accelerate_api::clear_handle_integer_type(&resident);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

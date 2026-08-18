@@ -2046,7 +2046,6 @@ pub(crate) mod tests {
         let result = run_getfield(Value::Struct(st), vec![Value::from("values")])
             .expect("direct resident field");
         assert_eq!(result, Value::GpuTensor(handle.clone()));
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]

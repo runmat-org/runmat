@@ -1729,7 +1729,6 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(ecdf_builtin(vec![Value::GpuTensor(handle.clone())]))
             .expect_err("resident integer y must gate before gather");
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
         assert_eq!(
             error.identifier(),
             ECDF_INTEGER_Y_EXTENSION.error_identifier

@@ -86,9 +86,6 @@ pub(crate) async fn gather_value(name: &'static str, value: &Value) -> BuiltinRe
 
 #[derive(Clone)]
 struct ResidentMetadata {
-    storage: GpuTensorStorage,
-    precision: Option<ProviderPrecision>,
-    integer: Option<IntegerElementType>,
     logical: bool,
     transpose: Option<runmat_accelerate_api::TransposeInfo>,
     class_name: Option<String>,
@@ -128,9 +125,6 @@ pub(crate) fn protect_resident_inputs(sources: &[GpuTensorHandle]) -> ResidentIn
 impl ResidentMetadata {
     fn capture(handle: &GpuTensorHandle) -> Self {
         Self {
-            storage: runmat_accelerate_api::handle_storage(handle),
-            precision: runmat_accelerate_api::handle_precision(handle),
-            integer: runmat_accelerate_api::handle_integer_type(handle),
             logical: runmat_accelerate_api::handle_is_logical(handle),
             transpose: runmat_accelerate_api::handle_transpose_info(handle),
             class_name: runmat_accelerate_api::handle_class_name(handle),
@@ -138,15 +132,6 @@ impl ResidentMetadata {
     }
 
     fn restore(&self, handle: &GpuTensorHandle) {
-        runmat_accelerate_api::set_handle_storage(handle, self.storage);
-        match self.precision {
-            Some(value) => runmat_accelerate_api::set_handle_precision(handle, value),
-            None => runmat_accelerate_api::clear_handle_precision(handle),
-        }
-        match self.integer {
-            Some(value) => runmat_accelerate_api::set_handle_integer_type(handle, value),
-            None => runmat_accelerate_api::clear_handle_integer_type(handle),
-        }
         runmat_accelerate_api::set_handle_logical(handle, self.logical);
         match self.transpose {
             Some(info) => runmat_accelerate_api::record_handle_transpose(

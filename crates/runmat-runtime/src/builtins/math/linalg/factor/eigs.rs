@@ -1782,7 +1782,6 @@ mod tests {
                 Some("RunMat:compatibility:EigsGpuInputExtension")
             );
         }
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]

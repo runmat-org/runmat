@@ -2301,7 +2301,6 @@ mod tests {
                 Some("RunMat:compatibility:DecompositionGpuInputExtension")
             );
         }
-        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]
