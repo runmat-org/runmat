@@ -1,3 +1,4 @@
+mod adaptive_refinement;
 mod carving;
 mod constraints;
 mod facet_recovery;
@@ -13,6 +14,12 @@ mod volume_quality;
 mod volume_refinement;
 mod volume_sliver;
 
+pub use adaptive_refinement::{
+    refine_marked_delaunay_volume, validate_marked_delaunay_volume_refinement,
+    DelaunayAdaptiveRefinementDecision, DelaunayAdaptiveRefinementError,
+    DelaunayAdaptiveRefinementErrorKind, DelaunayAdaptiveRefinementMark,
+    DelaunayAdaptiveRefinementOptions, DelaunayAdaptiveRefinementResult,
+};
 pub use carving::{
     carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
     DelaunayCarvingError, DelaunayCarvingErrorKind, DelaunayCarvingOptions,

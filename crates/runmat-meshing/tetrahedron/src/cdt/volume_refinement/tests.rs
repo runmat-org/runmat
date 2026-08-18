@@ -5,9 +5,11 @@ use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, Met
 use super::*;
 use crate::cdt::{
     assign_delaunay_volume_regions, build_delaunay_volume_topology,
-    evaluate_delaunay_volume_quality, insert_delaunay_volume_node, DelaunayFacetProvenance,
-    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunaySegmentProvenance,
-    DelaunayTopologyOptions,
+    evaluate_delaunay_volume_quality, insert_delaunay_volume_node, refine_marked_delaunay_volume,
+    validate_marked_delaunay_volume_refinement, DelaunayAdaptiveRefinementDecision,
+    DelaunayAdaptiveRefinementErrorKind, DelaunayAdaptiveRefinementMark,
+    DelaunayAdaptiveRefinementOptions, DelaunayFacetProvenance, DelaunayInsertionErrorKind,
+    DelaunayInsertionOptions, DelaunaySegmentProvenance, DelaunayTopologyOptions,
 };
 
 fn region() -> PersistentEntityId {
@@ -161,6 +163,42 @@ fn two_region_topology() -> DelaunayVolumeTopology {
         &NeverCancelled,
     )
     .unwrap()
+}
+
+fn two_region_provenance() -> DelaunayVolumeProvenance {
+    DelaunayVolumeProvenance {
+        nodes: Vec::new(),
+        segments: vec![DelaunaySegmentProvenance {
+            node_identities: [
+                StableDigest::from_bytes([2; 32]),
+                StableDigest::from_bytes([3; 32]),
+            ],
+            entity_ids: vec![edge("interface-edge")],
+            edge_parameters: [0.0, 1.0],
+        }],
+        facets: vec![
+            DelaunayFacetProvenance {
+                node_identities: [
+                    StableDigest::from_bytes([1; 32]),
+                    StableDigest::from_bytes([3; 32]),
+                    StableDigest::from_bytes([4; 32]),
+                ],
+                chart_id: StableDigest::from_bytes([40; 32]),
+                entity_ids: vec![face("left-boundary")],
+                region_ids: vec![named_region("left")],
+            },
+            DelaunayFacetProvenance {
+                node_identities: [
+                    StableDigest::from_bytes([2; 32]),
+                    StableDigest::from_bytes([3; 32]),
+                    StableDigest::from_bytes([4; 32]),
+                ],
+                chart_id: StableDigest::from_bytes([41; 32]),
+                entity_ids: vec![face("interface")],
+                region_ids: vec![named_region("left"), named_region("right")],
+            },
+        ],
+    }
 }
 
 #[test]
@@ -396,39 +434,7 @@ fn refinement_handles_convergence_tampering_limits_and_cancellation() {
 #[test]
 fn refinement_insertion_preserves_region_interface_and_rederives_quality() {
     let two_region = two_region_topology();
-    let provenance = DelaunayVolumeProvenance {
-        nodes: Vec::new(),
-        segments: vec![DelaunaySegmentProvenance {
-            node_identities: [
-                StableDigest::from_bytes([2; 32]),
-                StableDigest::from_bytes([3; 32]),
-            ],
-            entity_ids: vec![edge("interface-edge")],
-            edge_parameters: [0.0, 1.0],
-        }],
-        facets: vec![
-            DelaunayFacetProvenance {
-                node_identities: [
-                    StableDigest::from_bytes([1; 32]),
-                    StableDigest::from_bytes([3; 32]),
-                    StableDigest::from_bytes([4; 32]),
-                ],
-                chart_id: StableDigest::from_bytes([40; 32]),
-                entity_ids: vec![face("left-boundary")],
-                region_ids: vec![named_region("left")],
-            },
-            DelaunayFacetProvenance {
-                node_identities: [
-                    StableDigest::from_bytes([2; 32]),
-                    StableDigest::from_bytes([3; 32]),
-                    StableDigest::from_bytes([4; 32]),
-                ],
-                chart_id: StableDigest::from_bytes([41; 32]),
-                entity_ids: vec![face("interface")],
-                region_ids: vec![named_region("left"), named_region("right")],
-            },
-        ],
-    };
+    let provenance = two_region_provenance();
     let metric_request = metric();
     let quality_options = DelaunayVolumeQualityOptions {
         maximum_metric_edge_length: 0.5,
@@ -713,5 +719,188 @@ fn refinement_loop_fails_closed_on_nonconvergence_budget_and_cancellation() {
             .unwrap_err()
             .kind,
         DelaunayVolumeRefinementStepErrorKind::Cancelled
+    );
+}
+
+#[test]
+fn marked_adaptation_is_local_deterministic_replayable_and_bounded() {
+    let topology = two_region_topology();
+    let provenance = two_region_provenance();
+    let metric_request = metric();
+    let quality_options = DelaunayVolumeQualityOptions {
+        maximum_metric_edge_length: 10.0,
+        maximum_radius_edge_ratio: 10.0,
+        ..DelaunayVolumeQualityOptions::default()
+    };
+    let quality = evaluate_delaunay_volume_quality(
+        &topology,
+        &metric_request,
+        &provenance,
+        quality_options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    let input = refinement_input(
+        &topology,
+        &metric_request,
+        &provenance,
+        &quality,
+        quality_options,
+    );
+    let marks = quality
+        .tetrahedra
+        .iter()
+        .enumerate()
+        .map(|(index, tetrahedron)| DelaunayAdaptiveRefinementMark {
+            node_identities: tetrahedron.node_identities,
+            indicator_value: (index + 1) as f64,
+        })
+        .collect::<Vec<_>>();
+    let first = refine_marked_delaunay_volume(
+        input,
+        &marks,
+        DelaunayAdaptiveRefinementOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let second = refine_marked_delaunay_volume(
+        input,
+        &marks.iter().copied().rev().collect::<Vec<_>>(),
+        DelaunayAdaptiveRefinementOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.topology.nodes.len(), topology.nodes.len() + 2);
+    assert!(first.decisions.iter().all(|decision| matches!(
+        decision,
+        DelaunayAdaptiveRefinementDecision::Inserted { .. }
+    )));
+    validate_marked_delaunay_volume_refinement(
+        input,
+        &marks,
+        &first,
+        DelaunayAdaptiveRefinementOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    let mut tampered = first.clone();
+    tampered.decisions.swap(0, 1);
+    assert_eq!(
+        validate_marked_delaunay_volume_refinement(
+            input,
+            &marks,
+            &tampered,
+            DelaunayAdaptiveRefinementOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::InvalidResult
+    );
+    let mut tampered = first.clone();
+    tampered.quality.tetrahedra[0].maximum_metric_edge_length *= 2.0;
+    assert_eq!(
+        validate_marked_delaunay_volume_refinement(
+            input,
+            &marks,
+            &tampered,
+            DelaunayAdaptiveRefinementOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::InvalidResult
+    );
+    assert_eq!(
+        refine_marked_delaunay_volume(
+            input,
+            &marks,
+            DelaunayAdaptiveRefinementOptions {
+                maximum_insertions: 1,
+                ..DelaunayAdaptiveRefinementOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::ResourceLimit
+    );
+    assert_eq!(
+        refine_marked_delaunay_volume(
+            input,
+            &[marks[0], marks[0]],
+            DelaunayAdaptiveRefinementOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::InvalidMarks
+    );
+    for invalid_mark in [
+        DelaunayAdaptiveRefinementMark {
+            indicator_value: f64::NAN,
+            ..marks[0]
+        },
+        DelaunayAdaptiveRefinementMark {
+            indicator_value: 0.0,
+            ..marks[0]
+        },
+        DelaunayAdaptiveRefinementMark {
+            node_identities: [StableDigest::from_bytes([99; 32]); 4],
+            ..marks[0]
+        },
+    ] {
+        assert_eq!(
+            refine_marked_delaunay_volume(
+                input,
+                &[invalid_mark],
+                DelaunayAdaptiveRefinementOptions::default(),
+                &NeverCancelled,
+            )
+            .unwrap_err()
+            .kind,
+            DelaunayAdaptiveRefinementErrorKind::InvalidMarks
+        );
+    }
+    assert_eq!(
+        refine_marked_delaunay_volume(
+            input,
+            &marks,
+            DelaunayAdaptiveRefinementOptions {
+                maximum_marks: 1,
+                ..DelaunayAdaptiveRefinementOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::ResourceLimit
+    );
+    assert_eq!(
+        refine_marked_delaunay_volume(
+            input,
+            &marks,
+            DelaunayAdaptiveRefinementOptions {
+                cancellation_check_interval: 0,
+                ..DelaunayAdaptiveRefinementOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::InvalidOptions
+    );
+    assert_eq!(
+        refine_marked_delaunay_volume(
+            input,
+            &marks,
+            DelaunayAdaptiveRefinementOptions::default(),
+            &Cancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::Cancelled
     );
 }
