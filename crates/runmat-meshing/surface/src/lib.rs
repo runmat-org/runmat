@@ -3,6 +3,7 @@
 pub const CRATE_PURPOSE: &str = "face-domain triangulation, loop recovery, and surface validation";
 
 mod exact_metric;
+mod face_geometry;
 mod math;
 
 pub mod contract;
@@ -31,6 +32,11 @@ pub use exact_cdt::{
 pub use exact_metric::{
     validate_exact_face_metric_evaluation, ExactFaceMetricError, ExactFaceMetricErrorKind,
     ExactFaceMetricEvaluation, ParametricMetricTensor, ResolvedFaceMetricField,
+};
+pub use face_geometry::{
+    evaluate_exact_face_geometry, validate_exact_face_geometry, ExactFaceGeometry,
+    ExactFaceGeometryError, ExactFaceGeometryErrorKind, ExactFaceGeometryVertex,
+    ExactFaceTriangleGeometry,
 };
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
