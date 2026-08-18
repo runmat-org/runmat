@@ -3,12 +3,14 @@ use runmat_meshing_core::MetricFieldRequest;
 use runmat_meshing_curve::SharedCurveSegmentSplit;
 
 use crate::{
-    ExactFaceMetricError, ExactFacePslg, ExactFacePslgSegmentSource, ResolvedFaceMetricField,
+    exact_face_chart_cut_node_id, ExactFaceMetricError, ExactFacePslg, ExactFacePslgSegmentSource,
+    ResolvedFaceMetricField,
 };
 
 use super::{
-    ExactFaceCandidateDisposition, ExactFaceRefinementCandidate, ExactFaceRefinementError,
-    ExactFaceRefinementErrorKind, ExactProtectedSegmentSplit,
+    ExactChartCutSplit, ExactChartCutSplitImage, ExactFaceCandidateDisposition,
+    ExactFaceRefinementCandidate, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
+    ExactProtectedSegmentSplit,
 };
 
 pub fn classify_exact_face_refinement_candidate(
@@ -70,15 +72,14 @@ pub fn classify_exact_face_refinement_candidate(
             ));
         }
         if diametral_product <= 0.0 {
-            let ExactFacePslgSegmentSource::ExactTrim {
-                source_coedge_id,
-                source_edge_id,
-            } = &segment.source
-            else {
-                return Err(invalid(
-                    &pslg.source_face_id,
-                    "chart-cut refinement requires a face-owned protected split",
-                ));
+            let (source_coedge_id, source_edge_id) = match &segment.source {
+                ExactFacePslgSegmentSource::ExactTrim {
+                    source_coedge_id,
+                    source_edge_id,
+                } => (source_coedge_id, source_edge_id),
+                ExactFacePslgSegmentSource::ChartCut { cut_id } => {
+                    return chart_cut_split(pslg, segment_index, *cut_id);
+                }
             };
             let Some(segment_parameters) = segment.edge_parameters else {
                 return Err(invalid(
@@ -126,6 +127,79 @@ pub fn classify_exact_face_refinement_candidate(
         }
     }
     Ok(ExactFaceCandidateDisposition::Insert)
+}
+
+fn chart_cut_split(
+    pslg: &ExactFacePslg,
+    segment_index: usize,
+    cut_id: runmat_meshing_core::StableDigest,
+) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
+    let segment = &pslg.segments[segment_index];
+    if segment.edge_parameters.is_some() {
+        return Err(invalid(
+            &pslg.source_face_id,
+            "chart cut cannot carry exact curve parameters",
+        ));
+    }
+    let endpoint_node_ids = segment
+        .vertex_indices
+        .map(|index| pslg.vertices[index as usize].node_id);
+    if endpoint_node_ids[0] == endpoint_node_ids[1] {
+        return Err(invalid(
+            &pslg.source_face_id,
+            "chart cut endpoints must have distinct 3D identities",
+        ));
+    }
+    let mut counterparts = pslg
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(index, candidate)| {
+            *index != segment_index
+                && candidate.source == ExactFacePslgSegmentSource::ChartCut { cut_id }
+                && candidate.edge_parameters.is_none()
+                && candidate
+                    .vertex_indices
+                    .map(|vertex| pslg.vertices[vertex as usize].node_id)
+                    == [endpoint_node_ids[1], endpoint_node_ids[0]]
+        });
+    let Some((counterpart_index, counterpart)) = counterparts.next() else {
+        return Err(invalid(
+            &pslg.source_face_id,
+            "chart cut has no reversed periodic image",
+        ));
+    };
+    if counterparts.next().is_some() {
+        return Err(invalid(
+            &pslg.source_face_id,
+            "chart cut has ambiguous reversed periodic images",
+        ));
+    }
+    let image = |index: usize, vertices: [u32; 2]| ExactChartCutSplitImage {
+        pslg_segment_index: index as u32,
+        vertex_indices: vertices,
+        midpoint_uv: midpoint(vertices.map(|vertex| pslg.vertices[vertex as usize].uv)),
+    };
+    let mut images = [
+        image(segment_index, segment.vertex_indices),
+        image(counterpart_index, counterpart.vertex_indices),
+    ];
+    images.sort_by_key(|image| image.pslg_segment_index);
+    Ok(ExactFaceCandidateDisposition::SplitChartCut(Box::new(
+        ExactChartCutSplit {
+            source_face_id: pslg.source_face_id.clone(),
+            cut_id,
+            node_id: exact_face_chart_cut_node_id(cut_id, endpoint_node_ids),
+            images,
+        },
+    )))
+}
+
+fn midpoint(endpoints: [[f64; 2]; 2]) -> [f64; 2] {
+    [
+        endpoints[0][0] * 0.5 + endpoints[1][0] * 0.5,
+        endpoints[0][1] * 0.5 + endpoints[1][1] * 0.5,
+    ]
 }
 
 fn metric(

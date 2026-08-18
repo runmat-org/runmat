@@ -32,6 +32,7 @@ pub struct ExactFaceRefinementCandidate {
 pub enum ExactFaceCandidateDisposition {
     Insert,
     SplitProtectedSegment(Box<ExactProtectedSegmentSplit>),
+    SplitChartCut(Box<ExactChartCutSplit>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +41,21 @@ pub struct ExactProtectedSegmentSplit {
     pub pslg_segment_index: u32,
     pub source_coedge_id: PersistentEntityId,
     pub curve_split: SharedCurveSegmentSplit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExactChartCutSplitImage {
+    pub pslg_segment_index: u32,
+    pub vertex_indices: [u32; 2],
+    pub midpoint_uv: [f64; 2],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactChartCutSplit {
+    pub source_face_id: PersistentEntityId,
+    pub cut_id: runmat_meshing_core::StableDigest,
+    pub node_id: runmat_meshing_core::StableDigest,
+    pub images: [ExactChartCutSplitImage; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -124,6 +140,10 @@ pub enum ExactFaceRefinementOutcome {
     /// face-owned insertions are intentionally not authoritative across that boundary change.
     RequiresCurveSplit {
         split: Box<ExactProtectedSegmentSplit>,
+        completed_interior_insertions: u32,
+    },
+    RequiresChartCutSplit {
+        split: Box<ExactChartCutSplit>,
         completed_interior_insertions: u32,
     },
 }

@@ -36,8 +36,8 @@ pub use exact_boundary::{
     EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
 };
 pub use exact_cdt::{
-    build_exact_face_pslg, carve_exact_face_domain, exact_face_interior_node_id,
-    recover_exact_face_segments, triangulate_exact_face_pslg,
+    build_exact_face_pslg, carve_exact_face_domain, exact_face_chart_cut_node_id,
+    exact_face_interior_node_id, recover_exact_face_segments, triangulate_exact_face_pslg,
     validate_exact_face_constrained_delaunay, validate_exact_face_delaunay,
     validate_exact_face_pslg, validate_exact_face_trimmed_delaunay, ExactFaceConstrainedDelaunay,
     ExactFaceDelaunay, ExactFaceDelaunayError, ExactFaceDelaunayErrorKind,
@@ -70,12 +70,14 @@ pub use recovery::{
 pub use refinement::{
     classify_exact_face_refinement_candidate, derive_exact_face_feature_collars,
     insert_exact_face_refinement_candidate, refine_exact_face_until_blocked,
-    select_exact_face_refinement_candidate, validate_exact_face_feature_collars,
-    ExactFaceCandidateDisposition, ExactFaceFeatureCollar, ExactFaceFeatureCollars,
-    ExactFaceRefinedMesh, ExactFaceRefinedTopology, ExactFaceRefinementCandidate,
-    ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
-    ExactFaceRefinementOptions, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
-    ExactFaceRefinementReason, ExactProtectedSegmentSplit,
+    select_exact_face_refinement_candidate, split_exact_face_chart_cut,
+    validate_exact_face_chart_cut_split_result, validate_exact_face_feature_collars,
+    ExactChartCutSplit, ExactChartCutSplitImage, ExactFaceCandidateDisposition,
+    ExactFaceFeatureCollar, ExactFaceFeatureCollars, ExactFaceRefinedMesh,
+    ExactFaceRefinedTopology, ExactFaceRefinementCandidate, ExactFaceRefinementContext,
+    ExactFaceRefinementError, ExactFaceRefinementErrorKind, ExactFaceRefinementOptions,
+    ExactFaceRefinementOutcome, ExactFaceRefinementPolicy, ExactFaceRefinementReason,
+    ExactProtectedSegmentSplit,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,

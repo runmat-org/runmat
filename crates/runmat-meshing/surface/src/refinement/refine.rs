@@ -84,6 +84,12 @@ pub fn refine_exact_face_until_blocked(
                     completed_interior_insertions: insertion_count,
                 });
             }
+            ExactFaceCandidateDisposition::SplitChartCut(split) => {
+                return Ok(ExactFaceRefinementOutcome::RequiresChartCutSplit {
+                    split,
+                    completed_interior_insertions: insertion_count,
+                });
+            }
             ExactFaceCandidateDisposition::Insert => {
                 if insertion_count >= policy.refinement.maximum_interior_insertions {
                     return Err(ExactFaceRefinementError::new(

@@ -1,6 +1,5 @@
 use runmat_meshing_core::{predicate::orient2d, MeshingCancellationSignal, PredicateSign};
 
-use crate::exact_cdt::MAX_FACE_PSLG_ITEMS;
 use crate::{
     carve_exact_face_domain, exact_face_interior_node_id, recover_exact_face_segments,
     triangulate_exact_face_pslg, validate_exact_face_trimmed_delaunay, ExactFaceBoundary,
@@ -122,50 +121,16 @@ fn append_interior_vertex(
     pslg: &ExactFacePslg,
     uv: [f64; 2],
 ) -> Result<ExactFacePslg, ExactFaceRefinementError> {
-    if pslg.vertices.len() >= MAX_FACE_PSLG_ITEMS || pslg.vertices.len() >= u32::MAX as usize {
-        return Err(delaunay_error(
-            pslg,
-            ExactFaceDelaunayErrorKind::ResourceLimit,
-            "face vertex inventory exceeds its hard bound or index capacity",
-        ));
-    }
-    let old_count = pslg.vertices.len();
-    let mut indexed = pslg
-        .vertices
-        .iter()
-        .copied()
-        .enumerate()
-        .collect::<Vec<_>>();
-    indexed.push((
-        old_count,
-        ExactFacePslgVertex {
+    crate::exact_cdt::insert_pslg_vertices(
+        pslg,
+        &[ExactFacePslgVertex {
             node_id: exact_face_interior_node_id(&pslg.source_face_id, uv),
             seam_image: None,
             uv,
-        },
-    ));
-    indexed.sort_by(|(_, left), (_, right)| {
-        left.node_id
-            .cmp(&right.node_id)
-            .then_with(|| left.seam_image.cmp(&right.seam_image))
-            .then_with(|| left.uv[0].total_cmp(&right.uv[0]))
-            .then_with(|| left.uv[1].total_cmp(&right.uv[1]))
-    });
-    let mut remap = vec![0u32; indexed.len()];
-    let vertices = indexed
-        .into_iter()
-        .enumerate()
-        .map(|(new_index, (old_index, vertex))| {
-            remap[old_index] = new_index as u32;
-            vertex
-        })
-        .collect();
-    let mut refined = pslg.clone();
-    refined.vertices = vertices;
-    for segment in &mut refined.segments {
-        segment.vertex_indices = segment.vertex_indices.map(|index| remap[index as usize]);
-    }
-    Ok(refined)
+        }],
+    )
+    .map(|(refined, _)| refined)
+    .map_err(|reason| delaunay_error(pslg, ExactFaceDelaunayErrorKind::ResourceLimit, reason))
 }
 
 fn within_segment_bounds(point: [f64; 2], endpoints: [[f64; 2]; 2]) -> bool {

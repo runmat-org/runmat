@@ -187,6 +187,99 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         crate::ExactFaceDelaunayOptions::default(),
     )
     .unwrap();
+    let cut_segments = annulus_pslg
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| {
+            matches!(&segment.source, ExactFacePslgSegmentSource::ChartCut { .. })
+        })
+        .collect::<Vec<_>>();
+    let cut_id = match &cut_segments[0].1.source {
+        ExactFacePslgSegmentSource::ChartCut { cut_id } => *cut_id,
+        ExactFacePslgSegmentSource::ExactTrim { .. } => unreachable!(),
+    };
+    let images = cut_segments
+        .iter()
+        .map(|(index, segment)| crate::ExactChartCutSplitImage {
+            pslg_segment_index: *index as u32,
+            vertex_indices: segment.vertex_indices,
+            midpoint_uv: midpoint(
+                segment
+                    .vertex_indices
+                    .map(|vertex| annulus_pslg.vertices[vertex as usize].uv),
+            ),
+        })
+        .collect::<Vec<_>>();
+    let endpoint_node_ids = cut_segments[0]
+        .1
+        .vertex_indices
+        .map(|vertex| annulus_pslg.vertices[vertex as usize].node_id);
+    let split = crate::ExactChartCutSplit {
+        source_face_id: annulus.source_face_id.clone(),
+        cut_id,
+        node_id: crate::exact_face_chart_cut_node_id(cut_id, endpoint_node_ids),
+        images: [images[0], images[1]],
+    };
+    let initial_refined = crate::ExactFaceRefinedTopology {
+        pslg: annulus_pslg.clone(),
+        constrained: domains[0].constrained.clone(),
+        trimmed: domains[0].trimmed.clone(),
+    };
+    let split_refined = crate::split_exact_face_chart_cut(
+        &initial_refined,
+        &split,
+        &NeverCancelled,
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        split_refined.pslg.vertices.len(),
+        annulus_pslg.vertices.len() + 2
+    );
+    assert_eq!(
+        split_refined.pslg.segments.len(),
+        annulus_pslg.segments.len() + 2
+    );
+    assert_eq!(
+        split_refined
+            .pslg
+            .segments
+            .iter()
+            .filter(|segment| {
+                matches!(&segment.source, ExactFacePslgSegmentSource::ChartCut { .. })
+            })
+            .count(),
+        4
+    );
+    crate::validate_exact_face_chart_cut_split_result(
+        &split_refined,
+        &initial_refined,
+        &split,
+        &NeverCancelled,
+        crate::ExactFaceDelaunayOptions::default(),
+    )
+    .unwrap();
+    let mut tampered_split_refined = split_refined;
+    tampered_split_refined
+        .pslg
+        .vertices
+        .iter_mut()
+        .find(|vertex| vertex.node_id == split.node_id)
+        .unwrap()
+        .uv[0] += 0.25;
+    assert_eq!(
+        crate::validate_exact_face_chart_cut_split_result(
+            &tampered_split_refined,
+            &initial_refined,
+            &split,
+            &NeverCancelled,
+            crate::ExactFaceDelaunayOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceRefinementErrorKind::InvalidGeometry
+    );
     let mut tampered_domains = domains;
     tampered_domains[0].constrained.protected_segments.pop();
     assert!(matches!(
@@ -310,6 +403,13 @@ fn range(start: f64, end: f64) -> ParameterRange {
 
 fn node(value: u8) -> StableDigest {
     StableDigest::from_bytes([value; 32])
+}
+
+fn midpoint(endpoints: [[f64; 2]; 2]) -> [f64; 2] {
+    [
+        endpoints[0][0] * 0.5 + endpoints[1][0] * 0.5,
+        endpoints[0][1] * 0.5 + endpoints[1][1] * 0.5,
+    ]
 }
 
 fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {

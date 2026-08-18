@@ -9,12 +9,14 @@ pub use domain::{
 };
 pub(crate) use domain::{carve_validated_face_domain, validate_face_trimmed_topology};
 
-pub(crate) use pslg::MAX_FACE_PSLG_ITEMS;
-pub(crate) use pslg::{build_canonical_pslg, PslgLoopInput, PslgSegmentInput};
+pub(crate) use pslg::{
+    build_canonical_pslg, insert_pslg_vertices, PslgLoopInput, PslgSegmentInput,
+};
 pub use pslg::{
-    build_exact_face_pslg, exact_face_interior_node_id, validate_exact_face_pslg, ExactFacePslg,
-    ExactFacePslgError, ExactFacePslgErrorKind, ExactFacePslgLoop, ExactFacePslgLoopSource,
-    ExactFacePslgSegment, ExactFacePslgSegmentSource, ExactFacePslgVertex,
+    build_exact_face_pslg, exact_face_chart_cut_node_id, exact_face_interior_node_id,
+    validate_exact_face_pslg, ExactFacePslg, ExactFacePslgError, ExactFacePslgErrorKind,
+    ExactFacePslgLoop, ExactFacePslgLoopSource, ExactFacePslgSegment, ExactFacePslgSegmentSource,
+    ExactFacePslgVertex,
 };
 pub use recovery::{
     recover_exact_face_segments, validate_exact_face_constrained_delaunay,

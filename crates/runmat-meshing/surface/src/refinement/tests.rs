@@ -13,9 +13,9 @@ use runmat_meshing_curve::{
 };
 
 use crate::{
-    ExactFaceDelaunayTriangle, ExactFaceGeometry, ExactFaceGeometryVertex,
-    ExactFaceMetricEvaluation, ExactFacePslg, ExactFacePslgLoop, ExactFacePslgLoopSource,
-    ExactFacePslgSegment, ExactFacePslgSegmentSource, ExactFacePslgVertex,
+    exact_face_chart_cut_node_id, ExactFaceDelaunayTriangle, ExactFaceGeometry,
+    ExactFaceGeometryVertex, ExactFaceMetricEvaluation, ExactFacePslg, ExactFacePslgLoop,
+    ExactFacePslgLoopSource, ExactFacePslgSegment, ExactFacePslgSegmentSource, ExactFacePslgVertex,
     ExactFaceTriangleGeometry, ParametricMetricTensor,
 };
 
@@ -165,6 +165,54 @@ fn encroaching_candidate_requests_one_exact_parameter_split_before_insertion() {
         )
         .unwrap(),
         ExactFaceCandidateDisposition::Insert
+    );
+}
+
+#[test]
+fn encroaching_chart_cut_requests_both_periodic_images() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let face_id = topology.faces[0].id.clone();
+    let pslg = paired_cut_pslg(face_id.clone());
+    let disposition = classify_exact_face_refinement_candidate(
+        &candidate(face_id.clone(), [0.0, 0.0]),
+        &pslg,
+        &topology,
+        &metric_request(),
+        &evaluator,
+        &Control,
+    )
+    .unwrap();
+    let ExactFaceCandidateDisposition::SplitChartCut(split) = disposition else {
+        panic!("encroaching chart cut must split both periodic images")
+    };
+    assert_eq!(split.source_face_id, face_id);
+    assert_eq!(split.cut_id, node(9));
+    assert_eq!(split.images.map(|image| image.pslg_segment_index), [0, 1]);
+    assert_eq!(split.images[0].midpoint_uv, [0.0, 0.0]);
+    assert_eq!(split.images[1].midpoint_uv, [0.0, 1.0]);
+    assert_eq!(
+        split.node_id,
+        exact_face_chart_cut_node_id(node(9), [node(1), node(2)])
+    );
+
+    let mut unpaired = pslg;
+    unpaired.segments.pop();
+    assert_eq!(
+        classify_exact_face_refinement_candidate(
+            &candidate(topology.faces[0].id.clone(), [0.0, 0.0]),
+            &unpaired,
+            &topology,
+            &metric_request(),
+            &evaluator,
+            &Control,
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::InvalidGeometry
     );
 }
 
@@ -631,6 +679,47 @@ fn one_segment_pslg(source_face_id: PersistentEntityId) -> ExactFacePslg {
             vertex_indices: [0, 1],
             edge_parameters: Some([6.0, 2.0]),
         }],
+        loops: Vec::new(),
+    }
+}
+
+fn paired_cut_pslg(source_face_id: PersistentEntityId) -> ExactFacePslg {
+    ExactFacePslg {
+        source_face_id,
+        vertices: vec![
+            ExactFacePslgVertex {
+                node_id: node(1),
+                seam_image: None,
+                uv: [-1.0, 0.0],
+            },
+            ExactFacePslgVertex {
+                node_id: node(2),
+                seam_image: None,
+                uv: [1.0, 0.0],
+            },
+            ExactFacePslgVertex {
+                node_id: node(2),
+                seam_image: None,
+                uv: [1.0, 1.0],
+            },
+            ExactFacePslgVertex {
+                node_id: node(1),
+                seam_image: None,
+                uv: [-1.0, 1.0],
+            },
+        ],
+        segments: vec![
+            ExactFacePslgSegment {
+                source: ExactFacePslgSegmentSource::ChartCut { cut_id: node(9) },
+                vertex_indices: [0, 1],
+                edge_parameters: None,
+            },
+            ExactFacePslgSegment {
+                source: ExactFacePslgSegmentSource::ChartCut { cut_id: node(9) },
+                vertex_indices: [2, 3],
+                edge_parameters: None,
+            },
+        ],
         loops: Vec::new(),
     }
 }

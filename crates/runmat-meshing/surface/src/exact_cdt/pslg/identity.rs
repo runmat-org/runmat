@@ -19,6 +19,21 @@ pub fn exact_face_interior_node_id(face_id: &PersistentEntityId, uv: [f64; 2]) -
     StableDigest::from_bytes(digest.finalize().into())
 }
 
+pub fn exact_face_chart_cut_node_id(
+    cut_id: StableDigest,
+    mut endpoint_node_ids: [StableDigest; 2],
+) -> StableDigest {
+    endpoint_node_ids.sort();
+    let mut digest = Sha256::new();
+    digest.update(b"runmat.exact-face-chart-cut-node\0");
+    digest.update(1u16.to_be_bytes());
+    digest.update(cut_id.bytes());
+    for endpoint in endpoint_node_ids {
+        digest.update(endpoint.bytes());
+    }
+    StableDigest::from_bytes(digest.finalize().into())
+}
+
 fn write_bytes(digest: &mut Sha256, bytes: &[u8]) {
     digest.update((bytes.len() as u64).to_be_bytes());
     digest.update(bytes);
