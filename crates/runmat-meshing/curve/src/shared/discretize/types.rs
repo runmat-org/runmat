@@ -1,4 +1,7 @@
-use runmat_geometry_core::PersistentEntityId;
+use runmat_geometry_core::{
+    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, GeometryEvaluationControl,
+    PersistentEntityId,
+};
 use runmat_meshing_core::{MetricSourceKind, MetricTensor3};
 
 use crate::{shared::SharedCurveError, CurveResolutionPolicy};
@@ -35,6 +38,33 @@ pub trait CurveMetricField: Send + Sync {
         &self,
         query: CurveMetricQuery<'_>,
     ) -> Result<CurveMetricEvaluation, SharedCurveError>;
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SharedCurveEvaluationContext<'a> {
+    pub(crate) topology: &'a ExactBRepTopology,
+    pub(crate) curves: &'a dyn ExactCurveEvaluator,
+    pub(crate) pcurves: &'a dyn ExactPcurveEvaluator,
+    pub(crate) metric_field: &'a dyn CurveMetricField,
+    pub(crate) control: &'a dyn GeometryEvaluationControl,
+}
+
+impl<'a> SharedCurveEvaluationContext<'a> {
+    pub(crate) fn new(
+        topology: &'a ExactBRepTopology,
+        curves: &'a dyn ExactCurveEvaluator,
+        pcurves: &'a dyn ExactPcurveEvaluator,
+        metric_field: &'a dyn CurveMetricField,
+        control: &'a dyn GeometryEvaluationControl,
+    ) -> Self {
+        Self {
+            topology,
+            curves,
+            pcurves,
+            metric_field,
+            control,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

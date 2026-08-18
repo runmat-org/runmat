@@ -50,68 +50,69 @@ pub(crate) fn world_arc_length(
     let midpoint_parameter = (range.start + range.end) * 0.5;
     let midpoint = speed(midpoint_parameter)?;
     let end = speed(range.end)?;
-    adaptive_simpson(
+    AdaptiveArcLength {
         edge,
-        &speed,
+        speed: &speed,
+        maximum_depth,
+    }
+    .integrate(
         range.start,
         range.end,
         [start, midpoint, end],
         absolute_error_m,
         0,
-        maximum_depth,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn adaptive_simpson(
-    edge: &ExactEdge,
-    speed: &dyn Fn(f64) -> Result<f64, SharedCurveError>,
-    start: f64,
-    end: f64,
-    values: [f64; 3],
-    tolerance: f64,
-    depth: u16,
+struct AdaptiveArcLength<'a> {
+    edge: &'a ExactEdge,
+    speed: &'a dyn Fn(f64) -> Result<f64, SharedCurveError>,
     maximum_depth: u16,
-) -> Result<f64, SharedCurveError> {
-    let midpoint = (start + end) * 0.5;
-    let left_midpoint = (start + midpoint) * 0.5;
-    let right_midpoint = (midpoint + end) * 0.5;
-    let left_value = speed(left_midpoint)?;
-    let right_value = speed(right_midpoint)?;
-    let whole = (end - start) * (values[0] + 4.0 * values[1] + values[2]) / 6.0;
-    let left = (midpoint - start) * (values[0] + 4.0 * left_value + values[1]) / 6.0;
-    let right = (end - midpoint) * (values[1] + 4.0 * right_value + values[2]) / 6.0;
-    let difference = (left + right - whole).abs();
-    if difference <= 15.0 * tolerance {
-        return Ok(left + right + (left + right - whole) / 15.0);
+}
+
+impl AdaptiveArcLength<'_> {
+    fn integrate(
+        &self,
+        start: f64,
+        end: f64,
+        values: [f64; 3],
+        tolerance: f64,
+        depth: u16,
+    ) -> Result<f64, SharedCurveError> {
+        let midpoint = (start + end) * 0.5;
+        let left_midpoint = (start + midpoint) * 0.5;
+        let right_midpoint = (midpoint + end) * 0.5;
+        let left_value = (self.speed)(left_midpoint)?;
+        let right_value = (self.speed)(right_midpoint)?;
+        let whole = (end - start) * (values[0] + 4.0 * values[1] + values[2]) / 6.0;
+        let left = (midpoint - start) * (values[0] + 4.0 * left_value + values[1]) / 6.0;
+        let right = (end - midpoint) * (values[1] + 4.0 * right_value + values[2]) / 6.0;
+        let difference = (left + right - whole).abs();
+        if difference <= 15.0 * tolerance {
+            return Ok(left + right + (left + right - whole) / 15.0);
+        }
+        if depth >= self.maximum_depth {
+            return Err(edge_error(
+                self.edge,
+                SharedCurveErrorKind::ResourceLimit,
+                "curve arc-length integration",
+                "requested absolute error exceeds the integration depth limit",
+            ));
+        }
+        Ok(self.integrate(
+            start,
+            midpoint,
+            [values[0], left_value, values[1]],
+            tolerance * 0.5,
+            depth + 1,
+        )? + self.integrate(
+            midpoint,
+            end,
+            [values[1], right_value, values[2]],
+            tolerance * 0.5,
+            depth + 1,
+        )?)
     }
-    if depth >= maximum_depth {
-        return Err(edge_error(
-            edge,
-            SharedCurveErrorKind::ResourceLimit,
-            "curve arc-length integration",
-            "requested absolute error exceeds the integration depth limit",
-        ));
-    }
-    Ok(adaptive_simpson(
-        edge,
-        speed,
-        start,
-        midpoint,
-        [values[0], left_value, values[1]],
-        tolerance * 0.5,
-        depth + 1,
-        maximum_depth,
-    )? + adaptive_simpson(
-        edge,
-        speed,
-        midpoint,
-        end,
-        [values[1], right_value, values[2]],
-        tolerance * 0.5,
-        depth + 1,
-        maximum_depth,
-    )?)
 }
 
 fn similarity_scale(transform: GeometryTransform) -> Option<f64> {

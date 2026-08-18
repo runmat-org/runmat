@@ -61,7 +61,6 @@ impl Default for NativeMeshingHostLimits {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn execute_meshing_program_request<
     S: runmat_execution_artifact::cache::CacheImport + runmat_execution_artifact::cache::CacheExport,
 >(

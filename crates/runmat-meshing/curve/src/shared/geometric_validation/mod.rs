@@ -11,7 +11,7 @@ use runmat_geometry_core::{
 use super::{
     discretize::{
         edge_error, geometry_error, sub, validate_options, world_arc_length, CurveMetricField,
-        SharedCurveDiscretizationOptions,
+        SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
     },
     SharedCurve, SharedCurveError, SharedCurveErrorKind, SharedCurveMesh,
 };
@@ -35,8 +35,11 @@ pub fn validate_shared_curve_geometry(
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurveGeometryValidationReport, SharedCurveError> {
     validate_options(options)?;
-    mesh.validate_against(topology)?;
-    let edge_by_id = topology
+    let context =
+        SharedCurveEvaluationContext::new(topology, curves, pcurves, metric_field, control);
+    mesh.validate_against(context.topology)?;
+    let edge_by_id = context
+        .topology
         .edges
         .iter()
         .map(|edge| (&edge.id, edge))
@@ -45,16 +48,8 @@ pub fn validate_shared_curve_geometry(
     let mut metric_evaluation_count = 0u64;
     for curve in &mesh.edges {
         let edge = edge_by_id[&curve.source_edge_id];
-        metric_evaluation_count = metric_evaluation_count.saturating_add(validate_curve(
-            curve,
-            edge,
-            topology,
-            curves,
-            pcurves,
-            metric_field,
-            control,
-            options,
-        )?);
+        metric_evaluation_count =
+            metric_evaluation_count.saturating_add(validate_curve(curve, edge, context, options)?);
         node_count = node_count.saturating_add(curve.nodes.len() as u64);
     }
     Ok(SharedCurveGeometryValidationReport {
@@ -64,15 +59,10 @@ pub fn validate_shared_curve_geometry(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn validate_curve(
     curve: &SharedCurve,
     edge: &ExactEdge,
-    topology: &ExactBRepTopology,
-    curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
-    metric_field: &dyn CurveMetricField,
-    control: &dyn GeometryEvaluationControl,
+    context: SharedCurveEvaluationContext<'_>,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<u64, SharedCurveError> {
     if curve.requested != options.resolution {
@@ -82,7 +72,8 @@ fn validate_curve(
             "artifact resolution policy differs from the independent validator request",
         ));
     }
-    let exact_range = curves
+    let exact_range = context
+        .curves
         .parameter_range(&edge.curve_evaluator_id)
         .map_err(|error| geometry_error(edge, error))?;
     if exact_range != curve.parameter_range {
@@ -92,24 +83,45 @@ fn validate_curve(
             "artifact range differs from the exact evaluator",
         ));
     }
-    let transform = topology
+    let transform = context
+        .topology
         .world_transform_for(&edge.id)
         .map_err(|error| mismatch(edge, "edge occurrence transform", error.to_string()))?;
-    validate_nodes(curve, edge, curves, control, transform, options)?;
-    validate_pcurves(curve, edge, topology, pcurves, control, options)?;
+    validate_nodes(
+        curve,
+        edge,
+        context.curves,
+        context.control,
+        transform,
+        options,
+    )?;
+    validate_pcurves(
+        curve,
+        edge,
+        context.topology,
+        context.pcurves,
+        context.control,
+        options,
+    )?;
     if edge.is_degenerate {
         validate_degenerate_geometry(
             curve,
             edge,
-            curves,
-            control,
+            context.curves,
+            context.control,
             transform,
             options.geometry_absolute_error_m,
         )?;
         return Ok(0);
     }
 
-    let mut sampler = ValidationSampler::new(edge, curves, metric_field, control, transform);
+    let mut sampler = ValidationSampler::new(
+        edge,
+        context.curves,
+        context.metric_field,
+        context.control,
+        transform,
+    );
     let mut maximum_chordal_deviation_m: f64 = 0.0;
     let mut maximum_tangent_change_rad: f64 = 0.0;
     let mut minimum_metric_edge_length = f64::INFINITY;

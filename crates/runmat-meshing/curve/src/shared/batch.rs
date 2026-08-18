@@ -6,7 +6,7 @@ use runmat_meshing_core::{CanonicalEntityRange, MeshingPartitionDescriptor, Mesh
 use super::{
     discretize::{
         discretize_edge, geometry_error, validate_options, CurveMetricField,
-        SharedCurveDiscretizationOptions,
+        SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
     },
     validation::validate_curve_against_topology,
     SharedCurveBatch, SharedCurveError, SharedCurveMesh, SHARED_CURVE_BATCH_SCHEMA_VERSION,
@@ -46,7 +46,6 @@ pub fn curve_partition_descriptors(
         .collect())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn discretize_shared_curve_partition(
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
@@ -58,8 +57,11 @@ pub fn discretize_shared_curve_partition(
 ) -> Result<SharedCurveBatch, SharedCurveError> {
     validate_options(options)?;
     validate_partition(&partition)?;
+    let context =
+        SharedCurveEvaluationContext::new(topology, curves, pcurves, metric_field, control);
     let range = partition.entity_range.as_ref().expect("kind validated");
-    let selected = topology
+    let selected = context
+        .topology
         .edges
         .iter()
         .filter(|edge| edge.id >= range.first && edge.id <= range.last)
@@ -72,25 +74,18 @@ pub fn discretize_shared_curve_partition(
     }
     let mut edges = Vec::with_capacity(selected.len());
     for edge in selected {
-        control
+        context
+            .control
             .checkpoint()
             .map_err(|error| geometry_error(edge, error))?;
-        edges.push(discretize_edge(
-            topology,
-            edge,
-            curves,
-            pcurves,
-            metric_field,
-            control,
-            options,
-        )?);
+        edges.push(discretize_edge(context, edge, options)?);
     }
     let batch = SharedCurveBatch {
         schema_version: SHARED_CURVE_BATCH_SCHEMA_VERSION,
         partition,
         edges,
     };
-    validate_batch(&batch, topology)?;
+    validate_batch(&batch, context.topology)?;
     Ok(batch)
 }
 

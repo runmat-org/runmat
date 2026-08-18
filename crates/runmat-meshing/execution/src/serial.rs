@@ -124,7 +124,6 @@ impl MeshingSerialExecutionError {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn execute_serial_stage<S, K>(
     request: &ProgramExecutionRequest,
     store: &mut S,

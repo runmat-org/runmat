@@ -16,7 +16,7 @@ use super::{
     error::{edge_error, geometry_error, require_parameter_range, validate_options},
     pcurves::face_uses_for_parameters,
     sampling::{interval_evidence, EvaluatedPoint, EvaluationCache},
-    types::{CurveMetricField, SharedCurveDiscretizationOptions},
+    types::{CurveMetricField, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext},
 };
 
 pub fn discretize_shared_curves(
@@ -28,26 +28,21 @@ pub fn discretize_shared_curves(
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurveMesh, SharedCurveError> {
     validate_options(options)?;
-    let mut edges = Vec::with_capacity(topology.edges.len());
-    for edge in &topology.edges {
-        control
+    let context =
+        SharedCurveEvaluationContext::new(topology, curves, pcurves, metric_field, control);
+    let mut edges = Vec::with_capacity(context.topology.edges.len());
+    for edge in &context.topology.edges {
+        context
+            .control
             .checkpoint()
             .map_err(|error| geometry_error(edge, error))?;
-        edges.push(discretize_edge(
-            topology,
-            edge,
-            curves,
-            pcurves,
-            metric_field,
-            control,
-            options,
-        )?);
+        edges.push(discretize_edge(context, edge, options)?);
     }
     let mesh = SharedCurveMesh {
         schema_version: SHARED_CURVE_MESH_SCHEMA_VERSION,
         edges,
     };
-    mesh.validate_against(topology)
+    mesh.validate_against(context.topology)
         .map_err(|error| SharedCurveError {
             edge_id: None,
             kind: SharedCurveErrorKind::GeometricMismatch,
@@ -57,32 +52,44 @@ pub fn discretize_shared_curves(
     Ok(mesh)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn discretize_edge(
-    topology: &ExactBRepTopology,
+    context: SharedCurveEvaluationContext<'_>,
     edge: &ExactEdge,
-    curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
-    metric_field: &dyn CurveMetricField,
-    control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurve, SharedCurveError> {
     if edge.is_degenerate {
-        return discretize_degenerate_edge(topology, edge, curves, pcurves, control, options);
+        return discretize_degenerate_edge(
+            context.topology,
+            edge,
+            context.curves,
+            context.pcurves,
+            context.control,
+            options,
+        );
     }
-    let parameter_range = curves
+    let parameter_range = context
+        .curves
         .parameter_range(&edge.curve_evaluator_id)
         .map_err(|error| geometry_error(edge, error))?;
     require_parameter_range(edge, parameter_range)?;
-    let transform = topology.world_transform_for(&edge.id).map_err(|error| {
-        edge_error(
-            edge,
-            SharedCurveErrorKind::GeometricMismatch,
-            "edge occurrence transform",
-            error.to_string(),
-        )
-    })?;
-    let mut cache = EvaluationCache::new(edge, curves, metric_field, control, transform);
+    let transform = context
+        .topology
+        .world_transform_for(&edge.id)
+        .map_err(|error| {
+            edge_error(
+                edge,
+                SharedCurveErrorKind::GeometricMismatch,
+                "edge occurrence transform",
+                error.to_string(),
+            )
+        })?;
+    let mut cache = EvaluationCache::new(
+        edge,
+        context.curves,
+        context.metric_field,
+        context.control,
+        transform,
+    );
     let left = cache.sample(parameter_range.start)?;
     let right = cache.sample(parameter_range.end)?;
     let mut samples = vec![left];
@@ -105,8 +112,8 @@ pub(crate) fn discretize_edge(
         if index > 0 {
             arc_length_m += world_arc_length(
                 edge,
-                curves,
-                control,
+                context.curves,
+                context.control,
                 transform,
                 ParameterRange {
                     start: samples[index - 1].parameter,
@@ -126,7 +133,7 @@ pub(crate) fn discretize_edge(
         let (node_id, coordinates_m) = if let Some(vertex_id) = &source_vertex_id {
             (
                 shared_curve_vertex_node_id(vertex_id),
-                canonical_vertex_point(topology, edge, vertex_id, transform)?,
+                canonical_vertex_point(context.topology, edge, vertex_id, transform)?,
             )
         } else {
             (
@@ -148,10 +155,10 @@ pub(crate) fn discretize_edge(
         .map(|sample| sample.parameter)
         .collect::<Vec<_>>();
     let face_uses = face_uses_for_parameters(
-        topology,
+        context.topology,
         edge,
-        pcurves,
-        control,
+        context.pcurves,
+        context.control,
         parameter_range,
         &parameters,
         options.pcurve_absolute_error,
