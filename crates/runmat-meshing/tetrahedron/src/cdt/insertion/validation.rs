@@ -8,7 +8,7 @@ use super::{
     DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayVolumeNode,
     DelaunayVolumeTopology, InsertionWork,
 };
-use crate::cdt::build_delaunay_volume_topology;
+use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
 
 pub fn validate_delaunay_volume_topology(
     topology: &DelaunayVolumeTopology,
@@ -16,12 +16,12 @@ pub fn validate_delaunay_volume_topology(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayInsertionError> {
     validate_options(options)?;
-    let rebuilt = build_delaunay_volume_topology(
+    let rebuilt = build_delaunay_volume_topology_with_regions(
         topology.nodes.clone(),
         topology
             .tetrahedra
             .iter()
-            .map(|tetrahedron| tetrahedron.vertex_indices)
+            .map(|tetrahedron| (tetrahedron.vertex_indices, tetrahedron.region_id.clone()))
             .collect(),
         options.topology,
         cancellation,

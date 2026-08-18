@@ -1,9 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign, SpatialPredicateError},
     MeshingCancellationSignal, StableDigest,
 };
+
+use super::incidence::{build_volume_incidence, DelaunayVolumeIncidence};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DelaunayTopologyOptions {
@@ -33,12 +36,14 @@ pub struct DelaunayVolumeTetrahedron {
     pub vertex_indices: [u32; 4],
     /// Neighbor opposite each correspondingly indexed vertex.
     pub neighbors: [Option<u32>; 4],
+    pub region_id: Option<PersistentEntityId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayVolumeTopology {
     pub nodes: Vec<DelaunayVolumeNode>,
     pub tetrahedra: Vec<DelaunayVolumeTetrahedron>,
+    pub incidence: DelaunayVolumeIncidence,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +51,7 @@ pub enum DelaunayTopologyErrorKind {
     InvalidOptions,
     InvalidNode,
     InvalidTetrahedron,
+    InvalidRegion,
     DegenerateTetrahedron,
     NonManifoldFace,
     ResourceLimit,
@@ -73,6 +79,23 @@ impl std::error::Error for DelaunayTopologyError {}
 pub fn build_delaunay_volume_topology(
     nodes: Vec<DelaunayVolumeNode>,
     tetrahedra: Vec<[u32; 4]>,
+    options: DelaunayTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeTopology, DelaunayTopologyError> {
+    build_delaunay_volume_topology_with_regions(
+        nodes,
+        tetrahedra
+            .into_iter()
+            .map(|vertices| (vertices, None))
+            .collect(),
+        options,
+        cancellation,
+    )
+}
+
+pub(super) fn build_delaunay_volume_topology_with_regions(
+    nodes: Vec<DelaunayVolumeNode>,
+    tetrahedra: Vec<([u32; 4], Option<PersistentEntityId>)>,
     options: DelaunayTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayTopologyError> {
@@ -104,7 +127,7 @@ pub fn build_delaunay_volume_topology(
 
     let mut oriented = Vec::with_capacity(tetrahedra.len());
     let mut tetrahedron_keys = BTreeSet::new();
-    for (index, vertices) in tetrahedra.into_iter().enumerate() {
+    for (index, (vertices, region_id)) in tetrahedra.into_iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         if vertices
             .iter()
@@ -136,12 +159,12 @@ pub fn build_delaunay_volume_topology(
                 ));
             }
         }
-        oriented.push((key, canonical_vertices));
+        oriented.push((key, canonical_vertices, region_id));
     }
-    oriented.sort_by_key(|(key, _)| *key);
+    oriented.sort_by_key(|(key, _, _)| *key);
 
     let mut face_uses = BTreeMap::<[u32; 3], Vec<(usize, usize)>>::new();
-    for (tetrahedron_index, (_, vertices)) in oriented.iter().enumerate() {
+    for (tetrahedron_index, (_, vertices, _)) in oriented.iter().enumerate() {
         for opposite in 0..4 {
             let mut face = [0u32; 3];
             let mut cursor = 0;
@@ -160,9 +183,10 @@ pub fn build_delaunay_volume_topology(
     }
     let mut result = oriented
         .into_iter()
-        .map(|(_, vertex_indices)| DelaunayVolumeTetrahedron {
+        .map(|(_, vertex_indices, region_id)| DelaunayVolumeTetrahedron {
             vertex_indices,
             neighbors: [None; 4],
+            region_id,
         })
         .collect::<Vec<_>>();
     for uses in face_uses.values() {
@@ -180,9 +204,11 @@ pub fn build_delaunay_volume_topology(
             }
         }
     }
+    let incidence = build_volume_incidence(&nodes, &result, cancellation, options)?;
     Ok(DelaunayVolumeTopology {
         nodes,
         tetrahedra: result,
+        incidence,
     })
 }
 
@@ -217,7 +243,10 @@ fn predicate_error(error: SpatialPredicateError) -> DelaunayTopologyError {
     )
 }
 
-fn error(kind: DelaunayTopologyErrorKind, reason: impl Into<String>) -> DelaunayTopologyError {
+pub(super) fn error(
+    kind: DelaunayTopologyErrorKind,
+    reason: impl Into<String>,
+) -> DelaunayTopologyError {
     DelaunayTopologyError {
         kind,
         reason: reason.into(),

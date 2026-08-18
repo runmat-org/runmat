@@ -8,8 +8,8 @@ use runmat_meshing_core::{
 };
 
 use super::{
-    build_delaunay_volume_topology, DelaunayTopologyError, DelaunayTopologyOptions,
-    DelaunayVolumeNode, DelaunayVolumeTopology,
+    topology::build_delaunay_volume_topology_with_regions, DelaunayTopologyError,
+    DelaunayTopologyOptions, DelaunayVolumeNode, DelaunayVolumeTopology,
 };
 
 mod validation;
@@ -107,27 +107,42 @@ pub(super) fn insert_delaunay_volume_node_mutation(
 
     let cavity = connected_cavity(&topology, node, seed, &mut work)?;
     let boundary = cavity_boundary(&topology, &cavity, options)?;
+    let cavity_regions = cavity
+        .iter()
+        .map(|index| topology.tetrahedra[*index].region_id.clone())
+        .collect::<BTreeSet<_>>();
+    if cavity_regions.len() != 1 {
+        return Err(error(
+            DelaunayInsertionErrorKind::InvalidTopology,
+            "insertion cavity crosses assigned region incidence",
+        ));
+    }
+    let cavity_region = cavity_regions.into_iter().next().flatten();
     let (nodes, remap, inserted_index) = insert_node_canonically(&topology.nodes, node);
     let mut tetrahedra =
         Vec::with_capacity(topology.tetrahedra.len() - cavity.len() + boundary.len());
     for (index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
         if !cavity.contains(&index) {
-            tetrahedra.push(
+            tetrahedra.push((
                 tetrahedron
                     .vertex_indices
                     .map(|vertex| remap[vertex as usize]),
-            );
+                tetrahedron.region_id.clone(),
+            ));
         }
     }
     for face in boundary {
-        tetrahedra.push([
-            remap[face[0] as usize],
-            remap[face[1] as usize],
-            remap[face[2] as usize],
-            inserted_index,
-        ]);
+        tetrahedra.push((
+            [
+                remap[face[0] as usize],
+                remap[face[1] as usize],
+                remap[face[2] as usize],
+                inserted_index,
+            ],
+            cavity_region.clone(),
+        ));
     }
-    build_delaunay_volume_topology(nodes, tetrahedra, options.topology, cancellation)
+    build_delaunay_volume_topology_with_regions(nodes, tetrahedra, options.topology, cancellation)
         .map_err(topology_error)
 }
 

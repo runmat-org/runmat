@@ -348,6 +348,7 @@ fn topology_error(error_value: DelaunayTopologyError) -> DelaunayPointSetError {
         DelaunayTopologyErrorKind::ResourceLimit => DelaunayPointSetErrorKind::ResourceLimit,
         DelaunayTopologyErrorKind::Cancelled => DelaunayPointSetErrorKind::Cancelled,
         DelaunayTopologyErrorKind::InvalidTetrahedron
+        | DelaunayTopologyErrorKind::InvalidRegion
         | DelaunayTopologyErrorKind::DegenerateTetrahedron
         | DelaunayTopologyErrorKind::NonManifoldFace => DelaunayPointSetErrorKind::InvalidTopology,
     };

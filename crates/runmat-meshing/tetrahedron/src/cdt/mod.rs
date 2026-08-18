@@ -1,7 +1,12 @@
+mod incidence;
 mod insertion;
 mod point_set;
 mod topology;
 
+pub use incidence::{
+    assign_delaunay_volume_regions, DelaunayBoundaryFacet, DelaunayRegionIncidence,
+    DelaunayVolumeIncidence,
+};
 pub use insertion::{
     insert_delaunay_volume_node, validate_delaunay_volume_topology, DelaunayInsertionError,
     DelaunayInsertionErrorKind, DelaunayInsertionOptions,

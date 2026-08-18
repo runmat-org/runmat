@@ -1,6 +1,7 @@
 use runmat_meshing_core::{NeverCancelled, StableDigest};
 
 use super::*;
+use crate::cdt::build_delaunay_volume_topology;
 
 fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
     DelaunayVolumeNode {
