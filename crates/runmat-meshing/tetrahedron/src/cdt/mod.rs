@@ -1,8 +1,14 @@
+mod constraints;
 mod incidence;
 mod insertion;
 mod point_set;
 mod topology;
 
+pub use constraints::{
+    build_delaunay_constraints, DelaunayConstraintError, DelaunayConstraintErrorKind,
+    DelaunayConstraintFacet, DelaunayConstraintNode, DelaunayConstraintOptions,
+    DelaunayConstraintSegment, DelaunayConstraints,
+};
 pub use incidence::{
     assign_delaunay_volume_regions, DelaunayBoundaryFacet, DelaunayRegionIncidence,
     DelaunayVolumeIncidence,
