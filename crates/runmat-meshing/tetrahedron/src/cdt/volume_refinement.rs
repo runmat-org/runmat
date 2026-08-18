@@ -10,10 +10,14 @@ use super::{
 };
 
 mod candidate;
+mod insertion;
 mod validation;
 mod work;
 
 use candidate::construct_candidate;
+pub use insertion::{
+    insert_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_step,
+};
 pub use validation::validate_delaunay_volume_refinement_candidate;
 use work::CandidateWork;
 
@@ -50,6 +54,48 @@ pub struct DelaunayVolumeRefinementCandidateOptions {
     pub maximum_candidate_evaluations: u64,
     pub cancellation_check_interval: u64,
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DelaunayVolumeRefinementStepOptions {
+    pub candidate: DelaunayVolumeRefinementCandidateOptions,
+    pub insertion: super::DelaunayInsertionOptions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DelaunayVolumeRefinementStep {
+    pub topology: DelaunayVolumeTopology,
+    pub quality: DelaunayVolumeQuality,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DelaunayVolumeRefinementStepErrorKind {
+    InvalidOptions,
+    InvalidInput,
+    InvalidCandidate,
+    InvalidTopology,
+    InvalidProvenance,
+    InvalidQuality,
+    ResourceLimit,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DelaunayVolumeRefinementStepError {
+    pub kind: DelaunayVolumeRefinementStepErrorKind,
+    pub reason: String,
+}
+
+impl std::fmt::Display for DelaunayVolumeRefinementStepError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "3D Delaunay volume refinement step {:?}: {}",
+            self.kind, self.reason
+        )
+    }
+}
+
+impl std::error::Error for DelaunayVolumeRefinementStepError {}
 
 impl Default for DelaunayVolumeRefinementCandidateOptions {
     fn default() -> Self {

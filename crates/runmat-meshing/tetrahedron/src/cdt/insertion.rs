@@ -1,9 +1,7 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 
 use runmat_meshing_core::{
-    quality::predicate::{
-        insphere3d_symbolic, orient3d, PredicateSign, SpatialPredicateError, SpatialPredicatePoint,
-    },
+    quality::predicate::{orient3d, PredicateSign, SpatialPredicateError},
     MeshingCancellationSignal,
 };
 
@@ -12,15 +10,19 @@ use super::{
     DelaunayTopologyOptions, DelaunayVolumeNode, DelaunayVolumeTopology,
 };
 
+mod cavity;
 mod validation;
 mod work;
 
+use cavity::connected_cavity;
+pub(super) use validation::validate_constrained_delaunay_volume_topology;
 pub use validation::validate_delaunay_volume_topology;
 use work::InsertionWork;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DelaunayInsertionOptions {
     pub topology: DelaunayTopologyOptions,
+    pub maximum_protected_faces: u64,
     pub maximum_cavity_tetrahedra: u64,
     pub maximum_cavity_boundary_faces: u64,
     pub maximum_predicate_evaluations: u64,
@@ -30,6 +32,7 @@ impl Default for DelaunayInsertionOptions {
     fn default() -> Self {
         Self {
             topology: DelaunayTopologyOptions::default(),
+            maximum_protected_faces: 2_000_000_000,
             maximum_cavity_tetrahedra: 10_000_000,
             maximum_cavity_boundary_faces: 20_000_000,
             maximum_predicate_evaluations: 100_000_000,
@@ -86,8 +89,37 @@ pub(super) fn insert_delaunay_volume_node_mutation(
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
+    insert_delaunay_volume_node_internal(topology, node, &[], false, options, cancellation)
+}
+
+pub(super) fn insert_delaunay_volume_node_with_barriers(
+    topology: DelaunayVolumeTopology,
+    node: DelaunayVolumeNode,
+    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
+    insert_delaunay_volume_node_internal(
+        topology,
+        node,
+        protected_faces,
+        true,
+        options,
+        cancellation,
+    )
+}
+
+fn insert_delaunay_volume_node_internal(
+    topology: DelaunayVolumeTopology,
+    node: DelaunayVolumeNode,
+    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    protect_region_boundaries: bool,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
     validate_options(options)?;
     validate_new_node(&topology, node)?;
+    let protected_faces = protected_faces.iter().copied().collect::<BTreeSet<_>>();
 
     let mut work = InsertionWork::new(options, cancellation);
     let mut seed = None;
@@ -105,7 +137,14 @@ pub(super) fn insert_delaunay_volume_node_mutation(
         )
     })?;
 
-    let cavity = connected_cavity(&topology, node, seed, &mut work)?;
+    let cavity = connected_cavity(
+        &topology,
+        node,
+        seed,
+        &protected_faces,
+        protect_region_boundaries,
+        &mut work,
+    )?;
     let boundary = cavity_boundary(&topology, &cavity, options)?;
     let cavity_regions = cavity
         .iter()
@@ -144,74 +183,6 @@ pub(super) fn insert_delaunay_volume_node_mutation(
     }
     build_delaunay_volume_topology_with_regions(nodes, tetrahedra, options.topology, cancellation)
         .map_err(topology_error)
-}
-
-fn connected_cavity(
-    topology: &DelaunayVolumeTopology,
-    node: DelaunayVolumeNode,
-    seed: usize,
-    work: &mut InsertionWork<'_>,
-) -> Result<BTreeSet<usize>, DelaunayInsertionError> {
-    let mut cavity = BTreeSet::new();
-    let mut examined = BTreeSet::new();
-    let mut queue = VecDeque::from([(seed, false)]);
-    while let Some((index, forced)) = queue.pop_front() {
-        work.checkpoint()?;
-        if cavity.contains(&index) || !forced && !examined.insert(index) {
-            continue;
-        }
-        let tetrahedron = &topology.tetrahedra[index];
-        if !forced && !in_circumsphere(topology, tetrahedron.vertex_indices, node, work)? {
-            continue;
-        }
-        cavity.insert(index);
-        if cavity.len() as u64 > work.options.maximum_cavity_tetrahedra {
-            return Err(resource("cavity tetrahedron limit exceeded"));
-        }
-        for (opposite, neighbor) in tetrahedron.neighbors.iter().enumerate() {
-            if let Some(neighbor) = neighbor {
-                // A symbolic in-sphere tie must never leave a physical zero-volume
-                // replacement across a face containing the inserted node.
-                let coplanar = node_coplanar_with_face(
-                    topology,
-                    tetrahedron.vertex_indices,
-                    opposite,
-                    node,
-                    work,
-                )?;
-                queue.push_back((*neighbor as usize, coplanar));
-            }
-        }
-    }
-    if !cavity.contains(&seed) {
-        return Err(error(
-            DelaunayInsertionErrorKind::InvalidTopology,
-            "the containing tetrahedron does not contain the node in its circumsphere",
-        ));
-    }
-    Ok(cavity)
-}
-
-fn node_coplanar_with_face(
-    topology: &DelaunayVolumeTopology,
-    vertices: [u32; 4],
-    opposite: usize,
-    node: DelaunayVolumeNode,
-    work: &mut InsertionWork<'_>,
-) -> Result<bool, DelaunayInsertionError> {
-    work.predicate()?;
-    let mut points = [[0.0; 3]; 4];
-    let mut cursor = 0;
-    for (vertex_index, vertex) in vertices.iter().enumerate() {
-        if vertex_index != opposite {
-            points[cursor] = topology.nodes[*vertex as usize].coordinates_m;
-            cursor += 1;
-        }
-    }
-    points[3] = node.coordinates_m;
-    orient3d(points)
-        .map(|sign| sign == PredicateSign::Zero)
-        .map_err(predicate_error)
 }
 
 fn cavity_boundary(
@@ -264,27 +235,6 @@ fn point_in_tetrahedron(
     Ok(true)
 }
 
-fn in_circumsphere(
-    topology: &DelaunayVolumeTopology,
-    vertices: [u32; 4],
-    node: DelaunayVolumeNode,
-    work: &mut InsertionWork<'_>,
-) -> Result<bool, DelaunayInsertionError> {
-    work.predicate()?;
-    let points = vertices.map(|vertex| predicate_point(topology.nodes[vertex as usize]));
-    let query = predicate_point(node);
-    insphere3d_symbolic([points[0], points[1], points[2], points[3], query])
-        .map(|sign| sign == PredicateSign::Positive)
-        .map_err(predicate_error)
-}
-
-fn predicate_point(node: DelaunayVolumeNode) -> SpatialPredicatePoint {
-    SpatialPredicatePoint {
-        identity: node.identity,
-        coordinates: node.coordinates_m,
-    }
-}
-
 fn insert_node_canonically(
     nodes: &[DelaunayVolumeNode],
     node: DelaunayVolumeNode,
@@ -328,6 +278,7 @@ pub(super) fn validate_options(
     options: DelaunayInsertionOptions,
 ) -> Result<(), DelaunayInsertionError> {
     if options.maximum_cavity_tetrahedra == 0
+        || options.maximum_protected_faces == 0
         || options.maximum_cavity_boundary_faces == 0
         || options.maximum_predicate_evaluations == 0
     {

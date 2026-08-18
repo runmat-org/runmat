@@ -57,8 +57,11 @@ pub use volume_quality::{
     DelaunayVolumeQualityOptions,
 };
 pub use volume_refinement::{
-    select_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_candidate,
+    insert_delaunay_volume_refinement_candidate, select_delaunay_volume_refinement_candidate,
+    validate_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_step,
     DelaunayRefinementCandidateKind, DelaunayVolumeRefinementCandidate,
     DelaunayVolumeRefinementCandidateError, DelaunayVolumeRefinementCandidateErrorKind,
     DelaunayVolumeRefinementCandidateOptions, DelaunayVolumeRefinementInput,
+    DelaunayVolumeRefinementStep, DelaunayVolumeRefinementStepError,
+    DelaunayVolumeRefinementStepErrorKind, DelaunayVolumeRefinementStepOptions,
 };
