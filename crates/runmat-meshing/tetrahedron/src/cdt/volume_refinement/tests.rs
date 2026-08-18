@@ -41,13 +41,12 @@ fn topology(points: [[f64; 3]; 4]) -> DelaunayVolumeTopology {
     .unwrap()
 }
 
-fn context(topology: &DelaunayVolumeTopology) -> Vec<DelaunayVolumeMetricContext> {
-    vec![DelaunayVolumeMetricContext {
-        tetrahedron_node_identities: topology.tetrahedra[0]
-            .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].identity),
-        incident_entity_ids: vec![region()],
-    }]
+fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
+    DelaunayVolumeProvenance {
+        nodes: Vec::new(),
+        segments: Vec::new(),
+        facets: Vec::new(),
+    }
 }
 
 fn metric() -> MetricFieldRequest {
@@ -77,7 +76,7 @@ fn anisotropic_metric() -> MetricFieldRequest {
 
 fn quality(
     topology: &DelaunayVolumeTopology,
-    contexts: &[DelaunayVolumeMetricContext],
+    provenance: &DelaunayVolumeProvenance,
     maximum_edge: f64,
 ) -> (DelaunayVolumeQuality, DelaunayVolumeQualityOptions) {
     let options = DelaunayVolumeQualityOptions {
@@ -86,7 +85,7 @@ fn quality(
         ..DelaunayVolumeQualityOptions::default()
     };
     let quality =
-        evaluate_delaunay_volume_quality(topology, &metric(), contexts, options, &NeverCancelled)
+        evaluate_delaunay_volume_quality(topology, &metric(), provenance, options, &NeverCancelled)
             .unwrap();
     (quality, options)
 }
@@ -94,14 +93,14 @@ fn quality(
 fn refinement_input<'a>(
     topology: &'a DelaunayVolumeTopology,
     metric_request: &'a MetricFieldRequest,
-    contexts: &'a [DelaunayVolumeMetricContext],
+    provenance: &'a DelaunayVolumeProvenance,
     quality: &'a DelaunayVolumeQuality,
     quality_options: DelaunayVolumeQualityOptions,
 ) -> DelaunayVolumeRefinementInput<'a> {
     DelaunayVolumeRefinementInput {
         topology,
         metric_request,
-        metric_contexts: contexts,
+        provenance,
         quality,
         quality_options,
     }

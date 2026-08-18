@@ -17,7 +17,7 @@ pub fn validate_delaunay_volume_refinement_candidate(
     super::validate_delaunay_volume_quality(
         input.topology,
         input.metric_request,
-        input.metric_contexts,
+        input.provenance,
         input.quality,
         input.quality_options,
         cancellation,

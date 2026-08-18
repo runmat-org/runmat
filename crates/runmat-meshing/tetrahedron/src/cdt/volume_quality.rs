@@ -7,16 +7,17 @@ use runmat_meshing_size::metric::{
 };
 
 use super::{
-    topology::build_delaunay_volume_topology_with_regions, DelaunayTopologyOptions,
-    DelaunayVolumeTopology,
+    topology::build_delaunay_volume_topology_with_regions,
+    volume_provenance::derive_delaunay_volume_metric_contexts, DelaunayTopologyOptions,
+    DelaunayVolumeProvenance, DelaunayVolumeProvenanceError, DelaunayVolumeProvenanceErrorKind,
+    DelaunayVolumeProvenanceOptions, DelaunayVolumeTopology,
 };
 
-mod context;
+pub(super) mod context;
 mod evaluation;
 mod validation;
 
-use context::validate_metric_contexts;
-pub use context::DelaunayVolumeMetricContext;
+use context::{validate_metric_contexts, DelaunayVolumeMetricContext};
 use evaluation::evaluate_tetrahedron;
 pub use validation::validate_delaunay_volume_quality;
 
@@ -27,6 +28,7 @@ pub struct DelaunayVolumeQualityOptions {
     pub maximum_metric_edge_length: f64,
     pub maximum_radius_edge_ratio: f64,
     pub cancellation_check_interval: u64,
+    pub provenance: DelaunayVolumeProvenanceOptions,
 }
 
 impl Default for DelaunayVolumeQualityOptions {
@@ -37,6 +39,7 @@ impl Default for DelaunayVolumeQualityOptions {
             maximum_metric_edge_length: 1.0,
             maximum_radius_edge_ratio: 2.0,
             cancellation_check_interval: 1_024,
+            provenance: DelaunayVolumeProvenanceOptions::default(),
         }
     }
 }
@@ -106,17 +109,12 @@ impl std::error::Error for DelaunayVolumeQualityError {}
 pub fn evaluate_delaunay_volume_quality(
     topology: &DelaunayVolumeTopology,
     metric_request: &MetricFieldRequest,
-    metric_contexts: &[DelaunayVolumeMetricContext],
+    provenance: &DelaunayVolumeProvenance,
     options: DelaunayVolumeQualityOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeQuality, DelaunayVolumeQualityError> {
-    validate_inputs(
-        topology,
-        metric_request,
-        metric_contexts,
-        options,
-        cancellation,
-    )?;
+    let metric_contexts =
+        validate_inputs(topology, metric_request, provenance, options, cancellation)?;
     let field = ResolvedMetricField::new(metric_request).map_err(metric_error)?;
     let mut tetrahedra = Vec::with_capacity(topology.tetrahedra.len());
     let mut worst = None::<(f64, [StableDigest; 4])>;
@@ -124,7 +122,7 @@ pub fn evaluate_delaunay_volume_quality(
     let mut maximum_radius_edge_ratio = 0.0_f64;
 
     for (index, (tetrahedron, context)) in
-        topology.tetrahedra.iter().zip(metric_contexts).enumerate()
+        topology.tetrahedra.iter().zip(&metric_contexts).enumerate()
     {
         checkpoint(index as u64, options, cancellation)?;
         let region_id = tetrahedron.region_id.clone().ok_or_else(|| {
@@ -172,7 +170,7 @@ pub fn evaluate_delaunay_volume_quality(
     validate_delaunay_volume_quality(
         topology,
         metric_request,
-        metric_contexts,
+        provenance,
         &quality,
         options,
         cancellation,
@@ -183,10 +181,10 @@ pub fn evaluate_delaunay_volume_quality(
 fn validate_inputs(
     topology: &DelaunayVolumeTopology,
     metric_request: &MetricFieldRequest,
-    metric_contexts: &[DelaunayVolumeMetricContext],
+    provenance: &DelaunayVolumeProvenance,
     options: DelaunayVolumeQualityOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<(), DelaunayVolumeQualityError> {
+) -> Result<Vec<DelaunayVolumeMetricContext>, DelaunayVolumeQualityError> {
     validate_options(options)?;
     metric_request.validate().map_err(metric_error)?;
     if topology.nodes.len() as u64 > options.maximum_nodes
@@ -209,7 +207,6 @@ fn validate_inputs(
             "every evaluated tetrahedron must have one assigned region",
         ));
     }
-    validate_metric_contexts(topology, metric_contexts)?;
     let rebuilt = build_delaunay_volume_topology_with_regions(
         topology.nodes.clone(),
         topology
@@ -243,7 +240,34 @@ fn validate_inputs(
             "volume topology is not in canonical checked form",
         ));
     }
-    Ok(())
+    let contexts = derive_delaunay_volume_metric_contexts(
+        topology,
+        provenance,
+        options.provenance,
+        cancellation,
+    )
+    .map_err(provenance_error)?;
+    validate_metric_contexts(topology, &contexts)?;
+    Ok(contexts)
+}
+
+fn provenance_error(failure: DelaunayVolumeProvenanceError) -> DelaunayVolumeQualityError {
+    let kind = match failure.kind {
+        DelaunayVolumeProvenanceErrorKind::InvalidOptions => {
+            DelaunayVolumeQualityErrorKind::InvalidOptions
+        }
+        DelaunayVolumeProvenanceErrorKind::InvalidTopology => {
+            DelaunayVolumeQualityErrorKind::InvalidTopology
+        }
+        DelaunayVolumeProvenanceErrorKind::InvalidProvenance => {
+            DelaunayVolumeQualityErrorKind::InvalidMetricContext
+        }
+        DelaunayVolumeProvenanceErrorKind::ResourceLimit => {
+            DelaunayVolumeQualityErrorKind::ResourceLimit
+        }
+        DelaunayVolumeProvenanceErrorKind::Cancelled => DelaunayVolumeQualityErrorKind::Cancelled,
+    };
+    error(kind, None, failure.to_string())
 }
 
 fn validate_options(

@@ -7,8 +7,8 @@ use runmat_meshing_size::metric::{
 
 use super::*;
 use crate::cdt::{
-    assign_delaunay_volume_regions, build_delaunay_volume_topology, DelaunayTopologyOptions,
-    DelaunayVolumeNode,
+    assign_delaunay_volume_regions, build_delaunay_volume_topology, DelaunayFacetProvenance,
+    DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
 fn region(value: &str) -> PersistentEntityId {
@@ -23,24 +23,20 @@ fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
     }
 }
 
-fn metric_contexts(topology: &DelaunayVolumeTopology) -> Vec<DelaunayVolumeMetricContext> {
-    topology
-        .tetrahedra
-        .iter()
-        .map(|tetrahedron| {
-            let mut incident_entity_ids = vec![tetrahedron.region_id.clone().unwrap()];
-            if tetrahedron.region_id == Some(region("outer")) {
-                incident_entity_ids.push(entity(PersistentEntityKind::Face, "loaded-boundary"));
-            }
-            incident_entity_ids.sort();
-            DelaunayVolumeMetricContext {
-                tetrahedron_node_identities: tetrahedron
-                    .vertex_indices
-                    .map(|vertex| topology.nodes[vertex as usize].identity),
-                incident_entity_ids,
-            }
-        })
-        .collect()
+fn metric_contexts(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
+    DelaunayVolumeProvenance {
+        nodes: Vec::new(),
+        segments: Vec::new(),
+        facets: vec![DelaunayFacetProvenance {
+            node_identities: [
+                StableDigest::from_bytes([2; 32]),
+                StableDigest::from_bytes([3; 32]),
+                StableDigest::from_bytes([5; 32]),
+            ],
+            entity_ids: vec![entity(PersistentEntityKind::Face, "loaded-boundary")],
+            region_ids: vec![region("outer")],
+        }],
+    }
 }
 
 fn topology() -> DelaunayVolumeTopology {
@@ -259,7 +255,7 @@ fn quality_rejects_unassigned_topology_limits_bad_policy_and_cancellation() {
     );
 
     let mut invalid_contexts = contexts;
-    invalid_contexts[0].incident_entity_ids.clear();
+    invalid_contexts.facets[0].entity_ids.clear();
     assert_eq!(
         evaluate_delaunay_volume_quality(
             &assigned,

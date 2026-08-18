@@ -4,8 +4,8 @@ use runmat_meshing_size::metric::{MetricFieldRequest, MetricTensor3};
 use sha2::{Digest, Sha256};
 
 use super::{
-    validate_delaunay_volume_quality, DelaunayTetrahedronQuality, DelaunayVolumeMetricContext,
-    DelaunayVolumeNode, DelaunayVolumeQuality, DelaunayVolumeQualityError,
+    validate_delaunay_volume_quality, DelaunayTetrahedronQuality, DelaunayVolumeNode,
+    DelaunayVolumeProvenance, DelaunayVolumeQuality, DelaunayVolumeQualityError,
     DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions, DelaunayVolumeTopology,
 };
 
@@ -40,7 +40,7 @@ pub struct DelaunayVolumeRefinementCandidate {
 pub struct DelaunayVolumeRefinementInput<'a> {
     pub topology: &'a DelaunayVolumeTopology,
     pub metric_request: &'a MetricFieldRequest,
-    pub metric_contexts: &'a [DelaunayVolumeMetricContext],
+    pub provenance: &'a DelaunayVolumeProvenance,
     pub quality: &'a DelaunayVolumeQuality,
     pub quality_options: DelaunayVolumeQualityOptions,
 }
@@ -98,7 +98,7 @@ pub fn select_delaunay_volume_refinement_candidate(
     validate_delaunay_volume_quality(
         input.topology,
         input.metric_request,
-        input.metric_contexts,
+        input.provenance,
         input.quality,
         input.quality_options,
         cancellation,

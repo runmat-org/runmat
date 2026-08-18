@@ -4,7 +4,7 @@ use runmat_meshing_core::MeshingCancellationSignal;
 use runmat_meshing_size::metric::{MetricTensor3, ResolvedMetricField};
 
 use super::{
-    checkpoint, error, validate_inputs, DelaunayTetrahedronQuality, DelaunayVolumeMetricContext,
+    checkpoint, error, validate_inputs, DelaunayTetrahedronQuality, DelaunayVolumeProvenance,
     DelaunayVolumeQuality, DelaunayVolumeQualityError, DelaunayVolumeQualityErrorKind,
     DelaunayVolumeQualityOptions, DelaunayVolumeTopology, MetricFieldRequest,
 };
@@ -24,18 +24,13 @@ struct IndependentTetrahedronQuality {
 pub fn validate_delaunay_volume_quality(
     topology: &DelaunayVolumeTopology,
     metric_request: &MetricFieldRequest,
-    metric_contexts: &[DelaunayVolumeMetricContext],
+    provenance: &DelaunayVolumeProvenance,
     quality: &DelaunayVolumeQuality,
     options: DelaunayVolumeQualityOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayVolumeQualityError> {
-    validate_inputs(
-        topology,
-        metric_request,
-        metric_contexts,
-        options,
-        cancellation,
-    )?;
+    let metric_contexts =
+        validate_inputs(topology, metric_request, provenance, options, cancellation)?;
     if quality.tetrahedra.len() != topology.tetrahedra.len() {
         return Err(invalid(
             None,
@@ -50,7 +45,7 @@ pub fn validate_delaunay_volume_quality(
     for (index, ((tetrahedron, context), observed)) in topology
         .tetrahedra
         .iter()
-        .zip(metric_contexts)
+        .zip(&metric_contexts)
         .zip(&quality.tetrahedra)
         .enumerate()
     {

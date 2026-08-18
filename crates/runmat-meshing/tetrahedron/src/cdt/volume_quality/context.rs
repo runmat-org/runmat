@@ -6,7 +6,7 @@ use super::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DelaunayVolumeMetricContext {
+pub(in crate::cdt) struct DelaunayVolumeMetricContext {
     pub tetrahedron_node_identities: [StableDigest; 4],
     pub incident_entity_ids: Vec<PersistentEntityId>,
 }
