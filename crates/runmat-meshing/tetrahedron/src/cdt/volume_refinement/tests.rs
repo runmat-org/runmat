@@ -4,12 +4,14 @@ use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, Met
 
 use super::*;
 use crate::cdt::{
-    assign_delaunay_volume_regions, build_delaunay_volume_topology,
+    assign_delaunay_volume_regions, build_delaunay_volume_topology, coarsen_marked_delaunay_volume,
     evaluate_delaunay_volume_quality, insert_delaunay_volume_node, refine_marked_delaunay_volume,
-    validate_marked_delaunay_volume_refinement, DelaunayAdaptiveRefinementDecision,
-    DelaunayAdaptiveRefinementErrorKind, DelaunayAdaptiveRefinementMark,
-    DelaunayAdaptiveRefinementOptions, DelaunayFacetProvenance, DelaunayInsertionErrorKind,
-    DelaunayInsertionOptions, DelaunaySegmentProvenance, DelaunayTopologyOptions,
+    validate_marked_delaunay_volume_coarsening, validate_marked_delaunay_volume_refinement,
+    DelaunayAdaptiveCoarseningErrorKind, DelaunayAdaptiveCoarseningOptions,
+    DelaunayAdaptiveRefinementDecision, DelaunayAdaptiveRefinementErrorKind,
+    DelaunayAdaptiveRefinementMark, DelaunayAdaptiveRefinementOptions, DelaunayFacetProvenance,
+    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunaySegmentProvenance,
+    DelaunayTopologyOptions,
 };
 
 fn region() -> PersistentEntityId {
@@ -784,6 +786,159 @@ fn marked_adaptation_is_local_deterministic_replayable_and_bounded() {
         &NeverCancelled,
     )
     .unwrap();
+    let mut false_lineage = first.clone();
+    let DelaunayAdaptiveRefinementDecision::Inserted { lineage, .. } =
+        &mut false_lineage.decisions[0]
+    else {
+        panic!("fixture must produce an insertion");
+    };
+    lineage.created_tetrahedra.pop();
+    assert_eq!(
+        validate_marked_delaunay_volume_refinement(
+            input,
+            &marks,
+            &false_lineage,
+            DelaunayAdaptiveRefinementOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveRefinementErrorKind::InvalidResult
+    );
+
+    let inserted_nodes = first
+        .decisions
+        .iter()
+        .filter_map(|decision| match decision {
+            DelaunayAdaptiveRefinementDecision::Inserted { lineage, .. } => {
+                Some(lineage.node.identity)
+            }
+            DelaunayAdaptiveRefinementDecision::CoveredByPriorInsertion { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    let coarsened = coarsen_marked_delaunay_volume(
+        input,
+        &first,
+        &inserted_nodes,
+        DelaunayAdaptiveCoarseningOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(coarsened.topology, topology);
+    assert_eq!(coarsened.quality, quality);
+    assert_eq!(
+        coarsened.removed_node_identities,
+        inserted_nodes.iter().copied().rev().collect::<Vec<_>>()
+    );
+    let repeated = coarsen_marked_delaunay_volume(
+        input,
+        &first,
+        &inserted_nodes.iter().copied().rev().collect::<Vec<_>>(),
+        DelaunayAdaptiveCoarseningOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(coarsened, repeated);
+    validate_marked_delaunay_volume_coarsening(
+        input,
+        &first,
+        &inserted_nodes,
+        &coarsened,
+        DelaunayAdaptiveCoarseningOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let partial = coarsen_marked_delaunay_volume(
+        input,
+        &first,
+        &inserted_nodes[..1],
+        DelaunayAdaptiveCoarseningOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(partial.topology.nodes.len(), topology.nodes.len() + 1);
+
+    let mut tampered_coarsening = coarsened.clone();
+    tampered_coarsening.quality.tetrahedra[0].maximum_metric_edge_length *= 2.0;
+    assert_eq!(
+        validate_marked_delaunay_volume_coarsening(
+            input,
+            &first,
+            &inserted_nodes,
+            &tampered_coarsening,
+            DelaunayAdaptiveCoarseningOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveCoarseningErrorKind::InvalidResult
+    );
+    assert_eq!(
+        coarsen_marked_delaunay_volume(
+            input,
+            &first,
+            &inserted_nodes,
+            DelaunayAdaptiveCoarseningOptions {
+                maximum_removals: 1,
+                ..DelaunayAdaptiveCoarseningOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveCoarseningErrorKind::ResourceLimit
+    );
+    assert_eq!(
+        coarsen_marked_delaunay_volume(
+            input,
+            &first,
+            &[inserted_nodes[0], inserted_nodes[0]],
+            DelaunayAdaptiveCoarseningOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveCoarseningErrorKind::InvalidRemovals
+    );
+    assert_eq!(
+        coarsen_marked_delaunay_volume(
+            input,
+            &first,
+            &[StableDigest::from_bytes([99; 32])],
+            DelaunayAdaptiveCoarseningOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveCoarseningErrorKind::InvalidRemovals
+    );
+    assert_eq!(
+        coarsen_marked_delaunay_volume(
+            input,
+            &first,
+            &inserted_nodes,
+            DelaunayAdaptiveCoarseningOptions {
+                cancellation_check_interval: 0,
+                ..DelaunayAdaptiveCoarseningOptions::default()
+            },
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveCoarseningErrorKind::InvalidOptions
+    );
+    assert_eq!(
+        coarsen_marked_delaunay_volume(
+            input,
+            &first,
+            &inserted_nodes,
+            DelaunayAdaptiveCoarseningOptions::default(),
+            &Cancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayAdaptiveCoarseningErrorKind::Cancelled
+    );
 
     let mut tampered = first.clone();
     tampered.decisions.swap(0, 1);

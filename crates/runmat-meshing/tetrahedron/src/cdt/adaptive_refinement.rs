@@ -11,6 +11,7 @@ use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 use sha2::{Digest, Sha256};
 
 use super::{
+    adaptive_lineage::{insertion_lineage, tetrahedron_records, DelaunayAdaptiveInsertionLineage},
     evaluate_delaunay_volume_quality,
     insertion::{
         insert_delaunay_volume_node_with_barriers, validate_constrained_delaunay_volume_topology,
@@ -50,11 +51,11 @@ impl Default for DelaunayAdaptiveRefinementOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DelaunayAdaptiveRefinementDecision {
     Inserted {
         mark: DelaunayAdaptiveRefinementMark,
-        node: DelaunayVolumeNode,
+        lineage: DelaunayAdaptiveInsertionLineage,
     },
     CoveredByPriorInsertion {
         mark: DelaunayAdaptiveRefinementMark,
@@ -121,7 +122,7 @@ pub fn validate_marked_delaunay_volume_refinement(
             .decisions
             .iter()
             .zip(&canonical_marks)
-            .any(|(decision, mark)| decision_mark(*decision) != *mark)
+            .any(|(decision, mark)| decision_mark(decision) != *mark)
     {
         return Err(error(
             DelaunayAdaptiveRefinementErrorKind::InvalidResult,
@@ -233,6 +234,7 @@ fn apply_marks(
             )));
         }
         let node = adaptive_node(&topology, tetrahedron.vertex_indices, mark);
+        let previous = tetrahedron_records(&topology);
         topology = insert_delaunay_volume_node_with_barriers(
             topology,
             node,
@@ -242,7 +244,10 @@ fn apply_marks(
         )
         .map_err(insertion_error)?;
         insertion_count += 1;
-        decisions.push(DelaunayAdaptiveRefinementDecision::Inserted { mark, node });
+        decisions.push(DelaunayAdaptiveRefinementDecision::Inserted {
+            mark,
+            lineage: insertion_lineage(previous, &topology, node),
+        });
     }
     validate_constrained_delaunay_volume_topology(
         &topology,
@@ -306,10 +311,12 @@ fn adaptive_node(
     }
 }
 
-fn decision_mark(decision: DelaunayAdaptiveRefinementDecision) -> DelaunayAdaptiveRefinementMark {
+pub(super) fn decision_mark(
+    decision: &DelaunayAdaptiveRefinementDecision,
+) -> DelaunayAdaptiveRefinementMark {
     match decision {
         DelaunayAdaptiveRefinementDecision::Inserted { mark, .. }
-        | DelaunayAdaptiveRefinementDecision::CoveredByPriorInsertion { mark } => mark,
+        | DelaunayAdaptiveRefinementDecision::CoveredByPriorInsertion { mark } => *mark,
     }
 }
 

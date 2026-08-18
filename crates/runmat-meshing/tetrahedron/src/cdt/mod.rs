@@ -1,3 +1,5 @@
+mod adaptive_coarsening;
+mod adaptive_lineage;
 mod adaptive_refinement;
 mod carving;
 mod constraints;
@@ -14,6 +16,12 @@ mod volume_quality;
 mod volume_refinement;
 mod volume_sliver;
 
+pub use adaptive_coarsening::{
+    coarsen_marked_delaunay_volume, validate_marked_delaunay_volume_coarsening,
+    DelaunayAdaptiveCoarseningError, DelaunayAdaptiveCoarseningErrorKind,
+    DelaunayAdaptiveCoarseningOptions, DelaunayAdaptiveCoarseningResult,
+};
+pub use adaptive_lineage::{DelaunayAdaptiveInsertionLineage, DelaunayAdaptiveTetrahedronRecord};
 pub use adaptive_refinement::{
     refine_marked_delaunay_volume, validate_marked_delaunay_volume_refinement,
     DelaunayAdaptiveRefinementDecision, DelaunayAdaptiveRefinementError,
