@@ -56,12 +56,25 @@ pub fn validate_exact_face_mesh_batch(
     batch: &ExactFaceMeshBatch,
     topology: &ExactBRepTopology,
 ) -> Result<(), ExactSurfaceMeshError> {
-    validate_partition(&batch.partition)?;
-    if batch.schema_version != EXACT_FACE_MESH_BATCH_SCHEMA_VERSION || batch.faces.is_empty() {
+    validate_exact_face_mesh_batch_parts(
+        batch.schema_version,
+        &batch.partition,
+        &batch.faces,
+        topology,
+    )
+}
+
+pub(crate) fn validate_exact_face_mesh_batch_parts(
+    schema_version: u16,
+    partition: &MeshingPartitionDescriptor,
+    faces: &[ExactFaceMesh],
+    topology: &ExactBRepTopology,
+) -> Result<(), ExactSurfaceMeshError> {
+    validate_face_partition_descriptor(partition)?;
+    if schema_version != EXACT_FACE_MESH_BATCH_SCHEMA_VERSION || faces.is_empty() {
         return Err(invalid_input("face batch schema or inventory is invalid"));
     }
-    let range = batch
-        .partition
+    let range = partition
         .entity_range
         .as_ref()
         .expect("partition kind validated");
@@ -73,9 +86,8 @@ pub fn validate_exact_face_mesh_batch(
     if expected.len() as u64 != range.entity_count
         || expected.first().is_none_or(|face| face.id != range.first)
         || expected.last().is_none_or(|face| face.id != range.last)
-        || batch.faces.len() != expected.len()
-        || batch
-            .faces
+        || faces.len() != expected.len()
+        || faces
             .iter()
             .zip(&expected)
             .any(|(mesh, face)| mesh.source_face_id != face.id)
@@ -84,7 +96,7 @@ pub fn validate_exact_face_mesh_batch(
             "face batch does not exactly cover its canonical topology range",
         ));
     }
-    for mesh in &batch.faces {
+    for mesh in faces {
         validate_exact_face_mesh_contract(mesh, topology).map_err(|error| {
             ExactSurfaceMeshError::new(ExactSurfaceMeshErrorKind::InvalidInput, error.reason)
                 .with_face(&mesh.source_face_id)
@@ -93,7 +105,9 @@ pub fn validate_exact_face_mesh_batch(
     Ok(())
 }
 
-fn validate_partition(partition: &MeshingPartitionDescriptor) -> Result<(), ExactSurfaceMeshError> {
+pub(crate) fn validate_face_partition_descriptor(
+    partition: &MeshingPartitionDescriptor,
+) -> Result<(), ExactSurfaceMeshError> {
     partition
         .validate()
         .map_err(|error| invalid_input(error.to_string()))?;

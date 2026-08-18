@@ -70,7 +70,7 @@ pub use face_mesh::{
 };
 pub use face_pipeline::{
     mesh_exact_face_partition, ExactFacePartitionContext, ExactFacePartitionError,
-    ExactFacePartitionErrorKind, ExactFacePartitionOptions, ExactFacePartitionOutcome,
+    ExactFacePartitionErrorKind, ExactFacePartitionOptions,
 };
 pub use param_tri::{
     discretize_cad_surfaces, discretize_cad_surfaces_with_curves,
@@ -98,11 +98,14 @@ pub use refinement::{
     ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
 pub use surface_mesh::{
-    build_exact_face_mesh_batch, decode_exact_face_mesh_batch, decode_exact_surface_mesh,
-    encode_exact_face_mesh_batch, encode_exact_surface_mesh, face_partition_descriptors,
-    join_exact_face_mesh_batches, validate_exact_face_mesh_batch, validate_exact_surface_mesh,
-    ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh, ExactSurfaceMeshError,
-    ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
+    build_exact_face_mesh_batch, build_exact_face_partition_result, decode_exact_face_mesh_batch,
+    decode_exact_face_partition_result, decode_exact_surface_mesh, encode_exact_face_mesh_batch,
+    encode_exact_face_partition_result, encode_exact_surface_mesh, face_partition_descriptors,
+    join_exact_face_mesh_batches, validate_exact_face_mesh_batch,
+    validate_exact_face_partition_result, validate_exact_surface_mesh, ExactFaceMeshBatch,
+    ExactFacePartitionOutcome, ExactFacePartitionResult, ExactSurfaceJoinOptions, ExactSurfaceMesh,
+    ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence,
+    EXACT_FACE_MESH_BATCH_SCHEMA_VERSION, EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
     EXACT_SURFACE_MESH_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
 };
 pub use validate::{

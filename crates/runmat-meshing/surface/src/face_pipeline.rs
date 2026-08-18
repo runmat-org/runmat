@@ -1,22 +1,20 @@
 use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl};
 use runmat_meshing_core::{
-    MeshingCancellationSignal, MeshingPartitionDescriptor, MeshingPartitionKind,
-    MetricFieldRequest, SurfaceQualityTargets,
+    MeshingCancellationSignal, MeshingPartitionDescriptor, MetricFieldRequest,
+    SurfaceQualityTargets,
 };
-use runmat_meshing_curve::{
-    canonicalize_shared_curve_splits, SharedCurveMesh, SharedCurveSegmentSplit,
-};
+use runmat_meshing_curve::{canonicalize_shared_curve_splits, SharedCurveMesh};
 
 use crate::{
-    accept_exact_face_chart_mesh, build_exact_face_charts, build_exact_face_mesh_batch,
+    accept_exact_face_chart_mesh, build_exact_face_charts, build_exact_face_partition_result,
     build_exact_surface_boundary, join_exact_face_charts, recover_exact_face_chart_domains,
     refine_exact_face_chart_until_blocked, triangulate_exact_face_charts,
     ExactFaceAcceptanceErrorKind, ExactFaceAcceptanceOptions, ExactFaceChartDelaunayContext,
     ExactFaceChartErrorKind, ExactFaceChartRefinedMesh, ExactFaceChartRefinementOptions,
     ExactFaceChartRefinementOutcome, ExactFaceDelaunayOptions, ExactFaceJoinContext,
-    ExactFaceJoinErrorKind, ExactFaceJoinOptions, ExactFaceMesh, ExactFaceMeshBatch,
-    ExactFaceRefinementContext, ExactFaceRefinementErrorKind, ExactFaceRefinementPolicy,
-    ExactSurfaceBoundaryErrorKind, ExactSurfaceMeshErrorKind, MAX_EXACT_FACE_PARTITIONS,
+    ExactFaceJoinErrorKind, ExactFaceJoinOptions, ExactFaceMesh, ExactFacePartitionOutcome,
+    ExactFacePartitionResult, ExactFaceRefinementContext, ExactFaceRefinementErrorKind,
+    ExactFaceRefinementPolicy, ExactSurfaceBoundaryErrorKind, ExactSurfaceMeshErrorKind,
 };
 
 #[derive(Clone, Copy)]
@@ -38,12 +36,6 @@ pub struct ExactFacePartitionOptions {
     pub chart_refinement: ExactFaceChartRefinementOptions,
     pub acceptance: ExactFaceAcceptanceOptions,
     pub face_join: ExactFaceJoinOptions,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ExactFacePartitionOutcome {
-    Converged(ExactFaceMeshBatch),
-    RequiresCurveSplits(Vec<SharedCurveSegmentSplit>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +71,7 @@ pub fn mesh_exact_face_partition(
     partition: MeshingPartitionDescriptor,
     context: ExactFacePartitionContext<'_>,
     options: ExactFacePartitionOptions,
-) -> Result<ExactFacePartitionOutcome, ExactFacePartitionError> {
+) -> Result<ExactFacePartitionResult, ExactFacePartitionError> {
     validate_partition(&partition)?;
     let boundary = build_exact_surface_boundary(context.topology, context.curves)
         .map_err(|error| failure(ExactFacePartitionErrorKind::Boundary(error.kind), error))?;
@@ -200,28 +192,28 @@ pub fn mesh_exact_face_partition(
     }
     if !splits.is_empty() {
         canonicalize_shared_curve_splits(&mut splits);
-        return Ok(ExactFacePartitionOutcome::RequiresCurveSplits(splits));
+        return build_exact_face_partition_result(
+            context.topology,
+            context.curves,
+            partition,
+            ExactFacePartitionOutcome::RequiresCurveSplits { splits },
+        )
+        .map_err(|error| failure(ExactFacePartitionErrorKind::Batch(error.kind), error));
     }
-    build_exact_face_mesh_batch(context.topology, partition, meshes)
-        .map(ExactFacePartitionOutcome::Converged)
-        .map_err(|error| failure(ExactFacePartitionErrorKind::Batch(error.kind), error))
+    build_exact_face_partition_result(
+        context.topology,
+        context.curves,
+        partition,
+        ExactFacePartitionOutcome::Converged { faces: meshes },
+    )
+    .map_err(|error| failure(ExactFacePartitionErrorKind::Batch(error.kind), error))
 }
 
 fn validate_partition(
     partition: &MeshingPartitionDescriptor,
 ) -> Result<(), ExactFacePartitionError> {
-    partition
-        .validate()
-        .map_err(|error| invalid_partition(error.to_string()))?;
-    if partition.kind != MeshingPartitionKind::CanonicalEntityBatch
-        || partition.entity_range.is_none()
-        || partition.partition_count as usize > MAX_EXACT_FACE_PARTITIONS
-    {
-        return Err(invalid_partition(
-            "face meshing requires a canonical entity-range partition",
-        ));
-    }
-    Ok(())
+    crate::surface_mesh::validate_face_partition_descriptor(partition)
+        .map_err(|error| invalid_partition(error.reason))
 }
 
 fn invalid_partition(reason: impl Into<String>) -> ExactFacePartitionError {

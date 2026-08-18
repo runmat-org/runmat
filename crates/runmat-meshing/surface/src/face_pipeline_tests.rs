@@ -10,6 +10,7 @@ use runmat_meshing_curve::{
 };
 
 use crate::{
+    build_exact_face_partition_result, encode_exact_face_partition_result,
     face_partition_descriptors, mesh_exact_face_partition, ExactFacePartitionContext,
     ExactFacePartitionOptions, ExactFacePartitionOutcome,
 };
@@ -52,14 +53,80 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         ExactFacePartitionOptions::default(),
     )
     .unwrap();
-    let ExactFacePartitionOutcome::Converged(batch) = outcome else {
+    let ExactFacePartitionOutcome::Converged { faces } = &outcome.outcome else {
         panic!("permissive planar face must converge without a curve restart")
     };
 
-    assert_eq!(batch.partition, partitions[0]);
-    assert_eq!(batch.faces.len(), 1);
-    assert_eq!(batch.faces[0].source_face_id, topology.faces[0].id);
-    assert!(!batch.faces[0].triangles.is_empty());
+    assert_eq!(outcome.partition, partitions[0]);
+    assert_eq!(faces.len(), 1);
+    assert_eq!(faces[0].source_face_id, topology.faces[0].id);
+    assert!(!faces[0].triangles.is_empty());
+    let encoded = encode_exact_face_partition_result(&outcome, &topology, &curves).unwrap();
+    assert_eq!(
+        crate::decode_exact_face_partition_result(&encoded, &topology, &curves).unwrap(),
+        outcome
+    );
+    assert_eq!(
+        crate::surface_mesh::decode_exact_face_partition_result_with_byte_limit(
+            &encoded,
+            &topology,
+            &curves,
+            encoded.len() - 1,
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
+
+    let curve = &curves.edges[0];
+    let split = SharedCurveSegmentSplit {
+        source_edge_id: curve.source_edge_id.clone(),
+        endpoint_node_ids: [curve.nodes[0].node_id, curve.nodes[1].node_id],
+        edge_parameters: [curve.nodes[0].parameter, curve.nodes[1].parameter],
+        split_parameter: (curve.nodes[0].parameter + curve.nodes[1].parameter) * 0.5,
+    };
+    let restart = build_exact_face_partition_result(
+        &topology,
+        &curves,
+        partitions[0].clone(),
+        ExactFacePartitionOutcome::RequiresCurveSplits {
+            splits: vec![split.clone()],
+        },
+    )
+    .unwrap();
+    let restart_bytes = encode_exact_face_partition_result(&restart, &topology, &curves).unwrap();
+    assert_eq!(
+        crate::decode_exact_face_partition_result(&restart_bytes, &topology, &curves).unwrap(),
+        restart
+    );
+    let mut corrupted_restart = restart_bytes;
+    corrupted_restart[0] ^= 1;
+    assert_eq!(
+        crate::decode_exact_face_partition_result(&corrupted_restart, &topology, &curves)
+            .unwrap_err()
+            .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
+    assert!(build_exact_face_partition_result(
+        &topology,
+        &curves,
+        partitions[0].clone(),
+        ExactFacePartitionOutcome::RequiresCurveSplits {
+            splits: vec![split.clone(), split.clone()],
+        },
+    )
+    .is_err());
+    let mut unrelated = split;
+    unrelated.source_edge_id.source_topology_id = "unrelated-edge".into();
+    assert!(build_exact_face_partition_result(
+        &topology,
+        &curves,
+        partitions[0].clone(),
+        ExactFacePartitionOutcome::RequiresCurveSplits {
+            splits: vec![unrelated],
+        },
+    )
+    .is_err());
 
     let mut fabricated_range = partitions[0].clone();
     fabricated_range

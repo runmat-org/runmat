@@ -1,5 +1,6 @@
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::MeshingPartitionDescriptor;
+use runmat_meshing_curve::SharedCurveSegmentSplit;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -7,6 +8,7 @@ use crate::{
 };
 
 pub const EXACT_FACE_MESH_BATCH_SCHEMA_VERSION: u16 = 1;
+pub const EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION: u16 = 1;
 pub const EXACT_SURFACE_MESH_SCHEMA_VERSION: u16 = 1;
 pub const MAX_EXACT_FACE_PARTITIONS: usize = 63;
 
@@ -35,6 +37,25 @@ pub struct ExactFaceMeshBatch {
     pub schema_version: u16,
     pub partition: MeshingPartitionDescriptor,
     pub faces: Vec<ExactFaceMesh>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExactFacePartitionResult {
+    pub schema_version: u16,
+    pub partition: MeshingPartitionDescriptor,
+    pub outcome: ExactFacePartitionOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExactFacePartitionOutcome {
+    Converged {
+        faces: Vec<ExactFaceMesh>,
+    },
+    RequiresCurveSplits {
+        splits: Vec<SharedCurveSegmentSplit>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
