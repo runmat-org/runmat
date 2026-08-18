@@ -7,7 +7,7 @@ use super::{
 use crate::GeometryContractError;
 use std::collections::BTreeSet;
 
-pub const EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION: u16 = 3;
+pub const EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +57,7 @@ pub enum ExactCurveDefinition {
         y_axis: [f64; 3],
         radius_m: f64,
         domain: ParameterRange,
+        periodic: bool,
     },
     Ellipse {
         center_m: [f64; 3],
@@ -65,6 +66,7 @@ pub enum ExactCurveDefinition {
         major_radius_m: f64,
         minor_radius_m: f64,
         domain: ParameterRange,
+        periodic: bool,
     },
     Nurbs {
         definition: NurbsCurve3,

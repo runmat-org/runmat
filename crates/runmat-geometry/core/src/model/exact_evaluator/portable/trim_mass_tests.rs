@@ -171,6 +171,7 @@ fn circular_face_with_hole() -> (ExactEvaluatorRegistry, ExactBRepTopology, Exac
                 y_axis: [0.0, 1.0, 0.0],
                 radius_m: 0.25,
                 domain,
+                periodic: true,
             },
         },
     });

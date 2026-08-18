@@ -1,11 +1,14 @@
-use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl};
+use runmat_geometry_core::{
+    ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, SurfaceEvaluatorId,
+};
 use runmat_meshing_core::StableDigest;
 use sha2::{Digest, Sha256};
 
 use crate::{build_exact_face_pslg, ExactFaceBoundary, ExactFaceBoundaryLoop};
 
 use super::{
-    annulus::build_periodic_annulus_pslg, parameterization::build_projected_parameterization,
+    annulus::build_periodic_annulus_pslg,
+    parameterization::{build_projected_parameterization, is_singular},
     ExactFaceChart, ExactFaceChartError, ExactFaceChartErrorKind, ExactFaceChartOptions,
     ExactFaceChartParameterization, ExactFaceCharts,
 };
@@ -81,14 +84,17 @@ fn build_without_validation(
         ));
     }
     let mut boundary = source.clone();
-    let mut windings = vec![lift_loop(
-        &mut boundary.outer_loop,
+    let lift_context = LoopLiftContext {
         periodicity,
         options,
         source,
-    )?];
+        singular_surface: face.has_singularity.then_some(&face.surface_evaluator_id),
+        evaluator,
+        control,
+    };
+    let mut windings = vec![lift_loop(&mut boundary.outer_loop, &lift_context)?];
     for loop_boundary in &mut boundary.inner_loops {
-        windings.push(lift_loop(loop_boundary, periodicity, options, source)?);
+        windings.push(lift_loop(loop_boundary, &lift_context)?);
     }
     let chart_id = chart_id(&source.source_face_id, 0);
     let zero_winding = windings.iter().all(|winding| *winding == [0, 0]);
@@ -137,35 +143,48 @@ fn build_without_validation(
     })
 }
 
-fn lift_loop(
-    loop_boundary: &mut ExactFaceBoundaryLoop,
+struct LoopLiftContext<'a, Evaluator: ?Sized> {
     periodicity: [Option<f64>; 2],
     options: ExactFaceChartOptions,
-    source: &ExactFaceBoundary,
+    source: &'a ExactFaceBoundary,
+    singular_surface: Option<&'a SurfaceEvaluatorId>,
+    evaluator: &'a Evaluator,
+    control: &'a dyn GeometryEvaluationControl,
+}
+
+fn lift_loop<Evaluator: ExactSurfaceEvaluator + ?Sized>(
+    loop_boundary: &mut ExactFaceBoundaryLoop,
+    lift_context: &LoopLiftContext<'_, Evaluator>,
 ) -> Result<[i32; 2], ExactFaceChartError> {
     if loop_boundary.segments.is_empty() {
-        return Err(invalid(source, "face chart loop is empty"));
+        return Err(invalid(lift_context.source, "face chart loop is empty"));
     }
     let first_uv = loop_boundary.segments[0].node_uv[0];
     let mut previous_id = loop_boundary.segments[0].node_ids[0];
     let mut previous_uv = first_uv;
+    let mut used_singular_transition = false;
     for segment in &mut loop_boundary.segments {
         if segment.node_ids[0] != previous_id {
             return Err(invalid(
-                source,
+                lift_context.source,
                 "face chart loop node incidence is disconnected",
             ));
         }
-        for axis in 0..2 {
+        let singular_transition =
+            is_singular_transition(previous_uv, segment.node_uv[0], lift_context)?;
+        used_singular_transition |= singular_transition;
+        for (axis, previous_coordinate) in previous_uv.into_iter().enumerate() {
             let context = CoordinateLift {
-                period: periodicity[axis],
-                options,
-                source,
+                period: lift_context.periodicity[axis],
+                options: lift_context.options,
+                source: lift_context.source,
                 wire_id: &loop_boundary.source_wire_id,
                 axis,
             };
-            segment.node_uv[0][axis] =
-                context.lift(segment.node_uv[0][axis], previous_uv[axis], true)?;
+            if !singular_transition {
+                segment.node_uv[0][axis] =
+                    context.lift(segment.node_uv[0][axis], previous_coordinate, true)?;
+            }
             segment.node_uv[1][axis] =
                 context.lift(segment.node_uv[1][axis], segment.node_uv[0][axis], false)?;
         }
@@ -173,29 +192,36 @@ fn lift_loop(
         previous_uv = segment.node_uv[1];
     }
     if previous_id != loop_boundary.segments[0].node_ids[0] {
-        return Err(invalid(source, "face chart loop is not identity-closed"));
+        return Err(invalid(
+            lift_context.source,
+            "face chart loop is not identity-closed",
+        ));
+    }
+    used_singular_transition |= is_singular_transition(previous_uv, first_uv, lift_context)?;
+    if used_singular_transition {
+        return Ok([0, 0]);
     }
     let mut winding = [0i32; 2];
     for axis in 0..2 {
         let residual = previous_uv[axis] - first_uv[axis];
-        let tolerance = scaled_tolerance(previous_uv[axis], first_uv[axis], options);
+        let tolerance = scaled_tolerance(previous_uv[axis], first_uv[axis], lift_context.options);
         if residual.abs() <= tolerance {
             continue;
         }
-        let Some(period) = periodicity[axis] else {
+        let Some(period) = lift_context.periodicity[axis] else {
             return Err(invalid(
-                source,
+                lift_context.source,
                 "nonperiodic face chart loop does not close",
             ));
         };
         let periods = (residual / period).round();
         if !periods.is_finite()
-            || periods.abs() > options.maximum_period_shifts as f64
+            || periods.abs() > lift_context.options.maximum_period_shifts as f64
             || (residual - periods * period).abs() > tolerance
         {
             return Err(ExactFaceChartError::new(
                 ExactFaceChartErrorKind::InvalidInput,
-                &source.source_face_id,
+                &lift_context.source.source_face_id,
                 "periodic loop residual is not an integral bounded winding",
             )
             .with_witness(&loop_boundary.source_wire_id, axis, residual));
@@ -203,6 +229,49 @@ fn lift_loop(
         winding[axis] = periods as i32;
     }
     Ok(winding)
+}
+
+fn is_singular_transition<Evaluator: ExactSurfaceEvaluator + ?Sized>(
+    previous_uv: [f64; 2],
+    current_uv: [f64; 2],
+    context: &LoopLiftContext<'_, Evaluator>,
+) -> Result<bool, ExactFaceChartError> {
+    let Some(evaluator_id) = context.singular_surface else {
+        return Ok(false);
+    };
+    if previous_uv == current_uv {
+        return Ok(false);
+    }
+    let previous = context
+        .evaluator
+        .derivatives(evaluator_id, previous_uv, context.control)
+        .map_err(|failure| geometry_failure(context.source, failure))?;
+    let current = context
+        .evaluator
+        .derivatives(evaluator_id, current_uv, context.control)
+        .map_err(|failure| geometry_failure(context.source, failure))?;
+    if !is_singular(&previous) || !is_singular(&current) {
+        return Ok(false);
+    }
+    let squared_distance = previous
+        .point_m
+        .iter()
+        .zip(current.point_m)
+        .map(|(left, right)| (left - right) * (left - right))
+        .sum::<f64>();
+    Ok(squared_distance
+        <= context.options.projection_tolerance_m * context.options.projection_tolerance_m)
+}
+
+fn geometry_failure(
+    source: &ExactFaceBoundary,
+    failure: runmat_geometry_core::GeometryEvaluationError,
+) -> ExactFaceChartError {
+    ExactFaceChartError::new(
+        ExactFaceChartErrorKind::GeometryEvaluation(failure.kind),
+        &source.source_face_id,
+        failure.reason,
+    )
 }
 
 struct CoordinateLift<'a> {

@@ -11,9 +11,10 @@ use runmat_meshing_curve::{
 };
 
 use crate::{
-    build_exact_face_partition_result, decide_exact_surface_pass,
-    encode_exact_face_partition_result, encode_exact_surface_pass_result,
-    face_partition_descriptors, mesh_exact_face_partition, resolve_exact_surface_pass,
+    build_exact_face_charts, build_exact_face_partition_result, build_exact_surface_boundary,
+    decide_exact_surface_pass, encode_exact_face_partition_result,
+    encode_exact_surface_pass_result, face_partition_descriptors, mesh_exact_face_partition,
+    resolve_exact_surface_pass, ExactFaceChartErrorKind, ExactFaceChartOptions,
     ExactFacePartitionContext, ExactFacePartitionOptions, ExactFacePartitionOutcome,
     ExactSurfaceConvergenceOutcome, ExactSurfaceJoinOptions, ExactSurfacePassOutcome,
 };
@@ -300,6 +301,94 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
 }
 
 #[test]
+fn authoritative_spherical_octant_runs_the_complete_face_partition() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_spherical_octant();
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let curve_metric = UniformCurveMetric::from_target_size_m(1.0).unwrap();
+    let curves = discretize_shared_curves(
+        &topology,
+        &evaluator,
+        &evaluator,
+        &curve_metric,
+        &Control,
+        spherical_octant_curve_options(),
+    )
+    .unwrap();
+    assert_eq!(curves.edges.len(), 3);
+    let boundary = build_exact_surface_boundary(&topology, &curves).unwrap();
+    let mut noncoincident_pole = boundary.faces[0].clone();
+    assert_eq!(
+        noncoincident_pole.outer_loop.segments[0].node_ids[1],
+        noncoincident_pole.outer_loop.segments[1].node_ids[0]
+    );
+    noncoincident_pole.outer_loop.segments[1].node_uv[0][1] -= 0.1;
+    assert_eq!(
+        build_exact_face_charts(
+            &noncoincident_pole,
+            &topology,
+            &evaluator,
+            &Control,
+            ExactFaceChartOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceChartErrorKind::InvalidInput
+    );
+    let metric_request = MetricFieldRequest {
+        combination: MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
+        maximum_grading_ratio: 2.0,
+        contributions: Vec::new(),
+    };
+    let partitions = face_partition_descriptors(&topology, 1).unwrap();
+    let context = ExactFacePartitionContext {
+        topology: &topology,
+        curves: &curves,
+        metric_request: &metric_request,
+        quality: permissive_quality(),
+        evaluator: &evaluator,
+        geometry_control: &Control,
+        cancellation: &NeverCancelled,
+    };
+    let outcome = mesh_exact_face_partition(
+        partitions[0].clone(),
+        context,
+        ExactFacePartitionOptions::default(),
+    )
+    .unwrap();
+    let ExactFacePartitionOutcome::Converged { faces } = &outcome.outcome else {
+        panic!("authoritative singular face must converge without a curve restart")
+    };
+    assert_eq!(faces.len(), 1);
+    assert!(faces[0]
+        .nodes
+        .iter()
+        .any(|node| (node.point_m[2] - 1.0).abs() < 1.0e-12));
+    assert!(faces[0]
+        .triangles
+        .iter()
+        .all(|triangle| triangle.source_face_id == topology.faces[0].id));
+
+    let results = [outcome];
+    let pass = decide_exact_surface_pass(
+        &curves,
+        &results,
+        &topology,
+        ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    let ExactSurfacePassOutcome::Converged { surface } = pass.outcome else {
+        panic!("authoritative singular sheet must pass the surface join")
+    };
+    assert_eq!(surface.face_ids, vec![topology.faces[0].id.clone()]);
+    assert_eq!(surface.shells.len(), 1);
+    assert_eq!(surface.shells[0].open_edge_count, 3);
+}
+
+#[test]
 fn curve_split_demands_have_one_canonical_order() {
     let (_, topology, _) = runmat_geometry_fixtures::exact_circle();
     let edge_id = topology.edges[0].id.clone();
@@ -345,6 +434,22 @@ fn curve_options() -> SharedCurveDiscretizationOptions {
         },
         maximum_nodes_per_edge: 1_024,
         maximum_subdivision_depth: 20,
+        geometry_absolute_error_m: 1.0e-10,
+        pcurve_absolute_error: 1.0e-10,
+        arc_length_absolute_error_m: 1.0e-10,
+    }
+}
+
+fn spherical_octant_curve_options() -> SharedCurveDiscretizationOptions {
+    SharedCurveDiscretizationOptions {
+        resolution: CurveResolutionPolicy {
+            maximum_chordal_deviation_m: 1.0,
+            maximum_tangent_change_rad: 2.0,
+            minimum_metric_edge_length: 0.001,
+            maximum_metric_edge_length: 2.0,
+        },
+        maximum_nodes_per_edge: 16,
+        maximum_subdivision_depth: 4,
         geometry_absolute_error_m: 1.0e-10,
         pcurve_absolute_error: 1.0e-10,
         arc_length_absolute_error_m: 1.0e-10,

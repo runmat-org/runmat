@@ -18,6 +18,7 @@ pub(crate) fn registry() -> ExactEvaluatorRegistry {
                     y_axis: [0.0, 1.0, 0.0],
                     radius_m: 1.0,
                     domain: range(0.0, std::f64::consts::TAU),
+                    periodic: true,
                 },
             },
         }],

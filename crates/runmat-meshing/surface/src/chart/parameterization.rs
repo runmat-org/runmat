@@ -1,6 +1,7 @@
 use runmat_geometry_core::{
     ExactSurfaceEvaluator, GeometryEvaluationControl, SurfaceDerivatives, SurfaceEvaluatorId,
 };
+use std::collections::BTreeMap;
 
 use crate::ExactFaceBoundary;
 
@@ -123,6 +124,8 @@ pub(super) fn build_projected_parameterization(
     }
     let parameterization = frame(boundary, &points, singular.as_ref(), options)?;
     let source_face_id = boundary.source_face_id.clone();
+    let mut canonical_nodes =
+        BTreeMap::<runmat_meshing_core::StableDigest, ([f64; 3], [f64; 2])>::new();
     for segment in boundary_segments_mut(boundary) {
         for endpoint in 0..2 {
             let point = evaluator
@@ -134,14 +137,31 @@ pub(super) fn build_projected_parameterization(
                         error.reason,
                     )
                 })?;
-            segment.node_uv[endpoint] =
-                parameterization.project_point(point).map_err(|reason| {
-                    ExactFaceChartError::new(
+            let projected = parameterization.project_point(point).map_err(|reason| {
+                ExactFaceChartError::new(
+                    ExactFaceChartErrorKind::InvalidInput,
+                    &source_face_id,
+                    reason,
+                )
+            })?;
+            let node_id = segment.node_ids[endpoint];
+            segment.node_uv[endpoint] = if let Some((canonical_point, canonical_projected)) =
+                canonical_nodes.get(&node_id)
+            {
+                if squared_norm(subtract(point, *canonical_point))
+                    > options.projection_tolerance_m * options.projection_tolerance_m
+                {
+                    return Err(ExactFaceChartError::new(
                         ExactFaceChartErrorKind::InvalidInput,
                         &source_face_id,
-                        reason,
-                    )
-                })?;
+                        "one topological boundary node evaluates to distinct physical points",
+                    ));
+                }
+                *canonical_projected
+            } else {
+                canonical_nodes.insert(node_id, (point, projected));
+                projected
+            };
         }
     }
     Ok(parameterization)
@@ -327,7 +347,7 @@ fn projected_parameterization(
     Ok(result)
 }
 
-fn is_singular(derivatives: &SurfaceDerivatives) -> bool {
+pub(super) fn is_singular(derivatives: &SurfaceDerivatives) -> bool {
     let area = norm(cross(derivatives.du_m, derivatives.dv_m));
     let scale = norm(derivatives.du_m) * norm(derivatives.dv_m);
     area.is_finite() && area <= f64::EPSILON.sqrt() * scale.max(1.0)

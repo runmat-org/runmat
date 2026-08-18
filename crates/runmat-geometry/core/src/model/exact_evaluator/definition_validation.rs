@@ -34,6 +34,7 @@ pub(super) fn validate_curve(
                 y_axis,
                 radius_m,
                 domain,
+                ..
             } => {
                 finite_vector("circle center", center_m)?;
                 orthonormal_pair("circle axes", x_axis, y_axis)?;
@@ -47,6 +48,7 @@ pub(super) fn validate_curve(
                 major_radius_m,
                 minor_radius_m,
                 domain,
+                ..
             } => {
                 finite_vector("ellipse center", center_m)?;
                 orthonormal_pair("ellipse axes", x_axis, y_axis)?;
@@ -224,7 +226,8 @@ pub(super) fn validate_mass_properties(
 pub(super) fn curve_is_periodic(implementation: &ExactCurveImplementation) -> Option<bool> {
     match implementation {
         ExactCurveImplementation::Portable { definition } => Some(match definition {
-            ExactCurveDefinition::Circle { .. } | ExactCurveDefinition::Ellipse { .. } => true,
+            ExactCurveDefinition::Circle { periodic, .. }
+            | ExactCurveDefinition::Ellipse { periodic, .. } => *periodic,
             ExactCurveDefinition::Degenerate { .. } | ExactCurveDefinition::Line { .. } => false,
             ExactCurveDefinition::Nurbs { definition } => definition.periodic,
         }),
