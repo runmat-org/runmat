@@ -11,8 +11,8 @@ use runmat_meshing_size::{
 };
 
 use super::{
-    ExactFaceMetricError, ExactFaceMetricErrorKind, ExactFaceMetricEvaluation,
-    ParametricMetricTensor,
+    resolved::evaluator_parameters, ExactFaceMetricError, ExactFaceMetricErrorKind,
+    ExactFaceMetricEvaluation, ParametricMetricTensor,
 };
 
 pub fn validate_exact_face_metric_evaluation(
@@ -22,10 +22,15 @@ pub fn validate_exact_face_metric_evaluation(
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
 ) -> Result<(), ExactFaceMetricError> {
-    if evaluation.uv.iter().any(|value| !value.is_finite()) {
+    if evaluation
+        .uv
+        .iter()
+        .chain(&evaluation.evaluator_uv)
+        .any(|value| !value.is_finite())
+    {
         return Err(invalid(
             &evaluation.source_face_id,
-            "metric evaluation UV is not finite",
+            "metric evaluation chart or evaluator UV is not finite",
         ));
     }
     let face = topology
@@ -39,10 +44,22 @@ pub fn validate_exact_face_metric_evaluation(
                 "metric evaluation face is absent from exact topology",
             )
         })?;
+    let expected_evaluator_uv = evaluator_parameters(
+        evaluator,
+        &face.surface_evaluator_id,
+        &evaluation.source_face_id,
+        evaluation.uv,
+    )?;
+    if evaluation.evaluator_uv != expected_evaluator_uv {
+        return Err(invalid(
+            &face.id,
+            "metric evaluation uses a noncanonical periodic evaluator image",
+        ));
+    }
     let derivatives = ExactSurfaceEvaluator::derivatives(
         evaluator,
         &face.surface_evaluator_id,
-        evaluation.uv,
+        evaluation.evaluator_uv,
         control,
     )
     .map_err(|error| {

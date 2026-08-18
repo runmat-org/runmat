@@ -17,8 +17,9 @@ pub mod recovery;
 pub mod validate;
 
 pub use acceptance::{
-    accept_exact_face_mesh, validate_exact_face_acceptance, ExactFaceAcceptanceError,
-    ExactFaceAcceptanceErrorKind, ExactFaceAcceptanceOptions, ExactFaceAcceptanceReport,
+    accept_exact_face_chart_mesh, accept_exact_face_mesh, validate_exact_face_acceptance,
+    validate_exact_face_chart_acceptance, ExactFaceAcceptanceError, ExactFaceAcceptanceErrorKind,
+    ExactFaceAcceptanceOptions, ExactFaceAcceptanceReport, ExactFaceChartAcceptanceReport,
     ExactFaceTriangleAcceptance,
 };
 pub use chart::{

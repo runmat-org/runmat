@@ -43,7 +43,10 @@ impl ParametricMetricTensor {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceMetricEvaluation {
     pub source_face_id: PersistentEntityId,
+    /// Authoritative chart-local coordinate used by meshing topology.
     pub uv: [f64; 2],
+    /// Periodically equivalent coordinate admitted by the exact evaluator.
+    pub evaluator_uv: [f64; 2],
     pub point_m: [f64; 3],
     pub derivative_u_m: [f64; 3],
     pub derivative_v_m: [f64; 3],

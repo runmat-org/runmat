@@ -1,4 +1,5 @@
 use runmat_geometry_core::PersistentEntityId;
+use runmat_meshing_core::StableDigest;
 
 use crate::{ExactFaceDelaunayTriangle, ExactFaceGeometryErrorKind, ExactFaceMetricErrorKind};
 
@@ -30,6 +31,12 @@ pub struct ExactFaceAcceptanceReport {
     pub maximum_chordal_deviation_uv: [f64; 2],
     pub maximum_normal_deviation_rad: f64,
     pub maximum_normal_deviation_uv: [f64; 2],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceChartAcceptanceReport {
+    pub chart_id: StableDigest,
+    pub acceptance: ExactFaceAcceptanceReport,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

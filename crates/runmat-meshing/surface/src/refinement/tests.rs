@@ -542,6 +542,41 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     assert!(acceptance.sample_count > acceptance.triangles.len() as u64);
     assert!(acceptance.maximum_chordal_deviation_m < 1.0e-12);
     assert!(acceptance.maximum_normal_deviation_rad < 1.0e-7);
+    let chart_acceptance = crate::accept_exact_face_chart_mesh(
+        &chart_converged,
+        ExactFaceRefinementContext::new(
+            &topology,
+            &coarse_request,
+            &evaluator,
+            &Control,
+            &NeverCancelled,
+        ),
+        permissive_quality,
+        acceptance_options,
+    )
+    .unwrap();
+    assert_eq!(chart_acceptance.chart_id, chart_id);
+    assert_eq!(chart_acceptance.acceptance, acceptance);
+    let mut mismatched_chart_acceptance = chart_acceptance;
+    mismatched_chart_acceptance.chart_id = node(79);
+    assert_eq!(
+        crate::validate_exact_face_chart_acceptance(
+            &mismatched_chart_acceptance,
+            &chart_converged,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            permissive_quality,
+            acceptance_options,
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactFaceAcceptanceErrorKind::InvalidInput
+    );
     let mut tampered_acceptance = acceptance.clone();
     tampered_acceptance.maximum_chordal_deviation_m = 1.0;
     assert_eq!(
@@ -775,6 +810,7 @@ fn evaluation(face_id: &PersistentEntityId, uv: [f64; 2]) -> ExactFaceMetricEval
     ExactFaceMetricEvaluation {
         source_face_id: face_id.clone(),
         uv,
+        evaluator_uv: uv,
         point_m: [uv[0], uv[1], 0.0],
         derivative_u_m: [1.0, 0.0, 0.0],
         derivative_v_m: [0.0, 1.0, 0.0],

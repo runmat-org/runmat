@@ -23,6 +23,7 @@ fn exact_plane_pulls_the_resolved_world_metric_into_uv() {
         .evaluate(&topology.faces[0].id, [0.25, -0.5], &evaluator, &Control)
         .unwrap();
 
+    assert_eq!(evaluation.uv, evaluation.evaluator_uv);
     assert_eq!(evaluation.point_m, [0.25, -0.5, 0.0]);
     assert_eq!(evaluation.derivative_u_m, [1.0, 0.0, 0.0]);
     assert_eq!(evaluation.derivative_v_m, [0.0, 1.0, 0.0]);
@@ -78,6 +79,10 @@ fn independent_validation_rejects_geometry_metric_and_provenance_tampering() {
     let mut altered_metric = evaluation.clone();
     altered_metric.sizing_metric.uv = 0.0;
     assert_invalid(&altered_metric, &topology, &request, &evaluator);
+
+    let mut altered_evaluator_uv = evaluation.clone();
+    altered_evaluator_uv.evaluator_uv[0] += 1.0;
+    assert_invalid(&altered_evaluator_uv, &topology, &request, &evaluator);
 
     let mut altered_provenance = evaluation;
     altered_provenance.applied_contribution_count = 0;

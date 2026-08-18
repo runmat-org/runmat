@@ -120,10 +120,12 @@ impl ResolvedFaceMetricField {
                 "face is absent from the resolved exact metric field",
             )
         })?;
+        let evaluator_uv =
+            evaluator_parameters(evaluator, &record.surface_evaluator_id, source_face_id, uv)?;
         let derivatives = ExactSurfaceEvaluator::derivatives(
             evaluator,
             &record.surface_evaluator_id,
-            uv,
+            evaluator_uv,
             control,
         )
         .map_err(|error| {
@@ -168,6 +170,7 @@ impl ResolvedFaceMetricField {
         Ok(ExactFaceMetricEvaluation {
             source_face_id: source_face_id.clone(),
             uv,
+            evaluator_uv,
             point_m,
             derivative_u_m,
             derivative_v_m,
@@ -179,6 +182,46 @@ impl ResolvedFaceMetricField {
             rejected_contribution_count: record.resolved.rejected_contribution_count,
         })
     }
+}
+
+/// Maps chart-local periodic images into the evaluator's admitted parameter
+/// bounds without changing the authoritative chart coordinates retained in
+/// metric evidence.
+pub(super) fn evaluator_parameters(
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator_id: &SurfaceEvaluatorId,
+    source_face_id: &PersistentEntityId,
+    uv: [f64; 2],
+) -> Result<[f64; 2], ExactFaceMetricError> {
+    let bounds = evaluator
+        .parameter_bounds(evaluator_id)
+        .map_err(|error| geometry_error(source_face_id, error))?;
+    let periodicity = evaluator
+        .periodicity(evaluator_id)
+        .map_err(|error| geometry_error(source_face_id, error))?;
+    let mut result = uv;
+    for axis in 0..2 {
+        let bound = bounds[axis];
+        if !bound.start.is_finite() || !bound.end.is_finite() || bound.start >= bound.end {
+            return Err(invalid_evaluation(
+                source_face_id,
+                "surface evaluator returned invalid parameter bounds",
+            ));
+        }
+        let Some(period) = periodicity[axis] else {
+            continue;
+        };
+        if !period.is_finite() || period <= 0.0 || period > bound.end - bound.start {
+            return Err(invalid_evaluation(
+                source_face_id,
+                "surface evaluator returned periodicity inconsistent with its bounds",
+            ));
+        }
+        if result[axis] < bound.start || result[axis] > bound.end {
+            result[axis] = bound.start + (result[axis] - bound.start).rem_euclid(period);
+        }
+    }
+    Ok(result)
 }
 
 fn pullback_identity(first: [f64; 3], second: [f64; 3]) -> ParametricMetricTensor {
@@ -213,4 +256,26 @@ fn metric_dot(left: [f64; 3], metric: MetricTensor3, right: [f64; 3]) -> f64 {
 
 fn invalid_request(reason: impl Into<String>) -> ExactFaceMetricError {
     ExactFaceMetricError::new(ExactFaceMetricErrorKind::InvalidRequest, None, reason)
+}
+
+fn invalid_evaluation(
+    source_face_id: &PersistentEntityId,
+    reason: impl Into<String>,
+) -> ExactFaceMetricError {
+    ExactFaceMetricError::new(
+        ExactFaceMetricErrorKind::InvalidEvaluation,
+        Some(source_face_id),
+        reason,
+    )
+}
+
+fn geometry_error(
+    source_face_id: &PersistentEntityId,
+    error: runmat_geometry_core::GeometryEvaluationError,
+) -> ExactFaceMetricError {
+    ExactFaceMetricError::new(
+        ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
+        Some(source_face_id),
+        error.reason,
+    )
 }

@@ -3,7 +3,10 @@ use runmat_geometry_core::{
     GeometryEvaluationError, GeometryModel, ParameterRange, PersistentEntityId,
     PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
 };
-use runmat_meshing_core::{NeverCancelled, StableDigest};
+use runmat_meshing_core::{
+    MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
+    SurfaceQualityTargets,
+};
 
 use crate::{
     ExactFaceBoundary, ExactFaceBoundaryLoop, ExactFaceBoundarySegment, ExactFacePslgSegmentSource,
@@ -187,6 +190,64 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         crate::ExactFaceDelaunayOptions::default(),
     )
     .unwrap();
+    let metric_request = MetricFieldRequest {
+        combination: MetricCombinationRule::MostRestrictiveIntersection,
+        global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
+        maximum_grading_ratio: 2.0,
+        contributions: Vec::new(),
+    };
+    let quality = SurfaceQualityTargets {
+        minimum_metric_angle_degrees: 0.01,
+        maximum_physical_aspect_ratio: 1.0e9,
+        maximum_chordal_deviation_m: 1.0e9,
+        maximum_normal_deviation_degrees: 180.0,
+    };
+    let refinement_context = crate::ExactFaceRefinementContext::new(
+        &topology,
+        &metric_request,
+        &evaluator,
+        &Control,
+        &NeverCancelled,
+    );
+    let refined = crate::refine_exact_face_chart_until_blocked(
+        &annulus_charts.charts[0],
+        &domains[0],
+        refinement_context,
+        crate::ExactFaceRefinementPolicy {
+            quality,
+            delaunay: crate::ExactFaceDelaunayOptions::default(),
+            refinement: crate::ExactFaceRefinementOptions {
+                maximum_interior_insertions: 1,
+            },
+        },
+        crate::ExactFaceChartRefinementOptions {
+            maximum_chart_cut_splits: 1,
+        },
+    )
+    .unwrap();
+    let crate::ExactFaceChartRefinementOutcome::Converged(refined) = refined else {
+        panic!("permissive periodic-annulus refinement must converge")
+    };
+    assert!(refined
+        .mesh
+        .geometry
+        .vertices
+        .iter()
+        .any(|vertex| vertex.evaluation.uv != vertex.evaluation.evaluator_uv));
+    let acceptance = crate::accept_exact_face_chart_mesh(
+        &refined,
+        refinement_context,
+        quality,
+        crate::ExactFaceAcceptanceOptions {
+            minimum_subdivision_depth: 1,
+            maximum_subdivision_depth: 2,
+            refinement_margin_ratio: 0.5,
+            maximum_samples: 100_000,
+        },
+    )
+    .unwrap();
+    assert_eq!(acceptance.chart_id, annulus_charts.charts[0].chart_id);
+    assert!(acceptance.acceptance.sample_count > 0);
     let cut_segments = annulus_pslg
         .segments
         .iter()
