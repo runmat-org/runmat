@@ -355,7 +355,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     crate::validate_exact_surface_mesh(
         &surface,
         &sheet_topology,
-        vec![face_batch.clone()],
+        std::slice::from_ref(&face_batch),
         crate::ExactSurfaceJoinOptions::default(),
     )
     .unwrap();
@@ -388,7 +388,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         crate::validate_exact_surface_mesh(
             &tampered_surface,
             &sheet_topology,
-            vec![face_batch.clone()],
+            std::slice::from_ref(&face_batch),
             crate::ExactSurfaceJoinOptions::default(),
         )
         .unwrap_err()
@@ -468,6 +468,57 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     assert_eq!(reversed_surface, canonical_surface);
     assert_eq!(canonical_surface.face_ids.len(), 2);
     assert_eq!(canonical_surface.shells.len(), 2);
+    let surface_batches = [first_batch.clone(), second_batch.clone()];
+    let encoded_surface = crate::encode_exact_surface_mesh(
+        &canonical_surface,
+        &two_face_topology,
+        &surface_batches,
+        crate::ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    let decoded_surface = crate::decode_exact_surface_mesh(
+        &encoded_surface,
+        &two_face_topology,
+        &surface_batches,
+        crate::ExactSurfaceJoinOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(decoded_surface, canonical_surface);
+    assert_eq!(
+        crate::encode_exact_surface_mesh(
+            &decoded_surface,
+            &two_face_topology,
+            &surface_batches,
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap(),
+        encoded_surface
+    );
+    assert_eq!(
+        crate::surface_mesh::decode_exact_surface_mesh_with_byte_limit(
+            &encoded_surface,
+            &two_face_topology,
+            &surface_batches,
+            crate::ExactSurfaceJoinOptions::default(),
+            encoded_surface.len() - 1,
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
+    let mut corrupted_surface = encoded_surface;
+    corrupted_surface[0] ^= 1;
+    assert_eq!(
+        crate::decode_exact_surface_mesh(
+            &corrupted_surface,
+            &two_face_topology,
+            &surface_batches,
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
     let mut mismatched_second_batch = second_batch.clone();
     mismatched_second_batch.faces[0].boundary_segments[0].edge_parameters[1] += 0.125;
     assert_eq!(

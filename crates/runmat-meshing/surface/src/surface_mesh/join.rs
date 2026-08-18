@@ -130,10 +130,10 @@ pub fn join_exact_face_mesh_batches(
 pub fn validate_exact_surface_mesh(
     result: &ExactSurfaceMesh,
     topology: &ExactBRepTopology,
-    batches: Vec<ExactFaceMeshBatch>,
+    batches: &[ExactFaceMeshBatch],
     options: ExactSurfaceJoinOptions,
 ) -> Result<(), ExactSurfaceMeshError> {
-    let expected = join_exact_face_mesh_batches(topology, batches, options)?;
+    let expected = join_exact_face_mesh_batches(topology, batches.to_vec(), options)?;
     if result != &expected {
         return Err(invalid(
             "exact surface mesh differs from the canonical face-batch join",

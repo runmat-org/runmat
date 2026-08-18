@@ -90,11 +90,12 @@ pub use refinement::{
     ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
 pub use surface_mesh::{
-    build_exact_face_mesh_batch, decode_exact_face_mesh_batch, encode_exact_face_mesh_batch,
-    face_partition_descriptors, join_exact_face_mesh_batches, validate_exact_face_mesh_batch,
-    validate_exact_surface_mesh, ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh,
-    ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence,
-    EXACT_FACE_MESH_BATCH_SCHEMA_VERSION, EXACT_SURFACE_MESH_SCHEMA_VERSION,
+    build_exact_face_mesh_batch, decode_exact_face_mesh_batch, decode_exact_surface_mesh,
+    encode_exact_face_mesh_batch, encode_exact_surface_mesh, face_partition_descriptors,
+    join_exact_face_mesh_batches, validate_exact_face_mesh_batch, validate_exact_surface_mesh,
+    ExactFaceMeshBatch, ExactSurfaceJoinOptions, ExactSurfaceMesh, ExactSurfaceMeshError,
+    ExactSurfaceMeshErrorKind, ExactSurfaceShellEvidence, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
+    EXACT_SURFACE_MESH_SCHEMA_VERSION,
 };
 pub use validate::{
     validate_cad_topology_surface_discretization, validate_surface_discretization,
