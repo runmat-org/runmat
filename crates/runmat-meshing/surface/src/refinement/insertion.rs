@@ -151,7 +151,7 @@ fn append_interior_vertex(
         }],
     )
     .map(|(refined, _)| refined)
-    .map_err(|reason| delaunay_error(pslg, ExactFaceDelaunayErrorKind::ResourceLimit, reason))
+    .map_err(|reason| delaunay_error(pslg, ExactFaceDelaunayErrorKind::ElementLimit, reason))
 }
 
 fn within_segment_bounds(point: [f64; 2], endpoints: [[f64; 2]; 2]) -> bool {

@@ -159,7 +159,7 @@ fn consume(
     if count > options.maximum_predicate_evaluations {
         Err(error(
             pslg,
-            ExactFaceDelaunayErrorKind::ResourceLimit,
+            ExactFaceDelaunayErrorKind::SearchWorkLimit,
             "planarity predicate hard limit exceeded",
         ))
     } else {

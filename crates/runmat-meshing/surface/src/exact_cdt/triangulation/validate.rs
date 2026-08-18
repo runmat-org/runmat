@@ -53,7 +53,7 @@ pub(crate) fn validate_face_delaunay_topology(
     if triangulation.triangles.len() > options.maximum_triangles {
         return Err(invalid(
             pslg,
-            ExactFaceDelaunayErrorKind::ResourceLimit,
+            ExactFaceDelaunayErrorKind::ElementLimit,
             "Delaunay triangle inventory exceeds its hard limit",
         ));
     }
@@ -154,7 +154,7 @@ fn consume_predicate(
     if count > options.maximum_predicate_evaluations {
         Err(invalid(
             pslg,
-            ExactFaceDelaunayErrorKind::ResourceLimit,
+            ExactFaceDelaunayErrorKind::SearchWorkLimit,
             "validation predicate evaluation hard limit exceeded",
         ))
     } else {

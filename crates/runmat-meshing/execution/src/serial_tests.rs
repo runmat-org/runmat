@@ -34,9 +34,10 @@ use runmat_meshing_core::{
 };
 
 use super::{
-    execute_serial_stage, ExactCurveJoinKernel, ExactCurveStageKernel, MeshingProgressSink,
-    MeshingSerialExecutionError, MeshingStageCheckpoint, MeshingStageControl,
-    MeshingStageInvocation, MeshingStageKernel, ValidatedMeshingStageOutput,
+    execute_serial_stage, CompletedMeshingStage, ExactCurveJoinKernel, ExactCurveStageKernel,
+    ExactSurfacePartitionKernel, MeshingProgressSink, MeshingSerialExecutionError,
+    MeshingStageCheckpoint, MeshingStageControl, MeshingStageInvocation, MeshingStageKernel,
+    ValidatedMeshingStageOutput,
 };
 
 #[derive(Default)]
@@ -280,6 +281,132 @@ fn serial_curve_partition_executes_and_publishes_the_authoritative_batch() {
 
 #[test]
 fn serial_curve_join_reloads_partitions_and_publishes_the_global_curve_mesh() {
+    let (fixture, host, exact_root, joined) = execute_curve_pipeline();
+    let stage_objects = joined.publication().stage_objects();
+    assert_eq!(
+        stage_objects.result_identity.result_kind,
+        MeshingStageResultKind::DeterministicJoin
+    );
+    let streams = stage_objects.decoded_streams().unwrap();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0].media_type, MeshingChunkMediaType::CurveMesh);
+    assert_eq!(streams[0].records.len(), 1);
+
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        host.geometry_document.clone().unwrap(),
+        &exact_root,
+        host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let mesh = runmat_meshing_curve::decode_shared_curve_mesh(
+        &streams[0].records[0],
+        &exact.geometry_objects().topology,
+    )
+    .unwrap();
+    assert_eq!(mesh.edges.len(), 1);
+}
+
+#[test]
+fn serial_surface_partition_consumes_the_global_curve_artifact() {
+    let (mut fixture, curve_host, exact_root, joined) = execute_curve_pipeline();
+    let curve_root = root(joined.publication().root_output());
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        curve_host.geometry_document.clone().unwrap(),
+        &exact_root,
+        curve_host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let partition =
+        runmat_meshing_surface::face_partition_descriptors(&exact.geometry_objects().topology, 32)
+            .unwrap()
+            .remove(0);
+    let exact_input = curve_host.workload.inputs[0].clone();
+    let curve_input = MeshingInputRef {
+        kind: MeshingInputKind::StageArtifact,
+        digest: StableDigest::from_bytes(*curve_root.logical_digest.bytes()),
+    };
+    let request = curve_host.resolved_request.clone();
+    let identity = MeshingStageIdentity {
+        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
+        stage: MeshingStageKind::SurfaceMesh,
+        geometry: curve_host.stage_identity.geometry.clone(),
+        resolved_request_digest: request.canonical_digest().unwrap(),
+        tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
+        metric_policy_digest: request.metric.canonical_digest().unwrap(),
+        algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
+        deterministic_seed: request.deterministic_seed,
+        prerequisites: vec![exact_input.clone(), curve_input.clone()],
+        capability_cohort: curve_host.stage_identity.capability_cohort.clone(),
+    };
+    let workload = MeshingWorkloadRequest {
+        schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
+        stage: MeshingStageKind::SurfaceMesh,
+        stage_identity_digest: identity.canonical_digest().unwrap(),
+        partition: partition.clone(),
+        inputs: vec![exact_input, curve_input],
+        required_capabilities: surface_capabilities(&curve_host, &request),
+    };
+    let host = MeshingHostWorkload::new(
+        workload,
+        identity,
+        request,
+        curve_host.artifact_access.clone(),
+        curve_host.geometry_document.clone(),
+    )
+    .unwrap();
+    let program = host
+        .program_request(revision(), &[exact_root, curve_root])
+        .unwrap();
+    let completed = execute_serial_stage(
+        &program,
+        &mut fixture.store,
+        &ExactSurfacePartitionKernel::default(),
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1_000_000),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let streams = completed
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(
+        streams[0].media_type,
+        MeshingChunkMediaType::SurfacePartitions
+    );
+    assert_eq!(streams[0].records.len(), 1);
+    let curve_streams = joined
+        .publication()
+        .stage_objects()
+        .decoded_streams()
+        .unwrap();
+    let curves = runmat_meshing_curve::decode_shared_curve_mesh(
+        &curve_streams[0].records[0],
+        &exact.geometry_objects().topology,
+    )
+    .unwrap();
+    let result = runmat_meshing_surface::decode_exact_face_partition_result(
+        &streams[0].records[0],
+        &exact.geometry_objects().topology,
+        &curves,
+    )
+    .unwrap();
+    assert_eq!(result.partition, partition);
+}
+
+fn execute_curve_pipeline() -> (
+    Fixture,
+    MeshingHostWorkload,
+    ValueRef,
+    CompletedMeshingStage,
+) {
     let mut fixture = Fixture::with_exact_curve_partition();
     let exact_root = root(&fixture.program.arguments[0]);
     let partition = execute_serial_stage(
@@ -333,7 +460,7 @@ fn serial_curve_join_reloads_partitions_and_publishes_the_global_curve_mesh() {
     )
     .unwrap();
     let program = host
-        .program_request(revision(), &[exact_root.clone(), partition_root.clone()])
+        .program_request(revision(), &[exact_root.clone(), partition_root])
         .unwrap();
     let joined = execute_serial_stage(
         &program,
@@ -345,30 +472,26 @@ fn serial_curve_join_reloads_partitions_and_publishes_the_global_curve_mesh() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let stage_objects = joined.publication().stage_objects();
-    assert_eq!(
-        stage_objects.result_identity.result_kind,
-        MeshingStageResultKind::DeterministicJoin
-    );
-    let streams = stage_objects.decoded_streams().unwrap();
-    assert_eq!(streams.len(), 1);
-    assert_eq!(streams[0].media_type, MeshingChunkMediaType::CurveMesh);
-    assert_eq!(streams[0].records.len(), 1);
+    (fixture, host, exact_root, joined)
+}
 
-    let exact = import_exact_geometry_input(
-        &fixture.store,
-        host.geometry_document.clone().unwrap(),
-        &exact_root,
-        host.artifact_access.clone(),
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let mesh = runmat_meshing_curve::decode_shared_curve_mesh(
-        &streams[0].records[0],
-        &exact.geometry_objects().topology,
-    )
-    .unwrap();
-    assert_eq!(mesh.edges.len(), 1);
+fn surface_capabilities(
+    curve_host: &MeshingHostWorkload,
+    request: &MeshingRequest,
+) -> Vec<MeshingCapabilityRequirement> {
+    curve_host
+        .workload
+        .required_capabilities
+        .iter()
+        .map(|capability| match capability {
+            MeshingCapabilityRequirement::MeshingAlgorithm { .. } => {
+                MeshingCapabilityRequirement::MeshingAlgorithm {
+                    version: request.algorithms.surface.clone(),
+                }
+            }
+            capability => capability.clone(),
+        })
+        .collect()
 }
 
 #[test]
@@ -886,8 +1009,12 @@ impl Fixture {
         if stage == MeshingStageKind::CurveMesh {
             request.quality.curve.maximum_chordal_deviation_m = 0.05;
             request.quality.curve.maximum_tangent_change_degrees = 20.0;
-            request.resources.maximum_search_work = 10_000;
-            request.resources.maximum_iterations = 10_000;
+            request.resources.maximum_nodes = 10_000;
+            request.resources.maximum_elements = 10_000;
+            request.resources.maximum_memory_bytes = 64_000_000;
+            request.resources.maximum_artifact_bytes = 16_000_000;
+            request.resources.maximum_search_work = 1_000_000;
+            request.resources.maximum_iterations = 100_000;
         }
         let root_digest = StableDigest::from_bytes(*input.root_input().logical_digest.bytes());
         let exact_input = MeshingInputRef {

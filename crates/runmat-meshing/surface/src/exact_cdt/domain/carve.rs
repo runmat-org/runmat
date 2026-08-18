@@ -257,7 +257,7 @@ impl<'a> CarvingControl<'a> {
     fn consume_predicate(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.predicates_remaining = self.predicates_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
-                ExactFaceDelaunayErrorKind::ResourceLimit,
+                ExactFaceDelaunayErrorKind::SearchWorkLimit,
                 "trim-domain predicate hard limit exceeded",
             )
         })?;
@@ -267,7 +267,7 @@ impl<'a> CarvingControl<'a> {
     fn visit(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.visits_remaining = self.visits_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
-                ExactFaceDelaunayErrorKind::ResourceLimit,
+                ExactFaceDelaunayErrorKind::SearchWorkLimit,
                 "trim-domain traversal hard limit exceeded",
             )
         })?;

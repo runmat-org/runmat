@@ -56,14 +56,14 @@ pub(crate) fn validate_face_constrained_topology(
     {
         return Err(invalid(
             pslg,
-            ExactFaceDelaunayErrorKind::ResourceLimit,
+            ExactFaceDelaunayErrorKind::SearchWorkLimit,
             "reported constrained edge flips exceed the hard limit",
         ));
     }
     if constrained.cavity_retriangulation_count > options.maximum_cavity_retriangulations {
         return Err(invalid(
             pslg,
-            ExactFaceDelaunayErrorKind::ResourceLimit,
+            ExactFaceDelaunayErrorKind::IterationLimit,
             "reported cavity retriangulations exceed the hard limit",
         ));
     }
@@ -215,7 +215,7 @@ fn consume(
     if *count > options.maximum_predicate_evaluations {
         Err(invalid(
             pslg,
-            ExactFaceDelaunayErrorKind::ResourceLimit,
+            ExactFaceDelaunayErrorKind::SearchWorkLimit,
             "constrained validation predicate hard limit exceeded",
         ))
     } else {

@@ -96,7 +96,10 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &mut control,
     )
     .unwrap_err();
-    assert_eq!(error.kind, crate::ExactFaceDelaunayErrorKind::ResourceLimit);
+    assert_eq!(
+        error.kind,
+        crate::ExactFaceDelaunayErrorKind::IterationLimit
+    );
     assert_eq!(second_attempt, delaunay.triangles);
 }
 
@@ -140,7 +143,10 @@ fn independent_validation_rejects_excess_cavity_evidence() {
         options,
     )
     .unwrap_err();
-    assert_eq!(error.kind, crate::ExactFaceDelaunayErrorKind::ResourceLimit);
+    assert_eq!(
+        error.kind,
+        crate::ExactFaceDelaunayErrorKind::IterationLimit
+    );
 }
 
 fn concave_fixture() -> (ExactFaceBoundary, crate::ExactFacePslg) {

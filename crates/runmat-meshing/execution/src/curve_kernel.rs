@@ -270,7 +270,7 @@ pub(super) fn curve_failure(
     remediation: &str,
     detail: &str,
 ) -> Box<MeshingFailure> {
-    let detail = bounded_diagnostic_text(detail);
+    let detail = crate::diagnostic::bounded_diagnostic_text(detail, "curve stage failure");
     Box::new(MeshingFailure {
         schema_version: MESHING_FAILURE_SCHEMA_VERSION,
         category,
@@ -286,24 +286,4 @@ pub(super) fn curve_failure(
         }],
         remediation: remediation.into(),
     })
-}
-
-fn bounded_diagnostic_text(value: &str) -> String {
-    let text = value
-        .chars()
-        .map(|character| {
-            if character.is_ascii() && !character.is_ascii_control() {
-                character
-            } else {
-                '?'
-            }
-        })
-        .take(2048)
-        .collect::<String>();
-    let text = text.trim();
-    if text.is_empty() {
-        "curve stage failure".into()
-    } else {
-        text.into()
-    }
 }

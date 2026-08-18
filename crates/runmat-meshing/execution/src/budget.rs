@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use runmat_meshing_core::{
     MeshingCancellationSignal, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure,
-    MeshingFailureCategory, MeshingOperation, MeshingProgress, MeshingRequest, MeshingStageKind,
+    MeshingFailureCategory, MeshingProgress, MeshingRequest, MeshingStageKind,
     MESHING_FAILURE_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
 };
 
@@ -336,7 +336,7 @@ pub(super) fn failure(
         schema_version: MESHING_FAILURE_SCHEMA_VERSION,
         category,
         stage,
-        operation: operation(stage),
+        operation: stage.operation(),
         entity_ids: Vec::new(),
         witnesses: Vec::new(),
         request_values,
@@ -350,26 +350,5 @@ fn diagnostic(name: &str, value: u64) -> MeshingDiagnosticEntry {
         name: name.into(),
         value: MeshingDiagnosticValue::Count(value),
         unit: None,
-    }
-}
-
-const fn operation(stage: MeshingStageKind) -> MeshingOperation {
-    match stage {
-        MeshingStageKind::GeometryAdmission => MeshingOperation::AdmitGeometry,
-        MeshingStageKind::Healing => MeshingOperation::HealGeometry,
-        MeshingStageKind::Sizing => MeshingOperation::ResolveMetric,
-        MeshingStageKind::CurveMesh => MeshingOperation::DiscretizeCurve,
-        MeshingStageKind::SurfaceMesh => MeshingOperation::TriangulateSurface,
-        MeshingStageKind::ProtectedBoundaryComplex => {
-            MeshingOperation::BuildProtectedBoundaryComplex
-        }
-        MeshingStageKind::Tetrahedralization => MeshingOperation::Tetrahedralize,
-        MeshingStageKind::ConstraintRecovery => MeshingOperation::RecoverConstraint,
-        MeshingStageKind::Refinement => MeshingOperation::Refine,
-        MeshingStageKind::Optimization => MeshingOperation::Optimize,
-        MeshingStageKind::OrderElevation => MeshingOperation::ElevateOrder,
-        MeshingStageKind::Validation => MeshingOperation::Validate,
-        MeshingStageKind::Serialization => MeshingOperation::Serialize,
-        MeshingStageKind::Publication => MeshingOperation::Publish,
     }
 }

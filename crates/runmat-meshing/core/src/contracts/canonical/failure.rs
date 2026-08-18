@@ -40,6 +40,26 @@ impl MeshingStageKind {
         Self::Serialization,
         Self::Publication,
     ];
+
+    /// Canonical operation reported when this stage fails before a more specific operation exists.
+    pub const fn operation(self) -> MeshingOperation {
+        match self {
+            Self::GeometryAdmission => MeshingOperation::AdmitGeometry,
+            Self::Healing => MeshingOperation::HealGeometry,
+            Self::Sizing => MeshingOperation::ResolveMetric,
+            Self::CurveMesh => MeshingOperation::DiscretizeCurve,
+            Self::SurfaceMesh => MeshingOperation::TriangulateSurface,
+            Self::ProtectedBoundaryComplex => MeshingOperation::BuildProtectedBoundaryComplex,
+            Self::Tetrahedralization => MeshingOperation::Tetrahedralize,
+            Self::ConstraintRecovery => MeshingOperation::RecoverConstraint,
+            Self::Refinement => MeshingOperation::Refine,
+            Self::Optimization => MeshingOperation::Optimize,
+            Self::OrderElevation => MeshingOperation::ElevateOrder,
+            Self::Validation => MeshingOperation::Validate,
+            Self::Serialization => MeshingOperation::Serialize,
+            Self::Publication => MeshingOperation::Publish,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

@@ -190,7 +190,7 @@ impl<'a> RecoveryControl<'a> {
                 .checked_sub(count)
                 .ok_or_else(|| {
                     self.error(
-                        ExactFaceDelaunayErrorKind::ResourceLimit,
+                        ExactFaceDelaunayErrorKind::SearchWorkLimit,
                         "segment recovery predicate hard limit exceeded",
                     )
                 })?;
@@ -204,7 +204,7 @@ impl<'a> RecoveryControl<'a> {
     fn consume_flip(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.flips_remaining = self.flips_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
-                ExactFaceDelaunayErrorKind::ResourceLimit,
+                ExactFaceDelaunayErrorKind::SearchWorkLimit,
                 "segment recovery edge-flip hard limit exceeded",
             )
         })?;
@@ -214,7 +214,7 @@ impl<'a> RecoveryControl<'a> {
     pub(super) fn consume_cavity(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.cavities_remaining = self.cavities_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
-                ExactFaceDelaunayErrorKind::ResourceLimit,
+                ExactFaceDelaunayErrorKind::IterationLimit,
                 "segment recovery cavity hard limit exceeded",
             )
         })?;
@@ -227,7 +227,7 @@ impl<'a> RecoveryControl<'a> {
     ) -> Result<(), ExactFaceDelaunayError> {
         if triangle_count > self.maximum_triangles {
             Err(self.error(
-                ExactFaceDelaunayErrorKind::ResourceLimit,
+                ExactFaceDelaunayErrorKind::ElementLimit,
                 "segment recovery triangle hard limit exceeded",
             ))
         } else {

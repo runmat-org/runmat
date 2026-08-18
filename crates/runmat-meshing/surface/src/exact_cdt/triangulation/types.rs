@@ -61,7 +61,9 @@ pub enum ExactFaceDelaunayErrorKind {
     InvalidOptions,
     InvalidTopology,
     UnsatisfiedConstraint,
-    ResourceLimit,
+    ElementLimit,
+    SearchWorkLimit,
+    IterationLimit,
     Cancelled,
 }
 

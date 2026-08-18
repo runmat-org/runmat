@@ -6,6 +6,7 @@
 mod budget;
 mod curve_join_kernel;
 mod curve_kernel;
+mod diagnostic;
 mod dispatcher;
 mod error;
 mod faceted_geometry_objects;
@@ -17,6 +18,7 @@ mod objects;
 mod publication;
 mod response;
 mod serial;
+mod surface_kernel;
 mod task;
 
 #[cfg(test)]
@@ -73,6 +75,7 @@ pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
+pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{
     build_task_submission, MeshingExecutionContext, MeshingTaskEffectPolicy,
     MESHING_EXECUTION_CALLABLE_OWNER,

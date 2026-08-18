@@ -49,7 +49,7 @@ fn build_without_validation(
     validate_options(source, options)?;
     control.checkpoint().map_err(|failure| {
         ExactFaceChartError::new(
-            ExactFaceChartErrorKind::GeometryEvaluation,
+            ExactFaceChartErrorKind::GeometryEvaluation(failure.kind),
             &source.source_face_id,
             failure.reason,
         )
@@ -63,7 +63,7 @@ fn build_without_validation(
         .periodicity(&face.surface_evaluator_id)
         .map_err(|failure| {
             ExactFaceChartError::new(
-                ExactFaceChartErrorKind::GeometryEvaluation,
+                ExactFaceChartErrorKind::GeometryEvaluation(failure.kind),
                 &source.source_face_id,
                 failure.reason,
             )

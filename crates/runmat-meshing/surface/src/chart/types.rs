@@ -67,7 +67,7 @@ impl Default for ExactFaceChartOptions {
 pub enum ExactFaceChartErrorKind {
     InvalidOptions,
     InvalidInput,
-    GeometryEvaluation,
+    GeometryEvaluation(runmat_geometry_core::GeometryEvaluationErrorKind),
     RequiresMultipleCharts,
     Delaunay(ExactFaceDelaunayErrorKind),
 }

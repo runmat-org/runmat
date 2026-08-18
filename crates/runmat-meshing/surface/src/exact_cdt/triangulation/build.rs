@@ -102,7 +102,11 @@ pub(crate) fn triangulate_validated_face_pslg(
             }
             triangles.push(triangle);
             if triangles.len() > options.maximum_triangles {
-                return Err(resource_error(pslg, "triangle hard limit exceeded"));
+                return Err(resource_error(
+                    pslg,
+                    ExactFaceDelaunayErrorKind::ElementLimit,
+                    "triangle hard limit exceeded",
+                ));
             }
         }
     }
@@ -137,6 +141,7 @@ fn validate_options(
     if pslg.vertices.len() > u32::MAX as usize - 3 {
         return Err(resource_error(
             pslg,
+            ExactFaceDelaunayErrorKind::ElementLimit,
             "vertex inventory exceeds index capacity",
         ));
     }
@@ -227,12 +232,12 @@ fn predicate_error(
     )
 }
 
-fn resource_error(pslg: &ExactFacePslg, reason: &str) -> ExactFaceDelaunayError {
-    ExactFaceDelaunayError::new(
-        ExactFaceDelaunayErrorKind::ResourceLimit,
-        &pslg.source_face_id,
-        reason,
-    )
+fn resource_error(
+    pslg: &ExactFacePslg,
+    kind: ExactFaceDelaunayErrorKind,
+    reason: &str,
+) -> ExactFaceDelaunayError {
+    ExactFaceDelaunayError::new(kind, &pslg.source_face_id, reason)
 }
 
 struct PredicateBudget<'a> {
@@ -259,10 +264,13 @@ impl<'a> PredicateBudget<'a> {
     }
 
     fn consume(&mut self, count: u64) -> Result<(), ExactFaceDelaunayError> {
-        self.remaining = self
-            .remaining
-            .checked_sub(count)
-            .ok_or_else(|| resource_error(self.pslg, "predicate evaluation hard limit exceeded"))?;
+        self.remaining = self.remaining.checked_sub(count).ok_or_else(|| {
+            resource_error(
+                self.pslg,
+                ExactFaceDelaunayErrorKind::SearchWorkLimit,
+                "predicate evaluation hard limit exceeded",
+            )
+        })?;
         self.since_check += count;
         if self.since_check >= self.check_interval {
             self.checkpoint()?;

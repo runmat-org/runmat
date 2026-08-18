@@ -138,6 +138,12 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
     }
 }
 
+impl MeshingCancellationSignal for MeshingGeometryEvaluationControl<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+}
+
 fn elapsed_millis(start: Instant, end: Instant) -> u64 {
     u64::try_from(end.duration_since(start).as_millis()).unwrap_or(u64::MAX)
 }

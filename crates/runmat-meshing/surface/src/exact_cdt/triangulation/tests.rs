@@ -44,7 +44,7 @@ fn construction_enforces_cancellation_and_predicate_budget() {
         },
     )
     .unwrap_err();
-    assert_eq!(error.kind, ExactFaceDelaunayErrorKind::ResourceLimit);
+    assert_eq!(error.kind, ExactFaceDelaunayErrorKind::SearchWorkLimit);
 }
 
 #[test]

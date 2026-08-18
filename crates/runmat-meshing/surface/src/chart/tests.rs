@@ -1,7 +1,7 @@
 use runmat_geometry_core::{
     ExactSurfaceDefinition, ExactSurfaceImplementation, GeometryEvaluationControl,
-    GeometryEvaluationError, GeometryModel, ParameterRange, PersistentEntityId,
-    PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, GeometryModel, ParameterRange,
+    PersistentEntityId, PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
 };
 use runmat_meshing_core::{
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest,
@@ -791,6 +791,29 @@ fn nonperiodic_chart_is_identity_and_tamper_evident() {
     );
 }
 
+#[test]
+fn chart_construction_preserves_typed_geometry_cancellation() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let source = boundary(&topology, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+
+    assert_eq!(
+        build_exact_face_charts(
+            &source,
+            &topology,
+            &evaluator,
+            &CancelledControl,
+            ExactFaceChartOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceChartErrorKind::GeometryEvaluation(GeometryEvaluationErrorKind::Cancelled)
+    );
+}
+
 fn boundary(
     topology: &runmat_geometry_core::ExactBRepTopology,
     uv: [[f64; 2]; 4],
@@ -840,6 +863,26 @@ fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEnt
 }
 
 struct Control;
+
+struct CancelledControl;
+
+impl GeometryEvaluationControl for CancelledControl {
+    fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
+        Err(GeometryEvaluationError::new(
+            GeometryEvaluationErrorKind::Cancelled,
+            "cancelled",
+        ))
+    }
+    fn consume_iterations(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+        self.checkpoint()
+    }
+    fn consume_search_work(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+        self.checkpoint()
+    }
+    fn consume_allocation_bytes(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+        self.checkpoint()
+    }
+}
 
 impl GeometryEvaluationControl for Control {
     fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {

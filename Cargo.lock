@@ -6837,6 +6837,7 @@ dependencies = [
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "runmat-meshing-curve",
+ "runmat-meshing-surface",
  "serde",
  "thiserror 1.0.69",
 ]

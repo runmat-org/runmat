@@ -424,7 +424,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         )
         .unwrap_err()
         .kind,
-        ExactFaceRefinementErrorKind::Delaunay(crate::ExactFaceDelaunayErrorKind::ResourceLimit)
+        ExactFaceRefinementErrorKind::Delaunay(crate::ExactFaceDelaunayErrorKind::ElementLimit)
     );
     assert_eq!(
         insert_exact_face_refinement_candidate(
