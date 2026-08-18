@@ -1,4 +1,5 @@
 mod constraints;
+mod facet_recovery;
 mod incidence;
 mod insertion;
 mod point_set;
@@ -9,6 +10,11 @@ pub use constraints::{
     build_delaunay_constraints, validate_delaunay_constraints, DelaunayConstraintError,
     DelaunayConstraintErrorKind, DelaunayConstraintFacet, DelaunayConstraintNode,
     DelaunayConstraintOptions, DelaunayConstraintSegment, DelaunayConstraints,
+};
+pub use facet_recovery::{
+    recover_delaunay_facets, validate_delaunay_facet_recovery, DelaunayFacetRecovery,
+    DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
+    DelaunayRecoveredFacet, DelaunayRecoveredFacetTriangle,
 };
 pub use incidence::{
     assign_delaunay_volume_regions, DelaunayBoundaryFacet, DelaunayRegionIncidence,
