@@ -1,7 +1,7 @@
 use runmat_meshing_core::StableDigest;
 use sha2::{Digest, Sha256};
 
-pub(super) fn canonical_triangle<T: Ord + Copy>(values: [T; 3]) -> ([T; 3], usize) {
+pub(crate) fn canonical_triangle<T: Ord + Copy>(values: [T; 3]) -> ([T; 3], usize) {
     let rotation = (0..3)
         .min_by_key(|rotation| rotate(values, *rotation))
         .unwrap();

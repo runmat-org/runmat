@@ -4,9 +4,9 @@ mod join;
 mod lineage;
 mod types;
 
+pub(crate) use admission::valid_triangle_measures;
 pub(crate) use admission::validate_exact_face_mesh_contract;
-#[cfg(test)]
-pub(crate) use identity::exact_face_triangle_id;
+pub(crate) use identity::{canonical_triangle, exact_face_triangle_id};
 pub use join::{join_exact_face_charts, validate_exact_face_mesh};
 pub use types::{
     ExactFaceJoinContext, ExactFaceJoinError, ExactFaceJoinErrorKind, ExactFaceJoinOptions,

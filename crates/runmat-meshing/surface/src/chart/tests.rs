@@ -486,6 +486,27 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     .unwrap();
     assert_eq!(decoded_surface, canonical_surface);
     assert_eq!(
+        crate::decode_published_exact_surface_mesh(
+            &encoded_surface,
+            &two_face_topology,
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap(),
+        canonical_surface
+    );
+    let mut invalid_publication = canonical_surface.clone();
+    invalid_publication.shells[0].face_count += 1;
+    assert_eq!(
+        crate::validate_published_exact_surface_mesh(
+            &invalid_publication,
+            &two_face_topology,
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidInput
+    );
+    assert_eq!(
         crate::encode_exact_surface_mesh(
             &decoded_surface,
             &two_face_topology,
@@ -514,6 +535,16 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
             &corrupted_surface,
             &two_face_topology,
             &surface_batches,
+            crate::ExactSurfaceJoinOptions::default(),
+        )
+        .unwrap_err()
+        .kind,
+        crate::ExactSurfaceMeshErrorKind::InvalidEncoding
+    );
+    assert_eq!(
+        crate::decode_published_exact_surface_mesh(
+            &corrupted_surface,
+            &two_face_topology,
             crate::ExactSurfaceJoinOptions::default(),
         )
         .unwrap_err()

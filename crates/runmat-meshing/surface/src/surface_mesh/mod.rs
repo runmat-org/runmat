@@ -1,3 +1,4 @@
+mod artifact;
 mod batch;
 mod batch_codec;
 mod convergence;
@@ -7,6 +8,7 @@ mod pass_result;
 mod surface_codec;
 mod types;
 
+pub use artifact::validate_published_exact_surface_mesh;
 pub use batch::{
     build_exact_face_mesh_batch, face_partition_descriptors, validate_exact_face_mesh_batch,
 };
@@ -38,7 +40,8 @@ pub use pass_result::{
 #[cfg(test)]
 pub(crate) use surface_codec::decode_exact_surface_mesh_with_byte_limit;
 pub use surface_codec::{
-    decode_exact_surface_mesh, decode_exact_surface_mesh_from_pass, encode_exact_surface_mesh,
+    decode_exact_surface_mesh, decode_exact_surface_mesh_from_pass,
+    decode_published_exact_surface_mesh, encode_exact_surface_mesh,
     encode_exact_surface_mesh_from_pass,
 };
 pub use types::{

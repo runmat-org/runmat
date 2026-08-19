@@ -3,10 +3,11 @@ use runmat_geometry_core::ExactBRepTopology;
 use runmat_meshing_curve::SharedCurveMesh;
 
 use super::{
-    validate_exact_surface_mesh, validate_exact_surface_pass_result, ExactFaceMeshBatch,
-    ExactFacePartitionOutcome, ExactFacePartitionResult, ExactSurfaceJoinOptions, ExactSurfaceMesh,
-    ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfacePassOutcome,
-    ExactSurfacePassResult, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
+    validate_exact_surface_mesh, validate_exact_surface_pass_result,
+    validate_published_exact_surface_mesh, ExactFaceMeshBatch, ExactFacePartitionOutcome,
+    ExactFacePartitionResult, ExactSurfaceJoinOptions, ExactSurfaceMesh, ExactSurfaceMeshError,
+    ExactSurfaceMeshErrorKind, ExactSurfacePassOutcome, ExactSurfacePassResult,
+    EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
 };
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-exact-surface-canonical-cbor/v1\0";
@@ -32,6 +33,24 @@ pub fn decode_exact_surface_mesh(
     options: ExactSurfaceJoinOptions,
 ) -> Result<ExactSurfaceMesh, ExactSurfaceMeshError> {
     decode_with_limits(bytes, topology, batches, options, CONTRACT_LIMITS)
+}
+
+/// Decodes the final exact-surface publication without requiring its transient face partitions.
+/// The final artifact is independently checked against exact topology before downstream use.
+pub fn decode_published_exact_surface_mesh(
+    bytes: &[u8],
+    topology: &ExactBRepTopology,
+    options: ExactSurfaceJoinOptions,
+) -> Result<ExactSurfaceMesh, ExactSurfaceMeshError> {
+    let mesh = runmat_canonical_codec::decode_contract(
+        CODEC_PREFIX,
+        CONTRACT_DOMAIN,
+        bytes,
+        CONTRACT_LIMITS,
+    )
+    .map_err(map_codec_error)?;
+    validate_published_exact_surface_mesh(&mesh, topology, options)?;
+    Ok(mesh)
 }
 
 pub fn encode_exact_surface_mesh_from_pass(

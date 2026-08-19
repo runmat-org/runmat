@@ -146,7 +146,7 @@ struct CanonicalEdgePiece {
     node_ids: [StableDigest; 2],
 }
 
-fn validate_edge_conformity(
+pub(super) fn validate_edge_conformity(
     topology: &ExactBRepTopology,
     segments: &[ExactFaceMeshBoundarySegment],
 ) -> Result<(), ExactSurfaceMeshError> {
@@ -223,7 +223,7 @@ fn validate_edge_conformity(
     Ok(())
 }
 
-fn shell_evidence(
+pub(super) fn shell_evidence(
     topology: &ExactBRepTopology,
 ) -> Result<Vec<ExactSurfaceShellEvidence>, ExactSurfaceMeshError> {
     let sheet_shells = topology
@@ -339,7 +339,9 @@ fn compose(
     }
 }
 
-fn validate_options(options: ExactSurfaceJoinOptions) -> Result<(), ExactSurfaceMeshError> {
+pub(super) fn validate_options(
+    options: ExactSurfaceJoinOptions,
+) -> Result<(), ExactSurfaceMeshError> {
     if !options.coordinate_tolerance_m.is_finite()
         || options.coordinate_tolerance_m <= 0.0
         || options.maximum_nodes == 0

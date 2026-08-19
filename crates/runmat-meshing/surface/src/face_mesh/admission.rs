@@ -163,7 +163,7 @@ pub(crate) fn validate_exact_face_mesh_contract(
     Ok(())
 }
 
-fn valid_triangle_measures(triangle: &super::ExactFaceMeshTriangle) -> bool {
+pub(crate) fn valid_triangle_measures(triangle: &super::ExactFaceMeshTriangle) -> bool {
     triangle
         .unit_normal
         .into_iter()
