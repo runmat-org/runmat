@@ -14,13 +14,13 @@ pub fn noop_then_poll(device: &wgpu::Device, pipeline: &wgpu::ComputePipeline) {
 }
 
 pub fn submit(device: &wgpu::Device, queue: &wgpu::Queue, enc: wgpu::CommandEncoder) {
-    let submission = queue.submit(Some(enc.finish()));
+    let _submission = queue.submit(Some(enc.finish()));
     #[cfg(target_arch = "wasm32")]
     {
         device.poll(wgpu::Maintain::Poll);
     }
     #[cfg(not(target_arch = "wasm32"))]
-    device.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
+    device.poll(wgpu::Maintain::WaitForSubmissionIndex(_submission));
 }
 
 pub fn dispatch_groups(groups: u32) -> u32 {

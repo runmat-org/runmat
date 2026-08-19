@@ -189,7 +189,7 @@ mu = mean(imgs, [2 3]);
 sigma = sqrt(mean((imgs - mu).^2, [2 3]) + eps0);
 out = ((imgs - mu) ./ sigma) * gain + bias;
 out = out .^ gamma;
-mse = mean((out - imgs).^2, 'all');
+mse = mean(abs(out - imgs).^2, 'all');
 
 fprintf('RESULT_ok MSE=%.6e\n', double(mse));
 "#;
