@@ -155,6 +155,10 @@ pub enum ConstrainedCavityExtractionError {
 #[serde(rename_all = "snake_case")]
 pub enum ConstrainedCavityRefillError {
     InvalidOptions,
+    ResourceLimit {
+        reason: String,
+    },
+    Cancelled,
     Validation(ConstrainedCavityValidationError),
     MissingBoundaryNode {
         node_id: u32,

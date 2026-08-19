@@ -59,18 +59,6 @@ pub(super) fn finish_missing_face_stitch_candidates(
         .iter()
         .map(|node| node.node_id)
         .collect::<BTreeSet<_>>();
-    diagnostic.side_connector_candidate_count = append_cap_side_connector_tetrahedra(
-        CapTetrahedronRange {
-            start: cap_tetrahedron_start,
-            count: cap_tetrahedron_count,
-        },
-        &mut candidate_tetrahedra,
-        &mut seen_tetrahedra,
-        node_points,
-        &inserted_node_ids,
-        boundary_triangles,
-        options,
-    );
     diagnostic.candidate_tetrahedron_count = candidate_tetrahedra.len();
     let cap_side_mate_counts = cap_side_face_mate_counts(
         &candidate_tetrahedra[cap_tetrahedron_start..cap_tetrahedron_start + cap_tetrahedron_count],

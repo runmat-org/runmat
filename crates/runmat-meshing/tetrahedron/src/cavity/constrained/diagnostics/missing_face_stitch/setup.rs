@@ -73,7 +73,6 @@ pub(super) fn missing_face_stitch_setup(
         uncapped_faces: Vec::new(),
         capped_face_count: 0,
         inserted_node_count: 0,
-        side_connector_candidate_count: 0,
         candidate_tetrahedron_count: 0,
         cap_side_face_count: 0,
         zero_mate_cap_side_face_count: 0,

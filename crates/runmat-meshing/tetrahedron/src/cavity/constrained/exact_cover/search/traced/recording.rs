@@ -1,9 +1,19 @@
 use super::*;
 
 impl<'a> BoundaryExactCoverSearch<'a> {
+    #[cfg(test)]
     pub(in super::super::super::super) fn search_with_trace(
         &mut self,
     ) -> (Option<Vec<usize>>, BoundaryExactCoverTrace) {
+        self.search_with_trace_controlled(&runmat_meshing_core::NeverCancelled, u64::MAX)
+            .expect("the never-cancelled exact-cover search cannot cancel")
+    }
+
+    pub(in crate::cavity::constrained) fn search_with_trace_controlled(
+        &mut self,
+        cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+        cancellation_check_interval: u64,
+    ) -> Result<(Option<Vec<usize>>, BoundaryExactCoverTrace), ()> {
         let mut trace = BoundaryExactCoverTrace {
             dead_end: None,
             dead_ends: Vec::new(),
@@ -16,8 +26,12 @@ impl<'a> BoundaryExactCoverSearch<'a> {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut trace,
-        );
-        (result, trace)
+            ExactCoverSearchCancellation {
+                signal: cancellation,
+                interval: cancellation_check_interval,
+            },
+        )?;
+        Ok((result, trace))
     }
 
     pub(in super::super::super::super) fn record_dead_end(

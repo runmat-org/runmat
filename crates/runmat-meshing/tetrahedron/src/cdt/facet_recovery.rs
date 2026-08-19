@@ -29,6 +29,10 @@ pub struct DelaunayFacetRecoveryOptions {
     pub maximum_cavity_nodes: u64,
     pub maximum_cavity_boundary_faces: u64,
     pub maximum_cavity_apex_attempts: u64,
+    pub maximum_cavity_candidate_tetrahedra: u64,
+    pub maximum_cavity_candidate_evaluations: u64,
+    pub maximum_cavity_exact_cover_attempts: u64,
+    pub maximum_cavity_expansion_rounds: u32,
 }
 
 impl Default for DelaunayFacetRecoveryOptions {
@@ -43,6 +47,10 @@ impl Default for DelaunayFacetRecoveryOptions {
             maximum_cavity_nodes: 10_000,
             maximum_cavity_boundary_faces: 20_000,
             maximum_cavity_apex_attempts: 20_000,
+            maximum_cavity_candidate_tetrahedra: 1_000_000,
+            maximum_cavity_candidate_evaluations: 100_000_000,
+            maximum_cavity_exact_cover_attempts: 1_000_000,
+            maximum_cavity_expansion_rounds: 1_024,
         }
     }
 }
@@ -183,6 +191,10 @@ fn validate_options(
         || options.maximum_cavity_nodes == 0
         || options.maximum_cavity_boundary_faces == 0
         || options.maximum_cavity_apex_attempts == 0
+        || options.maximum_cavity_candidate_tetrahedra == 0
+        || options.maximum_cavity_candidate_evaluations == 0
+        || options.maximum_cavity_exact_cover_attempts == 0
+        || options.maximum_cavity_expansion_rounds == 0
     {
         return Err(error(
             DelaunayFacetRecoveryErrorKind::InvalidOptions,

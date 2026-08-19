@@ -3,6 +3,7 @@ use runmat_meshing_core::quality::predicate::Triangle3;
 use super::*;
 
 mod on_demand;
+pub(in crate::cavity::constrained) use on_demand::on_demand_interior_mate_faces_for_trace;
 
 pub(in super::super) use on_demand::exact_cover_refill_from_on_demand_interior_mates;
 

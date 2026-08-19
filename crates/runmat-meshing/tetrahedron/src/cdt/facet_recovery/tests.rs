@@ -9,6 +9,9 @@ use crate::cdt::{
     DelaunayConstraintSegment, DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
+#[path = "tests/scalable_cavity.rs"]
+mod scalable_cavity;
+
 fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
     let coordinates = [
         [5.0, 0.0, 0.0],

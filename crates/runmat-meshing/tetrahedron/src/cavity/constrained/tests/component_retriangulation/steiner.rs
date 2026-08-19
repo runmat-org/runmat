@@ -1,4 +1,5 @@
 use super::super::*;
+use runmat_meshing_core::NeverCancelled;
 
 #[test]
 fn component_steiner_nodes_are_bounded_inside_and_retriangulatable() {
@@ -59,6 +60,8 @@ fn component_steiner_nodes_are_bounded_inside_and_retriangulatable() {
         &component_cavity,
         &nodes_with_steiner,
         options,
+        ConstrainedCavityRefillBudget::default(),
+        &NeverCancelled,
     )
     .expect("Steiner component retriangulation should evaluate")
     .expect("component should remain retriangulatable with generated Steiner nodes");

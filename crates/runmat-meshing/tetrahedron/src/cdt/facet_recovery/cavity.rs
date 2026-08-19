@@ -17,6 +17,7 @@ use super::{
 use crate::{
     cavity::constrained::{
         retriangulate_constrained_cavity_from_nodes, ConstrainedCavity, ConstrainedCavityNode,
+        ConstrainedCavityRefillBudget, ConstrainedCavityRefillError,
         ConstrainedCavityRefillOptions,
     },
     cdt::{
@@ -31,9 +32,6 @@ pub(super) mod star;
 
 use sides::side_cavities;
 use star::star_refill;
-
-const EXACT_COVER_MAXIMUM_NODES: usize = 20;
-const EXACT_COVER_MAXIMUM_BOUNDARY_FACES: usize = 40;
 
 pub(super) struct BoundaryFace {
     pub(super) nodes: [u32; 3],
@@ -189,7 +187,7 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
     }
 }
 
-fn refill_side(
+pub(in crate::cdt::facet_recovery) fn refill_side(
     cavity: &ConstrainedCavity,
     nodes: &[ConstrainedCavityNode],
     topology: &DelaunayVolumeTopology,
@@ -199,27 +197,52 @@ fn refill_side(
     if let Some(star) = star_refill(cavity, topology, constraint_index, work)? {
         return Ok(Some(star));
     }
-    if nodes.len() > EXACT_COVER_MAXIMUM_NODES
-        || cavity.boundary_faces.len() > EXACT_COVER_MAXIMUM_BOUNDARY_FACES
-    {
-        return Ok(None);
-    }
     let refill_options = ConstrainedCavityRefillOptions {
         min_scaled_jacobian: 0.0,
         ..ConstrainedCavityRefillOptions::default()
     };
-    Ok(
-        retriangulate_constrained_cavity_from_nodes(cavity, nodes, refill_options)
-            .ok()
-            .flatten()
-            .map(|refill| {
-                refill
-                    .tetrahedra
-                    .into_iter()
-                    .map(|tetrahedron| tetrahedron.node_ids)
-                    .collect()
-            }),
-    )
+    let budget = ConstrainedCavityRefillBudget {
+        maximum_nodes: work.options.maximum_cavity_nodes,
+        maximum_boundary_faces: work.options.maximum_cavity_boundary_faces,
+        maximum_candidate_tetrahedra: work.options.maximum_cavity_candidate_tetrahedra,
+        maximum_candidate_evaluations: work.options.maximum_cavity_candidate_evaluations,
+        maximum_search_attempts: work.options.maximum_cavity_exact_cover_attempts,
+        maximum_expansion_rounds: work.options.maximum_cavity_expansion_rounds,
+        cancellation_check_interval: work
+            .options
+            .segment_recovery
+            .constraints
+            .cancellation_check_interval,
+    };
+    match retriangulate_constrained_cavity_from_nodes(
+        cavity,
+        nodes,
+        refill_options,
+        budget,
+        work.cancellation,
+    ) {
+        Ok(refill) => Ok(refill.map(|refill| {
+            refill
+                .tetrahedra
+                .into_iter()
+                .map(|tetrahedron| tetrahedron.node_ids)
+                .collect()
+        })),
+        Err(ConstrainedCavityRefillError::ResourceLimit { reason }) => Err(resource_or_cancelled(
+            DelaunayFacetRecoveryErrorKind::ResourceLimit,
+            constraint_index,
+            reason,
+        )),
+        Err(ConstrainedCavityRefillError::Cancelled) => Err(resource_or_cancelled(
+            DelaunayFacetRecoveryErrorKind::Cancelled,
+            constraint_index,
+            "cancelled".to_owned(),
+        )),
+        Err(failure) => Err(invalid_topology(
+            constraint_index,
+            format!("facet cavity refill failed: {failure:?}"),
+        )),
+    }
 }
 
 fn recovered_segments_exist(recovery: &DelaunaySegmentRecovery) -> bool {

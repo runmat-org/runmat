@@ -92,10 +92,15 @@ pub(super) fn refill_nested_tetrahedron_shell_cavity(
         min_scaled_jacobian: 1.0e-12,
         ..ConstrainedCavityRefillOptions::default()
     };
-    let refill =
-        retriangulate_constrained_cavity_from_nodes(&cavity, &cavity_nodes, refill_options)
-            .map_err(|_| TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?
-            .ok_or(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?;
+    let refill = retriangulate_constrained_cavity_from_nodes(
+        &cavity,
+        &cavity_nodes,
+        refill_options,
+        crate::cavity::constrained::ConstrainedCavityRefillBudget::default(),
+        &runmat_meshing_core::NeverCancelled,
+    )
+    .map_err(|_| TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?
+    .ok_or(TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?;
 
     Ok(NestedTetrahedronShellRefill {
         cavity_id_to_node_id,
@@ -139,9 +144,14 @@ fn try_boundary_centroid_refinement(
         min_scaled_jacobian: 0.15,
         ..ConstrainedCavityRefillOptions::default()
     };
-    let refill =
-        retriangulate_constrained_cavity_from_nodes(&cavity, &cavity_nodes, refill_options)
-            .map_err(|_| TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?;
+    let refill = retriangulate_constrained_cavity_from_nodes(
+        &cavity,
+        &cavity_nodes,
+        refill_options,
+        crate::cavity::constrained::ConstrainedCavityRefillBudget::default(),
+        &runmat_meshing_core::NeverCancelled,
+    )
+    .map_err(|_| TetrahedronGenerationError::UnsupportedNestedTetrahedronShellPlc)?;
 
     Ok(refill.map(|refill| NestedTetrahedronShellRefill {
         cavity_id_to_node_id,

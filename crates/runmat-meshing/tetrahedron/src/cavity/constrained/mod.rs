@@ -11,7 +11,6 @@ mod boundary_completion;
 mod boundary_nodes;
 mod boundary_operations;
 mod boundary_splits;
-mod cap_connectors;
 mod caps;
 mod component_steiner;
 mod connectivity;
@@ -52,8 +51,6 @@ pub use boundary_operations::{
     split_constrained_cavity_boundary_patch_at_centroids, split_constrained_cavity_source_edge,
 };
 use boundary_splits::*;
-#[cfg(test)]
-use cap_connectors::*;
 #[cfg(test)]
 use caps::*;
 pub use caps::{

@@ -1,6 +1,7 @@
 use super::*;
 
 mod mate_faces;
+pub(in crate::cavity::constrained) use mate_faces::on_demand_interior_mate_faces_for_trace;
 
 pub(in super::super::super) fn exact_cover_refill_from_on_demand_interior_mates(
     cavity: &ConstrainedCavity,
@@ -34,7 +35,12 @@ pub(in super::super::super) fn exact_cover_refill_from_on_demand_interior_mates(
                 &candidates,
                 options.volume_relative_tolerance,
             );
-            search.search_with_trace()
+            let Ok(result) =
+                search.search_with_trace_controlled(&runmat_meshing_core::NeverCancelled, u64::MAX)
+            else {
+                return Ok(None);
+            };
+            result
         };
         if let Some(selected) = selected {
             let selected_tetrahedra = selected
