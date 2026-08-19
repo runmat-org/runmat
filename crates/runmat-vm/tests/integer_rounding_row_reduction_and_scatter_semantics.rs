@@ -64,12 +64,3 @@ fn compiled_runmat_mode_rejects_inexact_floating_boundaries() {
         );
     }
 }
-
-#[test]
-fn compiled_runtests_flags_require_exact_zero_or_one() {
-    let error =
-        execute_source("r=runtests('definitely_missing_test_file','IncludeSubfolders',uint8(2));")
-            .expect_err("invalid integer flag must reject before discovery");
-    assert_eq!(error.identifier(), Some("RunMat:runtests:InvalidInput"));
-    assert!(error.message().contains("0 or 1"));
-}

@@ -604,7 +604,7 @@ fn runtests_flow(err: RuntimeError) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{CellArray, CharArray, LogicalArray, StringArray};
+    use runmat_value::{CellArray, CharArray, IntegerStorage, LogicalArray, StringArray, Tensor};
 
     #[test]
     fn parse_accepts_target_and_include_subfolders() {
@@ -623,6 +623,18 @@ mod tests {
         let options =
             parse_options(vec![Value::String("Coverage".into()), Value::Bool(true)]).unwrap();
         assert!(options.coverage);
+    }
+
+    #[test]
+    fn parse_rejects_integer_flags_other_than_exact_zero_or_one() {
+        let flag = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1])
+                .expect("scalar uint8 flag"),
+        );
+        let error = parse_options(vec![Value::String("IncludeSubfolders".to_string()), flag])
+            .expect_err("invalid integer flag");
+        assert_eq!(error.identifier(), Some("RunMat:runtests:InvalidInput"));
+        assert!(error.message().contains("0 or 1"));
     }
 
     #[test]

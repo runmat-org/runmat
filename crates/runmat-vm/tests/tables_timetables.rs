@@ -136,6 +136,7 @@ fn array_datastore_compiled_surface_preserves_all_integer_classes() {
 
 #[test]
 fn timetable_conversion_surface_executes_from_scripts() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "TT = timetable([1; 2], [10; 20], 'VariableNames', {'X'}); tf = istimetable(TT); H = head(TT, 1); tm = H.Time; T = timetable2table(TT, 'ConvertRowTimes', true); TT2 = table2timetable(T);",
     )
@@ -148,8 +149,9 @@ fn timetable_conversion_surface_executes_from_scripts() {
 
 #[test]
 fn categorical_dictionary_and_selector_surface_executes_from_scripts() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
-        "C = categorical({'red'; 'blue'; 'red'}); tf = iscategorical(C); O = ordinal({'medium'; 'low'}, {'low','medium','high'}); of = isordinal(O); nf = isordinal(C); gtmask = O > 'low'; eqmask = O == 'medium'; lemask = O <= 'medium'; out = [of + 0, nf + 0]; D = dictionary({'a','b'}, {1,2}); R = timerange(1, 3); V = vartype('numeric'); F = rowfilter({'A'}, '@gt0'); DS = arrayDatastore([1; 2]); UI = uitable('Data', [1 2]);",
+        "C = categorical({'red'; 'blue'; 'red'}); tf = iscategorical(C); O = ordinal({'medium'; 'low'}, {'low','medium','high'}, {'low','medium','high'}); of = isordinal(O); nf = isordinal(C); gtmask = O > 'low'; eqmask = O == 'medium'; lemask = O <= 'medium'; out = [of + 0, nf + 0]; D = dictionary({'a','b'}, {1,2}); R = timerange(1, 3); V = vartype('numeric'); F = rowfilter({'A'}, '@gt0'); DS = arrayDatastore([1; 2]); UI = uitable('Data', [1 2]);",
     )
     .expect("categorical dictionary script");
     assert!(has_bool(&vars, true));

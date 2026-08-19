@@ -503,6 +503,7 @@ fn zoom_object_dispatches_and_preserves_mode_properties() {
 
 #[test]
 fn plotting_ui_compat_helpers_dispatch_through_vm() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _guard = disable_interactive_plots_for_test();
     let input = "\
         f = figure('Visible', 'off'); \
@@ -1107,6 +1108,7 @@ fn gca_returns_active_subplot_axes_handle() {
 
 #[test]
 fn gca_with_figure_handle_returns_that_figures_current_axes() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _guard = disable_interactive_plots_for_test();
     let input = "\
         f1 = figure(1); \

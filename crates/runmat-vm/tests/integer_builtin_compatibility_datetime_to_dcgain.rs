@@ -192,6 +192,7 @@ fn compiled_dcgain_rejects_integer_sys_but_accepts_integer_tf_coefficients() {
     let error = execute_source("g = dcgain(int64(7));").expect_err("integer sys rejection");
     assert_eq!(error.identifier(), Some("RunMat:dcgain:InvalidModel"));
 
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let values = execute_source("g = dcgain(tf(int16(2), int16([1 3])));")
         .expect("dcgain of tf with integer coefficients");
     assert!(values

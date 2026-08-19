@@ -27,10 +27,10 @@ fn logical_mask_write_rows_scalar_broadcast() {
 }
 
 #[test]
-fn logical_mask_write_cols_vector_broadcast() {
-    // Select columns 2 and 4 by mask, assign a column vector broadcast across selected columns
+fn logical_mask_write_cols_exact_shape() {
+    // Select columns 2 and 4 by mask and assign an exactly matching matrix.
     // Use explicit literal to avoid range parsing differences in reshape
-    let src = "A=reshape([1 2 3 4 5 6 7 8],2,4); A(:, [false true false true]) = [8;9];"; // A is 2x4: columns are [1 2],[3 4],[5 6],[7 8]
+    let src = "A=reshape([1 2 3 4 5 6 7 8],2,4); A(:, [false true false true]) = [8 8;9 9];"; // A is 2x4: columns are [1 2],[3 4],[5 6],[7 8]
     let vars = execute_source(src).unwrap();
     // Columns 2 and 4 replaced by [8;9]
     // Expected columns: [1 2], [8 9], [5 6], [8 9] → data col-major [1,2,8,9,5,6,8,9]

@@ -75,6 +75,7 @@ fn movmad_executes_from_scripts() {
 
 #[test]
 fn table_missing_interop_executes_from_scripts() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "T = table([1; NaN; 3], strings(3, 1, 'missing'), 'VariableNames', {'A','S'}); M = ismissing(T); R = rmmissing(T);",
     )

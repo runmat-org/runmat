@@ -30,7 +30,7 @@ fn imhist_typed_bin_count_is_mode_gated() {
 #[test]
 fn impulse_integer_roles_are_mode_gated() {
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
-    let error = execute_source("sys=tf(uint8(1),[1 1]); y=impulse(sys,uint8(1));")
+    let error = execute_source("sys=tf(1,[1 1]); y=impulse(sys,uint8(1));")
         .expect_err("typed integer impulse roles must reject");
     assert_eq!(
         error.identifier(),

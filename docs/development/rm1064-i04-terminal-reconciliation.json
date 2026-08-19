@@ -7,8 +7,8 @@
   "recorded_conflict_hunk_count": 416,
   "unclassified_count": 0,
   "disposition_counts": {
-    "ported": 1216,
-    "already-superseded-equivalently": 6,
+    "ported": 1217,
+    "already-superseded-equivalently": 5,
     "regenerated-from-current-authority": 0,
     "intentionally-inapplicable": 0
   },
@@ -4834,8 +4834,8 @@
       "path": "crates/runmat-vm/tests/indexing_properties.rs",
       "terminal_status": "M",
       "conflict_hunks": 1,
-      "disposition": "already-superseded-equivalently",
-      "rationale": "The current post-R20 tree already supplies equivalent behavior or the terminal edit merges without an additional result delta."
+      "disposition": "ported",
+      "rationale": "The terminal semantic delta is represented in the reconciled merge result at its current domain owner."
     },
     {
       "path": "crates/runmat-vm/tests/integer_array_construction_and_conversion_semantics.rs",

@@ -377,6 +377,7 @@ fn scatterhist_surface_executes_from_scripts() {
 
 #[test]
 fn encoding_surface_executes_from_scripts() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "D = dummyvar([1;2;1]); labels = [\"red\";\"blue\";\"red\"]; H = onehotencode(labels, 2, 'ClassNames', [\"blue\";\"red\"], 'OutputType', 'logical'); dec = onehotdecode(H, [\"blue\";\"red\"], 2, 'string'); d11 = D(1,1); d22 = D(2,2);",
     )
@@ -642,11 +643,12 @@ fn linkage_surface_executes_from_scripts() {
 #[test]
 fn covariance_conversion_surface_executes_from_scripts() {
     let vars = execute_source(
-        "C = [4 2; 2 9]; [R,s] = corrcov(C); Q = cov2corr(C); r12 = R(1,2); s2 = s(2); q21 = Q(2,1);",
+        "C = [4 2; 2 9]; [R,s] = corrcov(C); [qs,Q] = cov2corr(C); r12 = R(1,2); s2 = s(2); qs2 = qs(2); q21 = Q(2,1);",
     )
     .expect("corrcov script");
     assert!(has_tensor_shape(&vars, &[2, 2]));
     assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_tensor_shape(&vars, &[1, 2]));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(value) if (*value - (1.0 / 3.0)).abs() < 1.0e-8)));

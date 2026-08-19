@@ -1,11 +1,20 @@
 use runmat_value::{IntegerStorage, Value};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 #[path = "support/mod.rs"]
 mod test_helpers;
 
 use test_helpers::execute_source;
 
+fn random_test_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[test]
 fn compiled_random_size_controls_accept_every_integer_class() {
+    let _random = random_test_guard();
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     for constructor in [
         "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
@@ -19,6 +28,7 @@ fn compiled_random_size_controls_accept_every_integer_class() {
 
 #[test]
 fn compiled_rng_accepts_public_integer_seed_classes_and_gates_wide_seeds() {
+    let _random = random_test_guard();
     {
         let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
         for constructor in [
@@ -41,6 +51,7 @@ fn compiled_rng_accepts_public_integer_seed_classes_and_gates_wide_seeds() {
 
 #[test]
 fn compiled_runmat_extensions_cover_waveforms_distributions_and_exact_sampling() {
+    let _random = random_test_guard();
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(
         "p=rectpuls(uint8([0 1]),uint8(2)); if ~isequal(p,[1 0]); error('rectpuls edge'); end; q=pulstran(uint8([0 1]),uint8(0),'rectpuls',uint8(2)); if ~isequal(q,[1 0]); error('pulstran integer form'); end; r=random('Normal',uint8(0),uint8(1),uint8(2)); if ~isequal(size(r),[2 2]); error('random integer form'); end; base=bitshift(uint64(1),53); s=randsample(uint64([base base+uint64(1)]),uint8(2)); if ~isa(s,'uint64') || numel(s)~=2; error('randsample integer form'); end;",
@@ -50,6 +61,7 @@ fn compiled_runmat_extensions_cover_waveforms_distributions_and_exact_sampling()
 
 #[test]
 fn compiled_randi_samples_full_width_integer_domains_reproducibly() {
+    let _random = random_test_guard();
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let values = execute_source(
         "rng(uint64(123)); sb=[intmin('int64') intmax('int64')]; a=randi(sb,1,64,'int64'); ub=[uint64(0) intmax('uint64')]; b=randi(ub,1,64,'uint64'); rng(uint64(123)); a2=randi(sb,1,64,'int64'); b2=randi(ub,1,64,'uint64'); if ~isequal(a,a2) || ~isequal(b,b2); error('randi reproducibility'); end;",
@@ -65,6 +77,7 @@ fn compiled_randi_samples_full_width_integer_domains_reproducibly() {
 
 #[test]
 fn compiled_strict_mode_rejects_waveform_and_column_size_extensions() {
+    let _random = random_test_guard();
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     for source in [
         "y=rectpuls(uint8([0 1]));",
