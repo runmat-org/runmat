@@ -69,6 +69,20 @@ fn numeric_data_from_bytes(
         expected_bytes,
         element_type
     );
+    if len == 0 {
+        return Ok(match element_type {
+            NumericElementType::F64 => HostNumericDataOwned::F64(Vec::new()),
+            NumericElementType::F32 => HostNumericDataOwned::F32(Vec::new()),
+            NumericElementType::I8 => HostNumericDataOwned::I8(Vec::new()),
+            NumericElementType::I16 => HostNumericDataOwned::I16(Vec::new()),
+            NumericElementType::I32 => HostNumericDataOwned::I32(Vec::new()),
+            NumericElementType::I64 => HostNumericDataOwned::I64(Vec::new()),
+            NumericElementType::U8 => HostNumericDataOwned::U8(Vec::new()),
+            NumericElementType::U16 => HostNumericDataOwned::U16(Vec::new()),
+            NumericElementType::U32 => HostNumericDataOwned::U32(Vec::new()),
+            NumericElementType::U64 => HostNumericDataOwned::U64(Vec::new()),
+        });
+    }
     Ok(match element_type {
         NumericElementType::F64 => HostNumericDataOwned::F64(cast_slice(bytes).to_vec()),
         NumericElementType::F32 => HostNumericDataOwned::F32(cast_slice(bytes).to_vec()),

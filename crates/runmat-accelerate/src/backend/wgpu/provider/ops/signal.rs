@@ -2995,12 +2995,12 @@ mod tests {
         with_wgpu_provider(|provider| {
             let mut interleaved = Vec::with_capacity(values.len() * 2);
             for &(re, im) in values {
-                interleaved.push(re);
-                interleaved.push(im);
+                interleaved.push(re as f32);
+                interleaved.push(im as f32);
             }
             let input = provider
                 .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F64(&interleaved),
+                    data: HostNumericDataView::F32(&interleaved),
                     shape,
                     storage: GpuTensorStorage::ComplexInterleaved,
                 })
@@ -3350,10 +3350,10 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("upload denominator");
-            let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0];
+            let data = [1.0_f32, 10.0, 2.0, 20.0, 3.0, 30.0];
             let x = provider
                 .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F64(&data),
+                    data: HostNumericDataView::F32(&data),
                     shape: &[1, 3],
                     storage: GpuTensorStorage::ComplexInterleaved,
                 })
@@ -3505,10 +3505,10 @@ mod tests {
     #[test]
     fn trapezoid_provider_preserves_complex_storage_and_integrates_lanes() {
         with_wgpu_provider(|provider| {
-            let data = [1.0, 1.0, 2.0, 2.0, 3.0, 3.0];
+            let data = [1.0_f32, 1.0, 2.0, 2.0, 3.0, 3.0];
             let input = provider
                 .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F64(&data),
+                    data: HostNumericDataView::F32(&data),
                     shape: &[1, 3],
                     storage: GpuTensorStorage::ComplexInterleaved,
                 })

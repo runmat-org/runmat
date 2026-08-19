@@ -451,4 +451,20 @@ impl WgpuProvider {
             })
             .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
     }
+
+    pub(super) fn get_entry_for_storage_move(
+        &self,
+        handle: &GpuTensorHandle,
+        operation: &str,
+    ) -> Result<BufferEntry> {
+        let entry = self.get_entry_raw(handle)?;
+        if entry.integer_type().is_none() && entry.precision != self.precision {
+            return Err(anyhow!(
+                "{operation}: native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
+                entry.element_type,
+                self.precision
+            ));
+        }
+        Ok(entry)
+    }
 }

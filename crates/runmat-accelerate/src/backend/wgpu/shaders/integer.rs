@@ -37,8 +37,7 @@ pub fn cast_shader(scalar_type: &str, workgroup_size: u32) -> String {
         r#"
 fn read_float_cast(logical_index: u32) -> f64 {
     let lane = logical_index * 2u;
-    let bits = (u64(InBuf.data[lane + 1u]) << 32u) | u64(InBuf.data[lane]);
-    return bitcast<f64>(bits);
+    return bitcast<f64>(vec2<u32>(InBuf.data[lane], InBuf.data[lane + 1u]));
 }
 "#
     } else {
@@ -1296,9 +1295,9 @@ fn compare_scan(a0: u32, a1: u32, b0: u32, b1: u32) -> i32 {
 
 fn should_replace_scan(ordering: i32) -> bool {
     if (params.op == 2u) {
-        return ordering < 0;
+        return ordering > 0;
     }
-    return ordering > 0;
+    return ordering < 0;
 }
 
 fn identity_scan() -> vec2<u32> {
@@ -1420,8 +1419,67 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Words;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn sx8_mean(x: u32) -> i64 { return i64(bitcast<i32>(x << 24u) >> 24); }
-fn sx16_mean(x: u32) -> i64 { return i64(bitcast<i32>(x << 16u) >> 16); }
+struct WideMean { low: u32, high: u32 };
+
+fn wide_mean_zero() -> WideMean { return WideMean(0u, 0u); }
+
+fn wide_mean_add(left: WideMean, right: WideMean) -> WideMean {
+    let low = left.low + right.low;
+    let carry = select(0u, 1u, low < left.low);
+    return WideMean(low, left.high + right.high + carry);
+}
+
+fn wide_mean_negate(value: WideMean) -> WideMean {
+    return wide_mean_add(WideMean(~value.low, ~value.high), WideMean(1u, 0u));
+}
+
+fn wide_mean_div_u32(value: WideMean, divisor: u32) -> WideMean {
+    var quotient = wide_mean_zero();
+    var remainder = 0u;
+    var bit = 64u;
+    loop {
+        if (bit == 0u) { break; }
+        bit = bit - 1u;
+        var input_bit = 0u;
+        if (bit >= 32u) {
+            input_bit = (value.high >> (bit - 32u)) & 1u;
+        } else {
+            input_bit = (value.low >> bit) & 1u;
+        }
+        let overflow = (remainder & 0x80000000u) != 0u;
+        var doubled = (remainder << 1u) | input_bit;
+        if (overflow || doubled >= divisor) {
+            doubled = doubled - divisor;
+            if (bit >= 32u) {
+                quotient.high = quotient.high | (1u << (bit - 32u));
+            } else {
+                quotient.low = quotient.low | (1u << bit);
+            }
+        }
+        remainder = doubled;
+    }
+    return quotient;
+}
+
+fn wide_mean_remainder_u32(value: WideMean, divisor: u32) -> u32 {
+    var remainder = 0u;
+    var bit = 64u;
+    loop {
+        if (bit == 0u) { break; }
+        bit = bit - 1u;
+        var input_bit = 0u;
+        if (bit >= 32u) {
+            input_bit = (value.high >> (bit - 32u)) & 1u;
+        } else {
+            input_bit = (value.low >> bit) & 1u;
+        }
+        let overflow = (remainder & 0x80000000u) != 0u;
+        var doubled = (remainder << 1u) | input_bit;
+        if (overflow || doubled >= divisor) { doubled = doubled - divisor; }
+        remainder = doubled;
+    }
+    return remainder;
+}
 
 fn map_mean_col_to_base(col: u32) -> u32 {
     var rem = col;
@@ -1457,112 +1515,118 @@ fn map_mean_row_offset(row: u32) -> u32 {
     return offset;
 }
 
-fn read_unsigned_mean(logical_index: u32) -> u64 {
+fn read_unsigned_mean(logical_index: u32) -> WideMean {
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
     let lane = logical_index * lanes;
     let low = InBuf.data[lane];
     if (params.integer_type == 7u) {
-        return (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
+        return WideMean(low, InBuf.data[lane + 1u]);
     }
     switch params.integer_type {
-        case 4u: { return u64(low & 0xffu); }
-        case 5u: { return u64(low & 0xffffu); }
-        default: { return u64(low); }
+        case 4u: { return WideMean(low & 0xffu, 0u); }
+        case 5u: { return WideMean(low & 0xffffu, 0u); }
+        default: { return WideMean(low, 0u); }
     }
 }
 
-fn read_signed_mean(logical_index: u32) -> i64 {
+fn read_signed_mean(logical_index: u32) -> WideMean {
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
     let lane = logical_index * lanes;
     let low = InBuf.data[lane];
     switch params.integer_type {
-        case 0u: { return sx8_mean(low); }
-        case 1u: { return sx16_mean(low); }
-        case 2u: { return i64(bitcast<i32>(low)); }
-        case 3u: {
-            let bits = (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
-            return bitcast<i64>(bits);
+        case 0u: {
+            let value = bitcast<u32>(bitcast<i32>(low << 24u) >> 24);
+            return WideMean(value, select(0u, 0xffffffffu, (value & 0x80000000u) != 0u));
         }
-        default: { return i64(read_unsigned_mean(logical_index)); }
+        case 1u: {
+            let value = bitcast<u32>(bitcast<i32>(low << 16u) >> 16);
+            return WideMean(value, select(0u, 0xffffffffu, (value & 0x80000000u) != 0u));
+        }
+        case 2u: { return WideMean(low, select(0u, 0xffffffffu, (low & 0x80000000u) != 0u)); }
+        case 3u: { return WideMean(low, InBuf.data[lane + 1u]); }
+        default: { return read_unsigned_mean(logical_index); }
     }
 }
 
-fn write_unsigned_mean(out_index: u32, value: u64) {
+fn write_mean(out_index: u32, value: WideMean) {
     let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
     let lane = out_index * lanes;
     switch params.integer_type {
-        case 4u: { OutBuf.data[lane] = u32(min(value, 255u)); }
-        case 5u: { OutBuf.data[lane] = u32(min(value, 65535u)); }
-        case 6u: { OutBuf.data[lane] = u32(min(value, 4294967295u)); }
-        case 7u: {
-            OutBuf.data[lane] = u32(value & 0xffffffffu);
-            OutBuf.data[lane + 1u] = u32(value >> 32u);
+        case 3u, 7u: {
+            OutBuf.data[lane] = value.low;
+            OutBuf.data[lane + 1u] = value.high;
         }
-        default: { OutBuf.data[lane] = u32(value); }
+        default: { OutBuf.data[lane] = value.low; }
     }
 }
 
-fn write_signed_mean(out_index: u32, value: i64) {
-    let lanes = select(1u, 2u, params.integer_type == 3u || params.integer_type == 7u);
-    let lane = out_index * lanes;
-    switch params.integer_type {
-        case 0u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -128i, 127i))); }
-        case 1u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -32768i, 32767i))); }
-        case 2u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -2147483648i, 2147483647i))); }
-        case 3u: {
-            let bits = bitcast<u64>(value);
-            OutBuf.data[lane] = u32(bits & 0xffffffffu);
-            OutBuf.data[lane + 1u] = u32(bits >> 32u);
-        }
-        default: { write_unsigned_mean(out_index, u64(max(value, 0i))); }
-    }
-}
-
-fn unsigned_mean(base: u32) -> u64 {
-    let divisor = u64(params.rows);
-    var quotient = 0u64;
-    var remainder = 0u64;
+fn unsigned_mean(base: u32) -> WideMean {
+    let divisor = params.rows;
+    var quotient = wide_mean_zero();
+    var remainder = 0u;
     var row = 0u;
     loop {
         if (row >= params.rows) { break; }
         let value = read_unsigned_mean(base + map_mean_row_offset(row));
-        quotient = quotient + value / divisor;
-        remainder = remainder + value % divisor;
-        if (remainder >= divisor) {
-            quotient = quotient + 1u;
-            remainder = remainder - divisor;
+        quotient = wide_mean_add(quotient, wide_mean_div_u32(value, divisor));
+        let term = wide_mean_remainder_u32(value, divisor);
+        if (term != 0u && remainder >= divisor - term) {
+            quotient = wide_mean_add(quotient, WideMean(1u, 0u));
+            remainder = remainder - (divisor - term);
+        } else {
+            remainder = remainder + term;
         }
         row = row + 1u;
     }
-    if (remainder * 2u >= divisor) {
-        quotient = quotient + 1u;
+    if (remainder != 0u && remainder >= divisor - remainder) {
+        quotient = wide_mean_add(quotient, WideMean(1u, 0u));
     }
     return quotient;
 }
 
-fn signed_mean(base: u32) -> i64 {
-    let divisor = i64(params.rows);
-    var quotient = 0i64;
-    var remainder = 0i64;
+fn signed_mean(base: u32) -> WideMean {
+    let divisor = params.rows;
+    var quotient = wide_mean_zero();
+    var remainder = 0u;
+    var remainder_negative = false;
     var row = 0u;
     loop {
         if (row >= params.rows) { break; }
         let value = read_signed_mean(base + map_mean_row_offset(row));
-        quotient = quotient + value / divisor;
-        remainder = remainder + value % divisor;
-        if (remainder >= divisor) {
-            quotient = quotient + 1i;
-            remainder = remainder - divisor;
-        }
-        if (remainder <= -divisor) {
-            quotient = quotient - 1i;
-            remainder = remainder + divisor;
+        let negative = (value.high & 0x80000000u) != 0u;
+        var magnitude = value;
+        if (negative) { magnitude = wide_mean_negate(value); }
+        var term_quotient = wide_mean_div_u32(magnitude, divisor);
+        let term_remainder = wide_mean_remainder_u32(magnitude, divisor);
+        if (negative) { term_quotient = wide_mean_negate(term_quotient); }
+        quotient = wide_mean_add(quotient, term_quotient);
+
+        if (term_remainder != 0u) {
+            if (remainder == 0u) {
+                remainder = term_remainder;
+                remainder_negative = negative;
+            } else if (remainder_negative == negative) {
+                if (remainder >= divisor - term_remainder) {
+                    remainder = remainder - (divisor - term_remainder);
+                    var unit = WideMean(1u, 0u);
+                    if (negative) { unit = WideMean(0xffffffffu, 0xffffffffu); }
+                    quotient = wide_mean_add(quotient, unit);
+                } else {
+                    remainder = remainder + term_remainder;
+                }
+            } else if (remainder >= term_remainder) {
+                remainder = remainder - term_remainder;
+            } else {
+                remainder = term_remainder - remainder;
+                remainder_negative = negative;
+            }
         }
         row = row + 1u;
     }
-    let magnitude = select(u64(remainder), u64(-remainder), remainder < 0i);
-    if (magnitude * 2u >= u64(params.rows)) {
-        quotient = quotient + select(1i, -1i, remainder < 0i);
+    if (remainder != 0u && remainder >= divisor - remainder) {
+        var unit = WideMean(1u, 0u);
+        if (remainder_negative) { unit = WideMean(0xffffffffu, 0xffffffffu); }
+        quotient = wide_mean_add(quotient, unit);
     }
     return quotient;
 }
@@ -1576,9 +1640,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let base = map_mean_col_to_base(slice);
     if (params.integer_type <= 3u) {
-        write_signed_mean(slice, signed_mean(base));
+        write_mean(slice, signed_mean(base));
     } else {
-        write_unsigned_mean(slice, unsigned_mean(base));
+        write_mean(slice, unsigned_mean(base));
     }
 }
 "#;
@@ -1596,41 +1660,73 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Words;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn sx8_cast(x: u32) -> i64 { return i64(bitcast<i32>(x << 24u) >> 24); }
-fn sx16_cast(x: u32) -> i64 { return i64(bitcast<i32>(x << 16u) >> 16); }
+struct WideCast { low: u32, high: u32 };
+struct SignedWideCast { magnitude: WideCast, negative: bool };
+
+fn wide_cast_zero() -> WideCast { return WideCast(0u, 0u); }
+
+fn wide_cast_add(left: WideCast, right: WideCast) -> WideCast {
+    let low = left.low + right.low;
+    let carry = select(0u, 1u, low < left.low);
+    return WideCast(low, left.high + right.high + carry);
+}
+
+fn wide_cast_negate(value: WideCast) -> WideCast {
+    return wide_cast_add(WideCast(~value.low, ~value.high), WideCast(1u, 0u));
+}
+
+fn wide_cast_greater(left: WideCast, right: WideCast) -> bool {
+    return left.high > right.high ||
+        (left.high == right.high && left.low > right.low);
+}
+
+fn wide_cast_clamp(value: WideCast, maximum: WideCast) -> WideCast {
+    if (wide_cast_greater(value, maximum)) { return maximum; }
+    return value;
+}
 
 fn is_source_integer() -> bool {
     return params.source_type <= 7u;
 }
 
-fn read_unsigned_cast(logical_index: u32) -> u64 {
+fn read_unsigned_cast(logical_index: u32) -> WideCast {
     let lanes = select(1u, 2u, params.source_type == 3u || params.source_type == 7u);
     let lane = logical_index * lanes;
     let low = InBuf.data[lane];
     if (params.source_type == 7u) {
-        return (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
+        return WideCast(low, InBuf.data[lane + 1u]);
     }
     switch params.source_type {
-        case 4u: { return u64(low & 0xffu); }
-        case 5u: { return u64(low & 0xffffu); }
-        default: { return u64(low); }
+        case 4u: { return WideCast(low & 0xffu, 0u); }
+        case 5u: { return WideCast(low & 0xffffu, 0u); }
+        default: { return WideCast(low, 0u); }
     }
 }
 
-fn read_signed_cast(logical_index: u32) -> i64 {
+fn read_signed_cast(logical_index: u32) -> SignedWideCast {
     let lanes = select(1u, 2u, params.source_type == 3u || params.source_type == 7u);
     let lane = logical_index * lanes;
     let low = InBuf.data[lane];
+    var bits = WideCast(low, 0u);
     switch params.source_type {
-        case 0u: { return sx8_cast(low); }
-        case 1u: { return sx16_cast(low); }
-        case 2u: { return i64(bitcast<i32>(low)); }
-        case 3u: {
-            let bits = (u64(InBuf.data[lane + 1u]) << 32u) | u64(low);
-            return bitcast<i64>(bits);
+        case 0u: {
+            bits.low = bitcast<u32>(bitcast<i32>(low << 24u) >> 24);
+            bits.high = select(0u, 0xffffffffu, (bits.low & 0x80000000u) != 0u);
         }
-        default: { return i64(read_unsigned_cast(logical_index)); }
+        case 1u: {
+            bits.low = bitcast<u32>(bitcast<i32>(low << 16u) >> 16);
+            bits.high = select(0u, 0xffffffffu, (bits.low & 0x80000000u) != 0u);
+        }
+        case 2u: {
+            bits.high = select(0u, 0xffffffffu, (low & 0x80000000u) != 0u);
+        }
+        case 3u: { bits.high = InBuf.data[lane + 1u]; }
+        default: { return SignedWideCast(read_unsigned_cast(logical_index), false); }
     }
+    let negative = (bits.high & 0x80000000u) != 0u;
+    var magnitude = bits;
+    if (negative) { magnitude = wide_cast_negate(bits); }
+    return SignedWideCast(magnitude, negative);
 }
 
 $READ_FLOAT
@@ -1645,84 +1741,75 @@ fn rounded_float_cast(value: $SCALAR) -> $SCALAR {
     return ceil(value - $SCALAR(0.5));
 }
 
-fn float_to_signed_cast(value: $SCALAR, min_value: i64, max_value: i64) -> i64 {
+fn float_to_wide_cast(value: $SCALAR) -> SignedWideCast {
     let rounded = rounded_float_cast(value);
-    if (rounded <= $SCALAR(min_value)) {
-        return min_value;
+    let negative = rounded < $SCALAR(0.0);
+    var magnitude = select(rounded, -rounded, negative);
+    if (magnitude != magnitude || magnitude <= $SCALAR(0.0)) {
+        return SignedWideCast(wide_cast_zero(), false);
     }
-    if (rounded >= $SCALAR(max_value)) {
-        return max_value;
+    let two32 = $SCALAR(4294967296.0);
+    let high_float = floor(magnitude / two32);
+    if (high_float >= $SCALAR(4294967295.0)) {
+        return SignedWideCast(WideCast(0xffffffffu, 0xffffffffu), negative);
     }
-    return i64(rounded);
+    let high = u32(high_float);
+    magnitude = magnitude - $SCALAR(high) * two32;
+    var low = 0u;
+    if (magnitude >= $SCALAR(4294967295.0)) {
+        low = 0xffffffffu;
+    } else {
+        low = u32(magnitude);
+    }
+    return SignedWideCast(WideCast(low, high), negative);
 }
 
-fn float_to_unsigned_cast(value: $SCALAR, max_value: u64) -> u64 {
-    let rounded = rounded_float_cast(value);
-    if (rounded <= $SCALAR(0.0)) {
-        return 0u64;
-    }
-    if (rounded >= $SCALAR(max_value)) {
-        return max_value;
-    }
-    return u64(rounded);
-}
-
-fn source_to_signed_cast(logical_index: u32, min_value: i64, max_value: i64) -> i64 {
+fn read_source_cast(logical_index: u32) -> SignedWideCast {
     if (is_source_integer()) {
         if (params.source_type <= 3u) {
-            return clamp(read_signed_cast(logical_index), min_value, max_value);
+            return read_signed_cast(logical_index);
         }
-        let value = read_unsigned_cast(logical_index);
-        if (value >= u64(max_value)) {
-            return max_value;
-        }
-        return i64(value);
+        return SignedWideCast(read_unsigned_cast(logical_index), false);
     }
-    return float_to_signed_cast(read_float_cast(logical_index), min_value, max_value);
+    return float_to_wide_cast(read_float_cast(logical_index));
 }
 
-fn source_to_unsigned_cast(logical_index: u32, max_value: u64) -> u64 {
-    if (is_source_integer()) {
-        if (params.source_type <= 3u) {
-            let value = read_signed_cast(logical_index);
-            if (value <= 0i64) {
-                return 0u64;
-            }
-            return min(u64(value), max_value);
-        }
-        return min(read_unsigned_cast(logical_index), max_value);
-    }
-    return float_to_unsigned_cast(read_float_cast(logical_index), max_value);
-}
-
-fn write_unsigned_cast(out_index: u32, value: u64) {
-    let lanes = select(1u, 2u, params.target_type == 3u || params.target_type == 7u);
-    let lane = out_index * lanes;
+fn target_limit_cast(negative: bool) -> WideCast {
     switch params.target_type {
-        case 4u: { OutBuf.data[lane] = u32(min(value, 255u)); }
-        case 5u: { OutBuf.data[lane] = u32(min(value, 65535u)); }
-        case 6u: { OutBuf.data[lane] = u32(min(value, 4294967295u)); }
-        case 7u: {
-            OutBuf.data[lane] = u32(value & 0xffffffffu);
-            OutBuf.data[lane + 1u] = u32(value >> 32u);
-        }
-        default: { OutBuf.data[lane] = u32(value); }
-    }
-}
-
-fn write_signed_cast(out_index: u32, value: i64) {
-    let lanes = select(1u, 2u, params.target_type == 3u || params.target_type == 7u);
-    let lane = out_index * lanes;
-    switch params.target_type {
-        case 0u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -128i, 127i))); }
-        case 1u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -32768i, 32767i))); }
-        case 2u: { OutBuf.data[lane] = bitcast<u32>(i32(clamp(value, -2147483648i, 2147483647i))); }
+        case 0u: { return WideCast(select(127u, 128u, negative), 0u); }
+        case 1u: { return WideCast(select(32767u, 32768u, negative), 0u); }
+        case 2u: { return WideCast(select(0x7fffffffu, 0x80000000u, negative), 0u); }
         case 3u: {
-            let bits = bitcast<u64>(value);
-            OutBuf.data[lane] = u32(bits & 0xffffffffu);
-            OutBuf.data[lane + 1u] = u32(bits >> 32u);
+            return WideCast(select(0xffffffffu, 0u, negative), 0x7fffffffu + select(0u, 1u, negative));
         }
-        default: { write_unsigned_cast(out_index, u64(max(value, 0i))); }
+        case 4u: { return WideCast(255u, 0u); }
+        case 5u: { return WideCast(65535u, 0u); }
+        case 6u: { return WideCast(0xffffffffu, 0u); }
+        default: { return WideCast(0xffffffffu, 0xffffffffu); }
+    }
+}
+
+fn write_unsigned_cast(out_index: u32, value: WideCast) {
+    let lanes = select(1u, 2u, params.target_type == 3u || params.target_type == 7u);
+    let lane = out_index * lanes;
+    switch params.target_type {
+        case 4u, 5u, 6u: { OutBuf.data[lane] = value.low; }
+        case 7u: {
+            OutBuf.data[lane] = value.low;
+            OutBuf.data[lane + 1u] = value.high;
+        }
+        default: { OutBuf.data[lane] = value.low; }
+    }
+}
+
+fn write_signed_cast(out_index: u32, magnitude: WideCast, negative: bool) {
+    let lanes = select(1u, 2u, params.target_type == 3u || params.target_type == 7u);
+    let lane = out_index * lanes;
+    var bits = magnitude;
+    if (negative) { bits = wide_cast_negate(magnitude); }
+    OutBuf.data[lane] = bits.low;
+    if (params.target_type == 3u) {
+        OutBuf.data[lane + 1u] = bits.high;
     }
 }
 
@@ -1733,19 +1820,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     let index = params.offset + local;
+    let source = read_source_cast(index);
     if (params.target_type <= 3u) {
-        switch params.target_type {
-            case 0u: { write_signed_cast(index, source_to_signed_cast(index, -128i64, 127i64)); }
-            case 1u: { write_signed_cast(index, source_to_signed_cast(index, -32768i64, 32767i64)); }
-            case 2u: { write_signed_cast(index, source_to_signed_cast(index, -2147483648i64, 2147483647i64)); }
-            default: { write_signed_cast(index, source_to_signed_cast(index, -9223372036854775808i64, 9223372036854775807i64)); }
-        }
+        let magnitude = wide_cast_clamp(source.magnitude, target_limit_cast(source.negative));
+        write_signed_cast(index, magnitude, source.negative);
     } else {
-        switch params.target_type {
-            case 4u: { write_unsigned_cast(index, source_to_unsigned_cast(index, 255u64)); }
-            case 5u: { write_unsigned_cast(index, source_to_unsigned_cast(index, 65535u64)); }
-            case 6u: { write_unsigned_cast(index, source_to_unsigned_cast(index, 4294967295u64)); }
-            default: { write_unsigned_cast(index, source_to_unsigned_cast(index, 18446744073709551615u64)); }
+        if (source.negative) {
+            write_unsigned_cast(index, wide_cast_zero());
+        } else {
+            write_unsigned_cast(index, wide_cast_clamp(source.magnitude, target_limit_cast(false)));
         }
     }
 }
@@ -1863,7 +1946,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{arithmetic_shader, comparison_shader, extrema_dim_shader, minmax_shader};
+    use super::{
+        arithmetic_shader, cast_shader, comparison_shader, extrema_dim_shader, minmax_shader,
+    };
 
     #[test]
     fn comparison_shader_substitutes_precision_and_workgroup_size() {
@@ -1895,5 +1980,19 @@ mod tests {
         assert!(shader.contains("@workgroup_size(128)"));
         assert!(!shader.contains("$SCALAR"));
         assert!(!shader.contains("@WG@"));
+    }
+
+    #[test]
+    fn cast_shader_uses_portable_packed_words_for_wide_integers() {
+        for scalar in ["f32", "f64"] {
+            let shader = cast_shader(scalar, 128);
+            assert!(shader.contains("struct WideCast"));
+            assert!(shader.contains("@workgroup_size(128)"));
+            assert!(!shader.contains("i64"));
+            assert!(!shader.contains("u64"));
+            assert!(!shader.contains("$SCALAR"));
+            assert!(!shader.contains("$READ_FLOAT"));
+            assert!(!shader.contains("@WG@"));
+        }
     }
 }

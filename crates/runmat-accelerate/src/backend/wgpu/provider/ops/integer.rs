@@ -891,12 +891,15 @@ impl WgpuProvider {
         );
         let rows = entry.shape[0];
         let cols = entry.shape[1];
-        let (out_len, out_shape) = match dim {
+        let (out_len, mut out_shape) = match dim {
             0 => (cols, vec![1, cols]),
             1 => (rows, vec![rows, 1]),
             _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
         };
         if rows == 0 || cols == 0 {
+            if dim == 0 && rows == 0 {
+                out_shape[0] = 0;
+            }
             // Keep empty extrema device-resident rather than routing through
             // the f64 host gather fallback, which cannot reconstruct wide
             // integers.
@@ -1757,7 +1760,7 @@ mod tests {
         let min = block_on(provider.reduce_min_dim(&input, 0)).expect("public empty min hook");
         let max = block_on(provider.reduce_max_dim(&input, 1)).expect("public empty max hook");
 
-        for (result, expected_shape) in [(&min, vec![1, 2]), (&max, vec![0, 1])] {
+        for (result, expected_shape) in [(&min, vec![0, 2]), (&max, vec![0, 1])] {
             assert_eq!(result.values.shape, expected_shape);
             assert_eq!(result.indices.shape, expected_shape);
             assert_eq!(
@@ -1861,7 +1864,7 @@ mod tests {
             [-64, -30],
             [6, -20, -16],
             [12],
-            [7680]
+            [1920]
         );
         check!(
             I32,
@@ -1872,7 +1875,7 @@ mod tests {
             [-64, -30],
             [6, -20, -16],
             [12],
-            [7680]
+            [1920]
         );
         check!(
             I64,
@@ -1883,7 +1886,7 @@ mod tests {
             [-64, -30],
             [6, -20, -16],
             [12],
-            [7680]
+            [1920]
         );
         check!(
             U8,
@@ -1905,7 +1908,7 @@ mod tests {
             [64, 30],
             [6, 20, 16],
             [24],
-            [7680]
+            [1920]
         );
         check!(
             U32,
@@ -1916,7 +1919,7 @@ mod tests {
             [64, 30],
             [6, 20, 16],
             [24],
-            [7680]
+            [1920]
         );
         check!(
             U64,
@@ -1927,7 +1930,7 @@ mod tests {
             [64, 30],
             [6, 20, 16],
             [24],
-            [7680]
+            [1920]
         );
     }
 
@@ -2557,7 +2560,7 @@ mod tests {
             block_on(provider.download_integer_exec(&sum))
                 .expect("download int64 sum")
                 .data,
-            HostIntegerDataOwned::I64(vec![0])
+            HostIntegerDataOwned::I64(vec![-1])
         );
         assert_eq!(
             block_on(provider.download_integer_exec(&prod))

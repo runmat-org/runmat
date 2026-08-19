@@ -158,7 +158,7 @@ impl WgpuProvider {
                 .ok_or_else(|| anyhow!("reshape: dimension product exceeds GPU limits"))?
         };
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
-            let entry = self.get_entry(handle)?;
+            let entry = self.get_entry_for_storage_move(handle, "reshape")?;
             ensure!(
                 entry.shape.len() == 2
                     && entry.shape[0] == info.base_cols
@@ -260,7 +260,7 @@ impl WgpuProvider {
             !reps.is_empty(),
             "repmat: replication factors must be specified"
         );
-        let entry = self.get_entry(handle)?;
+        let entry = self.get_entry_for_storage_move(handle, "repmat")?;
         let orig_rank = if entry.shape.is_empty() {
             1
         } else {
@@ -860,7 +860,7 @@ impl WgpuProvider {
     }
 
     pub(crate) fn transpose_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(a)?;
+        let entry = self.get_entry_for_storage_move(a, "transpose")?;
         if entry.shape.len() != 2 {
             return Err(anyhow!("transpose: only 2D tensors supported"));
         }
@@ -906,7 +906,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         ensure!(!order.is_empty(), "permute: order must not be empty");
         let logical_rank = order.len();
-        let entry = self.get_entry(handle)?;
+        let entry = self.get_entry_for_storage_move(handle, "permute")?;
         let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
@@ -956,10 +956,15 @@ impl WgpuProvider {
         let storage_total = logical_total
             .checked_mul(lane_factor)
             .ok_or_else(|| anyhow!("permute: tensor storage length exceeds GPU limits"))?;
+        let registered_storage_len = if integer_type.is_some() {
+            logical_total
+        } else {
+            storage_total
+        };
         ensure!(
-            logical_total == entry.len || (logical_total == 0 && entry.len == 0),
-            "permute: shape/product mismatch ({} vs {})",
-            logical_total,
+            registered_storage_len == entry.len || (registered_storage_len == 0 && entry.len == 0),
+            "permute: shape/storage mismatch ({} vs {})",
+            registered_storage_len,
             entry.len
         );
         if storage_total > u32::MAX as usize {
@@ -1162,7 +1167,7 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         shifts: &[isize],
     ) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(handle)?;
+        let entry = self.get_entry_for_storage_move(handle, "circshift")?;
         let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
@@ -1671,7 +1676,7 @@ impl WgpuProvider {
             return Ok(handle.clone());
         }
 
-        let entry = self.get_entry(handle)?;
+        let entry = self.get_entry_for_storage_move(handle, "flip")?;
         let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
@@ -1910,7 +1915,7 @@ mod tests {
         ];
         let handle = provider
             .upload_numeric_exec(&HostNumericTensorView {
-                data: HostNumericDataView::F64(&data),
+                data: HostNumericDataView::F32(&data),
                 shape: &[2, 3],
                 storage: GpuTensorStorage::ComplexInterleaved,
             })
@@ -1943,7 +1948,7 @@ mod tests {
         ];
         let handle = provider
             .upload_numeric_exec(&HostNumericTensorView {
-                data: HostNumericDataView::F64(&data),
+                data: HostNumericDataView::F32(&data),
                 shape: &[2, 3],
                 storage: GpuTensorStorage::ComplexInterleaved,
             })
@@ -2013,7 +2018,7 @@ mod tests {
         ];
         let handle = provider
             .upload_numeric_exec(&HostNumericTensorView {
-                data: HostNumericDataView::F64(&data),
+                data: HostNumericDataView::F32(&data),
                 shape: &[2, 2, 2],
                 storage: GpuTensorStorage::ComplexInterleaved,
             })

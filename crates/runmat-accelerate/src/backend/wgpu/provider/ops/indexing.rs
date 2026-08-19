@@ -734,6 +734,12 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(source)?;
         let integer_type = entry.integer_type();
+        ensure!(
+            integer_type.is_some() || entry.precision == self.precision,
+            "gather_linear: native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
+            entry.element_type,
+            self.precision
+        );
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
         let lane_factor = linear_storage_lane_factor(integer_type, entry.storage);
@@ -905,6 +911,12 @@ impl WgpuProvider {
         let target_entry = self.get_entry_raw(target)?;
         let values_entry = self.get_entry_raw(values)?;
         let integer_type = target_entry.integer_type();
+        ensure!(
+            integer_type.is_some()
+                || (target_entry.precision == self.precision
+                    && values_entry.precision == self.precision),
+            "scatter_linear: input precision does not match the active provider"
+        );
         ensure!(
             integer_type == values_entry.integer_type(),
             "scatter_linear: integer storage mismatch target={:?} values={:?}",
@@ -1243,10 +1255,10 @@ mod tests {
         let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
-        let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
+        let data = [1.0_f32, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
         let source = provider
             .upload_numeric_exec(&HostNumericTensorView {
-                data: HostNumericDataView::F64(&data),
+                data: HostNumericDataView::F32(&data),
                 shape: &[1, 4],
                 storage: GpuTensorStorage::ComplexInterleaved,
             })
