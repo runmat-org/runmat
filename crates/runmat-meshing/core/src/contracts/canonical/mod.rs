@@ -11,6 +11,7 @@ mod error;
 mod evidence;
 mod failure;
 mod identity;
+mod lineage;
 mod manifest;
 mod metric;
 mod request;
@@ -53,6 +54,11 @@ pub use identity::{
     MeshingPartitionKind, MeshingPartitionResultRef, MeshingStageIdentity,
     MeshingStageResultIdentity, MeshingValidationIdentity, StableDigest,
     MESHING_IDENTITY_SCHEMA_VERSION,
+};
+pub use lineage::{
+    SolverMeshAdaptationCell, SolverMeshAdaptationKind, SolverMeshAdaptationLineage,
+    SolverMeshAdaptationMark, SolverMeshAdaptationMutation,
+    SOLVER_MESH_ADAPTATION_LINEAGE_SCHEMA_VERSION,
 };
 pub use manifest::{
     MeshingChunkDescriptor, MeshingChunkMediaType, MeshingManifestDisposition,

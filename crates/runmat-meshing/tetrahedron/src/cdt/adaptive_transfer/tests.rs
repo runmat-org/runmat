@@ -1,12 +1,13 @@
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{
-    solver_volume_element_identity, AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets,
-    ElementOrder, FieldTopologyLocation, FieldTopologyMap, GeometryRevisionRef,
-    GeometryTolerancePolicy, MeshNeighbor, MeshRegion, MeshingCancellationSignal,
-    MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, NeverCancelled,
-    SolverMeshArtifact, SolverMeshNode, SolverMeshTopology, SolverTransferMethod,
-    SolverVolumeElement, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
-    ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    solver_volume_element_identity, AlgorithmVersionSet, CancellationPolicy,
+    CanonicalMeshingContract, CurveQualityTargets, ElementOrder, FieldTopologyLocation,
+    FieldTopologyMap, GeometryRevisionRef, GeometryTolerancePolicy, MeshNeighbor, MeshRegion,
+    MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    NeverCancelled, SolverMeshAdaptationKind, SolverMeshAdaptationLineage, SolverMeshArtifact,
+    SolverMeshNode, SolverMeshTopology, SolverTransferMethod, SolverVolumeElement, StableDigest,
+    SurfaceQualityTargets, VolumeQualityTargets, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    MESHING_REQUEST_SCHEMA_VERSION,
 };
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
 
@@ -276,7 +277,7 @@ fn adaptation() -> (
 }
 
 #[test]
-fn adaptive_lineage_builds_canonical_refinement_and_coarsening_maps() {
+fn adaptive_lineage_builds_canonical_refinement_and_coarsening_records() {
     let (topology, provenance, metric, quality_options, refinement) = adaptation();
     let quality = evaluate_delaunay_volume_quality(
         &topology,
@@ -295,7 +296,7 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_maps() {
     };
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);
-    let transfer = build_refinement_solver_transfer_map(
+    let adaptation = build_refinement_solver_adaptation(
         input,
         &refinement,
         &source,
@@ -305,6 +306,7 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_maps() {
         &NeverCancelled,
     )
     .unwrap();
+    let transfer = &adaptation.transfer_map;
     assert_eq!(transfer.node_transfers.len(), 1);
     assert_eq!(transfer.volume_element_transfers.len(), 4);
     assert_eq!(
@@ -320,6 +322,26 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_maps() {
         .iter()
         .all(|entry| entry.method == SolverTransferMethod::CentroidProjection));
     transfer.validate_against(&source, &refined).unwrap();
+    adaptation
+        .lineage
+        .validate_against(&source, &refined, transfer)
+        .unwrap();
+    assert_eq!(
+        adaptation.lineage.kind,
+        SolverMeshAdaptationKind::HRefinement
+    );
+    assert_eq!(adaptation.lineage.marks.len(), 1);
+    assert_eq!(adaptation.lineage.mutations.len(), 1);
+    let encoded = adaptation.lineage.canonical_encode().unwrap();
+    assert_eq!(
+        SolverMeshAdaptationLineage::canonical_decode(&encoded).unwrap(),
+        adaptation.lineage
+    );
+    let mut tampered = adaptation.lineage.clone();
+    tampered.mutations[0].created_cells.pop();
+    assert!(tampered
+        .validate_against(&source, &refined, transfer)
+        .is_err());
 
     let inserted = transfer.node_transfers[0].target_stable_identity;
     let coarsening = coarsen_marked_delaunay_volume(
@@ -331,8 +353,8 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_maps() {
     )
     .unwrap();
     let restored = artifact(&coarsening.topology);
-    let reverse = build_coarsening_solver_transfer_map(
-        DelaunayAdaptiveCoarseningTransferInput {
+    let reverse = build_coarsening_solver_adaptation(
+        DelaunayAdaptiveCoarseningInput {
             original: input,
             refinement: &refinement,
             removal_node_identities: &[inserted],
@@ -345,9 +367,25 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_maps() {
         &NeverCancelled,
     )
     .unwrap();
-    assert!(reverse.node_transfers.is_empty());
-    assert_eq!(reverse.volume_element_transfers.len(), 1);
-    reverse.validate_against(&refined, &restored).unwrap();
+    assert!(reverse.transfer_map.node_transfers.is_empty());
+    assert_eq!(reverse.transfer_map.volume_element_transfers.len(), 1);
+    reverse
+        .transfer_map
+        .validate_against(&refined, &restored)
+        .unwrap();
+    reverse
+        .lineage
+        .validate_against(&refined, &restored, &reverse.transfer_map)
+        .unwrap();
+    assert_eq!(reverse.lineage.kind, SolverMeshAdaptationKind::HCoarsening);
+    assert_eq!(
+        reverse.lineage.requested_removal_node_identities,
+        vec![inserted]
+    );
+    assert_eq!(
+        reverse.lineage.mutations[0].removed_cells,
+        adaptation.lineage.mutations[0].created_cells
+    );
 }
 
 #[test]
@@ -371,7 +409,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);
     assert_eq!(
-        build_refinement_solver_transfer_map(
+        build_refinement_solver_adaptation(
             input,
             &refinement,
             &source,
@@ -388,7 +426,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
     displaced.topology.nodes[0].coordinates_m[0] = 0.125;
     displaced.seal_canonical_digest().unwrap();
     assert_eq!(
-        build_refinement_solver_transfer_map(
+        build_refinement_solver_adaptation(
             input,
             &refinement,
             &displaced,
@@ -402,7 +440,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         DelaunayAdaptiveTransferErrorKind::InvalidArtifact
     );
     assert_eq!(
-        build_refinement_solver_transfer_map(
+        build_refinement_solver_adaptation(
             input,
             &refinement,
             &source,
@@ -419,7 +457,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         DelaunayAdaptiveTransferErrorKind::ResourceLimit
     );
     assert_eq!(
-        build_refinement_solver_transfer_map(
+        build_refinement_solver_adaptation(
             input,
             &refinement,
             &source,
@@ -436,7 +474,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         DelaunayAdaptiveTransferErrorKind::InvalidOptions
     );
     assert_eq!(
-        build_refinement_solver_transfer_map(
+        build_refinement_solver_adaptation(
             input,
             &refinement,
             &source,

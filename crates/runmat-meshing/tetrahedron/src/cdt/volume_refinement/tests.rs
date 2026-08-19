@@ -752,10 +752,9 @@ fn marked_adaptation_is_local_deterministic_replayable_and_bounded() {
     let marks = quality
         .tetrahedra
         .iter()
-        .enumerate()
-        .map(|(index, tetrahedron)| DelaunayAdaptiveRefinementMark {
+        .map(|tetrahedron| DelaunayAdaptiveRefinementMark {
             node_identities: tetrahedron.node_identities,
-            indicator_value: (index + 1) as f64,
+            indicator_value: 1.0,
         })
         .collect::<Vec<_>>();
     let first = refine_marked_delaunay_volume(

@@ -6,8 +6,8 @@ use crate::contracts::canonical::{
     MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor, MeshingPartitionIdentity,
     MeshingProgress, MeshingRequest, MeshingStageIdentity, MeshingStageManifest,
     MeshingStageResultIdentity, MeshingValidationIdentity, MeshingWorkloadRequest,
-    MeshingWorkloadResult, MetricFieldRequest, SolverMeshArtifact, SolverMeshTransferMap,
-    StableDigest,
+    MeshingWorkloadResult, MetricFieldRequest, SolverMeshAdaptationLineage, SolverMeshArtifact,
+    SolverMeshTransferMap, StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -34,6 +34,12 @@ canonical_contract!(
     "analysis.mesh.solver-transfer-map/v1",
     MeshingCanonicalLimits::ARTIFACT,
     SolverMeshTransferMap::validate
+);
+canonical_contract!(
+    SolverMeshAdaptationLineage,
+    "analysis.mesh.solver-adaptation-lineage/v1",
+    MeshingCanonicalLimits::ARTIFACT,
+    SolverMeshAdaptationLineage::validate
 );
 canonical_contract!(
     MetricFieldRequest,

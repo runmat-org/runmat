@@ -4,15 +4,17 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
     solver_volume_element_identity, MeshingCancellationSignal, SolverEntityTransfer,
-    SolverMeshArtifact, SolverMeshTransferMap, SolverTransferMethod, SolverTransferSource,
-    StableDigest, SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
+    SolverMeshAdaptationLineage, SolverMeshArtifact, SolverMeshTransferMap, SolverTransferMethod,
+    SolverTransferSource, StableDigest, SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
 };
 
+mod lineage;
 mod point_location;
 mod preserved_boundary;
 #[cfg(test)]
 mod tests;
 
+use lineage::{build_coarsening_lineage, build_refinement_lineage};
 use point_location::build_volume_element_transfers;
 use preserved_boundary::require_unchanged_boundaries;
 
@@ -70,7 +72,7 @@ impl std::fmt::Display for DelaunayAdaptiveTransferError {
 impl std::error::Error for DelaunayAdaptiveTransferError {}
 
 #[derive(Clone, Copy)]
-pub struct DelaunayAdaptiveCoarseningTransferInput<'a> {
+pub struct DelaunayAdaptiveCoarseningInput<'a> {
     pub original: DelaunayVolumeRefinementInput<'a>,
     pub refinement: &'a DelaunayAdaptiveRefinementResult,
     pub removal_node_identities: &'a [StableDigest],
@@ -79,7 +81,13 @@ pub struct DelaunayAdaptiveCoarseningTransferInput<'a> {
     pub target_artifact: &'a SolverMeshArtifact,
 }
 
-pub fn build_refinement_solver_transfer_map(
+#[derive(Clone, Debug, PartialEq)]
+pub struct DelaunayAdaptiveSolverAdaptation {
+    pub transfer_map: SolverMeshTransferMap,
+    pub lineage: SolverMeshAdaptationLineage,
+}
+
+pub fn build_refinement_solver_adaptation(
     original: DelaunayVolumeRefinementInput<'_>,
     refinement: &DelaunayAdaptiveRefinementResult,
     source_artifact: &SolverMeshArtifact,
@@ -87,7 +95,7 @@ pub fn build_refinement_solver_transfer_map(
     refinement_options: DelaunayAdaptiveRefinementOptions,
     transfer_options: DelaunayAdaptiveTransferOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<SolverMeshTransferMap, DelaunayAdaptiveTransferError> {
+) -> Result<DelaunayAdaptiveSolverAdaptation, DelaunayAdaptiveTransferError> {
     validate_options(transfer_options)?;
     let marks = refinement
         .decisions
@@ -137,7 +145,7 @@ pub fn build_refinement_solver_transfer_map(
             DelaunayAdaptiveRefinementDecision::CoveredByPriorInsertion { .. } => None,
         })
         .collect::<Vec<_>>();
-    build_map(
+    let transfer_map = build_map(
         original.topology,
         &refinement.topology,
         source_artifact,
@@ -145,15 +153,21 @@ pub fn build_refinement_solver_transfer_map(
         node_transfers,
         transfer_options,
         cancellation,
-    )
+    )?;
+    let lineage =
+        build_refinement_lineage(refinement, source_artifact, target_artifact, &transfer_map)?;
+    Ok(DelaunayAdaptiveSolverAdaptation {
+        transfer_map,
+        lineage,
+    })
 }
 
-pub fn build_coarsening_solver_transfer_map(
-    input: DelaunayAdaptiveCoarseningTransferInput<'_>,
+pub fn build_coarsening_solver_adaptation(
+    input: DelaunayAdaptiveCoarseningInput<'_>,
     coarsening_options: DelaunayAdaptiveCoarseningOptions,
     transfer_options: DelaunayAdaptiveTransferOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<SolverMeshTransferMap, DelaunayAdaptiveTransferError> {
+) -> Result<DelaunayAdaptiveSolverAdaptation, DelaunayAdaptiveTransferError> {
     validate_options(transfer_options)?;
     validate_marked_delaunay_volume_coarsening(
         input.original,
@@ -178,7 +192,7 @@ pub fn build_coarsening_solver_transfer_map(
         };
         error(kind, failure.to_string())
     })?;
-    build_map(
+    let transfer_map = build_map(
         &input.refinement.topology,
         &input.coarsening.topology,
         input.source_artifact,
@@ -186,7 +200,12 @@ pub fn build_coarsening_solver_transfer_map(
         Vec::new(),
         transfer_options,
         cancellation,
-    )
+    )?;
+    let lineage = build_coarsening_lineage(input, &transfer_map)?;
+    Ok(DelaunayAdaptiveSolverAdaptation {
+        transfer_map,
+        lineage,
+    })
 }
 
 fn build_map(

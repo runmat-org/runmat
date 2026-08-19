@@ -7,7 +7,9 @@
 
 use std::collections::BTreeSet;
 
-use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
+use runmat_meshing_core::{
+    solver_volume_element_identity, MeshingCancellationSignal, StableDigest,
+};
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -196,7 +198,10 @@ fn validate_input(
         right
             .indicator_value
             .total_cmp(&left.indicator_value)
-            .then_with(|| left.node_identities.cmp(&right.node_identities))
+            .then_with(|| {
+                solver_volume_element_identity(left.node_identities)
+                    .cmp(&solver_volume_element_identity(right.node_identities))
+            })
     });
     Ok(canonical)
 }

@@ -30,9 +30,10 @@ pub use adaptive_refinement::{
     DelaunayAdaptiveRefinementOptions, DelaunayAdaptiveRefinementResult,
 };
 pub use adaptive_transfer::{
-    build_coarsening_solver_transfer_map, build_refinement_solver_transfer_map,
-    DelaunayAdaptiveCoarseningTransferInput, DelaunayAdaptiveTransferError,
-    DelaunayAdaptiveTransferErrorKind, DelaunayAdaptiveTransferOptions,
+    build_coarsening_solver_adaptation, build_refinement_solver_adaptation,
+    DelaunayAdaptiveCoarseningInput, DelaunayAdaptiveSolverAdaptation,
+    DelaunayAdaptiveTransferError, DelaunayAdaptiveTransferErrorKind,
+    DelaunayAdaptiveTransferOptions,
 };
 pub use carving::{
     carve_delaunay_volume, validate_delaunay_carving, DelaunayCarvedFacet, DelaunayCarving,
