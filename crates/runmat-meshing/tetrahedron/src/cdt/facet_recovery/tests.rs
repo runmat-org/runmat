@@ -150,7 +150,8 @@ fn facet_recovery_uses_a_checked_edge_star_flip() {
     )
     .unwrap();
 
-    assert_eq!(recovered.segment_recovery.topology.tetrahedra.len(), 2);
+    assert_eq!(recovered.segment_recovery.topology.tetrahedra.len(), 3);
+    assert_eq!(recovered.topology.tetrahedra.len(), 2);
     assert_eq!(recovered.facets[0].constraint_index, 0);
     assert_eq!(recovered.facets[0].triangles.len(), 1);
     validate_delaunay_facet_recovery(
@@ -307,6 +308,7 @@ fn facet_recovery_is_a_noop_for_existing_support_and_rejects_tampering() {
     )
     .unwrap();
     assert_eq!(recovered.segment_recovery.topology, topology);
+    assert_eq!(recovered.topology, topology);
 
     recovered.facets[0].triangles[0].node_identities.swap(0, 1);
     assert_eq!(
@@ -318,52 +320,8 @@ fn facet_recovery_is_a_noop_for_existing_support_and_rejects_tampering() {
         )
         .unwrap_err()
         .kind,
-        DelaunayFacetRecoveryErrorKind::InvalidConstraints
+        DelaunayFacetRecoveryErrorKind::InvalidTopology
     );
-}
-
-#[test]
-fn facet_validation_treats_recovered_faces_as_delaunay_barriers() {
-    let mut constraints = constraints(false);
-    let mut segments = segment_recovery(false, &constraints);
-    constraints.nodes[4].coordinates_m = [0.0, 0.0, -1.0];
-    segments.topology = build_delaunay_volume_topology(
-        constraints.volume_nodes(),
-        vec![[0, 1, 2, 3], [0, 2, 1, 4]],
-        DelaunayTopologyOptions::default(),
-        &NeverCancelled,
-    )
-    .unwrap();
-    assert_eq!(
-        validate_delaunay_segment_recovery(
-            &segments,
-            &constraints,
-            DelaunaySegmentRecoveryOptions::default(),
-            &NeverCancelled,
-        )
-        .unwrap_err()
-        .kind,
-        DelaunaySegmentRecoveryErrorKind::InvalidTopology
-    );
-    let recovery = DelaunayFacetRecovery {
-        segment_recovery: segments,
-        facets: vec![DelaunayRecoveredFacet {
-            constraint_index: 0,
-            triangles: vec![DelaunayRecoveredFacetTriangle {
-                node_identities: constraints.facets[0]
-                    .vertex_indices
-                    .map(|index| constraints.nodes[index as usize].identity),
-            }],
-        }],
-    };
-
-    validate_delaunay_facet_recovery(
-        &recovery,
-        &constraints,
-        DelaunayFacetRecoveryOptions::default(),
-        &NeverCancelled,
-    )
-    .unwrap();
 }
 
 #[test]

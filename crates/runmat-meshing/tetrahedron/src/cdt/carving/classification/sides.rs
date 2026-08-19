@@ -15,7 +15,7 @@ pub(super) fn classify_facet_sides(
     classifications: &mut [Option<Classification>],
     work: &mut CarvingWork<'_>,
 ) -> Result<(), DelaunayCarvingError> {
-    let topology = &recovery.segment_recovery.topology;
+    let topology = &recovery.topology;
     for recovered in &recovery.facets {
         let constraint = &constraints.facets[recovered.constraint_index as usize];
         for triangle in &recovered.triangles {

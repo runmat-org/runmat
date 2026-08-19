@@ -1,13 +1,13 @@
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
-use super::support::facet_support;
 use super::{
-    error, node_index, segment_error, validate_options, DelaunayConstraints, DelaunayFacetRecovery,
-    DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
-    DelaunaySegmentRecovery, DelaunayVolumeTopology, FacetRecoveryWork,
+    construct_delaunay_facet_recovery, error, node_index, segment_error, validate_options,
+    DelaunayConstraints, DelaunayFacetRecovery, DelaunayFacetRecoveryError,
+    DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions, DelaunaySegmentRecovery,
+    DelaunayVolumeTopology, FacetRecoveryWork,
 };
 use crate::cdt::{
-    segment_recovery::validate_delaunay_segment_recovery_with_protected_faces,
+    segment_recovery::validate_delaunay_segment_recovery_on_topology,
     validate_delaunay_segment_recovery,
 };
 
@@ -25,6 +25,25 @@ pub fn validate_delaunay_facet_recovery(
             "facet recovery evidence count does not match the constraint inventory",
         ));
     }
+    if !recovery
+        .segment_recovery
+        .topology
+        .incidence
+        .regions
+        .is_empty()
+    {
+        return Err(error(
+            DelaunayFacetRecoveryErrorKind::InvalidTopology,
+            None,
+            "facet recovery prerequisite has assigned regions",
+        ));
+    }
+    validate_inputs(
+        &recovery.segment_recovery,
+        constraints,
+        options,
+        cancellation,
+    )?;
     let mut protected_faces = recovery
         .facets
         .iter()
@@ -37,43 +56,27 @@ pub fn validate_delaunay_facet_recovery(
         .collect::<Vec<_>>();
     protected_faces.sort_unstable();
     protected_faces.dedup();
-    validate_delaunay_segment_recovery_with_protected_faces(
+    validate_delaunay_segment_recovery_on_topology(
         &recovery.segment_recovery,
+        &recovery.topology,
         constraints,
         &protected_faces,
         options.segment_recovery,
         cancellation,
     )
     .map_err(segment_error)?;
-    let mut work = FacetRecoveryWork::new(options, cancellation);
-    for (expected_index, recovered) in recovery.facets.iter().enumerate() {
-        let expected = facet_support(
-            &recovery.segment_recovery,
-            constraints,
-            expected_index as u32,
-            &mut work,
-        )?;
-        if recovered.constraint_index != expected_index as u32 || recovered.triangles != expected {
-            return Err(error(
-                DelaunayFacetRecoveryErrorKind::InvalidConstraints,
-                Some(expected_index as u32),
-                "recovered facet does not retain its oriented constraint support",
-            ));
-        }
-        for triangle in &recovered.triangles {
-            if !face_exists(
-                &recovery.segment_recovery.topology,
-                triangle.node_identities,
-                expected_index as u32,
-                &mut work,
-            )? {
-                return Err(error(
-                    DelaunayFacetRecoveryErrorKind::InvalidTopology,
-                    Some(expected_index as u32),
-                    "recovered facet support is absent from tetrahedron face incidence",
-                ));
-            }
-        }
+    let expected = construct_delaunay_facet_recovery(
+        recovery.segment_recovery.clone(),
+        constraints,
+        options,
+        cancellation,
+    )?;
+    if recovery != &expected {
+        return Err(error(
+            DelaunayFacetRecoveryErrorKind::InvalidTopology,
+            None,
+            "facet recovery differs from deterministic replay of its segment-recovery prerequisite",
+        ));
     }
     Ok(())
 }

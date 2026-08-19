@@ -25,7 +25,7 @@ pub(super) fn classify_and_build(
     constraints: &DelaunayConstraints,
     work: &mut CarvingWork<'_>,
 ) -> Result<DelaunayCarving, DelaunayCarvingError> {
-    let topology = &recovery.segment_recovery.topology;
+    let topology = &recovery.topology;
     let blocked = blocked_faces(recovery)?;
     let mut classifications = vec![None; topology.tetrahedra.len()];
     let exterior = topology
@@ -151,7 +151,7 @@ fn classify_facets(
     constraints: &DelaunayConstraints,
     classifications: &[Option<Classification>],
 ) -> Result<Vec<DelaunayCarvedFacet>, DelaunayCarvingError> {
-    let topology = &recovery.segment_recovery.topology;
+    let topology = &recovery.topology;
     let mut result = Vec::with_capacity(recovery.facets.len());
     for facet in &recovery.facets {
         let mut expected = None;

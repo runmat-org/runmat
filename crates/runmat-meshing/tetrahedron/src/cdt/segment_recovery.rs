@@ -17,7 +17,7 @@ mod work;
 use flip::try_recover_edge_with_face_flip;
 use parameter::{interpolate, steiner_identity, DyadicNode, SegmentContext};
 pub use validation::validate_delaunay_segment_recovery;
-pub(in crate::cdt) use validation::validate_delaunay_segment_recovery_with_protected_faces;
+pub(in crate::cdt) use validation::validate_delaunay_segment_recovery_on_topology;
 use validation::validate_inputs;
 use work::RecoveryWork;
 

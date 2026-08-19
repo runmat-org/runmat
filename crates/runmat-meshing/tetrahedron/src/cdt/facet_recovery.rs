@@ -74,7 +74,10 @@ pub struct DelaunayRecoveredFacet {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayFacetRecovery {
+    /// Immutable prerequisite used to replay this stage independently.
     pub segment_recovery: DelaunaySegmentRecovery,
+    /// Canonical topology after every recovered facet has been inserted.
+    pub topology: DelaunayVolumeTopology,
     pub facets: Vec<DelaunayRecoveredFacet>,
 }
 
@@ -108,7 +111,7 @@ impl std::fmt::Display for DelaunayFacetRecoveryError {
 impl std::error::Error for DelaunayFacetRecoveryError {}
 
 pub fn recover_delaunay_facets(
-    mut segment_recovery: DelaunaySegmentRecovery,
+    segment_recovery: DelaunaySegmentRecovery,
     constraints: &DelaunayConstraints,
     options: DelaunayFacetRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
@@ -122,25 +125,33 @@ pub fn recover_delaunay_facets(
             "facet recovery must precede region assignment",
         ));
     }
+    let recovery =
+        construct_delaunay_facet_recovery(segment_recovery, constraints, options, cancellation)?;
+    validate_delaunay_facet_recovery(&recovery, constraints, options, cancellation)?;
+    Ok(recovery)
+}
+
+pub(super) fn construct_delaunay_facet_recovery(
+    segment_recovery: DelaunaySegmentRecovery,
+    constraints: &DelaunayConstraints,
+    options: DelaunayFacetRecoveryOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayFacetRecovery, DelaunayFacetRecoveryError> {
+    let mut working = segment_recovery.clone();
     let mut work = FacetRecoveryWork::new(options, cancellation);
     let mut facets = Vec::with_capacity(constraints.facets.len());
     let mut protected_triangles = Vec::new();
     for constraint_index in 0..constraints.facets.len() {
-        let support = facet_support(
-            &segment_recovery,
-            constraints,
-            constraint_index as u32,
-            &mut work,
-        )?;
+        let support = facet_support(&working, constraints, constraint_index as u32, &mut work)?;
         for triangle in &support {
             if !face_exists(
-                &segment_recovery.topology,
+                &working.topology,
                 triangle.node_identities,
                 constraint_index as u32,
                 &mut work,
             )? {
                 let updated = if let Some(updated) = try_recover_facet_with_edge_flip(
-                    &segment_recovery,
+                    &working,
                     triangle.node_identities,
                     &protected_triangles,
                     constraint_index as u32,
@@ -148,7 +159,7 @@ pub fn recover_delaunay_facets(
                 )? {
                     updated
                 } else if let Some(updated) = try_recover_facet_with_edge_star_cavity(
-                    &segment_recovery,
+                    &working,
                     triangle.node_identities,
                     &protected_triangles,
                     constraint_index as u32,
@@ -162,7 +173,7 @@ pub fn recover_delaunay_facets(
                         "facet support is absent and no legal protected flip or edge-star cavity recovers it",
                     ));
                 };
-                segment_recovery.topology = updated;
+                working.topology = updated;
             }
             protected_triangles.push(*triangle);
         }
@@ -173,9 +184,9 @@ pub fn recover_delaunay_facets(
     }
     let recovery = DelaunayFacetRecovery {
         segment_recovery,
+        topology: working.topology,
         facets,
     };
-    validate_delaunay_facet_recovery(&recovery, constraints, options, cancellation)?;
     Ok(recovery)
 }
 

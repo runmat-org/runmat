@@ -16,8 +16,9 @@ pub fn validate_delaunay_segment_recovery(
     options: DelaunaySegmentRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunaySegmentRecoveryError> {
-    validate_delaunay_segment_recovery_with_protected_faces(
+    validate_delaunay_segment_recovery_on_topology(
         recovery,
+        &recovery.topology,
         constraints,
         &[],
         options,
@@ -25,8 +26,9 @@ pub fn validate_delaunay_segment_recovery(
     )
 }
 
-pub(in crate::cdt) fn validate_delaunay_segment_recovery_with_protected_faces(
+pub(in crate::cdt) fn validate_delaunay_segment_recovery_on_topology(
     recovery: &DelaunaySegmentRecovery,
+    topology: &DelaunayVolumeTopology,
     constraints: &DelaunayConstraints,
     protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
     options: DelaunaySegmentRecoveryOptions,
@@ -36,17 +38,17 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_with_protected_faces(
     validate_delaunay_constraints(constraints, options.constraints, cancellation)
         .map_err(super::constraint_error)?;
     if protected_faces.is_empty() {
-        validate_delaunay_volume_topology(&recovery.topology, options.insertion, cancellation)
+        validate_delaunay_volume_topology(topology, options.insertion, cancellation)
     } else {
         validate_constrained_delaunay_volume_topology(
-            &recovery.topology,
+            topology,
             protected_faces,
             options.insertion,
             cancellation,
         )
     }
     .map_err(|validation| super::insertion_error(validation, 0))?;
-    validate_constraint_nodes(&recovery.topology, constraints)?;
+    validate_constraint_nodes(topology, constraints)?;
     if recovery.recovery_passes == 0
         || recovery.recovery_passes > options.maximum_recovery_passes
         || recovery.segments.len() != constraints.segments.len()
@@ -87,7 +89,7 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_with_protected_faces(
                     "recovered chain parameters are not strictly increasing",
                 ));
             }
-            let topology_node = find_node(&recovery.topology, node.identity).ok_or_else(|| {
+            let topology_node = find_node(topology, node.identity).ok_or_else(|| {
                 error(
                     DelaunaySegmentRecoveryErrorKind::InvalidTopology,
                     Some(expected_index as u32),
@@ -107,7 +109,7 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_with_protected_faces(
         }
         for pair in recovered.nodes.windows(2) {
             if !edge_exists(
-                &recovery.topology,
+                topology,
                 pair[0].identity,
                 pair[1].identity,
                 expected_index as u32,
@@ -121,7 +123,7 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_with_protected_faces(
             }
         }
     }
-    validate_steiner_evidence(recovery, constraints)
+    validate_steiner_evidence(recovery, topology, constraints)
 }
 
 pub(super) fn validate_inputs(
@@ -170,6 +172,7 @@ fn validate_constraint_nodes(
 
 fn validate_steiner_evidence(
     recovery: &DelaunaySegmentRecovery,
+    topology: &DelaunayVolumeTopology,
     constraints: &DelaunayConstraints,
 ) -> Result<(), DelaunaySegmentRecoveryError> {
     let reported = recovery
@@ -191,7 +194,7 @@ fn validate_steiner_evidence(
     if reported != expected
         || reported
             .iter()
-            .any(|identity| find_node(&recovery.topology, *identity).is_none())
+            .any(|identity| find_node(topology, *identity).is_none())
     {
         return Err(error(
             DelaunaySegmentRecoveryErrorKind::InvalidConstraints,
