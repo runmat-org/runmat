@@ -33,6 +33,9 @@ pub struct DelaunayFacetRecoveryOptions {
     pub maximum_cavity_candidate_evaluations: u64,
     pub maximum_cavity_exact_cover_attempts: u64,
     pub maximum_cavity_expansion_rounds: u32,
+    pub maximum_cavity_steiner_nodes: u64,
+    pub maximum_cavity_steiner_candidates: u64,
+    pub maximum_cavity_steiner_candidate_evaluations_per_round: u64,
 }
 
 impl Default for DelaunayFacetRecoveryOptions {
@@ -51,6 +54,9 @@ impl Default for DelaunayFacetRecoveryOptions {
             maximum_cavity_candidate_evaluations: 100_000_000,
             maximum_cavity_exact_cover_attempts: 1_000_000,
             maximum_cavity_expansion_rounds: 1_024,
+            maximum_cavity_steiner_nodes: 64,
+            maximum_cavity_steiner_candidates: 4_096,
+            maximum_cavity_steiner_candidate_evaluations_per_round: 1_000_000,
         }
     }
 }
@@ -195,6 +201,9 @@ fn validate_options(
         || options.maximum_cavity_candidate_evaluations == 0
         || options.maximum_cavity_exact_cover_attempts == 0
         || options.maximum_cavity_expansion_rounds == 0
+        || options.maximum_cavity_steiner_nodes == 0
+        || options.maximum_cavity_steiner_candidates == 0
+        || options.maximum_cavity_steiner_candidate_evaluations_per_round == 0
     {
         return Err(error(
             DelaunayFacetRecoveryErrorKind::InvalidOptions,

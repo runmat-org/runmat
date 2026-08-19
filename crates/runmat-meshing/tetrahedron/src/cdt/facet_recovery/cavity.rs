@@ -29,9 +29,17 @@ use crate::{
 
 mod sides;
 pub(super) mod star;
+mod steiner;
 
 use sides::side_cavities;
 use star::star_refill;
+pub(super) use steiner::try_recover_facet_with_edge_star_cavity;
+
+pub(super) enum FacetCavityAttempt {
+    Recovered(DelaunayVolumeTopology),
+    NeedsSteiner(Vec<ConstrainedCavity>),
+    Unavailable,
+}
 
 pub(super) struct BoundaryFace {
     pub(super) nodes: [u32; 3],
@@ -39,18 +47,18 @@ pub(super) struct BoundaryFace {
     pub(super) outside_tetrahedron: Option<u32>,
 }
 
-pub(super) fn try_recover_facet_with_edge_star_cavity(
+pub(super) fn try_recover_facet_cavity_once(
     recovery: &DelaunaySegmentRecovery,
     facet: [StableDigest; 3],
     protected_facets: &[DelaunayRecoveredFacetTriangle],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
-) -> Result<Option<DelaunayVolumeTopology>, DelaunayFacetRecoveryError> {
+) -> Result<FacetCavityAttempt, DelaunayFacetRecoveryError> {
     let facet_nodes = facet_indices(&recovery.topology, facet, constraint_index)?;
     let signs = plane_signs(&recovery.topology, facet_nodes, constraint_index, work)?;
     let mut removed = edge_star_seed(&recovery.topology, facet_nodes, constraint_index, work)?;
     if removed.is_empty() {
-        return Ok(None);
+        return Ok(FacetCavityAttempt::Unavailable);
     }
     expand_crossing_boundary(
         &recovery.topology,
@@ -69,7 +77,7 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
         constraint_index,
     )?
     else {
-        return Ok(None);
+        return Ok(FacetCavityAttempt::Unavailable);
     };
     let cavity_nodes = removed
         .iter()
@@ -89,22 +97,32 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
             coordinates_m: recovery.topology.nodes[node_id as usize].coordinates_m,
         })
         .collect::<Vec<_>>();
-    let positive = refill_side(
+    let positive_refill = refill_side(
         &positive,
         &nodes,
         &recovery.topology,
         constraint_index,
         work,
     )?;
-    let negative = refill_side(
+    let negative_refill = refill_side(
         &negative,
         &nodes,
         &recovery.topology,
         constraint_index,
         work,
     )?;
-    let (Some(positive), Some(negative)) = (positive, negative) else {
-        return Ok(None);
+    let (positive_refill, negative_refill) = match (positive_refill, negative_refill) {
+        (Some(positive_refill), Some(negative_refill)) => (positive_refill, negative_refill),
+        (positive_refill, negative_refill) => {
+            let mut cavities = Vec::new();
+            if positive_refill.is_none() {
+                cavities.push(positive);
+            }
+            if negative_refill.is_none() {
+                cavities.push(negative);
+            }
+            return Ok(FacetCavityAttempt::NeedsSteiner(cavities));
+        }
     };
 
     let mut tetrahedra = recovery
@@ -116,9 +134,9 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
         .map(|(_, tetrahedron)| (tetrahedron.vertex_indices, tetrahedron.region_id.clone()))
         .collect::<Vec<_>>();
     tetrahedra.extend(
-        positive
+        positive_refill
             .into_iter()
-            .chain(negative)
+            .chain(negative_refill)
             .map(|tetrahedron| (tetrahedron, None)),
     );
     let candidate = match build_delaunay_volume_topology_with_regions(
@@ -143,7 +161,7 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
                     failure.to_string(),
                 ));
             }
-            _ => return Ok(None),
+            _ => return Ok(FacetCavityAttempt::Unavailable),
         },
     };
     let mut protected = protected_facets
@@ -175,15 +193,15 @@ pub(super) fn try_recover_facet_with_edge_star_cavity(
                     failure.to_string(),
                 ));
             }
-            _ => return Ok(None),
+            _ => return Ok(FacetCavityAttempt::Unavailable),
         },
     }
     let mut candidate_recovery = recovery.clone();
     candidate_recovery.topology = candidate.clone();
     if recovered_segments_exist(&candidate_recovery) {
-        Ok(Some(candidate))
+        Ok(FacetCavityAttempt::Recovered(candidate))
     } else {
-        Ok(None)
+        Ok(FacetCavityAttempt::Unavailable)
     }
 }
 

@@ -73,6 +73,23 @@ pub struct ConstrainedCavityRefillBudget {
     pub cancellation_check_interval: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstrainedCavitySteinerCandidateBudget {
+    pub maximum_candidates: u64,
+    pub maximum_evaluations: u64,
+    pub cancellation_check_interval: u64,
+}
+
+impl Default for ConstrainedCavitySteinerCandidateBudget {
+    fn default() -> Self {
+        Self {
+            maximum_candidates: 4_096,
+            maximum_evaluations: 1_000_000,
+            cancellation_check_interval: 1_024,
+        }
+    }
+}
+
 impl Default for ConstrainedCavityRefillBudget {
     fn default() -> Self {
         Self {

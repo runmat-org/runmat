@@ -162,6 +162,38 @@ fn boundary_driven_refill_recovers_large_nonstar_tetrahelix() {
     );
 }
 
+#[test]
+fn constructive_facet_steiner_work_is_hard_bounded() {
+    let mut node_work = FacetRecoveryWork::new(
+        DelaunayFacetRecoveryOptions {
+            maximum_cavity_steiner_nodes: 1,
+            ..DelaunayFacetRecoveryOptions::default()
+        },
+        &NeverCancelled,
+    );
+    assert_eq!(node_work.cavity_steiner_node(7).unwrap(), 1);
+    assert_eq!(
+        node_work.cavity_steiner_node(7).unwrap_err().kind,
+        DelaunayFacetRecoveryErrorKind::ResourceLimit
+    );
+
+    let mut candidate_work = FacetRecoveryWork::new(
+        DelaunayFacetRecoveryOptions {
+            maximum_cavity_steiner_candidates: 1,
+            ..DelaunayFacetRecoveryOptions::default()
+        },
+        &NeverCancelled,
+    );
+    candidate_work.cavity_steiner_insertion_attempt(8).unwrap();
+    assert_eq!(
+        candidate_work
+            .cavity_steiner_insertion_attempt(8)
+            .unwrap_err()
+            .kind,
+        DelaunayFacetRecoveryErrorKind::ResourceLimit
+    );
+}
+
 fn reflect_across_face(
     point: [f64; 3],
     first: [f64; 3],

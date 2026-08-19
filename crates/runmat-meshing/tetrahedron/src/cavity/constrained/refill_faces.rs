@@ -33,6 +33,7 @@ pub(super) fn refill_boundary_face_delta(
     })
 }
 
+#[cfg(test)]
 pub(super) fn missing_refill_boundary_faces(
     cavity: &ConstrainedCavity,
     refill_tetrahedra: &[ConstrainedCavityRefillTetrahedron],

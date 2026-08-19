@@ -12,7 +12,6 @@ mod boundary_nodes;
 mod boundary_operations;
 mod boundary_splits;
 mod caps;
-mod component_steiner;
 mod connectivity;
 #[cfg(test)]
 mod diagnostic_metrics;
@@ -20,6 +19,7 @@ mod diagnostic_metrics;
 mod diagnostics;
 mod exact_cover;
 mod geometry;
+#[cfg(test)]
 mod missing_faces;
 mod pressure;
 mod refill_candidates;
@@ -29,6 +29,7 @@ mod refill_tetrahedra;
 mod retriangulate;
 mod selection;
 mod solid_empty;
+mod steiner_candidates;
 mod topology;
 mod types;
 mod validation;
@@ -53,10 +54,6 @@ pub use boundary_operations::{
 use boundary_splits::*;
 #[cfg(test)]
 use caps::*;
-pub use caps::{
-    generate_constrained_cavity_boundary_cap_nodes, generate_constrained_cavity_patch_steiner_nodes,
-};
-pub use component_steiner::generate_constrained_cavity_component_steiner_nodes;
 use connectivity::*;
 #[cfg(test)]
 use diagnostic_metrics::*;
@@ -114,6 +111,7 @@ pub use solid_empty::{
     constrained_cavity_solid_empty_boundary_faces,
     recover_constrained_cavity_solid_empty_boundaries,
 };
+pub use steiner_candidates::generate_constrained_cavity_interior_steiner_candidates;
 use topology::*;
 pub use types::*;
 use validation::*;

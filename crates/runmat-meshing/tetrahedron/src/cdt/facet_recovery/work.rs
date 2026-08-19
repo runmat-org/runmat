@@ -13,6 +13,8 @@ pub(super) struct FacetRecoveryWork<'a> {
     support_steps: u64,
     cavity_steps: u64,
     cavity_apex_attempts: u64,
+    cavity_steiner_nodes: u64,
+    cavity_steiner_insertion_attempts: u64,
 }
 
 impl<'a> FacetRecoveryWork<'a> {
@@ -28,6 +30,8 @@ impl<'a> FacetRecoveryWork<'a> {
             support_steps: 0,
             cavity_steps: 0,
             cavity_apex_attempts: 0,
+            cavity_steiner_nodes: 0,
+            cavity_steiner_insertion_attempts: 0,
         }
     }
 
@@ -99,6 +103,35 @@ impl<'a> FacetRecoveryWork<'a> {
             ));
         }
         self.check_cancelled(constraint_index, self.cavity_apex_attempts)
+    }
+
+    pub(super) fn cavity_steiner_node(
+        &mut self,
+        constraint_index: u32,
+    ) -> Result<u64, DelaunayFacetRecoveryError> {
+        self.cavity_steiner_nodes += 1;
+        if self.cavity_steiner_nodes > self.options.maximum_cavity_steiner_nodes {
+            return Err(resource(
+                constraint_index,
+                "facet cavity Steiner-node limit exceeded",
+            ));
+        }
+        self.check_cancelled(constraint_index, self.cavity_steiner_nodes)?;
+        Ok(self.cavity_steiner_nodes)
+    }
+
+    pub(super) fn cavity_steiner_insertion_attempt(
+        &mut self,
+        constraint_index: u32,
+    ) -> Result<(), DelaunayFacetRecoveryError> {
+        self.cavity_steiner_insertion_attempts += 1;
+        if self.cavity_steiner_insertion_attempts > self.options.maximum_cavity_steiner_candidates {
+            return Err(resource(
+                constraint_index,
+                "facet cavity Steiner insertion-attempt limit exceeded",
+            ));
+        }
+        self.check_cancelled(constraint_index, self.cavity_steiner_insertion_attempts)
     }
 
     fn check_cancelled(
