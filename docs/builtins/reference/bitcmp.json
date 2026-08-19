@@ -1,0 +1,23 @@
+{
+  "title": "bitcmp",
+  "category": "logical/bit",
+  "keywords": ["bitcmp", "bitwise", "complement", "integer", "gpuArray"],
+  "summary": "Complement the bits of integer-valued input.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Documented gpuArray input is uint8, uint16, or uint32 and uses exact owner-aware fallback with resident output."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "none"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::logical::bit::integer::integer_tests"},
+  "description": "`C = bitcmp(A)` complements every bit in the storage class of `A`. The optional `assumedtype` supplies the width and signedness for integer-valued double input.",
+  "behaviors": [
+    "All eight native integer classes preserve class and shape.",
+    "Integer-valued double input requires an assumed integer type.",
+    "Supported gpuArray forms return resident output; unsupported classes and assumedtype GPU calls are rejected in MATLAB-compatible mode."
+  ],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"}
+}

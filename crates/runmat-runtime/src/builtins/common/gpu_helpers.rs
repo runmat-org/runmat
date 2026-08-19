@@ -768,7 +768,13 @@ pub fn restore_class_preserving_value(
             };
             let output = match upload_tensor(provider, tensor) {
                 Ok(output) => output,
-                Err(_) if expected_precision != Some(provider.precision()) => return Ok(value),
+                Err(_)
+                    if expected_integer.is_none()
+                        && expected_precision != Some(provider.precision())
+                        && !runmat_accelerate_api::handle_is_explicit(source) =>
+                {
+                    return Ok(value)
+                }
                 Err(error) => {
                     return Err(build_runtime_error(format!(
                         "{builtin}: failed to restore GPU result: {error}"
@@ -830,8 +836,9 @@ pub fn restore_class_preserving_value(
             let output = match upload_complex_tensor(provider, tensor) {
                 Ok(output) => output,
                 Err(_)
-                    if expected_integer.is_some()
-                        || expected_precision != Some(provider.precision()) =>
+                    if expected_integer.is_none()
+                        && expected_precision != Some(provider.precision())
+                        && !runmat_accelerate_api::handle_is_explicit(source) =>
                 {
                     return Ok(value)
                 }

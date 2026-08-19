@@ -38,7 +38,7 @@
     "Dimensions other than `dim` must match exactly; missing higher dimensions are treated as size `1` automatically.",
     "The size along `dim` becomes the sum of the corresponding sizes from each input.",
     "An empty operand is omitted when a nonempty compatible partner remains; compatible all-empty inputs retain the concatenated empty geometry.",
-    "`gpuArray` inputs stay on the device when an acceleration provider is registered, and numeric host inputs may be mixed with resident inputs in the same call.",
+    "`gpuArray` inputs stay on the device when an acceleration provider is registered, and real or complex numeric host inputs may be mixed with resident inputs in the same call. Paired complex-integer data retains its exact component class and owning provider.",
     "RunMat compatibility mode adds an optional trailing `\"like\", prototype` pair that can request host or GPU output residency; this pair is not part of the pinned public MATLAB syntax."
   ],
   "examples": [

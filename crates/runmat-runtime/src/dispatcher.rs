@@ -721,11 +721,7 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     if error_chain_has_identifier_prefix(err, "RunMat:compatibility:") {
         return false;
     }
-    if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested) {
-        return true;
-    }
-    let lowered = err.message().to_ascii_lowercase();
-    lowered.contains("gpu")
+    error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested)
 }
 
 fn value_contains_explicit_gpu(value: &Value) -> bool {
@@ -894,7 +890,7 @@ mod tests {
         let ordinary_gpu_error = crate::build_runtime_error("GPU input requires host fallback")
             .with_identifier("RunMat:example:UnsupportedGpuPath")
             .build();
-        assert!(should_retry_with_gpu_gather(
+        assert!(!should_retry_with_gpu_gather(
             &ordinary_gpu_error,
             &[Value::GpuTensor(automatic_gpu.clone())]
         ));

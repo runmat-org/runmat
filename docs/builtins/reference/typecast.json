@@ -1,0 +1,70 @@
+{
+  "title": "typecast",
+  "category": "math/elementwise",
+  "keywords": [
+    "typecast",
+    "reinterpret",
+    "bytes",
+    "integer",
+    "gpuArray"
+  ],
+  "summary": "Reinterpret numeric bytes as another class without converting values.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Real numeric gpuArray input is transferred exactly through its owning provider and restored there after reinterpretation. Complex and logical gpuArray input and the like form are rejected before transfer."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::typecast::tests"
+  },
+  "description": "`Y = typecast(X, newtype)` preserves the native byte sequence of a full numeric or logical scalar or vector and decodes it as `newtype`. `Y = typecast(X, \"like\", prototype)` selects the host output class and complexity from a prototype.",
+  "behaviors": [
+    "The input must be a full scalar or vector. Sparse arrays and nonscalar matrices are rejected.",
+    "The input byte count must be divisible by the requested output element width.",
+    "Row inputs produce rows and column inputs produce columns; changing element width changes the element count without changing the byte sequence.",
+    "Double, single, logical, and all eight integer classes use their authoritative native storage and the platform's native byte order.",
+    "The like form can produce real or complex host output and groups adjacent decoded values into real and imaginary components for a complex prototype.",
+    "Character input and output are not currently available because RunMat's character value representation cannot preserve every raw UTF-16 code unit.",
+    "Real numeric gpuArray input preserves exact bytes, output class, shape orientation, and the owning provider. Unsupported GPU forms fail terminally rather than gathering through the general dispatcher."
+  ],
+  "examples": [
+    {
+      "description": "Inspect the native bytes of unsigned integers",
+      "input": "bytes = typecast(uint32([1 256]), \"uint8\")"
+    },
+    {
+      "description": "Round-trip wide integer bit patterns exactly",
+      "input": "values = uint64([9007199254740993 intmax(\"uint64\")]);\ncopy = typecast(typecast(values, \"uint8\"), \"uint64\")"
+    },
+    {
+      "description": "Select paired complex integer output with a prototype",
+      "input": "z = typecast(int16([-1 2 -3 4]), \"like\", complex(int16(0)))"
+    }
+  ],
+  "links": [
+    {
+      "label": "swapbytes",
+      "url": "./swapbytes"
+    },
+    {
+      "label": "uint8",
+      "url": "./uint8"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/typecast.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/typecast.rs"
+  }
+}

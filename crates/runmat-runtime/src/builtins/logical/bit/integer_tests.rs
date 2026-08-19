@@ -1312,16 +1312,152 @@ fn wgpu_gathered_bit_position_shapes_use_scalar_or_exact_size_rules() {
 
     let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
     let positions = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("same-size positions");
-    let Value::Tensor(output) = block_on(bitget_builtin(vec![
+    let output = block_on(bitget_builtin(vec![
         Value::GpuTensor(handle),
         Value::Tensor(positions),
     ]))
-    .expect("wgpu same-size bitget") else {
-        panic!("expected typed tensor result");
-    };
+    .expect("wgpu same-size bitget");
+    assert!(matches!(output, Value::GpuTensor(_)));
+    let output = test_support::gather(output).expect("gather bitget result");
     assert_eq!(
         output.integer_storage(),
         Some(&IntegerStorage::U8(vec![1, 1]))
+    );
+}
+
+#[test]
+fn remaining_direct_bit_functions_preserve_supported_gpu_residency() {
+    test_support::with_test_provider(|provider| {
+        let input = Tensor::new_integer(IntegerStorage::U8(vec![0b1010, 0b0101]), vec![1, 2])
+            .expect("input");
+        let other = Tensor::new_integer(IntegerStorage::U8(vec![0b1100, 0b0011]), vec![1, 2])
+            .expect("other");
+
+        let left = gpu_helpers::upload_tensor(provider, &input).expect("left upload");
+        let right = gpu_helpers::upload_tensor(provider, &other).expect("right upload");
+        let xor = block_on(bitxor_builtin(vec![
+            Value::GpuTensor(left),
+            Value::GpuTensor(right),
+        ]))
+        .expect("bitxor");
+        assert!(matches!(xor, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(xor)
+                .expect("xor gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![0b0110, 0b0110]))
+        );
+
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("cmp upload");
+        let complement = block_on(bitcmp_builtin(vec![Value::GpuTensor(source)])).expect("bitcmp");
+        assert!(matches!(complement, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(complement)
+                .expect("complement gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![0b1111_0101, 0b1111_1010]))
+        );
+
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("get upload");
+        let bits = block_on(bitget_builtin(vec![
+            Value::GpuTensor(source),
+            Value::Num(2.0),
+        ]))
+        .expect("bitget");
+        assert!(matches!(bits, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(bits)
+                .expect("bitget gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![1, 0]))
+        );
+
+        let source = gpu_helpers::upload_tensor(provider, &input).expect("set upload");
+        let cleared = block_on(bitset_builtin(vec![
+            Value::GpuTensor(source),
+            Value::Num(2.0),
+            Value::Bool(false),
+        ]))
+        .expect("bitset");
+        assert!(matches!(cleared, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(cleared)
+                .expect("bitset gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U8(vec![0b1000, 0b0101]))
+        );
+    });
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn remaining_direct_bit_functions_and_idivide_preserve_actual_wgpu_residency() {
+    let _guard = test_support::accel_test_lock();
+    if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .is_err()
+    {
+        return;
+    }
+    let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+    let input =
+        Tensor::new_integer(IntegerStorage::U8(vec![0b1010, 0b0101]), vec![1, 2]).expect("input");
+    let other =
+        Tensor::new_integer(IntegerStorage::U8(vec![0b1100, 0b0011]), vec![1, 2]).expect("other");
+
+    let left = gpu_helpers::upload_tensor(provider, &input).expect("left upload");
+    let right = gpu_helpers::upload_tensor(provider, &other).expect("right upload");
+    let xor = block_on(bitxor_builtin(vec![
+        Value::GpuTensor(left),
+        Value::GpuTensor(right),
+    ]))
+    .expect("bitxor");
+    assert!(matches!(xor, Value::GpuTensor(_)));
+    assert_eq!(
+        test_support::gather(xor)
+            .expect("xor gather")
+            .integer_storage(),
+        Some(&IntegerStorage::U8(vec![0b0110, 0b0110]))
+    );
+
+    let source = gpu_helpers::upload_tensor(provider, &input).expect("cmp upload");
+    let complement = block_on(bitcmp_builtin(vec![Value::GpuTensor(source)])).expect("bitcmp");
+    assert!(matches!(complement, Value::GpuTensor(_)));
+
+    let source = gpu_helpers::upload_tensor(provider, &input).expect("get upload");
+    let bits = block_on(bitget_builtin(vec![
+        Value::GpuTensor(source),
+        Value::Num(2.0),
+    ]))
+    .expect("bitget");
+    assert!(matches!(bits, Value::GpuTensor(_)));
+
+    let source = gpu_helpers::upload_tensor(provider, &input).expect("set upload");
+    let cleared = block_on(bitset_builtin(vec![
+        Value::GpuTensor(source),
+        Value::Num(2.0),
+        Value::Bool(false),
+    ]))
+    .expect("bitset");
+    assert!(matches!(cleared, Value::GpuTensor(_)));
+
+    let dividend =
+        Tensor::new_integer(IntegerStorage::U8(vec![10, 11]), vec![1, 2]).expect("dividend");
+    let divisor = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("divisor");
+    let dividend = gpu_helpers::upload_tensor(provider, &dividend).expect("dividend upload");
+    let divisor = gpu_helpers::upload_tensor(provider, &divisor).expect("divisor upload");
+    let quotient = block_on(idivide_builtin(vec![
+        Value::GpuTensor(dividend),
+        Value::GpuTensor(divisor),
+    ]))
+    .expect("idivide");
+    assert!(matches!(quotient, Value::GpuTensor(_)));
+    assert_eq!(
+        test_support::gather(quotient)
+            .expect("quotient gather")
+            .integer_storage(),
+        Some(&IntegerStorage::U8(vec![3, 3]))
     );
 }
 
@@ -1781,6 +1917,36 @@ fn idivide_rejects_the_unrepresentable_signed_minimum_quotient() {
     ]))
     .expect_err("int64 minimum divided by negative one must not wrap");
     assert_eq!(overflow.identifier(), ERROR_OVERFLOW.identifier);
+}
+
+#[test]
+fn idivide_preserves_exact_supported_gpu_residency() {
+    test_support::with_test_provider(|provider| {
+        let dividend = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 63) + 12, u64::MAX - 1]),
+            vec![1, 2],
+        )
+        .expect("dividend");
+        let divisor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2]).expect("divisor");
+        let dividend = gpu_helpers::upload_tensor(provider, &dividend).expect("dividend upload");
+        let divisor = gpu_helpers::upload_tensor(provider, &divisor).expect("divisor upload");
+        let result = block_on(idivide_builtin(vec![
+            Value::GpuTensor(dividend),
+            Value::GpuTensor(divisor),
+        ]))
+        .expect("resident idivide");
+        assert!(matches!(result, Value::GpuTensor(_)));
+        assert_eq!(
+            test_support::gather(result)
+                .expect("result gather")
+                .integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                ((1_u64 << 63) + 12) / 2,
+                (u64::MAX - 1) / 3,
+            ]))
+        );
+    });
 }
 
 #[test]

@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the owning provider's unary_conj hook for floating real and complex-interleaved GPU tensors. Real integer and logical inputs are exact resident identities. If the hook is unavailable, floating data is gathered, conjugated on the host, and re-uploaded to the owning provider. Typed complex integer resident buffers are not yet representable by the provider ABI."
+    "notes": "Uses the owning provider's unary_conj hook for floating real and complex-interleaved GPU tensors. Real integer and logical inputs are exact resident identities. Floating fallback and typed complex-integer conjugation restore class-preserving output to the owning provider."
   },
   "fusion": {
     "elementwise": true,
@@ -214,6 +214,6 @@
   "gpu_behavior": [
     "**Hook available:** Real tensors stay GPU-resident and are processed by the owning provider (both the in-process provider used for tests and the WGPU provider expose this path).",
     "**Fusion and auto-offload:** Because `conj` is tagged as an elementwise unary builtin, the fusion planner treats it as a pass-through for real-valued kernels. Native auto-offload therefore keeps fused expressions resident on the GPU whenever the surrounding ops are profitable.",
-    "**Hook missing:** RunMat gathers floating real or complex data to host memory, applies the CPU semantics, and re-uploads through the input handle's owning provider. Providers may implement native complex-interleaved conjugation through the same hook. Typed complex-integer buffers remain unsupported by the provider ABI."
+    "**Hook missing:** RunMat transfers floating or paired complex-integer data exactly through the input handle's owner, applies the host semantics, and restores class-preserving output to that same provider. Providers may implement native floating complex-interleaved conjugation through the unary hook."
   ]
 }

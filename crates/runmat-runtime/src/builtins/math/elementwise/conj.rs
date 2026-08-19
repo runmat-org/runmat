@@ -79,7 +79,7 @@ const CONJ_REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
 const CONJ_COMPLEX_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Typed complex integer storage retains its class; RunMat conservatively saturates imaginary-component negation while signed-minimum and unsigned endpoints remain evidence-open." }];
 pub const CONJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor { form: "Y = conj(real_integer_X)", inputs: &CONJ_REAL_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Host inputs are returned unchanged; resident real integer inputs preserve the same exact handle and metadata." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = conj(complex_integer_X)", inputs: &CONJ_COMPLEX_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Host typed-complex integer storage uses the conservative resolved saturating-negation policy, but public evidence does not directly settle signed-minimum or unsigned-imaginary endpoints. The provider ABI does not currently represent typed complex integer resident buffers." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = conj(complex_integer_X)", inputs: &CONJ_COMPLEX_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Typed-complex integer storage uses the conservative resolved saturating-negation policy, preserves paired native storage on the host and owning provider, and retains the evidence qualification for signed-minimum and unsigned-imaginary endpoints." },
 ];
 
 const CONJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -190,13 +190,15 @@ async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
 async fn conj_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let storage = runmat_accelerate_api::handle_storage(&handle);
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        if storage != runmat_accelerate_api::GpuTensorStorage::Real {
-            return Err(builtin_error_with_detail(
-                &CONJ_ERROR_INTERNAL,
-                "typed complex integer resident buffers are not supported by the provider ABI",
-            ));
+        if storage == runmat_accelerate_api::GpuTensorStorage::Real {
+            return Ok(gpu_helpers::resident_gpu_value(handle));
         }
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err.to_string()))?;
+        let result = conj_host(gathered)?;
+        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME)
+            .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err.message()));
     }
     if runmat_accelerate_api::handle_is_logical(&handle)
         && storage == runmat_accelerate_api::GpuTensorStorage::Real
@@ -705,6 +707,35 @@ pub(crate) mod tests {
             };
             assert_eq!(ct.shape, vec![2, 1]);
             assert_eq!(ct.materialize_f64(), vec![(1.0, -2.0), (-3.0, 4.0)]);
+        });
+    }
+
+    #[test]
+    fn conj_typed_complex_integer_gpu_stays_exact_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                    IntegerStorage::I64(vec![i64::MIN, 17]),
+                )
+                .expect("storage"),
+                vec![2, 1],
+            )
+            .expect("complex");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let Value::GpuTensor(output) = conj_builtin(Value::GpuTensor(handle)).expect("conj")
+            else {
+                panic!("expected resident complex integer");
+            };
+            let Value::ComplexTensor(gathered) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output)))
+                    .expect("gather")
+            else {
+                panic!("expected complex integer");
+            };
+            let storage = gathered.integer_storage().expect("integer storage");
+            assert_eq!(storage.real, IntegerStorage::I64(vec![i64::MIN, i64::MAX]));
+            assert_eq!(storage.imag, IntegerStorage::I64(vec![i64::MAX, -17]));
         });
     }
 

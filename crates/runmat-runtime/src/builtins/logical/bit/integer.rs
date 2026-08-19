@@ -116,6 +116,53 @@ pub const BITOR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
     BITOR_GPU_ASSUMED_TYPE_EXTENSION,
 ];
 
+const BITXOR_SINGLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitxor-single-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitxor with single-precision input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitxorSingleInputExtension"),
+};
+const BITXOR_GPU_UNDOCUMENTED_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "bitxor-gpu-undocumented-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "bitxor with a resident input outside the documented uint8/uint16/uint32 GPU domain is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BitxorGpuUndocumentedInputExtension"),
+    };
+const BITXOR_GPU_ASSUMED_TYPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitxor-gpu-assumedtype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitxor with resident input and assumedtype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitxorGpuAssumedTypeExtension"),
+};
+pub const BITXOR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    BITXOR_SINGLE_INPUT_EXTENSION,
+    BITXOR_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+    BITXOR_GPU_ASSUMED_TYPE_EXTENSION,
+];
+
+const DIRECT_BIT_GPU_UNDOCUMENTED_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "direct-bit-gpu-undocumented-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "A direct bit function with a resident input outside its documented GPU domain is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DirectBitGpuUndocumentedInputExtension"),
+    };
+const DIRECT_BIT_GPU_ASSUMED_TYPE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "direct-bit-gpu-assumedtype",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "A direct bit function with resident input and assumedtype is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DirectBitGpuAssumedTypeExtension"),
+    };
+pub const DIRECT_BIT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DIRECT_BIT_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+    DIRECT_BIT_GPU_ASSUMED_TYPE_EXTENSION,
+];
+
 const BITAND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "A",
@@ -195,6 +242,112 @@ pub const BITOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
         notes: "assumedtype selects the signed or unsigned bit width for double inputs and must equal the native class of integer inputs. Public GPU-array support excludes assumedtype; RunMat mode retains it as a gated gather-and-restore extension.",
     },
 ];
+
+pub const BITXOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = bitxor(A, B)",
+        inputs: &BITAND_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Same-class integer inputs preserve their class and use exact two's-complement bit patterns with compatible-size expansion. The documented interactive GPU subset is uint8, uint16, and uint32 and restores exact output to the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = bitxor(A, B, assumedtype)",
+        inputs: &BITAND_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "assumedtype selects the signed or unsigned bit width for double inputs and must equal the native class of integer inputs. Public GPU-array support excludes assumedtype; RunMat mode retains it as a gated gather-and-restore extension.",
+    },
+];
+
+const BITCMP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every native integer class is complemented within its own signed or unsigned storage width.",
+    }];
+pub const BITCMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = bitcmp(integer_A)",
+        inputs: &BITCMP_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host execution covers all eight classes. Documented interactive GPU input is uint8, uint16, or uint32; exact fallback restores resident output to the owner.",
+    }];
+
+const BITGET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every native integer data class supplies exact signed or unsigned bit storage and determines output class and residency.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "bit",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is accepted for finite positive one-based bit positions; this control does not select output class or residency.",
+    },
+];
+pub const BITGET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = bitget(integer_A, integer_bit)",
+        inputs: &BITGET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "A and bit use scalar expansion or exactly matching nonscalar sizes. Supported resident data uses exact fallback and returns to A's owner; bit is a structural control.",
+    }];
+
+const BITSET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every native integer data class supplies exact signed or unsigned bit storage and determines output class and residency.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "bit",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is accepted for finite positive one-based bit positions; this control does not select output class or residency.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "V",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is accepted for zero-or-one replacement controls; V does not select output class or residency.",
+    },
+];
+pub const BITSET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = bitset(integer_A, integer_bit, integer_V)",
+        inputs: &BITSET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "A, bit, and V use scalar expansion or exactly matching nonscalar sizes. Supported resident data uses exact fallback and returns to A's owner; bit and V are controls.",
+    }];
 
 const BITSHIFT_SINGLE_VALUE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "bitshift-single-value-input",
@@ -1058,22 +1211,30 @@ fn restore_binary_bitwise_gpu_result(
     keywords = "bitcmp,bitwise,complement,integer,uint32",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::BITCMP_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::integer::DIRECT_BIT_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::integer::BITCMP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitcmp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let output_source = args.first().and_then(|value| match value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    });
+    enforce_direct_bit_gpu_compatibility(BITCMP_NAME, &args, true)?;
     let (value, assumed) = unary_args(BITCMP_NAME, args)?;
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitcmp(sparse, assumed);
     }
     let input = bit_buffer_from(BITCMP_NAME, value, assumed).await?;
     let mask = input.compute_class.map_or(u64::MAX, IntegerClass::bit_mask);
-    value_from_bits_with_classes(
+    let result = value_from_bits_with_classes(
         input.data.into_iter().map(|bits| !bits & mask).collect(),
         input.shape,
         input.compute_class,
         input.output_class,
         BITCMP_NAME,
-    )
+    )?;
+    restore_binary_bitwise_gpu_result(BITCMP_NAME, result, output_source.as_ref())
 }
 
 fn sparse_bitcmp(
@@ -1106,9 +1267,16 @@ fn sparse_bitcmp(
     keywords = "bitget,bitwise,bit,integer,uint32",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::BITGET_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::integer::DIRECT_BIT_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::integer::BITGET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitget_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let output_source = args.first().and_then(|value| match value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    });
+    enforce_direct_bit_gpu_compatibility(BITGET_NAME, &args, false)?;
     let (value, bit, assumed) = value_bit_args(BITGET_NAME, args)?;
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitget(sparse, bit, assumed).await;
@@ -1130,13 +1298,14 @@ async fn bitget_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         data.push((input.data[input_index] >> (position as u32 - 1)) & 1);
     }
-    value_from_bits_with_classes(
+    let result = value_from_bits_with_classes(
         data,
         plan.output_shape().to_vec(),
         input.compute_class,
         input.output_class,
         BITGET_NAME,
-    )
+    )?;
+    restore_binary_bitwise_gpu_result(BITGET_NAME, result, output_source.as_ref())
 }
 
 async fn sparse_bitget(
@@ -1195,9 +1364,16 @@ async fn sparse_bitget(
     keywords = "bitset,bitwise,bit,integer,uint32",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::BITSET_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::integer::DIRECT_BIT_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::integer::BITSET_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let output_source = args.first().and_then(|value| match value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    });
+    enforce_direct_bit_gpu_compatibility(BITSET_NAME, &args, false)?;
     let (value, bit, value_to_set, assumed) = bitset_args(args)?;
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitset(sparse, bit, value_to_set, assumed).await;
@@ -1239,13 +1415,14 @@ async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             current & !mask
         });
     }
-    value_from_bits_with_classes(
+    let result = value_from_bits_with_classes(
         data,
         plan.output_shape().to_vec(),
         input.compute_class,
         input.output_class,
         BITSET_NAME,
-    )
+    )?;
+    restore_binary_bitwise_gpu_result(BITSET_NAME, result, output_source.as_ref())
 }
 
 async fn sparse_bitset(
@@ -1351,10 +1528,63 @@ async fn bitor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "bitxor,bitwise,xor,integer,uint32",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::BITXOR_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::integer::BITXOR_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::integer::BITXOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitxor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    binary_bitwise_from_args(BITXOR_NAME, args, |a, b| a ^ b).await
+    public_binary_bitwise_builtin(
+        BITXOR_NAME,
+        args,
+        &BITXOR_SINGLE_INPUT_EXTENSION,
+        &BITXOR_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+        &BITXOR_GPU_ASSUMED_TYPE_EXTENSION,
+        |a, b| a ^ b,
+    )
+    .await
+}
+
+fn enforce_direct_bit_gpu_compatibility(
+    name: &str,
+    args: &[Value],
+    restricted_integer_classes: bool,
+) -> BuiltinResult<()> {
+    let Some(Value::GpuTensor(source)) = args.first() else {
+        return Ok(());
+    };
+    if args.last().is_some_and(|value| {
+        matches!(value, Value::String(_))
+            && ((name == BITCMP_NAME && args.len() == 2) || args.len() >= 3)
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DIRECT_BIT_GPU_ASSUMED_TYPE_EXTENSION,
+            name,
+        )?;
+    }
+    let source_class = runmat_accelerate_api::handle_integer_type(source);
+    let outside_domain = if restricted_integer_classes {
+        !matches!(
+            source_class,
+            Some(
+                runmat_accelerate_api::IntegerElementType::U8
+                    | runmat_accelerate_api::IntegerElementType::U16
+                    | runmat_accelerate_api::IntegerElementType::U32
+            )
+        )
+    } else {
+        source_class.is_none()
+            && !args
+                .iter()
+                .skip(1)
+                .any(|value| bitwise_integer_class(value).is_some())
+    };
+    if outside_domain {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DIRECT_BIT_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+            name,
+        )?;
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -1521,6 +1751,13 @@ async fn idivide_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "expected two integer inputs and an optional rounding mode",
         ));
     }
+    let output_source = gpu_helpers::select_resident_output_source(
+        args.iter().take(2).filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        IDIVIDE_NAME,
+    )?;
     let mut iter = args.into_iter();
     let left = idivide_buffer_from(iter.next().expect("A")).await?;
     let right = idivide_buffer_from(iter.next().expect("B")).await?;
@@ -1544,12 +1781,13 @@ async fn idivide_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         let quotient = rounded_integer_divide(left.data[idx_a], divisor, rounding);
         out.push(quotient);
     }
-    value_from_integer_data(
+    let result = value_from_integer_data(
         out,
         plan.output_shape().to_vec(),
         output_class,
         IDIVIDE_NAME,
-    )
+    )?;
+    restore_binary_bitwise_gpu_result(IDIVIDE_NAME, result, output_source.as_ref())
 }
 
 #[runtime_builtin(

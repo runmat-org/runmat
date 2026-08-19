@@ -969,10 +969,18 @@ pub async fn assign_gpu_slice_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::GpuTensor(handle.clone()));
     }
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+    let mut unique_indices = plan.indices.clone();
+    unique_indices.sort_unstable();
+    if unique_indices.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(mex(
+            "RepeatedGpuAssignmentIndex",
+            "gpuArray indexed assignment does not support repeated target subscripts",
+        ));
+    }
+    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
         mex(
             "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
+            "No acceleration provider owns the target gpuArray",
         )
     })?;
     if runmat_accelerate_api::handle_integer_type(handle).is_some() {
@@ -1464,11 +1472,11 @@ fn integer_tensor_view<'a>(
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_complex_with_plan, assign_sparse_with_plan, assign_tensor_with_plan,
-        build_complex_rhs_view, build_string_rhs_view, delete_complex_with_plan,
-        delete_gpu_slice_with_plan, delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan,
-        map_acceleration_error, materialize_rhs_linear_real, materialize_rhs_nd_real,
-        validated_assignment_rhs_shape, ComplexRhsView,
+        assign_complex_with_plan, assign_gpu_slice_with_plan, assign_sparse_with_plan,
+        assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
+        delete_complex_with_plan, delete_gpu_slice_with_plan, delete_tensor_with_plan,
+        integer_gpu_rhs_indices_for_plan, map_acceleration_error, materialize_rhs_linear_real,
+        materialize_rhs_nd_real, validated_assignment_rhs_shape, ComplexRhsView,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1476,6 +1484,23 @@ mod tests {
         CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
         NumericStorage, SparseTensor, StringArray, Tensor, Value,
     };
+
+    #[test]
+    fn gpu_assignment_rejects_repeated_target_subscripts_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 3],
+            device_id: 91,
+            buffer_id: 17,
+            descriptor: Default::default(),
+        };
+        let plan = IndexPlan::new(vec![1, 1], vec![1, 2], vec![2], 1, vec![1, 3]);
+        let error = block_on(assign_gpu_slice_with_plan(&handle, &plan, &Value::Num(4.0)))
+            .expect_err("repeated gpuArray assignment targets must reject");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:RepeatedGpuAssignmentIndex")
+        );
+    }
 
     #[test]
     fn integer_plan_assignment_preserves_exact_uint64_rhs() {
