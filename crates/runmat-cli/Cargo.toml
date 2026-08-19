@@ -77,6 +77,7 @@ runmat-filesystem = { version = "=0.6.1", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.6.1", path = "../runmat-telemetry" }
 runmat-static-analysis = { version = "=0.6.1", path = "../runmat-static-analysis" }
 runmat-server-client = { workspace = true }
+runmat-node-agent = { workspace = true }
 runmat-test = { workspace = true }
 runmat-test-runner = { workspace = true }
 runmat-test-runner-execution = { workspace = true }

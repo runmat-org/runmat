@@ -7,6 +7,7 @@ use runmat_types::ProgramPointId;
 use crate::AotProcessInput;
 
 pub fn execute(input: AotProcessInput) -> Result<(), String> {
+    let _console_forwarder = crate::output::install_console_forwarder();
     let assembly: runmat_native_codegen::NativeAssembly = serde_json::from_slice(&input.native_ir)
         .map_err(|error| format!("standalone Native IR is invalid: {error}"))?;
     assembly

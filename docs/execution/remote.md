@@ -29,14 +29,14 @@ runmat cluster create --name workstation-pool --queue default
 runmat cluster enroll CLUSTER_ID --ttl-seconds 900
 ```
 
-Transfer the enrollment secret through the organization's secret-delivery channel. On the intended host, run the node agent's enrollment flow shown by `runmat-node-agent --help`. Do not place the secret in a service file, shell profile, image, or log.
+Transfer the enrollment secret through the organization's secret-delivery channel. On the intended host, run the node enrollment flow shown by `runmat cluster join --help`. Do not place the secret in a service file, shell profile, image, or log.
 
 Inspect the native service plan before installing it:
 
 ```bash
-runmat-node-agent --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
-sudo runmat-node-agent --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
-runmat-node-agent service inspect
+runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
+sudo runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
+runmat cluster join service inspect
 ```
 
 The agent uses systemd on Linux, launchd on macOS, and the Windows Service Control Manager on Windows. Installation persists non-secret startup configuration only. The enrolled node credential remains in the agent's private state directory and survives service removal so a service can be repaired without creating a second node identity.

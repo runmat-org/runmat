@@ -170,7 +170,7 @@ pub fn apply_uninstall(plan: &ServicePlan) -> AgentResult<()> {
 fn validate_executable(path: &Path) -> AgentResult<()> {
     if !path.is_absolute() || !path.is_file() {
         return Err(AgentError::Configuration(
-            "node-agent executable must be an existing absolute file".into(),
+            "RunMat executable must be an existing absolute file".into(),
         ));
     }
     Ok(())
@@ -283,7 +283,7 @@ fn linux_install_plan(config_content: String, agent_executable: &Path) -> AgentR
     let executable = systemd_quote(agent_executable)?;
     let config = systemd_quote(&config_path)?;
     let unit = format!(
-        "[Unit]\nDescription=RunMat execution node agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} --config {config} run\nRestart=on-failure\nRestartSec=5s\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict\nReadWritePaths=/var/lib/runmat/node-agent\nLockPersonality=true\nRestrictSUIDSGID=true\n\n[Install]\nWantedBy=multi-user.target\n"
+        "[Unit]\nDescription=RunMat execution node agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} cluster join --node-config {config} run\nRestart=on-failure\nRestartSec=5s\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict\nReadWritePaths=/var/lib/runmat/node-agent\nLockPersonality=true\nRestrictSUIDSGID=true\n\n[Install]\nWantedBy=multi-user.target\n"
     );
     Ok(ServicePlan {
         platform: "systemd",
@@ -328,7 +328,7 @@ fn macos_install_plan(config_content: String, agent_executable: &Path) -> AgentR
     let executable = xml_escape(&path_text(agent_executable)?);
     let config = xml_escape(&path_text(&config_path)?);
     let plist = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.runmat.node-agent</string>\n  <key>ProgramArguments</key>\n  <array><string>{executable}</string><string>--config</string><string>{config}</string><string>run</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n  <key>ProcessType</key><string>Background</string>\n</dict>\n</plist>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.runmat.node-agent</string>\n  <key>ProgramArguments</key>\n  <array><string>{executable}</string><string>cluster</string><string>join</string><string>--node-config</string><string>{config}</string><string>run</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n  <key>ProcessType</key><string>Background</string>\n</dict>\n</plist>\n"
     );
     Ok(ServicePlan {
         platform: "launchd",
@@ -389,7 +389,7 @@ fn windows_install_plan(
 ) -> AgentResult<ServicePlan> {
     let config_path = windows_config_path()?;
     let binary_path = format!(
-        "\"{}\" --config \"{}\" windows-service-run",
+        "\"{}\" cluster join --node-config \"{}\" windows-service-run",
         path_text(agent_executable)?,
         path_text(&config_path)?
     );
@@ -464,7 +464,7 @@ mod tests {
     #[test]
     fn service_plan_contains_only_validated_absolute_paths() {
         let directory = tempfile::tempdir().unwrap();
-        let executable = directory.path().join("runmat-node-agent");
+        let executable = directory.path().join("runmat");
         std::fs::write(&executable, b"binary").unwrap();
         let runmat = directory.path().join("runmat");
         std::fs::write(&runmat, b"binary").unwrap();
@@ -484,6 +484,10 @@ mod tests {
         assert!(plan.files.iter().all(|file| file.path.is_absolute()));
         let rendered = serde_json::to_string(&plan).unwrap();
         assert!(rendered.contains(SERVICE_NAME));
+        assert!(rendered.contains("cluster"));
+        assert!(rendered.contains("join"));
+        assert!(rendered.contains("runmat"));
+        assert!(!rendered.contains("runmat-node-agent --"));
         assert!(!rendered.contains("credential"));
     }
 }

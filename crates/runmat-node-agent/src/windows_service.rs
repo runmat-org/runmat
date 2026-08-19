@@ -2,8 +2,6 @@ use std::ffi::OsString;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use runmat_node_agent::service::{HttpNodeControlPlane, NodeAgentService, Shutdown};
-use runmat_node_agent::AgentConfig;
 use windows_service::define_windows_service;
 use windows_service::service::{
     ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
@@ -12,6 +10,9 @@ use windows_service::service_control_handler::{
     self, ServiceControlHandlerResult, ServiceStatusHandle,
 };
 use windows_service::service_dispatcher;
+
+use crate::service::{HttpNodeControlPlane, NodeAgentService, Shutdown};
+use crate::AgentConfig;
 
 const SERVICE_NAME: &str = "RunMatNodeAgent";
 static CONFIG: OnceLock<AgentConfig> = OnceLock::new();

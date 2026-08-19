@@ -151,6 +151,7 @@ runmat-process-host = { version = "=0.6.1", path = "crates/runmat-process-host" 
 runmat-static-analysis = { version = "=0.6.1", path = "crates/runmat-static-analysis" }
 runmat-canonical-codec = { version = "=0.6.1", path = "crates/runmat-canonical-codec" }
 runmat-server-client = { version = "=0.6.1", path = "crates/runmat-server-client" }
+runmat-node-agent = { version = "=0.6.1", path = "crates/runmat-node-agent" }
 runmat-accelerate = { version = "=0.6.1", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.6.1", path = "crates/runmat-accelerate-api" }
 runmat-gc-api = { version = "=0.6.1", path = "crates/runmat-gc-api" }

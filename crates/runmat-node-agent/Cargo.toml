@@ -5,16 +5,11 @@ edition = "2021"
 license-file = "../../LICENSE.md"
 description = "RunMat remote execution node service"
 
-[[bin]]
-name = "runmat-node-agent"
-path = "src/main.rs"
-
 [dependencies]
 anyhow = { workspace = true }
 async-trait = "0.1"
 base64 = "0.22"
 chrono = { workspace = true }
-clap = { workspace = true }
 dirs = "5"
 rand = "0.8"
 serde = { workspace = true }

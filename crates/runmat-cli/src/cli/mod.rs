@@ -9,7 +9,10 @@ mod test;
 mod value_types;
 
 pub use batch::BatchCommand;
-pub use cluster::{ClusterCommand, ClusterStateArg, NodeStateArg};
+pub use cluster::{
+    ClusterCommand, ClusterStateArg, NodeJoinArgs, NodeJoinCommand, NodeServiceCommand,
+    NodeStateArg, NodeTrustTier,
+};
 pub use job::{JobCommand, JobRecoveryCommand};
 pub use package::{
     PackageCacheCommand, PackageCommand, PackageInspectArgs, PackageKeyCommand, PackageKeyTarget,

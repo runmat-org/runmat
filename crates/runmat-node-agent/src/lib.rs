@@ -1,11 +1,16 @@
 pub mod allocation;
-pub mod cli;
 pub mod config;
 pub mod enrollment;
 pub mod inventory;
 pub mod platform;
 pub mod service;
 pub mod service_install;
+
+#[cfg(windows)]
+mod windows_service;
+
+#[cfg(windows)]
+pub use windows_service::dispatch as dispatch_windows_service;
 
 pub use config::{AgentConfig, AgentFileConfig};
 

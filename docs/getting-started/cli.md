@@ -215,11 +215,11 @@ Every cluster command and every durable job observation/mutation supports `--jso
 The node agent can run in the foreground for diagnosis or install its native systemd, launchd, or Windows service. Generate a dry-run plan before changing a host:
 
 ```bash
-runmat-node-agent --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
-sudo runmat-node-agent --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
+runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
+sudo runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
 ```
 
-Service installation persists only non-secret configuration. Enrollment credentials remain in the private state directory, service removal preserves that identity for safe reinstall, and retiring a host requires revoking the node before deleting its state. See the node-agent README and `runmat-node-agent --help` for platform paths and the foreground enrollment flow.
+Service installation persists only non-secret configuration. Enrollment credentials remain in the private state directory, service removal preserves that identity for safe reinstall, and retiring a host requires revoking the node before deleting its state. See `runmat cluster join --help` for platform paths and the foreground enrollment flow.
 
 Organization recovery is optional. The CLI generates and retains the private key locally, sends only its validated public recipient to the Server policy API, and decrypts authorized terminal results or diagnostics on the custodian machine. Once configured, every new submission must carry an envelope for the exact active fingerprint. Keep rotated private keys for the full artifact-retention period. See [Remote Execution](/docs/runtime/execution/remote) for customer-node, hosted-node, browser, draining, and recovery workflows.
 

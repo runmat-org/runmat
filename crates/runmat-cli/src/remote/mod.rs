@@ -3,6 +3,7 @@ mod fs;
 mod git;
 mod history;
 mod login;
+mod node;
 mod orgs;
 mod projects;
 mod retention;
@@ -75,6 +76,7 @@ pub async fn execute_cluster_command(command: ClusterCommand) -> Result<()> {
             state,
             json,
         } => clusters::set_node_state(org, cluster, node, state, json).await,
+        ClusterCommand::Join(args) => node::execute(args).await,
     }
 }
 
