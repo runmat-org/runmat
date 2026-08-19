@@ -7,10 +7,11 @@ fn carving_preserves_a_small_nested_void() {
         [10.0, 0.0, 0.0],
         [0.0, 10.0, 0.0],
         [0.0, 0.0, 10.0],
-        [2.0, 2.0, 2.0],
         [2.0001, 2.0, 2.0],
-        [2.0, 2.0001, 2.0],
+        [1.99995, 2.0000866025403785, 2.0],
+        [1.99995, 1.9999133974596215, 2.0],
         [2.0, 2.0, 2.0001],
+        [2.0, 2.0, 1.9999],
     ];
     let outer_facets = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
     let inner_facets = [[4, 5, 6], [4, 7, 5], [4, 6, 7], [5, 7, 6]];
@@ -114,6 +115,7 @@ fn carving_preserves_a_small_nested_void() {
         &NeverCancelled,
     )
     .unwrap();
+    assert_ne!(recovery.topology, recovery.segment_recovery.topology);
     let carving = carve_delaunay_volume(
         &recovery,
         &constraints,

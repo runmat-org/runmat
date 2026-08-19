@@ -26,7 +26,7 @@ const FACET_STEINER_IDENTITY_DOMAIN: &[u8] = b"runmat:cdt-facet-steiner-node:v1"
 /// Retries the same checked cavity mutation after each legal barrier-aware insertion. The
 /// `FacetRecoveryWork` counters are shared across all retries and facets, so failure is atomic and
 /// the loop cannot outlive the configured node or candidate limits.
-pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_edge_star_cavity(
+pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
     recovery: &DelaunaySegmentRecovery,
     facet: [StableDigest; 3],
     protected_facets: &[DelaunayRecoveredFacetTriangle],

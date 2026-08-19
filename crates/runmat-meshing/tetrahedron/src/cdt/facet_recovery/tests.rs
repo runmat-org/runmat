@@ -173,11 +173,11 @@ fn facet_recovery_uses_a_checked_edge_star_flip() {
 }
 
 #[test]
-fn facet_edge_star_cavity_retriangulates_both_exact_sides() {
+fn facet_cavity_retriangulates_both_exact_sides() {
     let constraints = constraints(false);
     let segments = segment_recovery(true, &constraints);
     let mut work = FacetRecoveryWork::new(DelaunayFacetRecoveryOptions::default(), &NeverCancelled);
-    let recovered = super::cavity::try_recover_facet_with_edge_star_cavity(
+    let recovered = super::cavity::try_recover_facet_with_cavity(
         &segments,
         constraints.facets[0]
             .vertex_indices
@@ -187,7 +187,7 @@ fn facet_edge_star_cavity_retriangulates_both_exact_sides() {
         &mut work,
     )
     .unwrap()
-    .expect("the bipyramid edge-star cavity should be recoverable");
+    .expect("the bipyramid facet cavity should be recoverable");
 
     assert_eq!(recovered.tetrahedra.len(), 2);
     let mut candidate = segments;
@@ -241,7 +241,7 @@ fn facet_recovery_handles_an_acute_thin_crossing_cavity() {
 }
 
 #[test]
-fn facet_edge_star_cavity_enforces_its_tetrahedron_budget() {
+fn facet_cavity_enforces_its_tetrahedron_budget() {
     let constraints = constraints(false);
     let segments = segment_recovery(true, &constraints);
     let mut work = FacetRecoveryWork::new(
@@ -252,7 +252,7 @@ fn facet_edge_star_cavity_enforces_its_tetrahedron_budget() {
         &NeverCancelled,
     );
     assert_eq!(
-        super::cavity::try_recover_facet_with_edge_star_cavity(
+        super::cavity::try_recover_facet_with_cavity(
             &segments,
             constraints.facets[0]
                 .vertex_indices

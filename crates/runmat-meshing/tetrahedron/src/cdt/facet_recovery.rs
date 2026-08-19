@@ -11,7 +11,7 @@ mod support;
 mod validation;
 mod work;
 
-use cavity::try_recover_facet_with_edge_star_cavity;
+use cavity::try_recover_facet_with_cavity;
 use flip::try_recover_facet_with_edge_flip;
 use support::facet_support;
 pub use validation::validate_delaunay_facet_recovery;
@@ -158,7 +158,7 @@ pub(super) fn construct_delaunay_facet_recovery(
                     &mut work,
                 )? {
                     updated
-                } else if let Some(updated) = try_recover_facet_with_edge_star_cavity(
+                } else if let Some(updated) = try_recover_facet_with_cavity(
                     &working,
                     triangle.node_identities,
                     &protected_triangles,

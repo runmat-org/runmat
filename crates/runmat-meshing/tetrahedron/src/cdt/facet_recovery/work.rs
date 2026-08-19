@@ -85,7 +85,7 @@ impl<'a> FacetRecoveryWork<'a> {
         if self.cavity_steps > self.options.maximum_cavity_steps {
             return Err(resource(
                 constraint_index,
-                "facet edge-star cavity work limit exceeded",
+                "facet cavity work limit exceeded",
             ));
         }
         self.check_cancelled(constraint_index, self.cavity_steps)

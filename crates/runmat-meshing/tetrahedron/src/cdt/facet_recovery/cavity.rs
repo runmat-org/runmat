@@ -1,4 +1,4 @@
-//! Bounded recovery for a missing facet support triangle whose surrounding edge stars form a
+//! Bounded recovery for a missing facet support triangle whose intersected tetrahedra form a
 //! closed local cavity. Exact orientation predicates partition the existing nodes; recovery does
 //! not invent rounded points on the authoritative facet plane.
 
@@ -27,13 +27,15 @@ use crate::{
     },
 };
 
+mod footprint;
 mod sides;
 pub(super) mod star;
 mod steiner;
 
+use footprint::facet_footprint_crosses_face;
 use sides::side_cavities;
 use star::star_refill;
-pub(super) use steiner::try_recover_facet_with_edge_star_cavity;
+pub(super) use steiner::try_recover_facet_with_cavity;
 
 pub(super) enum FacetCavityAttempt {
     Recovered(DelaunayVolumeTopology),
@@ -56,12 +58,14 @@ pub(super) fn try_recover_facet_cavity_once(
 ) -> Result<FacetCavityAttempt, DelaunayFacetRecoveryError> {
     let facet_nodes = facet_indices(&recovery.topology, facet, constraint_index)?;
     let signs = plane_signs(&recovery.topology, facet_nodes, constraint_index, work)?;
-    let mut removed = edge_star_seed(&recovery.topology, facet_nodes, constraint_index, work)?;
+    let mut removed =
+        facet_intersection_seed(&recovery.topology, facet_nodes, constraint_index, work)?;
     if removed.is_empty() {
         return Ok(FacetCavityAttempt::Unavailable);
     }
     expand_crossing_boundary(
         &recovery.topology,
+        facet_nodes,
         &signs,
         &mut removed,
         constraint_index,
@@ -328,7 +332,7 @@ fn plane_signs(
     Ok(signs)
 }
 
-fn edge_star_seed(
+fn facet_intersection_seed(
     topology: &DelaunayVolumeTopology,
     facet: [u32; 3],
     constraint_index: u32,
@@ -337,12 +341,22 @@ fn edge_star_seed(
     let mut removed = BTreeSet::new();
     for (index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
         work.cavity_step(constraint_index)?;
-        if facet
-            .iter()
-            .filter(|node| tetrahedron.vertex_indices.contains(node))
-            .count()
-            >= 2
-        {
+        let mut intersects = false;
+        for opposite in 0..4 {
+            let mut face = [0; 3];
+            let mut cursor = 0;
+            for (vertex_index, vertex) in tetrahedron.vertex_indices.iter().enumerate() {
+                if vertex_index != opposite {
+                    face[cursor] = *vertex;
+                    cursor += 1;
+                }
+            }
+            if facet_footprint_crosses_face(topology, facet, face, constraint_index, work)? {
+                intersects = true;
+                break;
+            }
+        }
+        if intersects {
             removed.insert(index as u32);
             if removed.len() as u64 > work.options.maximum_cavity_tetrahedra {
                 return Err(resource_or_cancelled(
@@ -358,6 +372,7 @@ fn edge_star_seed(
 
 fn expand_crossing_boundary(
     topology: &DelaunayVolumeTopology,
+    facet: [u32; 3],
     signs: &[PredicateSign],
     removed: &mut BTreeSet<u32>,
     constraint_index: u32,
@@ -365,14 +380,24 @@ fn expand_crossing_boundary(
 ) -> Result<(), DelaunayFacetRecoveryError> {
     loop {
         let boundary = cavity_boundary(topology, removed, constraint_index, work)?;
-        let crossing = boundary.into_iter().find(|face| {
+        let crossing = boundary.into_iter().find_map(|face| {
             let face_signs = face.nodes.map(|node| signs[node as usize]);
-            face_signs.contains(&PredicateSign::Positive)
-                && face_signs.contains(&PredicateSign::Negative)
+            if !face_signs.contains(&PredicateSign::Positive)
+                || !face_signs.contains(&PredicateSign::Negative)
+            {
+                return None;
+            }
+            match facet_footprint_crosses_face(topology, facet, face.nodes, constraint_index, work)
+            {
+                Ok(true) => Some(Ok(face)),
+                Ok(false) => None,
+                Err(failure) => Some(Err(failure)),
+            }
         });
         let Some(crossing) = crossing else {
             return Ok(());
         };
+        let crossing = crossing?;
         let Some(outside) = crossing.outside_tetrahedron else {
             return Err(invalid_topology(
                 constraint_index,
