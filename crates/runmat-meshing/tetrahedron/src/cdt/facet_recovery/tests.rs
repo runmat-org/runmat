@@ -13,13 +13,22 @@ use crate::cdt::{
 mod scalable_cavity;
 
 fn constraints(include_crossing_segment: bool) -> DelaunayConstraints {
-    let coordinates = [
-        [5.0, 0.0, 0.0],
-        [0.0, 5.0, 0.0],
-        [-3.0, -4.0, 0.0],
-        [0.0, 0.0, 5.0],
-        [0.0, 0.0, -5.0],
-    ];
+    constraints_with_coordinates(
+        [
+            [5.0, 0.0, 0.0],
+            [0.0, 5.0, 0.0],
+            [-3.0, -4.0, 0.0],
+            [0.0, 0.0, 5.0],
+            [0.0, 0.0, -5.0],
+        ],
+        include_crossing_segment,
+    )
+}
+
+fn constraints_with_coordinates(
+    coordinates: [[f64; 3]; 5],
+    include_crossing_segment: bool,
+) -> DelaunayConstraints {
     let mut segments = vec![[0, 1], [0, 2], [1, 2]];
     if include_crossing_segment {
         segments.push([3, 4]);
@@ -187,6 +196,45 @@ fn facet_edge_star_cavity_retriangulates_both_exact_sides() {
         &candidate,
         &constraints,
         DelaunaySegmentRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
+fn facet_recovery_handles_an_acute_thin_crossing_cavity() {
+    let constraints = constraints_with_coordinates(
+        [
+            [-1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 100.0, 0.0],
+            [0.0, 0.001, 0.000_001],
+            [0.0, 0.001, -0.000_001],
+        ],
+        false,
+    );
+    let prerequisite = segment_recovery(true, &constraints);
+    let recovered = recover_delaunay_facets(
+        prerequisite.clone(),
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .expect("the acute thin cavity must recover without crossing a protected segment");
+    let repeated = recover_delaunay_facets(
+        prerequisite,
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    assert_eq!(recovered, repeated);
+    assert_eq!(recovered.topology.tetrahedra.len(), 2);
+    validate_delaunay_facet_recovery(
+        &recovered,
+        &constraints,
+        DelaunayFacetRecoveryOptions::default(),
         &NeverCancelled,
     )
     .unwrap();
