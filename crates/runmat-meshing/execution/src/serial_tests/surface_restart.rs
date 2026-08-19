@@ -337,61 +337,23 @@ pub(super) fn execute_surface_join_pipeline_from_fixture(
         execute_surface_pipeline_with_fixture(partition_kernel, fixture);
     let curve_root = root(joined.publication().root_output());
     let partition_root = root(partition.publication().root_output());
-    let exact_input = partition_host.workload.inputs[0].clone();
-    let curve_input = partition_host.workload.inputs[1].clone();
-    let partition_input = MeshingInputRef {
-        kind: MeshingInputKind::StageArtifact,
-        digest: StableDigest::from_bytes(*partition_root.logical_digest.bytes()),
-    };
-    let request = partition_host.resolved_request.clone();
-    let mut dependencies = vec![
-        (exact_input, exact_root.clone()),
-        (curve_input, curve_root),
-        (partition_input, partition_root),
-    ];
-    dependencies.sort_by(|left, right| left.0.cmp(&right.0));
-    let inputs = dependencies
-        .iter()
-        .map(|(input, _)| input.clone())
-        .collect::<Vec<_>>();
-    let roots = dependencies
-        .into_iter()
-        .map(|(_, root)| root)
-        .collect::<Vec<_>>();
-    let identity = MeshingStageIdentity {
-        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage: MeshingStageKind::SurfaceMesh,
-        geometry: partition_host.stage_identity.geometry.clone(),
-        resolved_request_digest: request.canonical_digest().unwrap(),
-        tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
-        metric_policy_digest: request.metric.canonical_digest().unwrap(),
-        algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
-        deterministic_seed: request.deterministic_seed,
-        prerequisites: inputs.clone(),
-        capability_cohort: partition_host.stage_identity.capability_cohort.clone(),
-    };
-    let workload = MeshingWorkloadRequest {
-        schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
-        stage: MeshingStageKind::SurfaceMesh,
-        stage_identity_digest: identity.canonical_digest().unwrap(),
-        partition: MeshingPartitionDescriptor {
-            kind: MeshingPartitionKind::DeterministicJoin,
-            partition_index: 0,
-            partition_count: 1,
-            entity_range: None,
-        },
-        inputs,
-        required_capabilities: partition_host.workload.required_capabilities.clone(),
-    };
-    let host = MeshingHostWorkload::new(
-        workload,
-        identity,
-        request,
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        partition_host.geometry_document.clone().unwrap(),
+        &exact_root,
         partition_host.artifact_access.clone(),
-        partition_host.geometry_document.clone(),
+        ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let program = host.program_request(revision(), &roots).unwrap();
+    let planner =
+        crate::ExactMeshingDagPlanner::from_exact_host(&partition_host, exact_root.clone())
+            .unwrap();
+    let pass = planner
+        .begin_surface_pass(&exact.geometry_objects().topology, curve_root, 32)
+        .unwrap();
+    let join = planner.surface_join(&pass, vec![partition_root]).unwrap();
+    let host = join.host().clone();
+    let program = join.program_request(revision()).unwrap();
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,

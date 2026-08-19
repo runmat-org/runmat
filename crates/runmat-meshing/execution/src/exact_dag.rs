@@ -14,6 +14,7 @@ use runmat_meshing_core::{
     MeshingWorkloadRequest, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
     MESHING_WORKLOAD_SCHEMA_VERSION,
 };
+use runmat_meshing_curve::curve_partition_descriptors;
 use runmat_meshing_surface::{face_partition_descriptors, MAX_EXACT_FACE_PARTITIONS};
 
 use crate::task::{validate_input, validate_inputs};
@@ -24,6 +25,19 @@ use crate::{MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload};
 pub struct PlannedMeshingStage {
     host: MeshingHostWorkload,
     input_roots: Vec<ValueRef>,
+}
+
+/// A complete deterministic edge-partition pass for the initial shared curve mesh.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactCurvePassPlan {
+    context: ExactDagContext,
+    partitions: Vec<PlannedMeshingStage>,
+}
+
+impl ExactCurvePassPlan {
+    pub fn partitions(&self) -> &[PlannedMeshingStage] {
+        &self.partitions
+    }
 }
 
 impl PlannedMeshingStage {
@@ -132,6 +146,56 @@ impl ExactMeshingDagPlanner {
         preferred_faces_per_partition: u32,
     ) -> MeshingExecutionResult<ExactSurfacePassPlan> {
         self.build_surface_pass(topology, 0, curve_root, preferred_faces_per_partition)
+    }
+
+    /// Plans the canonical edge batches that construct the first shared curve mesh.
+    pub fn initial_curve_pass(
+        &self,
+        topology: &ExactBRepTopology,
+        preferred_edges_per_partition: u32,
+    ) -> MeshingExecutionResult<ExactCurvePassPlan> {
+        let descriptors = curve_partition_descriptors(topology, preferred_edges_per_partition)
+            .map_err(|error| invalid(error.to_string()))?;
+        let partitions = descriptors
+            .into_iter()
+            .map(|partition| {
+                self.build_stage(
+                    MeshingStageKind::CurveMesh,
+                    partition,
+                    vec![self.geometry_root.clone()],
+                )
+            })
+            .collect::<MeshingExecutionResult<Vec<_>>>()?;
+        Ok(ExactCurvePassPlan {
+            context: self.context.clone(),
+            partitions,
+        })
+    }
+
+    /// Plans the global shared-curve join independently of partition completion order.
+    pub fn curve_join(
+        &self,
+        pass: &ExactCurvePassPlan,
+        partition_roots: Vec<ValueRef>,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        if pass.context != self.context {
+            return Err(invalid(
+                "curve pass belongs to a different geometry, request, or artifact authority",
+            ));
+        }
+        if partition_roots.len() != pass.partitions.len() || partition_roots.is_empty() {
+            return Err(invalid(
+                "curve barrier requires one result for every planned edge partition",
+            ));
+        }
+        let mut roots = Vec::with_capacity(1 + partition_roots.len());
+        roots.push(self.geometry_root.clone());
+        roots.extend(partition_roots);
+        self.build_stage(
+            MeshingStageKind::CurveMesh,
+            whole_partition(MeshingPartitionKind::DeterministicJoin),
+            roots,
+        )
     }
 
     pub fn next_surface_pass(

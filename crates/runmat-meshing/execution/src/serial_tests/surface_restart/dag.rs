@@ -1,6 +1,64 @@
 use super::*;
 
 #[test]
+fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join() {
+    let mut fixture = Fixture::with_exact_tetrahedron_curve_partition();
+    let exact_root = root(&fixture.program.arguments[0]);
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        fixture.host.geometry_document.clone().unwrap(),
+        &exact_root,
+        fixture.host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let planner =
+        crate::ExactMeshingDagPlanner::from_exact_host(&fixture.host, exact_root.clone()).unwrap();
+    let pass = planner
+        .initial_curve_pass(&exact.geometry_objects().topology, 3)
+        .unwrap();
+    assert_eq!(pass.partitions().len(), 2);
+    for (index, stage) in pass.partitions().iter().enumerate() {
+        assert_eq!(
+            stage.host().workload.partition.kind,
+            MeshingPartitionKind::CanonicalEntityBatch
+        );
+        assert_eq!(
+            stage.host().workload.partition.partition_index,
+            index as u32
+        );
+        assert_eq!(stage.input_roots(), std::slice::from_ref(&exact_root));
+        assert_eq!(
+            algorithm_capability(stage.host()),
+            fixture.host.resolved_request.algorithms.curve
+        );
+    }
+
+    let first = execute_planned(
+        &mut fixture,
+        &pass.partitions()[0],
+        &crate::ExactCurveStageKernel::default(),
+    );
+    let second = execute_planned(
+        &mut fixture,
+        &pass.partitions()[1],
+        &crate::ExactCurveStageKernel::default(),
+    );
+    let first = root(first.publication().root_output());
+    let second = root(second.publication().root_output());
+    let forward = planner
+        .curve_join(&pass, vec![first.clone(), second.clone()])
+        .unwrap();
+    let reverse = planner.curve_join(&pass, vec![second, first]).unwrap();
+    assert_eq!(forward, reverse);
+    assert_eq!(
+        forward.host().workload.partition.kind,
+        MeshingPartitionKind::DeterministicJoin
+    );
+    assert!(planner.curve_join(&pass, Vec::new()).is_err());
+}
+
+#[test]
 fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() {
     let (mut fixture, curve_host, exact_root, initial_curve) = execute_curve_pipeline();
     let initial_curve_root = root(initial_curve.publication().root_output());

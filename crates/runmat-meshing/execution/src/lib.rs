@@ -52,7 +52,9 @@ pub use curve_kernel::{
 pub use curve_refinement_kernel::ExactCurveRefinementKernel;
 pub use dispatcher::MeshingKernelDispatcher;
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
-pub use exact_dag::{ExactMeshingDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage};
+pub use exact_dag::{
+    ExactCurvePassPlan, ExactMeshingDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage,
+};
 pub use faceted_geometry_objects::{
     import_faceted_geometry_input, import_faceted_geometry_objects, prepare_faceted_geometry_input,
     prepare_faceted_geometry_objects, FacetedGeometryObjectRoot, PreparedFacetedGeometryInput,

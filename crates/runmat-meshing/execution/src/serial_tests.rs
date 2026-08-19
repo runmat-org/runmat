@@ -397,47 +397,15 @@ fn execute_surface_pipeline_with_fixture(
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let partition =
-        runmat_meshing_surface::face_partition_descriptors(&exact.geometry_objects().topology, 32)
-            .unwrap()
-            .remove(0);
-    let exact_input = curve_host.workload.inputs[0].clone();
-    let curve_input = MeshingInputRef {
-        kind: MeshingInputKind::StageArtifact,
-        digest: StableDigest::from_bytes(*curve_root.logical_digest.bytes()),
-    };
-    let request = curve_host.resolved_request.clone();
-    let identity = MeshingStageIdentity {
-        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage: MeshingStageKind::SurfaceMesh,
-        geometry: curve_host.stage_identity.geometry.clone(),
-        resolved_request_digest: request.canonical_digest().unwrap(),
-        tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
-        metric_policy_digest: request.metric.canonical_digest().unwrap(),
-        algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
-        deterministic_seed: request.deterministic_seed,
-        prerequisites: vec![exact_input.clone(), curve_input.clone()],
-        capability_cohort: curve_host.stage_identity.capability_cohort.clone(),
-    };
-    let workload = MeshingWorkloadRequest {
-        schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
-        stage: MeshingStageKind::SurfaceMesh,
-        stage_identity_digest: identity.canonical_digest().unwrap(),
-        partition: partition.clone(),
-        inputs: vec![exact_input, curve_input],
-        required_capabilities: surface_capabilities(&curve_host, &request),
-    };
-    let host = MeshingHostWorkload::new(
-        workload,
-        identity,
-        request,
-        curve_host.artifact_access.clone(),
-        curve_host.geometry_document.clone(),
-    )
-    .unwrap();
-    let program = host
-        .program_request(revision(), &[exact_root.clone(), curve_root])
+    let planner =
+        crate::ExactMeshingDagPlanner::from_exact_host(&curve_host, exact_root.clone()).unwrap();
+    let pass = planner
+        .begin_surface_pass(&exact.geometry_objects().topology, curve_root, 32)
         .unwrap();
+    let stage = &pass.partitions()[0];
+    let partition = stage.host().workload.partition.clone();
+    let host = stage.host().clone();
+    let program = stage.program_request(revision()).unwrap();
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -469,59 +437,37 @@ fn execute_curve_pipeline_from(
     CompletedMeshingStage,
 ) {
     let exact_root = root(&fixture.program.arguments[0]);
-    let partition = execute_serial_stage(
-        &fixture.program,
-        &mut fixture.store,
-        &ExactCurveStageKernel::default(),
-        &NeverCancelled,
-        &mut Progress::default(),
-        chunk_policy(65_536),
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        fixture.host.geometry_document.clone().unwrap(),
+        &exact_root,
+        fixture.host.artifact_access.clone(),
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let partition_root = root(partition.publication().root_output());
-    let exact_input = fixture.host.workload.inputs[0].clone();
-    let partition_input = MeshingInputRef {
-        kind: MeshingInputKind::StageArtifact,
-        digest: StableDigest::from_bytes(*partition_root.logical_digest.bytes()),
-    };
-    let request = fixture.host.resolved_request.clone();
-    let identity = MeshingStageIdentity {
-        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage: MeshingStageKind::CurveMesh,
-        geometry: fixture.host.stage_identity.geometry.clone(),
-        resolved_request_digest: request.canonical_digest().unwrap(),
-        tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
-        metric_policy_digest: request.metric.canonical_digest().unwrap(),
-        algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
-        deterministic_seed: request.deterministic_seed,
-        prerequisites: vec![exact_input.clone(), partition_input.clone()],
-        capability_cohort: fixture.host.stage_identity.capability_cohort.clone(),
-    };
-    let workload = MeshingWorkloadRequest {
-        schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
-        stage: MeshingStageKind::CurveMesh,
-        stage_identity_digest: identity.canonical_digest().unwrap(),
-        partition: MeshingPartitionDescriptor {
-            kind: MeshingPartitionKind::DeterministicJoin,
-            partition_index: 0,
-            partition_count: 1,
-            entity_range: None,
-        },
-        inputs: vec![exact_input, partition_input],
-        required_capabilities: fixture.host.workload.required_capabilities.clone(),
-    };
-    let host = MeshingHostWorkload::new(
-        workload,
-        identity,
-        request,
-        fixture.host.artifact_access.clone(),
-        fixture.host.geometry_document.clone(),
-    )
-    .unwrap();
-    let program = host
-        .program_request(revision(), &[exact_root.clone(), partition_root])
+    let planner =
+        crate::ExactMeshingDagPlanner::from_exact_host(&fixture.host, exact_root.clone()).unwrap();
+    let pass = planner
+        .initial_curve_pass(&exact.geometry_objects().topology, 32)
         .unwrap();
+    let mut partition_roots = Vec::with_capacity(pass.partitions().len());
+    for stage in pass.partitions() {
+        let program = stage.program_request(revision()).unwrap();
+        let partition = execute_serial_stage(
+            &program,
+            &mut fixture.store,
+            &ExactCurveStageKernel::default(),
+            &NeverCancelled,
+            &mut Progress::default(),
+            chunk_policy(65_536),
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        partition_roots.push(root(partition.publication().root_output()));
+    }
+    let join = planner.curve_join(&pass, partition_roots).unwrap();
+    let host = join.host().clone();
+    let program = join.program_request(revision()).unwrap();
     let joined = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -533,25 +479,6 @@ fn execute_curve_pipeline_from(
     )
     .unwrap();
     (fixture, host, exact_root, joined)
-}
-
-fn surface_capabilities(
-    curve_host: &MeshingHostWorkload,
-    request: &MeshingRequest,
-) -> Vec<MeshingCapabilityRequirement> {
-    curve_host
-        .workload
-        .required_capabilities
-        .iter()
-        .map(|capability| match capability {
-            MeshingCapabilityRequirement::MeshingAlgorithm { .. } => {
-                MeshingCapabilityRequirement::MeshingAlgorithm {
-                    version: request.algorithms.surface.clone(),
-                }
-            }
-            capability => capability.clone(),
-        })
-        .collect()
 }
 
 #[test]
