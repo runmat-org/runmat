@@ -6308,9 +6308,11 @@ dependencies = [
  "futures",
  "runmat-accelerate-api",
  "runmat-analysis-core",
+ "runmat-canonical-codec",
  "runmat-geometry-core",
  "runmat-meshing-core",
  "serde",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
 ]
 

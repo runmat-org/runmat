@@ -1,12 +1,21 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::{
     ElementOrder, FieldTopologyLocation, SolverEntityTransfer, SolverMeshArtifact,
     SolverMeshTransferMap, SolverTransferMethod, StableDigest, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+const FIELD_CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-field-cbor/v1\0";
+const FIELD_CODEC_DOMAIN: &str = "analysis.fea.field/v1";
+const FIELD_CODEC_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SolverFieldTransferMethod {
     StableIdentity,
     QuadraticEdgeInterpolation,
@@ -15,7 +24,8 @@ pub enum SolverFieldTransferMethod {
     ConservativeProjection,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SolverFieldTransferEvidence {
     pub source_artifact_digest: StableDigest,
     pub target_artifact_digest: StableDigest,
@@ -25,6 +35,16 @@ pub struct SolverFieldTransferEvidence {
     pub copied_entity_count: usize,
     pub projected_entity_count: usize,
     pub methods: Vec<SolverFieldTransferMethod>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SolverFieldTransferErrorEvidence {
+    pub transfer: SolverFieldTransferEvidence,
+    pub transferred_field_digest: StableDigest,
+    pub reference_field_digest: StableDigest,
+    pub absolute_l2_error: f64,
+    pub relative_l2_error: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +66,66 @@ pub enum SolverFieldTransferError {
     DeviceFieldRequiresHostTransfer,
     UnsupportedTopologyChange,
     InconsistentQuadraticConnectivity,
+    InvalidReferenceField,
+}
+
+pub fn measure_solver_field_transfer_error(
+    transfer: &SolverFieldTransferResult,
+    reference: &AnalysisField,
+) -> Result<SolverFieldTransferErrorEvidence, SolverFieldTransferError> {
+    if transfer.field.field_id != reference.field_id || transfer.field.shape != reference.shape {
+        return Err(SolverFieldTransferError::InvalidReferenceField);
+    }
+    let transferred = transfer
+        .field
+        .as_host_f64()
+        .ok_or(SolverFieldTransferError::DeviceFieldRequiresHostTransfer)?;
+    let reference_values = reference
+        .as_host_f64()
+        .ok_or(SolverFieldTransferError::DeviceFieldRequiresHostTransfer)?;
+    if transferred.len() != reference_values.len()
+        || transferred.iter().any(|value| !value.is_finite())
+        || reference_values.iter().any(|value| !value.is_finite())
+    {
+        return Err(SolverFieldTransferError::InvalidReferenceField);
+    }
+    let error_squared = transferred
+        .iter()
+        .zip(reference_values)
+        .map(|(transferred, reference)| (transferred - reference).powi(2))
+        .sum::<f64>();
+    let reference_squared = reference_values
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>();
+    let absolute_l2_error = error_squared.sqrt();
+    let relative_l2_error = if reference_squared == 0.0 {
+        if absolute_l2_error == 0.0 {
+            Some(0.0)
+        } else {
+            None
+        }
+    } else {
+        Some(absolute_l2_error / reference_squared.sqrt())
+    };
+    Ok(SolverFieldTransferErrorEvidence {
+        transfer: transfer.evidence.clone(),
+        transferred_field_digest: field_digest(&transfer.field)?,
+        reference_field_digest: field_digest(reference)?,
+        absolute_l2_error,
+        relative_l2_error,
+    })
+}
+
+fn field_digest(field: &AnalysisField) -> Result<StableDigest, SolverFieldTransferError> {
+    let encoded = runmat_canonical_codec::encode_contract(
+        FIELD_CODEC_PREFIX,
+        FIELD_CODEC_DOMAIN,
+        field,
+        FIELD_CODEC_LIMITS,
+    )
+    .map_err(|_| SolverFieldTransferError::InvalidReferenceField)?;
+    Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
 }
 
 pub fn transfer_solver_field(
@@ -555,6 +635,22 @@ mod tests {
             .evidence
             .methods
             .contains(&SolverFieldTransferMethod::BarycentricInterpolation));
+        let reference =
+            AnalysisField::host_f64("temperature", vec![4], vec![24.0, 20.0, 30.0, 40.0]);
+        let transfer_error = measure_solver_field_transfer_error(&transferred, &reference).unwrap();
+        assert_eq!(transfer_error.absolute_l2_error, 1.0);
+        assert_eq!(
+            transfer_error.relative_l2_error,
+            Some(
+                1.0 / (24.0_f64.powi(2) + 20.0_f64.powi(2) + 30.0_f64.powi(2) + 40.0_f64.powi(2))
+                    .sqrt()
+            )
+        );
+        let wrong_reference = AnalysisField::host_f64("other", vec![4], vec![0.0; 4]);
+        assert_eq!(
+            measure_solver_field_transfer_error(&transferred, &wrong_reference),
+            Err(SolverFieldTransferError::InvalidReferenceField)
+        );
 
         let history = AnalysisField::host_f64("history", vec![1, 2], vec![0.2, 0.3]);
         let transferred =
