@@ -254,19 +254,23 @@ impl WorkerBackend for ProcessBackend {
             )
             .await?;
             let mut reader = session.state.reader.lock().await;
-            let mut events = Vec::new();
             loop {
                 match read_response(&mut *reader, session.state.limits)
                     .await
                     .map_err(native_backend_error)?
                 {
-                    WorkerResponse::Event { event } => events.push(event),
-                    WorkerResponse::Completed { result, coverage } => {
-                        return Ok(Some(WorkerExecution {
-                            result,
-                            events,
-                            coverage,
-                        }));
+                    WorkerResponse::Event { .. } => {}
+                    WorkerResponse::Completed { .. } => {
+                        // A completion can race with the cancellation frame after the worker has
+                        // already left its active-test receive loop. In that case the unread frame
+                        // would be interpreted as the next session request. A process-isolated
+                        // session is therefore retired after every cancellation request; the
+                        // coordinator records the requested terminal disposition and replaces the
+                        // worker before executing more tests in the fixture group.
+                        drop(reader);
+                        let mut child = session.state.child.lock().await;
+                        let _ = child.terminate_tree().await;
+                        return Ok(None);
                     }
                     WorkerResponse::Rejected { .. } => return Ok(None),
                     response => {

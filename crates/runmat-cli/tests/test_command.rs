@@ -165,7 +165,9 @@ fn timeout_is_a_test_failure_and_does_not_strand_the_worker() {
 fn hard_timeout_recovers_capacity_for_the_next_fixture_group_test() {
     let temporary = tempfile::tempdir().unwrap();
     let output = run(
-        &["--name", "testRecovery", "--timeout-ms", "25"],
+        // Leave enough time for the replacement process to initialize and execute the trivial
+        // passing case; the other case loops forever, so this still exercises forced recovery.
+        &["--name", "testRecovery", "--timeout-ms", "250"],
         temporary.path(),
     );
     assert_eq!(output.status.code(), Some(1), "{output:#?}");
