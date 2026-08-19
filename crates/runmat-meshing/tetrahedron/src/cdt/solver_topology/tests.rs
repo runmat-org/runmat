@@ -361,6 +361,97 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
 }
 
 #[test]
+fn curved_tet10_nodes_optimize_deterministically_with_hard_round_and_candidate_limits() {
+    let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();
+    let request = request(ElementOrder::Tet10);
+    let volume_options = volume_options();
+    let volume_mesh = super::super::construct_delaunay_volume_mesh(
+        &exact_topology,
+        &exact_surface,
+        &request.metric,
+        volume_options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    let materials = [DelaunayRegionMaterial {
+        region_id: exact_topology.regions[0].id.clone(),
+        material_id: "steel".into(),
+    }];
+    let input = || DelaunaySolverTopologyInput {
+        exact_topology: &exact_topology,
+        exact_surface: &exact_surface,
+        volume_mesh: &volume_mesh,
+        volume_options,
+        request: &request,
+        region_materials: &materials,
+        exact_evaluation: Some(DelaunayExactEvaluation {
+            evaluator: &super::test_evaluator::WARPED_EVALUATOR,
+            control: &super::test_evaluator::CONTROL,
+        }),
+    };
+    let topology = build_delaunay_solver_topology(
+        input(),
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let repeated = build_delaunay_solver_topology(
+        input(),
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(topology, repeated);
+
+    let element = &topology.volume_elements[0];
+    for (local_edge, endpoints) in runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
+        .iter()
+        .enumerate()
+    {
+        let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1].coordinates_m;
+        let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1].coordinates_m;
+        let node = &topology.nodes[element.node_ids[4 + local_edge] as usize - 1];
+        let target: [f64; 3] = std::array::from_fn(|axis| left[axis] * 0.5 + right[axis] * 0.5);
+        let edge_length_squared = left
+            .into_iter()
+            .zip(right)
+            .map(|(left, right)| (left - right) * (left - right))
+            .sum::<f64>();
+        let optimized_distance_squared = node
+            .coordinates_m
+            .into_iter()
+            .zip(target)
+            .map(|(left, right)| (left - right) * (left - right))
+            .sum::<f64>();
+        assert!(optimized_distance_squared < edge_length_squared / 64.0);
+        assert!(matches!(
+            node.exact_parameters.first(),
+            Some(runmat_meshing_core::SolverNodeExactParameter::Curve { parameter, .. })
+                if parameter.to_bits() != 0.5_f64.to_bits()
+        ));
+    }
+    runmat_meshing_core::validate_solver_mesh_topology(&topology, &request).unwrap();
+
+    for options in [
+        DelaunaySolverTopologyOptions {
+            maximum_curved_optimization_candidates: 1,
+            ..DelaunaySolverTopologyOptions::default()
+        },
+        DelaunaySolverTopologyOptions {
+            maximum_curved_optimization_rounds: 5,
+            ..DelaunaySolverTopologyOptions::default()
+        },
+    ] {
+        assert_eq!(
+            build_delaunay_solver_topology(input(), options, &NeverCancelled)
+                .unwrap_err()
+                .kind,
+            DelaunaySolverTopologyErrorKind::ResourceLimit
+        );
+    }
+}
+
+#[test]
 fn exact_interface_and_contact_classification_preserve_typed_sides() {
     use runmat_geometry_core::{
         ExactContactPair, ExactSharedInterface, PersistentEntityId, PersistentEntityKind,

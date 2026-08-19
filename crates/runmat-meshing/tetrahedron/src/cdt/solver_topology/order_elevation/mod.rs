@@ -12,6 +12,7 @@ use super::{
 mod connectivity;
 mod geometry;
 mod jacobian;
+mod optimization;
 
 pub(super) fn elevate(
     input: &DelaunaySolverTopologyInput<'_>,
@@ -28,12 +29,32 @@ pub(super) fn elevate(
     let midpoint_by_edge =
         geometry::append_midpoint_nodes(input, &mut topology, evaluation, options, cancellation)?;
     connectivity::elevate(&mut topology, &midpoint_by_edge)?;
+    let mut jacobian_work = 0_u64;
     jacobian::validate(
         &topology,
         input.request.resources.maximum_search_work,
         input.request.resources.maximum_recursion_depth,
         options.cancellation_check_interval,
         cancellation,
+        &mut jacobian_work,
+    )?;
+    optimization::optimize(
+        input,
+        &mut topology,
+        &midpoint_by_edge,
+        evaluation,
+        options,
+        cancellation,
+        &mut jacobian_work,
+    )?;
+    // Re-certify the complete joined topology independently after all accepted rounds.
+    jacobian::validate(
+        &topology,
+        input.request.resources.maximum_search_work,
+        input.request.resources.maximum_recursion_depth,
+        options.cancellation_check_interval,
+        cancellation,
+        &mut jacobian_work,
     )?;
     Ok(topology)
 }

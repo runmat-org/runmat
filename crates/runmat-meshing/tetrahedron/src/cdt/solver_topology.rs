@@ -58,6 +58,8 @@ pub struct DelaunayExactEvaluation<'a> {
 pub struct DelaunaySolverTopologyOptions {
     pub maximum_boundary_faces: u64,
     pub maximum_boundary_edges: u64,
+    pub maximum_curved_optimization_candidates: u64,
+    pub maximum_curved_optimization_rounds: u32,
     pub trim_boundary_tolerance_uv: f64,
     pub cancellation_check_interval: u64,
 }
@@ -67,6 +69,8 @@ impl Default for DelaunaySolverTopologyOptions {
         Self {
             maximum_boundary_faces: 2_000_000_000,
             maximum_boundary_edges: 3_000_000_000,
+            maximum_curved_optimization_candidates: 12_000_000_000,
+            maximum_curved_optimization_rounds: 4_096,
             trim_boundary_tolerance_uv: 1.0e-10,
             cancellation_check_interval: 1_024,
         }
@@ -106,6 +110,8 @@ fn validate_options(
 ) -> Result<(), DelaunaySolverTopologyError> {
     if options.maximum_boundary_faces == 0
         || options.maximum_boundary_edges == 0
+        || options.maximum_curved_optimization_candidates == 0
+        || options.maximum_curved_optimization_rounds == 0
         || !options.trim_boundary_tolerance_uv.is_finite()
         || options.trim_boundary_tolerance_uv < 0.0
         || options.cancellation_check_interval == 0

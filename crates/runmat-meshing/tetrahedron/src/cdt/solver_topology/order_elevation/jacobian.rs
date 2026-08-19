@@ -28,14 +28,39 @@ pub(super) fn validate(
     maximum_recursion_depth: u32,
     cancellation_check_interval: u64,
     cancellation: &dyn MeshingCancellationSignal,
+    work: &mut u64,
+) -> Result<(), DelaunaySolverTopologyError> {
+    let element_indices = 0..topology.volume_elements.len();
+    validate_elements(
+        topology,
+        element_indices,
+        maximum_search_work,
+        maximum_recursion_depth,
+        cancellation_check_interval,
+        cancellation,
+        work,
+    )
+}
+
+pub(super) fn validate_elements(
+    topology: &SolverMeshTopology,
+    element_indices: impl IntoIterator<Item = usize>,
+    maximum_search_work: u64,
+    maximum_recursion_depth: u32,
+    cancellation_check_interval: u64,
+    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut u64,
 ) -> Result<(), DelaunaySolverTopologyError> {
     let node_by_id = topology
         .nodes
         .iter()
         .map(|node| (node.node_id, node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
-    let mut work = 0_u64;
-    for element in &topology.volume_elements {
+    for element_index in element_indices {
+        let element = topology
+            .volume_elements
+            .get(element_index)
+            .ok_or_else(|| invalid("Tet10 Jacobian element index is out of bounds"))?;
         let coordinates = element
             .node_ids
             .iter()
@@ -55,7 +80,7 @@ pub(super) fn validate(
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
-            &mut work,
+            work,
         )?;
     }
     Ok(())

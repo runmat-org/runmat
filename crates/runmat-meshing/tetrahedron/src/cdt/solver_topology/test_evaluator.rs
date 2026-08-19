@@ -15,10 +15,17 @@ const POINTS: [[f64; 3]; 4] = [
 const EDGES: [[usize; 2]; 6] = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
 const FACETS: [[usize; 3]; 4] = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
 
-pub(super) static EVALUATOR: LinearTetrahedronEvaluator = LinearTetrahedronEvaluator;
+pub(super) static EVALUATOR: LinearTetrahedronEvaluator = LinearTetrahedronEvaluator {
+    warped_curve_parameter: false,
+};
+pub(super) static WARPED_EVALUATOR: LinearTetrahedronEvaluator = LinearTetrahedronEvaluator {
+    warped_curve_parameter: true,
+};
 pub(super) static CONTROL: UnlimitedControl = UnlimitedControl;
 
-pub(super) struct LinearTetrahedronEvaluator;
+pub(super) struct LinearTetrahedronEvaluator {
+    warped_curve_parameter: bool,
+}
 
 impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
     fn parameter_range(
@@ -37,7 +44,11 @@ impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
         parameter: f64,
         _control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError> {
-        curve_point(index(id.as_str(), "curve:")?, parameter)
+        curve_point(
+            index(id.as_str(), "curve:")?,
+            parameter,
+            self.warped_curve_parameter,
+        )
     }
 
     fn unit_tangent(
@@ -58,10 +69,21 @@ impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
     ) -> Result<CurveDerivatives, GeometryEvaluationError> {
         let edge = index(id.as_str(), "curve:")?;
         let [left, right] = EDGES[edge];
+        let direction = subtract(POINTS[right], POINTS[left]);
+        let first_scale = if self.warped_curve_parameter {
+            1.5 - parameter
+        } else {
+            1.0
+        };
+        let second_scale = if self.warped_curve_parameter {
+            -1.0
+        } else {
+            0.0
+        };
         Ok(CurveDerivatives {
-            point_m: curve_point(edge, parameter)?,
-            first_m: subtract(POINTS[right], POINTS[left]),
-            second_m: [0.0; 3],
+            point_m: curve_point(edge, parameter, self.warped_curve_parameter)?,
+            first_m: direction.map(|value| value * first_scale),
+            second_m: direction.map(|value| value * second_scale),
         })
     }
 
@@ -82,7 +104,12 @@ impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
         _control: &dyn GeometryEvaluationControl,
     ) -> Result<f64, GeometryEvaluationError> {
         let [left, right] = EDGES[index(id.as_str(), "curve:")?];
-        Ok(length(subtract(POINTS[right], POINTS[left])) * (range.end - range.start).abs())
+        let span = if self.warped_curve_parameter {
+            warped_parameter(range.end) - warped_parameter(range.start)
+        } else {
+            range.end - range.start
+        };
+        Ok(length(subtract(POINTS[right], POINTS[left])) * span.abs())
     }
 
     fn inverse_project(
@@ -117,7 +144,10 @@ impl ExactPcurveEvaluator for LinearTetrahedronEvaluator {
         let from = FACETS[face][local_edge];
         let to = FACETS[face][(local_edge + 1) % 3];
         let edge = edge_index(from, to)?;
-        Ok(surface_uv(face, curve_point(edge, parameter)?))
+        Ok(surface_uv(
+            face,
+            curve_point(edge, parameter, self.warped_curve_parameter)?,
+        ))
     }
 
     fn derivatives(
@@ -258,11 +288,24 @@ impl GeometryEvaluationControl for UnlimitedControl {
     }
 }
 
-fn curve_point(edge: usize, parameter: f64) -> Result<[f64; 3], GeometryEvaluationError> {
+fn curve_point(
+    edge: usize,
+    parameter: f64,
+    warped: bool,
+) -> Result<[f64; 3], GeometryEvaluationError> {
     let [left, right] = *EDGES.get(edge).ok_or_else(unknown)?;
+    let parameter = if warped {
+        warped_parameter(parameter)
+    } else {
+        parameter
+    };
     Ok(std::array::from_fn(|axis| {
         POINTS[left][axis] * (1.0 - parameter) + POINTS[right][axis] * parameter
     }))
+}
+
+fn warped_parameter(parameter: f64) -> f64 {
+    parameter + 0.5 * parameter * (1.0 - parameter)
 }
 
 fn surface_point(face: usize, uv: [f64; 2]) -> Result<[f64; 3], GeometryEvaluationError> {

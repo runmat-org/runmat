@@ -16,11 +16,12 @@ mod evaluation;
 use evaluation::{
     curve_parameter, evaluate_surface, midpoint_geometry, pcurve_uv, require_matching_points,
 };
+pub(super) use evaluation::{edge_geometry, EdgeGeometryRequest};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct SurfaceUse {
-    source_face_id: PersistentEntityId,
-    chart_id: StableDigest,
+    pub(super) source_face_id: PersistentEntityId,
+    pub(super) chart_id: StableDigest,
 }
 
 pub(super) fn append_midpoint_nodes(
@@ -179,7 +180,7 @@ fn insert_surface_parameter(
     Ok(())
 }
 
-fn boundary_surface_uses(
+pub(super) fn boundary_surface_uses(
     input: &DelaunaySolverTopologyInput<'_>,
     topology: &SolverMeshTopology,
 ) -> Result<BTreeMap<[u64; 2], Vec<SurfaceUse>>, DelaunaySolverTopologyError> {
@@ -216,7 +217,7 @@ fn boundary_surface_uses(
         .collect())
 }
 
-fn boundary_exact_edges(
+pub(super) fn boundary_exact_edges(
     topology: &SolverMeshTopology,
 ) -> Result<BTreeMap<[u64; 2], PersistentEntityId>, DelaunaySolverTopologyError> {
     let mut result = BTreeMap::new();

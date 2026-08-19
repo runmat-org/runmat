@@ -12,6 +12,19 @@ use crate::cdt::solver_topology::{
     DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
 };
 
+pub(in crate::cdt::solver_topology::order_elevation) struct EdgeGeometryRequest<'a> {
+    pub left: &'a SolverMeshNode,
+    pub right: &'a SolverMeshNode,
+    pub exact_edge_id: Option<&'a PersistentEntityId>,
+    pub surface_uses: &'a [SurfaceUse],
+    pub fraction: f64,
+}
+
+pub(in crate::cdt::solver_topology::order_elevation) struct ExactEdgePoint {
+    pub coordinates_m: [f64; 3],
+    pub exact_parameters: Vec<SolverNodeExactParameter>,
+}
+
 pub(super) fn midpoint_geometry(
     input: &DelaunaySolverTopologyInput<'_>,
     left: &SolverMeshNode,
@@ -21,38 +34,59 @@ pub(super) fn midpoint_geometry(
     evaluation: DelaunayExactEvaluation<'_>,
     options: DelaunaySolverTopologyOptions,
 ) -> Result<([f64; 3], Vec<SolverNodeExactParameter>), DelaunaySolverTopologyError> {
-    if let Some(edge_id) = exact_edge_id {
-        return curve_midpoint(
-            input,
+    edge_geometry(
+        input,
+        evaluation,
+        options,
+        EdgeGeometryRequest {
             left,
             right,
-            edge_id,
+            exact_edge_id,
             surface_uses,
-            evaluation,
-            options,
-        );
+            fraction: 0.5,
+        },
+    )?
+    .map(|point| (point.coordinates_m, point.exact_parameters))
+    .ok_or_else(|| invalid("exact midpoint leaves its source trim domain"))
+}
+
+pub(in crate::cdt::solver_topology::order_elevation) fn edge_geometry(
+    input: &DelaunaySolverTopologyInput<'_>,
+    evaluation: DelaunayExactEvaluation<'_>,
+    options: DelaunaySolverTopologyOptions,
+    request: EdgeGeometryRequest<'_>,
+) -> Result<Option<ExactEdgePoint>, DelaunaySolverTopologyError> {
+    if !request.fraction.is_finite() || !(0.0..=1.0).contains(&request.fraction) {
+        return Err(invalid("exact edge fraction is outside its source domain"));
     }
-    if !surface_uses.is_empty() {
-        return surface_midpoint(input, left, right, surface_uses, evaluation, options);
+    if request.exact_edge_id.is_some() {
+        return curve_midpoint(input, evaluation, options, request);
     }
-    Ok((
-        average3(left.coordinates_m, right.coordinates_m),
-        Vec::new(),
-    ))
+    if !request.surface_uses.is_empty() {
+        return surface_midpoint(input, evaluation, options, request);
+    }
+    Ok(Some(ExactEdgePoint {
+        coordinates_m: interpolate3(
+            request.left.coordinates_m,
+            request.right.coordinates_m,
+            request.fraction,
+        ),
+        exact_parameters: Vec::new(),
+    }))
 }
 
 fn curve_midpoint(
     input: &DelaunaySolverTopologyInput<'_>,
-    left: &SolverMeshNode,
-    right: &SolverMeshNode,
-    edge_id: &PersistentEntityId,
-    surface_uses: &[SurfaceUse],
     evaluation: DelaunayExactEvaluation<'_>,
     options: DelaunaySolverTopologyOptions,
-) -> Result<([f64; 3], Vec<SolverNodeExactParameter>), DelaunaySolverTopologyError> {
-    let left_parameter = curve_parameter(left, edge_id)?;
-    let right_parameter = curve_parameter(right, edge_id)?;
-    let parameter = left_parameter * 0.5 + right_parameter * 0.5;
+    request: EdgeGeometryRequest<'_>,
+) -> Result<Option<ExactEdgePoint>, DelaunaySolverTopologyError> {
+    let edge_id = request
+        .exact_edge_id
+        .ok_or_else(|| invalid("curve point has no exact edge owner"))?;
+    let left_parameter = curve_parameter(request.left, edge_id)?;
+    let right_parameter = curve_parameter(request.right, edge_id)?;
+    let parameter = interpolate(left_parameter, right_parameter, request.fraction);
     let edge = exact_edge(input.exact_topology, edge_id)?;
     evaluation.control.checkpoint().map_err(error::geometry)?;
     let local = ExactCurveEvaluator::point(
@@ -71,37 +105,49 @@ fn curve_midpoint(
         source_edge_id: edge_id.clone(),
         parameter,
     }];
-    for surface_use in surface_uses {
+    for surface_use in request.surface_uses {
         let evaluator_uv = pcurve_uv(input, edge_id, parameter, surface_use, evaluation)?;
-        let surface_point =
-            evaluate_surface(input, surface_use, evaluator_uv, evaluation, options)?;
-        require_matching_points(input, coordinates_m, surface_point)?;
+        let Some(surface_point) =
+            evaluate_surface_candidate(input, surface_use, evaluator_uv, evaluation, options)?
+        else {
+            return Ok(None);
+        };
+        if !points_match(input, coordinates_m, surface_point) {
+            return Ok(None);
+        }
         parameters.push(SolverNodeExactParameter::Surface {
             source_face_id: surface_use.source_face_id.clone(),
             chart_id: surface_use.chart_id,
             evaluator_uv,
         });
     }
-    Ok((coordinates_m, parameters))
+    Ok(Some(ExactEdgePoint {
+        coordinates_m,
+        exact_parameters: parameters,
+    }))
 }
 
 fn surface_midpoint(
     input: &DelaunaySolverTopologyInput<'_>,
-    left: &SolverMeshNode,
-    right: &SolverMeshNode,
-    surface_uses: &[SurfaceUse],
     evaluation: DelaunayExactEvaluation<'_>,
     options: DelaunaySolverTopologyOptions,
-) -> Result<([f64; 3], Vec<SolverNodeExactParameter>), DelaunaySolverTopologyError> {
+    request: EdgeGeometryRequest<'_>,
+) -> Result<Option<ExactEdgePoint>, DelaunaySolverTopologyError> {
     let mut coordinates = None;
-    let mut parameters = Vec::with_capacity(surface_uses.len());
-    for surface_use in surface_uses {
-        let left_uv = surface_parameter(left, surface_use)?;
-        let right_uv = surface_parameter(right, surface_use)?;
-        let evaluator_uv = average2(left_uv, right_uv);
-        let point = evaluate_surface(input, surface_use, evaluator_uv, evaluation, options)?;
+    let mut parameters = Vec::with_capacity(request.surface_uses.len());
+    for surface_use in request.surface_uses {
+        let left_uv = surface_parameter(request.left, surface_use)?;
+        let right_uv = surface_parameter(request.right, surface_use)?;
+        let evaluator_uv = interpolate2(left_uv, right_uv, request.fraction);
+        let Some(point) =
+            evaluate_surface_candidate(input, surface_use, evaluator_uv, evaluation, options)?
+        else {
+            return Ok(None);
+        };
         if let Some(existing) = coordinates {
-            require_matching_points(input, existing, point)?;
+            if !points_match(input, existing, point) {
+                return Ok(None);
+            }
         } else {
             coordinates = Some(point);
         }
@@ -111,10 +157,11 @@ fn surface_midpoint(
             evaluator_uv,
         });
     }
-    Ok((
-        coordinates.ok_or_else(|| invalid("surface midpoint has no exact evaluation"))?,
-        parameters,
-    ))
+    Ok(Some(ExactEdgePoint {
+        coordinates_m: coordinates
+            .ok_or_else(|| invalid("surface midpoint has no exact evaluation"))?,
+        exact_parameters: parameters,
+    }))
 }
 
 pub(super) fn pcurve_uv(
@@ -180,6 +227,17 @@ pub(super) fn evaluate_surface(
     evaluation: DelaunayExactEvaluation<'_>,
     options: DelaunaySolverTopologyOptions,
 ) -> Result<[f64; 3], DelaunaySolverTopologyError> {
+    evaluate_surface_candidate(input, surface_use, evaluator_uv, evaluation, options)?
+        .ok_or_else(|| invalid("elevated surface point leaves the exact trim domain"))
+}
+
+fn evaluate_surface_candidate(
+    input: &DelaunaySolverTopologyInput<'_>,
+    surface_use: &SurfaceUse,
+    evaluator_uv: [f64; 2],
+    evaluation: DelaunayExactEvaluation<'_>,
+    options: DelaunaySolverTopologyOptions,
+) -> Result<Option<[f64; 3]>, DelaunaySolverTopologyError> {
     let face = input
         .exact_topology
         .faces
@@ -195,9 +253,7 @@ pub(super) fn evaluate_surface(
     )
     .map_err(error::geometry)?;
     if location == TrimDomainLocation::Outside {
-        return Err(invalid(
-            "elevated surface midpoint leaves the exact trim domain",
-        ));
+        return Ok(None);
     }
     let local = ExactSurfaceEvaluator::point(
         evaluation.evaluator,
@@ -214,7 +270,7 @@ pub(super) fn evaluate_surface(
     if point.iter().any(|value| !value.is_finite()) {
         return Err(invalid("exact midpoint evaluation is not finite"));
     }
-    Ok(point)
+    Ok(Some(point))
 }
 
 fn exact_edge<'a>(
@@ -274,6 +330,15 @@ pub(super) fn require_matching_points(
     left: [f64; 3],
     right: [f64; 3],
 ) -> Result<(), DelaunaySolverTopologyError> {
+    if !points_match(input, left, right) {
+        return Err(invalid(
+            "exact curve and surface evaluations disagree beyond tolerance",
+        ));
+    }
+    Ok(())
+}
+
+fn points_match(input: &DelaunaySolverTopologyInput<'_>, left: [f64; 3], right: [f64; 3]) -> bool {
     let tolerance = input
         .request
         .tolerance
@@ -285,26 +350,25 @@ pub(super) fn require_matching_points(
         .zip(right)
         .map(|(left, right)| (left - right) * (left - right))
         .sum::<f64>();
-    if !squared_distance.is_finite() || squared_distance > tolerance * tolerance {
-        return Err(invalid(
-            "exact curve and surface midpoint evaluations disagree beyond tolerance",
-        ));
-    }
-    Ok(())
+    squared_distance.is_finite() && squared_distance <= tolerance * tolerance
 }
 
-fn average2(left: [f64; 2], right: [f64; 2]) -> [f64; 2] {
+fn interpolate(left: f64, right: f64, fraction: f64) -> f64 {
+    left * (1.0 - fraction) + right * fraction
+}
+
+fn interpolate2(left: [f64; 2], right: [f64; 2], fraction: f64) -> [f64; 2] {
     [
-        left[0] * 0.5 + right[0] * 0.5,
-        left[1] * 0.5 + right[1] * 0.5,
+        interpolate(left[0], right[0], fraction),
+        interpolate(left[1], right[1], fraction),
     ]
 }
 
-fn average3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+fn interpolate3(left: [f64; 3], right: [f64; 3], fraction: f64) -> [f64; 3] {
     [
-        left[0] * 0.5 + right[0] * 0.5,
-        left[1] * 0.5 + right[1] * 0.5,
-        left[2] * 0.5 + right[2] * 0.5,
+        interpolate(left[0], right[0], fraction),
+        interpolate(left[1], right[1], fraction),
+        interpolate(left[2], right[2], fraction),
     ]
 }
 
