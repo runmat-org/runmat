@@ -1,6 +1,7 @@
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 use runmat_meshing_size::metric::{MetricFieldRequest, MetricTensor3};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -113,7 +114,13 @@ pub struct DelaunayVolumeRefinement {
     pub mutations: Vec<DelaunayVolumeRefinementMutation>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "mutation",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum DelaunayVolumeRefinementMutation {
     Inserted(DelaunayVolumeNode),
     Relocated(DelaunayVolumeSliverRelocation),

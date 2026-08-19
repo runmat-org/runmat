@@ -76,9 +76,10 @@ pub use topology::{
     DelaunayTopologyOptions, DelaunayVolumeNode, DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
 };
 pub use volume_mesh::{
-    construct_delaunay_volume_mesh, validate_delaunay_volume_mesh, DelaunayVolumeMesh,
-    DelaunayVolumeMeshError, DelaunayVolumeMeshErrorKind, DelaunayVolumeMeshOptions,
-    DelaunayVolumeMeshStage,
+    construct_delaunay_volume_mesh, decode_delaunay_volume_mesh, encode_delaunay_volume_mesh,
+    validate_delaunay_volume_mesh, DelaunayVolumeMesh, DelaunayVolumeMeshCodecError,
+    DelaunayVolumeMeshCodecErrorKind, DelaunayVolumeMeshError, DelaunayVolumeMeshErrorKind,
+    DelaunayVolumeMeshOptions, DelaunayVolumeMeshStage, DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
 };
 pub use volume_provenance::{
     build_delaunay_volume_provenance, validate_delaunay_volume_provenance,

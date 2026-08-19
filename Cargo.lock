@@ -6888,6 +6888,7 @@ dependencies = [
 name = "runmat-meshing-tetrahedron"
 version = "0.6.1"
 dependencies = [
+ "runmat-canonical-codec",
  "runmat-geometry-core",
  "runmat-meshing-core",
  "runmat-meshing-curve",

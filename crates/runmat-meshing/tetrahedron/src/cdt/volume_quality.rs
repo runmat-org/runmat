@@ -6,6 +6,7 @@ use runmat_meshing_size::grading::grade_metric_evaluations;
 use runmat_meshing_size::metric::{
     MetricContractError, MetricFieldRequest, MetricSourceKind, MetricTensor3, ResolvedMetricField,
 };
+use serde::{Deserialize, Serialize};
 
 use super::{
     topology::build_delaunay_volume_topology_with_regions,
@@ -47,7 +48,8 @@ impl Default for DelaunayVolumeQualityOptions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayTetrahedronQuality {
     pub node_identities: [StableDigest; 4],
     pub region_id: PersistentEntityId,
@@ -71,7 +73,8 @@ impl DelaunayTetrahedronQuality {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeQuality {
     pub tetrahedra: Vec<DelaunayTetrahedronQuality>,
     pub worst_refinement_tetrahedron: Option<[StableDigest; 4]>,

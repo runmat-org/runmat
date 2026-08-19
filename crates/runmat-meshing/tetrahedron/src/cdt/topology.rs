@@ -5,6 +5,7 @@ use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign, SpatialPredicateError},
     MeshingCancellationSignal, StableDigest,
 };
+use serde::{Deserialize, Serialize};
 
 use super::incidence::{build_volume_incidence, DelaunayVolumeIncidence};
 
@@ -25,13 +26,15 @@ impl Default for DelaunayTopologyOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeNode {
     pub identity: StableDigest,
     pub coordinates_m: [f64; 3],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeTetrahedron {
     pub vertex_indices: [u32; 4],
     /// Neighbor opposite each correspondingly indexed vertex.
@@ -39,7 +42,8 @@ pub struct DelaunayVolumeTetrahedron {
     pub region_id: Option<PersistentEntityId>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeTopology {
     pub nodes: Vec<DelaunayVolumeNode>,
     pub tetrahedra: Vec<DelaunayVolumeTetrahedron>,

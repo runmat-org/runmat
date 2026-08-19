@@ -1,4 +1,5 @@
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
+use serde::{Deserialize, Serialize};
 
 use super::{
     validate_delaunay_volume_provenance, validate_delaunay_volume_quality,
@@ -32,7 +33,8 @@ impl Default for DelaunayVolumeSliverOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeSliverRelocation {
     pub source_node_identity: StableDigest,
     pub replacement_node: DelaunayVolumeNode,

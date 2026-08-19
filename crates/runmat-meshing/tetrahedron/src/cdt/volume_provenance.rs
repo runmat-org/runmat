@@ -1,5 +1,6 @@
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
+use serde::{Deserialize, Serialize};
 
 use super::{volume_quality::context::DelaunayVolumeMetricContext, DelaunayVolumeTopology};
 
@@ -13,13 +14,15 @@ pub use construction::{
 pub(super) use derivation::derive_delaunay_volume_metric_contexts;
 pub use validation::validate_delaunay_volume_provenance;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayNodeProvenance {
     pub node_identity: StableDigest,
     pub entity_ids: Vec<PersistentEntityId>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunaySegmentProvenance {
     pub node_identities: [StableDigest; 2],
     pub entity_ids: Vec<PersistentEntityId>,
@@ -27,7 +30,8 @@ pub struct DelaunaySegmentProvenance {
     pub edge_parameters: [f64; 2],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayFacetProvenance {
     pub node_identities: [StableDigest; 3],
     pub chart_id: StableDigest,
@@ -37,7 +41,8 @@ pub struct DelaunayFacetProvenance {
 
 /// Canonical persistent incidence for protected PLC simplices. Per-tetrahedron metric context is
 /// derived from this authority after every topology mutation; it is never copied heuristically.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeProvenance {
     pub nodes: Vec<DelaunayNodeProvenance>,
     pub segments: Vec<DelaunaySegmentProvenance>,

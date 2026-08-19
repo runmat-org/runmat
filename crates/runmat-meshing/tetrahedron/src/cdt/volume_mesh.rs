@@ -2,6 +2,7 @@ use runmat_geometry_core::ExactBRepTopology;
 use runmat_meshing_core::MeshingCancellationSignal;
 use runmat_meshing_size::metric::MetricFieldRequest;
 use runmat_meshing_surface::ExactSurfaceMesh;
+use serde::{Deserialize, Serialize};
 
 use super::{
     build_delaunay_constraints, build_delaunay_volume_point_set, build_delaunay_volume_provenance,
@@ -13,9 +14,14 @@ use super::{
     DelaunayVolumeRefinementOptions, DelaunayVolumeTopology,
 };
 
+mod codec;
 mod error;
 mod validation;
 
+pub use codec::{
+    decode_delaunay_volume_mesh, encode_delaunay_volume_mesh, DelaunayVolumeMeshCodecError,
+    DelaunayVolumeMeshCodecErrorKind, DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
+};
 use error::{
     carving_error, constraint_error, facet_error, point_set_error, provenance_error, quality_error,
     refinement_error, segment_error,
@@ -45,7 +51,8 @@ impl Default for DelaunayVolumeMeshOptions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeMesh {
     pub topology: DelaunayVolumeTopology,
     pub provenance: DelaunayVolumeProvenance,

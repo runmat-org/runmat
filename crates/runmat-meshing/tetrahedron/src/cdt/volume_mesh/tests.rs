@@ -12,10 +12,8 @@ fn metric_request() -> MetricFieldRequest {
     }
 }
 
-#[test]
-fn exact_surface_constructs_one_validated_general_volume_mesh() {
-    let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();
-    let options = DelaunayVolumeMeshOptions {
+fn volume_options() -> DelaunayVolumeMeshOptions {
+    DelaunayVolumeMeshOptions {
         quality: DelaunayVolumeQualityOptions {
             maximum_metric_edge_length: 2.0,
             maximum_radius_edge_ratio: 10.0,
@@ -23,7 +21,13 @@ fn exact_surface_constructs_one_validated_general_volume_mesh() {
             ..DelaunayVolumeQualityOptions::default()
         },
         ..DelaunayVolumeMeshOptions::default()
-    };
+    }
+}
+
+#[test]
+fn exact_surface_constructs_one_validated_general_volume_mesh() {
+    let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();
+    let options = volume_options();
     let result = construct_delaunay_volume_mesh(
         &topology,
         &surface,
@@ -56,6 +60,125 @@ fn exact_surface_constructs_one_validated_general_volume_mesh() {
         &NeverCancelled,
     )
     .unwrap();
+}
+
+#[test]
+fn canonical_volume_artifact_round_trips_and_revalidates_its_sources() {
+    let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();
+    let metric = metric_request();
+    let options = volume_options();
+    let mesh =
+        construct_delaunay_volume_mesh(&topology, &surface, &metric, options, &NeverCancelled)
+            .unwrap();
+    let encoded = encode_delaunay_volume_mesh(
+        &mesh,
+        &topology,
+        &surface,
+        &metric,
+        options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(
+        encoded,
+        encode_delaunay_volume_mesh(
+            &mesh,
+            &topology,
+            &surface,
+            &metric,
+            options,
+            &NeverCancelled,
+        )
+        .unwrap()
+    );
+    let decoded = decode_delaunay_volume_mesh(
+        &encoded,
+        &topology,
+        &surface,
+        &metric,
+        options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(decoded, mesh);
+    assert_eq!(
+        encode_delaunay_volume_mesh(
+            &decoded,
+            &topology,
+            &surface,
+            &metric,
+            options,
+            &NeverCancelled,
+        )
+        .unwrap(),
+        encoded
+    );
+
+    let mut trailing = encoded.clone();
+    trailing.push(0);
+    assert_eq!(
+        decode_delaunay_volume_mesh(
+            &trailing,
+            &topology,
+            &surface,
+            &metric,
+            options,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshCodecErrorKind::InvalidEncoding
+    );
+    assert_eq!(
+        super::codec::decode_delaunay_volume_mesh_with_byte_limit(
+            &encoded,
+            &topology,
+            &surface,
+            &metric,
+            options,
+            &NeverCancelled,
+            encoded.len() - 1,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshCodecErrorKind::InvalidEncoding
+    );
+    let unsupported_schema = super::codec::encode_delaunay_volume_mesh_with_schema_version(
+        &mesh,
+        DELAUNAY_VOLUME_MESH_SCHEMA_VERSION + 1,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_delaunay_volume_mesh(
+            &unsupported_schema,
+            &topology,
+            &surface,
+            &metric,
+            options,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshCodecErrorKind::InvalidEncoding
+    );
+
+    let changed_metric = MetricFieldRequest {
+        global_metric: MetricTensor3::isotropic_length_m(1.5).unwrap(),
+        ..metric
+    };
+    assert_eq!(
+        decode_delaunay_volume_mesh(
+            &encoded,
+            &topology,
+            &surface,
+            &changed_metric,
+            options,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshCodecErrorKind::InvalidMesh
+    );
 }
 
 #[test]

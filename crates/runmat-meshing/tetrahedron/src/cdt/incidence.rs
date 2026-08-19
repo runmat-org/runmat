@@ -5,6 +5,7 @@ use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign},
     MeshingCancellationSignal,
 };
+use serde::{Deserialize, Serialize};
 
 use super::{
     topology::{build_delaunay_volume_topology_with_regions, error},
@@ -12,7 +13,8 @@ use super::{
     DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayBoundaryFacet {
     pub vertex_indices: [u32; 3],
     /// Oriented so the incident tetrahedron's opposite vertex has positive
@@ -22,13 +24,15 @@ pub struct DelaunayBoundaryFacet {
     pub opposite_vertex_slot: u8,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayRegionIncidence {
     pub region_id: PersistentEntityId,
     pub tetrahedron_indices: Vec<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeIncidence {
     pub vertex_stars: Vec<Vec<u32>>,
     pub boundary_facets: Vec<DelaunayBoundaryFacet>,
