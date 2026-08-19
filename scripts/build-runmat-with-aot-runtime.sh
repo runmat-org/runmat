@@ -2,27 +2,52 @@
 set -euo pipefail
 
 profile="${RUNMAT_BUILD_PROFILE:-release}"
-profile_directory="$profile"
-if [[ "$profile" == "dev" ]]; then
-  profile_directory="debug"
-fi
 build_root="$(mktemp -d "${TMPDIR:-/tmp}/runmat-aot-build.XXXXXX")"
 trap 'rm -rf "$build_root"' EXIT
 rustc_log="$build_root/native-static-libs.log"
 target="${RUNMAT_BUILD_TARGET:-}"
 locked_args=()
+build_args=()
 
-previous=''
-for argument in "$@"; do
-  if [[ "$previous" == '--target' ]]; then
-    target="$argument"
-  fi
+while (($#)); do
+  argument="$1"
   case "$argument" in
-    --target=*) target="${argument#--target=}" ;;
-    --locked|--offline|--frozen) locked_args+=("$argument") ;;
+    --release)
+      profile="release"
+      ;;
+    --profile)
+      [[ $# -ge 2 ]] || { echo "--profile requires a value" >&2; exit 2; }
+      profile="$2"
+      shift
+      ;;
+    --profile=*)
+      profile="${argument#--profile=}"
+      ;;
+    --target)
+      [[ $# -ge 2 ]] || { echo "--target requires a value" >&2; exit 2; }
+      target="$2"
+      build_args+=("$argument" "$2")
+      shift
+      ;;
+    --target=*)
+      target="${argument#--target=}"
+      build_args+=("$argument")
+      ;;
+    --locked|--offline|--frozen)
+      locked_args+=("$argument")
+      build_args+=("$argument")
+      ;;
+    *)
+      build_args+=("$argument")
+      ;;
   esac
-  previous="$argument"
+  shift
 done
+
+profile_directory="$profile"
+if [[ "$profile" == "dev" ]]; then
+  profile_directory="debug"
+fi
 
 target_directory="target/$profile_directory"
 runtime_build=(cargo rustc -p runmat-aot-runtime --profile "$profile")
@@ -65,4 +90,4 @@ pack_command+=(-p runmat-aot --bin runmat-aot-pack --)
 
 RUNMAT_AOT_RUNTIME_ARCHIVE="$build_root/runtime-archive.payload" \
 RUNMAT_AOT_RUNTIME_MANIFEST="$build_root/runtime-archive.json" \
-  cargo build -p runmat --profile "$profile" "$@"
+  cargo build -p runmat --profile "$profile" "${build_args[@]}"
