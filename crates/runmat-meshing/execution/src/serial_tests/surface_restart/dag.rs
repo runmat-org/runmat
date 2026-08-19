@@ -13,7 +13,7 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
     )
     .unwrap();
     let planner =
-        crate::ExactSurfaceDagPlanner::from_exact_host(&curve_host, exact_root.clone()).unwrap();
+        crate::ExactMeshingDagPlanner::from_exact_host(&curve_host, exact_root.clone()).unwrap();
     let first_pass = planner
         .begin_surface_pass(
             &exact.geometry_objects().topology,
@@ -174,7 +174,7 @@ fn exact_surface_dag_enforces_its_convergence_budget_and_context() {
     )
     .unwrap();
     let planner =
-        crate::ExactSurfaceDagPlanner::from_exact_host(&curve_host, exact_root.clone()).unwrap();
+        crate::ExactMeshingDagPlanner::from_exact_host(&curve_host, exact_root.clone()).unwrap();
     let initial_curve_root = root(initial_curve.publication().root_output());
     let pass = planner
         .begin_surface_pass(
@@ -205,7 +205,7 @@ fn exact_surface_dag_enforces_its_convergence_budget_and_context() {
         shallow_host.stage_identity.canonical_digest().unwrap();
     shallow_host.validate().unwrap();
     let shallow =
-        crate::ExactSurfaceDagPlanner::from_exact_host(&shallow_host, exact_root).unwrap();
+        crate::ExactMeshingDagPlanner::from_exact_host(&shallow_host, exact_root).unwrap();
     let shallow_pass = shallow
         .begin_surface_pass(
             &exact.geometry_objects().topology,
@@ -246,7 +246,7 @@ fn exact_surface_dag_identity_is_independent_of_partition_completion_order() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let planner = crate::ExactSurfaceDagPlanner::from_exact_host(&curve_host, exact_root).unwrap();
+    let planner = crate::ExactMeshingDagPlanner::from_exact_host(&curve_host, exact_root).unwrap();
     let mut topology = exact.geometry_objects().topology.clone();
     let mut second_face = topology.faces[0].clone();
     second_face.id.source_topology_id = "face-second".into();

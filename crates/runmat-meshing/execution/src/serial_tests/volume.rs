@@ -9,77 +9,28 @@ fn serial_dispatcher_publishes_independently_validated_general_cdt_volume() {
             fixture,
         );
     let surface_root = root(surface_stage.publication().root_output());
-    let exact_input = surface_host
+    let planner =
+        crate::ExactMeshingDagPlanner::from_exact_host(&surface_host, exact_root.clone()).unwrap();
+    let volume_stage = planner.tetrahedralization(surface_root).unwrap();
+    let host = volume_stage.host().clone();
+    assert_eq!(host.workload.stage, MeshingStageKind::Tetrahedralization);
+    assert_eq!(
+        host.workload.partition.kind,
+        MeshingPartitionKind::WholeStage
+    );
+    assert_eq!(host.workload.inputs.len(), 2);
+    assert!(host
         .workload
-        .inputs
+        .required_capabilities
         .iter()
-        .find(|input| input.kind == MeshingInputKind::ExactGeometry)
-        .unwrap()
-        .clone();
-    let surface_input = MeshingInputRef {
-        kind: MeshingInputKind::StageArtifact,
-        digest: StableDigest::from_bytes(*surface_root.logical_digest.bytes()),
-    };
-    let request = surface_host.resolved_request.clone();
-    let mut dependencies = vec![
-        (exact_input, exact_root.clone()),
-        (surface_input, surface_root),
-    ];
-    dependencies.sort_by(|left, right| left.0.cmp(&right.0));
-    let inputs = dependencies
-        .iter()
-        .map(|(input, _)| input.clone())
-        .collect::<Vec<_>>();
-    let roots = dependencies
-        .into_iter()
-        .map(|(_, root)| root)
-        .collect::<Vec<_>>();
-    let identity = MeshingStageIdentity {
-        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage: MeshingStageKind::Tetrahedralization,
-        geometry: surface_host.stage_identity.geometry.clone(),
-        resolved_request_digest: request.canonical_digest().unwrap(),
-        tolerance_policy_digest: request.tolerance.canonical_digest().unwrap(),
-        metric_policy_digest: request.metric.canonical_digest().unwrap(),
-        algorithm_set_digest: request.algorithms.canonical_digest().unwrap(),
-        deterministic_seed: request.deterministic_seed,
-        prerequisites: inputs.clone(),
-        capability_cohort: surface_host.stage_identity.capability_cohort.clone(),
-    };
-    let workload = MeshingWorkloadRequest {
-        schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
-        stage: MeshingStageKind::Tetrahedralization,
-        stage_identity_digest: identity.canonical_digest().unwrap(),
-        partition: MeshingPartitionDescriptor {
-            kind: MeshingPartitionKind::WholeStage,
-            partition_index: 0,
-            partition_count: 1,
-            entity_range: None,
-        },
-        inputs,
-        required_capabilities: surface_host
-            .workload
-            .required_capabilities
-            .iter()
-            .map(|capability| match capability {
-                MeshingCapabilityRequirement::MeshingAlgorithm { .. } => {
-                    MeshingCapabilityRequirement::MeshingAlgorithm {
-                        version: request.algorithms.tetrahedron.clone(),
-                    }
-                }
-                capability => capability.clone(),
-            })
-            .collect(),
-    };
-    let host = MeshingHostWorkload::new(
-        workload,
-        identity,
-        request,
-        surface_host.artifact_access.clone(),
-        surface_host.geometry_document.clone(),
-    )
-    .unwrap();
-    let program = host.program_request(revision(), &roots).unwrap();
+        .any(|capability| {
+            matches!(
+                capability,
+                MeshingCapabilityRequirement::MeshingAlgorithm { version }
+                    if version == &host.resolved_request.algorithms.tetrahedron
+            )
+        }));
+    let program = volume_stage.program_request(revision()).unwrap();
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,

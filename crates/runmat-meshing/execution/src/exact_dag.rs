@@ -1,4 +1,4 @@
-//! Meshing-owned geometric dependencies for exact surface convergence.
+//! Meshing-owned geometric dependencies for exact curve, surface, and volume construction.
 //!
 //! This planner produces immutable host workloads and canonically aligned roots. It deliberately
 //! has no tasks, attempts, workers, placement, retry, or lifecycle state; those remain owned by
@@ -46,7 +46,7 @@ impl PlannedMeshingStage {
 /// A complete deterministic face-partition pass bound to one current shared curve.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactSurfacePassPlan {
-    context: SurfaceDagContext,
+    context: ExactDagContext,
     pass_index: u32,
     curve_root: ValueRef,
     partitions: Vec<PlannedMeshingStage>,
@@ -66,16 +66,16 @@ impl ExactSurfacePassPlan {
     }
 }
 
-/// Deterministic exact-surface DAG construction over one admitted geometry and request.
+/// Deterministic exact-meshing DAG construction over one admitted geometry and request.
 #[derive(Clone, Debug)]
-pub struct ExactSurfaceDagPlanner {
+pub struct ExactMeshingDagPlanner {
     seed: MeshingHostWorkload,
     geometry_root: ValueRef,
-    context: SurfaceDagContext,
+    context: ExactDagContext,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct SurfaceDagContext {
+struct ExactDagContext {
     geometry_digest: StableDigest,
     request_digest: StableDigest,
     authorization_scope: String,
@@ -83,8 +83,8 @@ struct SurfaceDagContext {
     capability_cohort: Option<String>,
 }
 
-impl ExactSurfaceDagPlanner {
-    /// Seeds surface planning from a validated host that consumes the admitted exact geometry.
+impl ExactMeshingDagPlanner {
+    /// Seeds exact meshing from a validated host that consumes the admitted exact geometry.
     ///
     /// Reusing the seed preserves the already admitted host ABI, exact-kernel ABI, element order,
     /// deterministic cohort, artifact authority, geometry revision, and resolved request.
@@ -101,17 +101,17 @@ impl ExactSurfaceDagPlanner {
             .collect::<Vec<_>>();
         let [exact_input] = exact_inputs.as_slice() else {
             return Err(invalid(
-                "exact surface DAG seed must have one authoritative exact-geometry input",
+                "exact meshing DAG seed must have one authoritative exact-geometry input",
             ));
         };
         if seed.geometry_document.is_none() {
             return Err(invalid(
-                "exact surface DAG seed must carry its authoritative geometry document",
+                "exact meshing DAG seed must carry its authoritative geometry document",
             ));
         }
         validate_input(&geometry_root, exact_input, &seed.artifact_access)?;
         validate_seed_capabilities(seed)?;
-        let context = SurfaceDagContext {
+        let context = ExactDagContext {
             geometry_digest: exact_input.digest,
             request_digest: seed.resolved_request.canonical_digest()?,
             authorization_scope: seed.artifact_access.authorization_scope.clone(),
@@ -197,6 +197,24 @@ impl ExactSurfaceDagPlanner {
             MeshingStageKind::CurveMesh,
             whole_partition(MeshingPartitionKind::WholeStage),
             roots,
+        )
+    }
+
+    /// Plans the connected general-CDT stage from the final exact-surface publication. The
+    /// kernel independently validates that root as the deterministic join for this geometry.
+    pub fn tetrahedralization(
+        &self,
+        surface_root: ValueRef,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        if surface_root.logical_digest == self.geometry_root.logical_digest {
+            return Err(invalid(
+                "tetrahedralization requires a distinct final exact-surface artifact",
+            ));
+        }
+        self.build_stage(
+            MeshingStageKind::Tetrahedralization,
+            whole_partition(MeshingPartitionKind::WholeStage),
+            vec![self.geometry_root.clone(), surface_root],
         )
     }
 
@@ -335,7 +353,7 @@ fn validate_seed_capabilities(seed: &MeshingHostWorkload) -> MeshingExecutionRes
     let expected_cohort = usize::from(seed.stage_identity.capability_cohort.is_some());
     if (host, exact, algorithm, order, cohort) != (1, 1, 1, 1, expected_cohort) {
         return Err(invalid(
-            "exact surface DAG seed capabilities are incomplete or ambiguous",
+            "exact meshing DAG seed capabilities are incomplete or ambiguous",
         ));
     }
     Ok(())
@@ -348,7 +366,8 @@ fn capabilities_for_stage(
     let version = match stage {
         MeshingStageKind::CurveMesh => &seed.resolved_request.algorithms.curve,
         MeshingStageKind::SurfaceMesh => &seed.resolved_request.algorithms.surface,
-        _ => return Err(invalid("exact surface DAG received an unsupported stage")),
+        MeshingStageKind::Tetrahedralization => &seed.resolved_request.algorithms.tetrahedron,
+        _ => return Err(invalid("exact meshing DAG received an unsupported stage")),
     };
     let mut capabilities = seed
         .workload

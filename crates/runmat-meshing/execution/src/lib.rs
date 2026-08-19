@@ -11,6 +11,7 @@ mod curve_refinement_kernel;
 mod diagnostic;
 mod dispatcher;
 mod error;
+mod exact_dag;
 mod faceted_geometry_objects;
 mod geometry_control;
 mod geometry_objects;
@@ -20,7 +21,6 @@ mod objects;
 mod publication;
 mod response;
 mod serial;
-mod surface_dag;
 mod surface_join_kernel;
 mod surface_kernel;
 mod task;
@@ -52,6 +52,7 @@ pub use curve_kernel::{
 pub use curve_refinement_kernel::ExactCurveRefinementKernel;
 pub use dispatcher::MeshingKernelDispatcher;
 pub use error::{MeshingExecutionError, MeshingExecutionResult};
+pub use exact_dag::{ExactMeshingDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage};
 pub use faceted_geometry_objects::{
     import_faceted_geometry_input, import_faceted_geometry_objects, prepare_faceted_geometry_input,
     prepare_faceted_geometry_objects, FacetedGeometryObjectRoot, PreparedFacetedGeometryInput,
@@ -81,7 +82,6 @@ pub use serial::{
     execute_serial_stage, CompletedMeshingStage, MeshingSerialExecutionError,
     MeshingStageInvocation, MeshingStageKernel, PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
-pub use surface_dag::{ExactSurfaceDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage};
 pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{
