@@ -133,7 +133,6 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
         let encoded =
             encode_shared_curve_batch(&batch, &geometry.topology).map_err(map_curve_error)?;
         let usage = control.usage();
-        drop(control);
 
         let node_count = batch
             .edges

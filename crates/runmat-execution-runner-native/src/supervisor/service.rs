@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;

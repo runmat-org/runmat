@@ -88,7 +88,6 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactSurfacePartitio
                 )
             })?;
         let usage = control.usage();
-        drop(control);
 
         let (face_count, node_count, element_count, split_count) = match &result.outcome {
             ExactFacePartitionOutcome::Converged { faces } => (

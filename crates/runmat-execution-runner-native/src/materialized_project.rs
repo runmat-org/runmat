@@ -77,12 +77,16 @@ fn verify_materialized_sources(handoff: &FrozenProjectHandoff) -> NativeExecutio
     Ok(())
 }
 
+#[cfg(unix)]
 fn make_private(path: &Path) -> NativeExecutionResult<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(protocol)?;
-    }
+    use std::os::unix::fs::PermissionsExt as _;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(protocol)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn make_private(_path: &Path) -> NativeExecutionResult<()> {
     Ok(())
 }
 

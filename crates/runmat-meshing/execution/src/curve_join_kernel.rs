@@ -117,7 +117,6 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel
         let encoded =
             encode_shared_curve_mesh(&mesh, &geometry.topology).map_err(map_curve_error)?;
         let usage = control.usage();
-        drop(control);
 
         let mut entity_counts = std::collections::BTreeMap::new();
         entity_counts.insert("curve_edges".into(), report.edge_count);

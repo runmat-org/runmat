@@ -127,7 +127,6 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveRefinement
         let encoded =
             encode_shared_curve_mesh(&refined, &geometry.topology).map_err(map_curve_error)?;
         let usage = control.usage();
-        drop(control);
 
         let edge_count = checked_count(
             std::iter::once(refined.edges.len()),

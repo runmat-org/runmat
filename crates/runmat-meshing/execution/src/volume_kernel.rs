@@ -79,7 +79,6 @@ impl MeshingStageKernel for ExactVolumeKernel {
             &cancellation,
         )
         .map_err(map_codec_error)?;
-        drop(cancellation);
 
         let node_count = mesh.topology.nodes.len() as u64;
         let element_count = mesh.topology.tetrahedra.len() as u64;
